@@ -1,0 +1,38 @@
+name: CD / Upload Package to Internal PyPI / workflow_call
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-20.04-rbln
+    continue-on-error: true
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+        with:
+          repository: rebellions-sw/vllm-rbln
+          fetch-depth: 0
+          ref: ${{ inputs.version }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install build dependencies
+        run: |
+          pip3 install packaging setuptools wheel setuptools_scm
+      - name: Build package
+        run: |
+          python3 setup.py bdist_wheel
+      - name: Publish package
+        run: |
+          pip3 install twine
+          TWINE_USERNAME=__token__ \
+          TWINE_PASSWORD=${{ secrets.PYPI_ORG_PASSWORD }} \
+          TWINE_NON_INTERACTIVE=1 \
+          twine upload --skip-existing dist/vllm_rbln*.whl

@@ -1,0 +1,126 @@
+[build-system]
+# Should be mirrored in requirements/build.txt
+requires = [
+    "cmake>=3.26",
+    "ninja",
+    "packaging",
+    "setuptools>=61",
+    "setuptools-scm>=8.0",
+    "torch == 2.6.0",
+    "wheel",
+    "jinja2",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vllm_rbln"
+authors = [{name = "Rebellions Inc.", email = "support@rebellions.ai"}]
+license = { "file"= "LICENSE" }
+readme = "README.md"
+description = "vLLM plugin for RBLN NPU"
+classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+    "License :: OSI Approved :: Apache Software License",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+requires-python = ">=3.9"
+dynamic = [ "version", "dependencies", "optional-dependencies"]
+
+[project.urls]
+Homepage="https://rebellions.ai"
+Documentation="https://docs.rbln.ai"
+Repository="https://github.com/rebellions-sw/vllm-rbln"
+
+[project.scripts]
+vllm = "vllm_rbln.entrypoints.cli.main:main"
+
+[project.entry-points."vllm.platform_plugins"]
+rbln = "vllm_rbln:register"
+
+[project.entry-points."vllm.general_plugins"]
+rbln_new_models = "vllm_rbln:register_model"
+
+[tool.setuptools_scm]
+version_file = "vllm_rbln/_version.py"
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["benchmarks", "csrc", "docs", "examples", "tests*"]
+namespaces = false
+
+[tool.ruff]
+# Allow lines to be as long as 80.
+line-length = 80
+
+[tool.ruff.lint.per-file-ignores]
+"vllm/third_party/**" = ["ALL"]
+# Python 3.8 typing. TODO: Remove these excludes after v1.0.0
+"vllm_rbln/attention/**/*.py" = ["UP006", "UP035"]
+"vllm_rbln/core/**/*.py" = ["UP006", "UP035"]
+"vllm_rbln/model_executor/**/*.py" = ["UP006", "UP035"]
+"vllm_rbln/worker/**/*.py" = ["UP006", "UP035"]
+"vllm_rbln/platform.py" = ["UP006", "UP035"]
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    # "I",
+    "G",
+]
+ignore = [
+    # star imports
+    "F405", "F403",
+    # lambda expression assignment
+    "E731",
+    # Loop control variable not used within loop body
+    "B007",
+    # f-string format
+    "UP032",
+    # Can remove once 3.10+ is the minimum Python version
+    "UP007",
+]
+
+[tool.mypy]
+ignore_missing_imports = true
+check_untyped_defs = true
+follow_imports = "silent"
+
+# After fixing type errors resulting from follow_imports: "skip" -> "silent",
+# move the directory here and remove it from tools/mypy.sh
+files = [
+    "vllm_rbln/*.py",
+    "vllm_rbln/core",
+]
+
+[tool.codespell]
+ignore-words-list = "dout, te, indicies, subtile, ElementE"
+skip = "vllm/third_party/*"
+
+[tool.isort]
+use_parentheses = true
+skip_gitignore = true
+
+[tool.pymarkdown]
+plugins.md004.style = "sublist" # ul-style
+plugins.md013.enabled = false # line-length
+plugins.md041.enabled = false # first-line-h1
+plugins.md033.enabled = false # inline-html
+plugins.md024.allow_different_nesting = true # no-duplicate-headers

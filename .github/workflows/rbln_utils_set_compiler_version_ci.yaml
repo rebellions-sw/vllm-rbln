@@ -1,0 +1,31 @@
+name: CI / Utils / Set rebel-compiler version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version of rebel-compiler to use in vLLM RBLN CI"
+        required: true
+        type: string
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version of rebel-compiler to use in vLLM RBLN CI"
+        required: true
+        type: string
+
+jobs:
+  update-compiler-version:
+    runs-on: ubuntu-latest-rbln
+    steps:
+      - name: Write compiler-version info for vLLM RBLN CIs
+        run: |
+          echo "COMPILER_VERSION=${{ inputs.version }}" >> ./compiler-version-for-vllm-rbln
+          cat ./compiler-version-for-vllm-rbln
+
+      - name: Upload compiler-version for vLLM RBLN CIs
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler-version-for-vllm-rbln
+          path: ./compiler-version-for-vllm-rbln

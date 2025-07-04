@@ -1,0 +1,13 @@
+name: CD / Upload Package to Internal PyPI / Trigger on Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy-on-tag:
+    uses: ./.github/workflows/rbln_deploy.yaml
+    with:
+      version: ${{ github.ref_name }}
+    secrets: inherit

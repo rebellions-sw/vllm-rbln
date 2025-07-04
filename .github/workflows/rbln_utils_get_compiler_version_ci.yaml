@@ -1,0 +1,42 @@
+name: CI / Utils / Get rebel-compiler version
+
+on:
+  workflow_call:
+    outputs:
+      compiler_version:
+        description: "compiler package version for vllm-rbln"
+        value: ${{ jobs.get-version.outputs.compiler_version }}
+
+jobs:
+  get-version:
+    runs-on: ubuntu-latest-rbln
+    outputs:
+      compiler_version: ${{ steps.get-compiler-version.outputs.COMPILER_VERSION }}
+    steps:
+    - name: Get latest run id of vllm-rbln workflow
+      id: get-run-id
+      env:
+        GH_TOKEN: ${{ secrets.GIT_PAT }}
+      run: |
+        RUN_ID=$(gh run list \
+          --repo rebellions-sw/vllm-rbln \
+          --workflow "rbln_utils_set_compiler_version_ci.yaml" \
+          --limit 1 \
+          --json databaseId | jq -r '.[0].databaseId')
+        echo "RUN_ID=${RUN_ID}" >> $GITHUB_OUTPUT
+
+    - name: Restore compiler-version-for-vllm-rbln
+      uses: actions/download-artifact@v4
+      with:
+        name: compiler-version-for-vllm-rbln
+        repository: rebellions-sw/vllm-rbln
+        github-token: ${{ secrets.GIT_PAT }}
+        run-id: ${{ steps.get-run-id.outputs.RUN_ID }}
+
+    - name: Set outputs for rebel-compiler version
+      id: get-compiler-version
+      run: |
+        set -a
+        source ./compiler-version-for-vllm-rbln
+        echo "rebel-compiler version: ${COMPILER_VERSION}"
+        echo "COMPILER_VERSION=${COMPILER_VERSION}" >> $GITHUB_OUTPUT
