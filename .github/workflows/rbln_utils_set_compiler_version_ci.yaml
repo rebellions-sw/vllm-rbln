@@ -1,6 +1,9 @@
 name: CI / Utils / Set rebel-compiler version
 
 on:
+  pull_request:
+    branches:
+      - '*'
   workflow_call:
     inputs:
       version:
