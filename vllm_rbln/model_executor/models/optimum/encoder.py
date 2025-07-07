@@ -138,6 +138,6 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
             assert hidden_states.dim() == 2, (
                 f"We expected the shape to be dim 2 ([batch, num_labels]), "
                 f"but the current output is dim {hidden_states.dim()}.")
-            hidden_states = hidden_states[:request_nums]
+            hidden_states = hidden_states[:request_nums].squeeze(-1)
 
         return hidden_states
