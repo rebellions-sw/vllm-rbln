@@ -27,7 +27,7 @@ from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
 from vllm.forward_context import set_forward_context
 from vllm.model_executor import SamplingMetadata
-from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.model_loader import get_model
 from vllm.multimodal import MultiModalKwargs, MultiModalPlaceholderMap
 from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
@@ -399,6 +399,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         # Lazy initialization.
         self.model: nn.Module  # initialize after load_model.
 
+        self.sampler =  = get_sampler()
+
         if hasattr(self, "_builder_cls"):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(
@@ -568,7 +570,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             return []
 
         # Sample the next token.
-        output = self.model.sample(
+        output = self.sample(
             logits=logits,
             sampling_metadata=model_input.sampling_metadata,
         )
@@ -588,11 +590,6 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         self.builder.set_seq_group_list(seq_group_metadata_list)
 
         return self.builder.build()  # type: ignore
-
-    # sampler property will be used by spec_decode_worker
-    @property
-    def sampler(self):
-        return self.model.sampler
 
     @property
     def vocab_size(self) -> int:
