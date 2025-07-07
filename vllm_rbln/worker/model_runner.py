@@ -399,7 +399,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         # Lazy initialization.
         self.model: nn.Module  # initialize after load_model.
 
-        self.sampler =  = get_sampler()
+        self.sampler = get_sampler()
 
         if hasattr(self, "_builder_cls"):
             # multi-step model runner does not have `_builder_cls`
@@ -570,7 +570,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             return []
 
         # Sample the next token.
-        output = self.sample(
+        output = self.sampler(
             logits=logits,
             sampling_metadata=model_input.sampling_metadata,
         )
