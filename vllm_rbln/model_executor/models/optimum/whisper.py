@@ -24,6 +24,7 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
+    INVALID_TOKEN = 100
     def __init__(
         self,
         model_config: ModelConfig,
@@ -74,8 +75,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
                 table_ids.append(table_id)
             return table_ids
 
-    def pad_tensors(self, input_ids):
-        request_nums = input_ids.shape[0]
+    def pad_tensors(self, input_ids, valid_block_ids):
+        # request_nums = input_ids.shape[0]
         padded_input_ids = torch.zeros(
             self.batch_size,
             input_ids.shape[1],
@@ -87,7 +88,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
         #     1,
         #     dtype=cache_position.dtype
         # )
-        padded_input_ids[:request_nums] = input_ids
+        padded_input_ids[valid_block_ids] = input_ids
         # padded_cache_position[:request_nums] = cache_position
 
         return padded_input_ids
@@ -101,9 +102,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
 
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-        request_nums = input_ids.shape[0]
+        # request_nums = input_ids.shape[0]
 
         table_ids = self.get_table_id(is_prompt, finished_requests_ids, running_requests_ids)
+        valid_block_ids = torch.tensor(table_ids)
         model_kwargs = {}
 
         if is_prompt:
@@ -112,7 +114,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             except (AttributeError, KeyError):
                 raise ValueError("Whisper requires audio data as an input.")
     
-        input_ids = self.pad_tensors(input_ids)
+        input_ids = self.pad_tensors(input_ids, [valid_block_ids])
         cache_position = torch.zeros(
             self.batch_size,
             1,
@@ -122,42 +124,43 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
         decoder_attention_mask = torch.zeros(
             self.batch_size,
             self.dec_max_seq_len,
-            dtype=torch.float32
+            dtype=torch.int32
         )
         # breakpoint()
         if is_prompt:
             # breakpoint()
             # encoder is inplace function
             # there's no need to return the value.
+            block_tables = torch.tensor([[table_ids[0]]], dtype=torch.int16)
             self.model.encoder(input_features=input_features[0], block_tables=block_tables.squeeze(0))
             self.model.is_language_detected = True
-            decoder_attention_mask[0, 0] = 1
-            # breakpoint()
-            decoder_output = self.model.decoder(
-                decoder_input_ids=input_ids.contiguous(),
-                decoder_attention_mask=decoder_attention_mask,
-                cache_position=cache_position,
-            )
-            # breakpoint()
-            lm_logits = decoder_output.logits
-            # mark
-            self.model.language_cross = decoder_output.cross_attentions
+            lm_logits = torch.zeros(
+                1, 1, self.model.config.vocab_size + self.INVALID_TOKEN)
+            # Set the probability of INVALID_TOKEN (the last token in
+            # the logits tensor) to 1.0.
+            lm_logits[0][0][-1] = 1
+
+            # self.model.language_cross = decoder_output.cross_attentions
             self.table_mapping[running_requests_ids[0]] = table_ids[0]
-            self.dec_lengths[table_ids[0]] = 1
+            self.dec_lengths[table_ids[0]] = 0
         else:
             # extract cache_position from dec_lengths
             # breakpoint()
-            for batch_idx in range(request_nums):
+            input_ids[input_ids == (
+                self.model.config.vocab_size + self.INVALID_TOKEN -
+                1)] = self.model.config.decoder_start_token_id
+
+            for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
                 decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
                 self.dec_lengths[batch_idx] += 1
-            # breakpoint()
+            breakpoint()
             decoder_output = self.model.decoder(
                 decoder_input_ids=input_ids.contiguous(),
                 decoder_attention_mask=decoder_attention_mask,
                 cache_position=cache_position,
             )
             lm_logits = decoder_output.logits
-
-        lm_logits = lm_logits[:request_nums]
+            breakpoint()
+            lm_logits = lm_logits[valid_block_ids]
         return lm_logits
