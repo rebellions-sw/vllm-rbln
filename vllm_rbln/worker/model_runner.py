@@ -475,6 +475,27 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         logger.info("[RBLN] model_config.num_layers = %d",
                     self.model_config.get_num_layers(self.parallel_config))
 
+        def model_wrapper(
+            input_ids: torch.Tensor,
+            positions: torch.Tensor,
+            intermediate_tensors: Optional[IntermediateTensors] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
+            num_prefills: Optional[int] = None,
+            selected_token_indices: Optional[torch.Tensor] = None,
+        ) -> Union[torch.Tensor, IntermediateTensors]:
+            model_output = self.model(input_ids=input_ids,
+                                      positions=positions,
+                                      intermediate_tensors=intermediate_tensors,
+                                      inputs_embeds=inputs_embeds)
+
+            if num_prefills > 0:
+                # aten::select -> adv_index --> contrib_dynamic_take (tensor -> scalar)
+                # aten::index_select --> take --> contrib_dynamic_take (tensor -> scalar)
+                model_output = model_output[:, selected_token_indices]
+            logits = self.model.compute_logits(model_output, None)
+            return logits
+
+
         # NOTE - refer to pytorch 2.5 release notes
         # torch.compile regional compilation without recompilations
         # To prevent nn.modules parameters to be model input, set false
@@ -552,6 +573,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             execute_model_kwargs.update(
                 {"previous_hidden_states": previous_hidden_states})
 
+        num_prefills = model_input.attn_metadata.num_prefills
+        selected_token_indices = model_input.sampling_metadata.selected_token_indices
+
         with set_forward_context(model_input.attn_metadata, self.vllm_config,
                                  model_input.virtual_engine):
             # RBLN compile context is much similar to vLLM forward context
@@ -563,14 +587,21 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
                 intermediate_tensors=intermediate_tensors,
+                num_prefills=num_prefills,
+                selected_token_indices=selected_token_indices,
                 **execute_model_kwargs,
             )
+            # Gather logits for TP
+            hidden_states = self.model.logits_processor._gather_logits(hidden_states)
+
             hidden_states = hidden_states.view(-1, hidden_states.size(-1))
             assert hidden_states.dim() == 2
 
-        # Compute the logits.
-        logits = self.model.compute_logits(hidden_states,
-                                           model_input.sampling_metadata)
+        # Compute the logits. -> moved to model executable
+        if num_prefills > 0:
+            logits = hidden_states
+        else:
+            logits = hidden_states[selected_token_indices]
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
