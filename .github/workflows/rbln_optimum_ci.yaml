@@ -1,9 +1,6 @@
 name: CI / PR / vllm-rbln with optimum
 
 on:
-  pull_request:
-    branches:
-      - '*'
   workflow_dispatch:
     inputs:
       rebel_compiler_version:
