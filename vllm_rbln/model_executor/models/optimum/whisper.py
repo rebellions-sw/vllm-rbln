@@ -97,7 +97,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
 
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-        # request_nums = input_ids.shape[0]
+        request_nums = input_ids.shape[0]
 
         table_ids = self.get_table_id(is_prompt, finished_requests_ids, running_requests_ids)
         valid_block_ids = torch.tensor(table_ids)
@@ -146,13 +146,15 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
                 decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
                 self.dec_lengths[batch_idx] += 1
             # breakpoint()
-            padded_block_tables = torch.zeros(self.batch_size, 1, dtype=torch.int16).fill_(self.padding_value)
+            # FIXME padding value!!!!
+            padded_block_tables = torch.zeros(self.batch_size, 1, dtype=torch.int16).fill_(4)
             # block_tables = []
             padded_block_tables[valid_block_ids] = block_tables
             # for i, table_id in enumerate(table_ids):
             #     block_tables[i]
-
-            block_tables = torch.tensor(block_tables, dtype=torch.int16)
+            # if request_nums != self.batch_size:
+            #     breakpoint()
+            # padded_block_tables = torch.tensor(block_tables, dtype=torch.int16)
             decoder_output = self.model.decoder(
                 decoder_input_ids=input_ids.contiguous(),
                 decoder_attention_mask=decoder_attention_mask,
