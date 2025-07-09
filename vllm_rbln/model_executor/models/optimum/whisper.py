@@ -41,11 +41,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             decoder_batch_sizes=[self.batch_size],
         )
         self.dec_max_seq_len = self.model_config.max_model_len
-        # self.decoder_attention_mask = torch.zeros(
-        #     self.batch_size,
-        #     self.dec_max_seq_len,
-        #     dtype=torch.float32
-        # )
         self.dec_lengths = [0] * self.batch_size
         self.table_mapping: Dict[str, int] = {}
 
@@ -126,12 +121,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             self.dec_max_seq_len,
             dtype=torch.int32
         )
-        # breakpoint()
         if is_prompt:
-            # breakpoint()
             # encoder is inplace function
             # there's no need to return the value.
-            block_tables = torch.tensor([[table_ids[0]]], dtype=torch.int16)
+            # block_tables = torch.tensor([[table_ids[0]]], dtype=torch.int16)
             self.model.encoder(input_features=input_features[0], block_tables=block_tables.squeeze(0))
             self.model.is_language_detected = True
             lm_logits = torch.zeros(
@@ -139,8 +132,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             lm_logits[0][0][-1] = 1
-
-            # self.model.language_cross = decoder_output.cross_attentions
             self.table_mapping[running_requests_ids[0]] = table_ids[0]
             self.dec_lengths[table_ids[0]] = 0
         else:
@@ -154,13 +145,21 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
                 decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
                 self.dec_lengths[batch_idx] += 1
-            breakpoint()
+            # breakpoint()
+            padded_block_tables = torch.zeros(self.batch_size, 1, dtype=torch.int16).fill_(self.padding_value)
+            # block_tables = []
+            padded_block_tables[valid_block_ids] = block_tables
+            # for i, table_id in enumerate(table_ids):
+            #     block_tables[i]
+
+            block_tables = torch.tensor(block_tables, dtype=torch.int16)
             decoder_output = self.model.decoder(
                 decoder_input_ids=input_ids.contiguous(),
                 decoder_attention_mask=decoder_attention_mask,
                 cache_position=cache_position,
+                block_tables=padded_block_tables,
             )
             lm_logits = decoder_output.logits
-            breakpoint()
+            # breakpoint()
             lm_logits = lm_logits[valid_block_ids]
         return lm_logits
