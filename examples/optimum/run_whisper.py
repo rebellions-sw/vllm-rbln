@@ -1,61 +1,103 @@
-import time
+# Copyright 2025 Rebellions Inc. All rights reserved.
 
-from vllm import LLM, SamplingParams
-from vllm.assets.audio import AudioAsset
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+import asyncio
+
+import fire
 from datasets import load_dataset
-from transformers import AutoTokenizer
-# Create a Whisper encoder/decoder model instance
-model_id = "/home/eunji.lee/nas_data/0704_models/whisper-base-b4-wo-token-timestamps"
-batch_size = 4
-llm = LLM(
-    model=model_id,
-    device="auto",
-    block_size=448,
-    max_num_batched_tokens=448,
-    max_model_len=448,
-    max_num_seqs=batch_size,
-    limit_mm_per_prompt={"audio": 4},
-)
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+from transformers import AutoProcessor, AutoTokenizer
+from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
-ds = load_dataset("distil-whisper/librispeech_asr-noise", "test-pub-noise", split="40")
+def generate_prompts(batch_size: int, model_id: str):
+    dataset = load_dataset("distil-whisper/librispeech_asr-noise", "test-pub-noise", split="40")
 
-prompts = [
-    {
-        "prompt": "<|startoftranscript|>",
-        "multi_modal_data": {
-            # "audio": AudioAsset("mary_had_lamb").audio_and_sample_rate,
-            "audio": (ds[i]["audio"]["array"], ds[i]["audio"]["sampling_rate"])
-        },
-    } for i in range(10)
-]
+    messages = [
+        {
+            "prompt": "<|startoftranscript|>",
+            "multi_modal_data": {
+                "audio": (dataset[i]["audio"]["array"], dataset[i]["audio"]["sampling_rate"])
+            },
+        } for i in range(batch_size)
+    ]
 
-# Create a sampling params object.
-sampling_params = SamplingParams(
-    temperature=0,
-    max_tokens=500,
-    ignore_eos=False,
-    skip_special_tokens=True,
-    stop_token_ids=[tokenizer.eos_token_id],
-)
+    return messages
 
-start = time.time()
+async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
+    results_generator = engine.generate(
+        request,
+        SamplingParams(temperature=0,
+                       ignore_eos=False,
+                       skip_special_tokens=True,
+                       stop_token_ids=[tokenizer.eos_token_id],
+                       max_tokens=448),
+        request_id,
+    )
 
-# Generate output tokens from the prompts. The output is a list of
-# RequestOutput objects that contain the prompt, generated
-# text, and other information.
-outputs = llm.generate(prompts, sampling_params)
+    final_output = None
+    async for request_output in results_generator:
+        final_output = request_output
+    return final_output
 
-# Print the outputs.
-for output in outputs:
-    prompt = output.prompt
-    encoder_prompt = output.encoder_prompt
-    generated_text = output.outputs[0].text
-    print(f"Encoder prompt: {encoder_prompt!r}, "
-          f"Decoder prompt: {prompt!r}, "
-          f"Generated text: {generated_text!r}")
+async def main(
+    batch_size: int,
+    max_seq_len: int,
+    num_input_prompt: int,
+    model_id: str,
+):
+    engine_args = AsyncEngineArgs(model=model_id,
+                                  device="auto",
+                                  max_num_seqs=batch_size,
+                                  max_num_batched_tokens=max_seq_len,
+                                  max_model_len=max_seq_len,
+                                  block_size=max_seq_len,
+                                  limit_mm_per_prompt={"audio": 1})
 
-duration = time.time() - start
+    engine = AsyncLLMEngine.from_engine_args(engine_args)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    inputs = generate_prompts(num_input_prompt, model_id)
 
-print("Duration:", duration)
-print("RPS:", len(prompts) / duration)
+    futures = []
+    for request_id, request in enumerate(inputs):
+        futures.append(
+            asyncio.create_task(
+                generate(engine, tokenizer, request_id, request)))
+
+    results = await asyncio.gather(*futures)
+
+    for i, result in enumerate(results):
+        output = result.outputs[0].text
+        print(
+            f"===================== Output {i} ==============================")
+        print(output)
+        print(
+            "===============================================================\n"
+        )
+
+def entry_point(
+    batch_size: int = 4,
+    max_seq_len: int = 448,
+    num_input_prompt: int = 1,
+    model_id: str = "/whisper-base-b4-wo-token-timestamps",
+):
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(
+        main(
+            batch_size=batch_size,
+            max_seq_len=max_seq_len,
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        ))
+
+
+if __name__ == "__main__":
+    fire.Fire(entry_point)
