@@ -77,14 +77,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             input_ids.shape[1],
             dtype=input_ids.dtype
         )
-        # WIP
-        # padded_cache_position = torch.zeros(
-        #     self.batch_size,
-        #     1,
-        #     dtype=cache_position.dtype
-        # )
         padded_input_ids[valid_block_ids] = input_ids
-        # padded_cache_position[:request_nums] = cache_position
 
         return padded_input_ids
 
@@ -119,7 +112,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
         decoder_attention_mask = torch.zeros(
             self.batch_size,
             self.dec_max_seq_len,
-            dtype=torch.int32
+            dtype=torch.float32
         )
         if is_prompt:
             # encoder is inplace function
@@ -134,6 +127,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             lm_logits[0][0][-1] = 1
             self.table_mapping[running_requests_ids[0]] = table_ids[0]
             self.dec_lengths[table_ids[0]] = 0
+            self.model.is_language_detected = False
         else:
             # extract cache_position from dec_lengths
             # breakpoint()
@@ -145,16 +139,9 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
                 decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
                 self.dec_lengths[batch_idx] += 1
-            # breakpoint()
             # FIXME padding value!!!!
             padded_block_tables = torch.zeros(self.batch_size, 1, dtype=torch.int16).fill_(4)
-            # block_tables = []
             padded_block_tables[valid_block_ids] = block_tables
-            # for i, table_id in enumerate(table_ids):
-            #     block_tables[i]
-            # if request_nums != self.batch_size:
-            #     breakpoint()
-            # padded_block_tables = torch.tensor(block_tables, dtype=torch.int16)
             decoder_output = self.model.decoder(
                 decoder_input_ids=input_ids.contiguous(),
                 decoder_attention_mask=decoder_attention_mask,
@@ -162,6 +149,5 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
                 block_tables=padded_block_tables,
             )
             lm_logits = decoder_output.logits
-            # breakpoint()
             lm_logits = lm_logits[valid_block_ids]
         return lm_logits

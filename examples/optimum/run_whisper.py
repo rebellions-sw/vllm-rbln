@@ -3,37 +3,40 @@ import time
 from vllm import LLM, SamplingParams
 from vllm.assets.audio import AudioAsset
 from datasets import load_dataset
+from transformers import AutoTokenizer
 # Create a Whisper encoder/decoder model instance
-model_id = "whisper-tiny-b4-wo-token-timestamps"
+model_id = "/home/eunji.lee/nas_data/0704_models/whisper-base-b4-wo-token-timestamps"
+batch_size = 4
 llm = LLM(
     model=model_id,
     device="auto",
     block_size=448,
     max_num_batched_tokens=448,
     max_model_len=448,
-    max_num_seqs=4,
-    limit_mm_per_prompt={"audio": 1},
-    kv_cache_dtype="fp8",
+    max_num_seqs=batch_size,
+    limit_mm_per_prompt={"audio": 4},
 )
+tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-ds = load_dataset("distil-whisper/librispeech_long", "clean", split="validation")
-audio_array = ds[0]["audio"]["array"]
-sampling_rate = ds[0]["audio"]["sampling_rate"]
+ds = load_dataset("distil-whisper/librispeech_asr-noise", "test-pub-noise", split="40")
+
 prompts = [
     {
         "prompt": "<|startoftranscript|>",
         "multi_modal_data": {
             # "audio": AudioAsset("mary_had_lamb").audio_and_sample_rate,
-            "audio": (audio_array, sampling_rate)
+            "audio": (ds[i]["audio"]["array"], ds[i]["audio"]["sampling_rate"])
         },
-    },
+    } for i in range(10)
 ]
 
 # Create a sampling params object.
 sampling_params = SamplingParams(
     temperature=0,
-    top_p=1.0,
-    max_tokens=400,
+    max_tokens=500,
+    ignore_eos=False,
+    skip_special_tokens=True,
+    stop_token_ids=[tokenizer.eos_token_id],
 )
 
 start = time.time()
