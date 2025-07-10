@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Dict
+from typing import Any, Dict, Optional
 
 import torch
 from vllm.config import ModelConfig, SchedulerConfig
@@ -48,8 +48,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
     def get_table_id(
         self,
-        is_prompt: True,
-        finished_requests_ids: bool,
+        is_prompt: bool,
+        finished_requests_ids: list[str],
         running_requests_ids: list[str],
     ) -> list[int]:
         if is_prompt:
@@ -86,16 +86,12 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         valid_block_ids = torch.tensor(table_ids)
 
         if is_prompt:
-            try:
-                input_features = model_input.multi_modal_kwargs[
-                    "input_features"]
-            except AttributeError as e:
-                raise AttributeError(
-                    "Whisper requires audio data as an input.") from e
-            except KeyError as e:
-                raise KeyError(
-                    "Whisper requires `input_features` as an input.") from e
-            # FIXME Should I check the shape of input_features?
+            if model_input.multi_modal_kwargs:
+                input_features = self._parse_and_validate_audio_input(
+                    **model_input.multi_modal_kwargs)
+            if input_features is None:
+                raise ValueError(
+                    "Whisper requires `input_features` as an input.")
 
         cache_position = torch.zeros(request_nums, 1, dtype=torch.int32)
 
@@ -149,3 +145,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             lm_logits = decoder_output.logits
             lm_logits = lm_logits[valid_block_ids]
         return lm_logits
+
+    def _parse_and_validate_audio_input(
+            self, **kwargs: Any) -> Optional[torch.Tensor]:
+        input_features = kwargs.pop("input_features", None)
+        return input_features
