@@ -149,5 +149,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
     def _parse_and_validate_audio_input(
             self, **kwargs: Any) -> Optional[torch.Tensor]:
         input_features = kwargs.pop("input_features", None)
-        input_features = input_features.squeeze(0)
+        if input_features is not None:
+            input_features = input_features.squeeze(0)
         return input_features
