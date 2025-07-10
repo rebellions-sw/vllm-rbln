@@ -105,7 +105,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         block_tables = kwargs.pop("block_tables")
 
         if is_prompt:
-            _ = self.model.encoder(input_features=input_features[0],
+            _ = self.model.encoder(input_features=input_features,
                                    block_tables=block_tables)
             # FIXME Is `is_languaged_detected` required
             # unless the time stamp is not supported in vLLM?
@@ -149,4 +149,5 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
     def _parse_and_validate_audio_input(
             self, **kwargs: Any) -> Optional[torch.Tensor]:
         input_features = kwargs.pop("input_features", None)
+        input_features = input_features.squeeze(0)
         return input_features
