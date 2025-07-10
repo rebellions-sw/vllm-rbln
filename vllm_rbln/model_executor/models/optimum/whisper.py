@@ -84,7 +84,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
 
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
-        # cache_position = model_input.input_positions
         is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables
 
@@ -94,31 +93,33 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
 
         table_ids = self.get_table_id(is_prompt, finished_requests_ids, running_requests_ids)
         valid_block_ids = torch.tensor(table_ids)
-        model_kwargs = {}
 
         if is_prompt:
             try:
                 input_features = model_input.multi_modal_kwargs["input_features"]
             except (AttributeError, KeyError):
                 raise ValueError("Whisper requires audio data as an input.")
-    
-        input_ids = self.pad_tensors(input_ids, [valid_block_ids])
+        
         cache_position = torch.zeros(
-            self.batch_size,
+            request_nums,
             1,
             dtype=torch.int32
         )
-        # NOTE Is it ok generate torch.zero tensor for each forward? 
-        decoder_attention_mask = torch.zeros(
-            self.batch_size,
-            self.dec_max_seq_len,
-            dtype=torch.float32
+
+        kwargs = self.preprocess_for_decoder(
+            is_prompt,
+            block_tables,
+            input_ids,
+            cache_position,
+            input_block_ids=valid_block_ids
         )
+        input_ids = kwargs.pop("input_ids")
+        cache_position = kwargs.pop("cache_position")
+        block_tables = kwargs.pop("block_tables")
+
         if is_prompt:
-            # encoder is inplace function
-            # there's no need to return the value.
-            # block_tables = torch.tensor([[table_ids[0]]], dtype=torch.int16)
-            self.model.encoder(input_features=input_features[0], block_tables=block_tables.squeeze(0))
+            _ = self.model.encoder(input_features=input_features[0], block_tables=block_tables)
+            # FIXME is_languaged_detected is required unless the time stamp is not supported in vLLM?
             self.model.is_language_detected = True
             lm_logits = torch.zeros(
                 1, 1, self.model.config.vocab_size + self.INVALID_TOKEN)
@@ -129,25 +130,30 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             self.dec_lengths[table_ids[0]] = 0
             self.model.is_language_detected = False
         else:
-            # extract cache_position from dec_lengths
-            # breakpoint()
             input_ids[input_ids == (
                 self.model.config.vocab_size + self.INVALID_TOKEN -
                 1)] = self.model.config.decoder_start_token_id
-
+            
+            # FIXME Is it ok generate torch.zero tensor for each forward?
+            # OR just generate pooled tensor in the model instance?
+            decoder_attention_mask = torch.zeros(
+                self.batch_size,
+                self.dec_max_seq_len,
+                dtype=torch.float32
+            )
+            # Generate cache_position using dec_lengths
             for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
                 decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
                 self.dec_lengths[batch_idx] += 1
-            # FIXME padding value!!!!
-            padded_block_tables = torch.zeros(self.batch_size, 1, dtype=torch.int16).fill_(4)
-            padded_block_tables[valid_block_ids] = block_tables
+
             decoder_output = self.model.decoder(
                 decoder_input_ids=input_ids.contiguous(),
                 decoder_attention_mask=decoder_attention_mask,
                 cache_position=cache_position,
-                block_tables=padded_block_tables,
+                block_tables=block_tables,
             )
+
             lm_logits = decoder_output.logits
             lm_logits = lm_logits[valid_block_ids]
         return lm_logits
