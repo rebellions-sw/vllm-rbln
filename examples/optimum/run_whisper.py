@@ -15,22 +15,25 @@ import asyncio
 
 import fire
 from datasets import load_dataset
-from transformers import AutoProcessor, AutoTokenizer
+from transformers import AutoTokenizer
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
-def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("distil-whisper/librispeech_asr-noise", "test-pub-noise", split="40")
 
-    messages = [
-        {
-            "prompt": "<|startoftranscript|>",
-            "multi_modal_data": {
-                "audio": (dataset[i]["audio"]["array"], dataset[i]["audio"]["sampling_rate"])
-            },
-        } for i in range(batch_size)
-    ]
+def generate_prompts(batch_size: int, model_id: str):
+    dataset = load_dataset("distil-whisper/librispeech_asr-noise",
+                           "test-pub-noise",
+                           split="40")
+
+    messages = [{
+        "prompt": "<|startoftranscript|>",
+        "multi_modal_data": {
+            "audio": (dataset[i]["audio"]["array"],
+                      dataset[i]["audio"]["sampling_rate"])
+        },
+    } for i in range(batch_size)]
 
     return messages
+
 
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     results_generator = engine.generate(
@@ -47,6 +50,7 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     async for request_output in results_generator:
         final_output = request_output
     return final_output
+
 
 async def main(
     batch_size: int,
@@ -83,11 +87,13 @@ async def main(
             "===============================================================\n"
         )
 
+
 def entry_point(
     batch_size: int = 4,
     max_seq_len: int = 448,
     num_input_prompt: int = 1,
-    model_id: str = "/whisper-base-b4-wo-token-timestamps",
+    model_id:
+    str = "/whisper-base-b4-wo-token-timestamps",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
