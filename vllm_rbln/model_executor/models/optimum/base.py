@@ -58,7 +58,8 @@ _RBLN_MULTIMODAL_MODELS = {
     ("blip2", "RBLNBlip2ForConditionalGeneration"),
     "Gemma3ForConditionalGeneration": ("gemma3",
                                        "RBLNGemma3ForConditionalGeneration"),
-    "WhisperForConditionalGeneration": ("whisper", "RBLNWhisperForConditionalGeneration"),
+    "WhisperForConditionalGeneration": ("whisper",
+                                        "RBLNWhisperForConditionalGeneration"),
 }
 
 _RBLN_EMBEDDING_MODELS = {
