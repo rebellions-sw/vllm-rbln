@@ -11,20 +11,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict
 
 import torch
 from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
 
-from .base import ModelInputForRBLN, version_error
+from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 
 logger = init_logger(__name__)
 
-class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
+
+class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
+                                                 RBLNOptimumDecoderMixin):
     INVALID_TOKEN = 100
+
     def __init__(
         self,
         model_config: ModelConfig,
@@ -70,18 +72,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
                 table_ids.append(table_id)
             return table_ids
 
-    def pad_tensors(self, input_ids, valid_block_ids):
-        # request_nums = input_ids.shape[0]
-        padded_input_ids = torch.zeros(
-            self.batch_size,
-            input_ids.shape[1],
-            dtype=input_ids.dtype
-        )
-        padded_input_ids[valid_block_ids] = input_ids
-
-        return padded_input_ids
-
-
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
         is_prompt = model_input.sampling_metadata.num_prompts > 0
@@ -91,35 +81,38 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
         running_requests_ids = model_input.running_requests_ids
         request_nums = input_ids.shape[0]
 
-        table_ids = self.get_table_id(is_prompt, finished_requests_ids, running_requests_ids)
+        table_ids = self.get_table_id(is_prompt, finished_requests_ids,
+                                      running_requests_ids)
         valid_block_ids = torch.tensor(table_ids)
 
         if is_prompt:
             try:
-                input_features = model_input.multi_modal_kwargs["input_features"]
-            except (AttributeError, KeyError):
-                raise ValueError("Whisper requires audio data as an input.")
-        
-        cache_position = torch.zeros(
-            request_nums,
-            1,
-            dtype=torch.int32
-        )
+                input_features = model_input.multi_modal_kwargs[
+                    "input_features"]
+            except AttributeError as e:
+                raise AttributeError(
+                    "Whisper requires audio data as an input.") from e
+            except KeyError as e:
+                raise KeyError(
+                    "Whisper requires `input_features` as an input.") from e
+            # FIXME Should I check the shape of input_features?
 
-        kwargs = self.preprocess_for_decoder(
-            is_prompt,
-            block_tables,
-            input_ids,
-            cache_position,
-            input_block_ids=valid_block_ids
-        )
+        cache_position = torch.zeros(request_nums, 1, dtype=torch.int32)
+
+        kwargs = self.preprocess_for_decoder(is_prompt,
+                                             block_tables,
+                                             input_ids,
+                                             cache_position,
+                                             input_block_ids=valid_block_ids)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
 
         if is_prompt:
-            _ = self.model.encoder(input_features=input_features[0], block_tables=block_tables)
-            # FIXME is_languaged_detected is required unless the time stamp is not supported in vLLM?
+            _ = self.model.encoder(input_features=input_features[0],
+                                   block_tables=block_tables)
+            # FIXME Is `is_languaged_detected` required
+            # unless the time stamp is not supported in vLLM?
             self.model.is_language_detected = True
             lm_logits = torch.zeros(
                 1, 1, self.model.config.vocab_size + self.INVALID_TOKEN)
@@ -133,18 +126,17 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase, RBLNOptim
             input_ids[input_ids == (
                 self.model.config.vocab_size + self.INVALID_TOKEN -
                 1)] = self.model.config.decoder_start_token_id
-            
+
             # FIXME Is it ok generate torch.zero tensor for each forward?
             # OR just generate pooled tensor in the model instance?
-            decoder_attention_mask = torch.zeros(
-                self.batch_size,
-                self.dec_max_seq_len,
-                dtype=torch.float32
-            )
+            decoder_attention_mask = torch.zeros(self.batch_size,
+                                                 self.dec_max_seq_len,
+                                                 dtype=torch.float32)
             # Generate cache_position using dec_lengths
             for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
-                decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
+                decoder_attention_mask[batch_idx, :cache_position[batch_idx] +
+                                       1] = 1
                 self.dec_lengths[batch_idx] += 1
 
             decoder_output = self.model.decoder(
