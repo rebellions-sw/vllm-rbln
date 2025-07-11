@@ -161,9 +161,7 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
             if kvcache_partition_len is None:
                 kvcache_partition_len = getattr(submodule_config, "kvcache_partition_len", None)
             if max_seq_len is None:
-                max_seq_len = getattr(submodule_config, "max_seq_len", None)
-            if max_seq_len is None:
-                max_seq_len = getattr(submodule_config, "dec_max_seq_len", None)
+                max_seq_len = getattr(submodule_config, "max_seq_len", None) or getattr(submodule_config, "dec_max_seq_len", None)
             
             submodule_batch_size =  getattr(submodule_config, "batch_size", None)
             # FIXME
