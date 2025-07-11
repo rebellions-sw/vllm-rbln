@@ -312,8 +312,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         # Different values are not tested.
         assert num_cpu_blocks == 0
-        #FIXME(jindol21) : create new assert
-        #assert num_gpu_blocks == self.scheduler_config.max_num_seqs + 1
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks

@@ -131,7 +131,7 @@ class RblnPlatform(Platform):
 
         # torch.compile() is currently disabled.
         # TODO: Replace with dynamic check via is_torch_compile_supported().
-        is_torch_compile = True
+        is_torch_compile = False
         model_config = vllm_config.model_config
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:

@@ -296,10 +296,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                 block_table = seq_group_metadata.block_tables[seq_id]
                 assert len(block_table) >= 1
 
-                #for i in range(len(block_table)):
-                #    assert block_table[i] != self.max_num_seqs
-                #    arr_input_block_ids.append(block_table)
-                #FIXME(jindol21)
                 list_input_block_ids.append(block_table)
                 data.max_decode_seq_len = max(data.max_decode_seq_len, seq_len)
                 data.input_tokens.append([generation_token])
@@ -435,7 +431,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     backend="rbln",
                     options={
                         "compile_context": self.compile_context,
-                        #"cache_dir": "./rsd_cache_dir",
+                        "cache_dir": "./rsd_cache_dir",
                         "tensor_parallel_size": _TP_SIZE,
                     },
                     dynamic=False,
@@ -446,7 +442,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     backend="rbln",
                     options={
                         "compile_context": self.compile_context,
-                        #"cache_dir": "./cache_dir",
+                        "cache_dir": "./cache_dir",
                     },
                     dynamic=False,
                 )
