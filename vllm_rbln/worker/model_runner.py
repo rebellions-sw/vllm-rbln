@@ -170,6 +170,8 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         self.sliding_window = self.runner.sliding_window
         self.block_size = self.runner.cache_config.block_size
         self.device = self.runner.device
+        self.max_model_len = self.runner.scheduler_config.max_model_len
+
         if self.runner.attn_backend is not None:
             # spec decode (e.g. Medusa) does not have atten backend
             attn_backend = self.runner.attn_backend
@@ -195,7 +197,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert len(seq_group_metadata_list) > 0
-        input_block_ids: List[int] = []
+        list_input_block_ids: List[int] = []
 
         block_size = self.runner.block_size
         assert (
@@ -217,8 +219,9 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
 
             assert seq_group_metadata.block_tables is not None
             block_table = seq_group_metadata.block_tables[seq_id]
-            assert len(block_table) == 1
-            input_block_ids.append(block_table[0])
+            assert len(block_table) == math.ceil(seq_data.get_len() /
+                                                 block_size)
+            list_input_block_ids.extend(block_table)
             data.input_tokens.append(tokens)
             data.input_positions.append(list(range(computed_len, seq_len)))
             data.num_prefills += 1
@@ -234,6 +237,21 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         max_seq_len = max(data.seq_lens)
         assert max_seq_len > 0
 
+        num_partition = self.max_model_len // block_size
+        dummy = self.runner.cache_config.num_gpu_blocks
+        # make_tensor_with_pad takes List[List[]] as input
+        # To make it work, input_block_ids is expanded
+        input_block_ids = make_tensor_with_pad([list_input_block_ids],
+                                               max_len=num_partition,
+                                               pad=dummy,
+                                               dtype=torch.long,
+                                               device=self.device)
+        # input_block_ids gets back in here.
+        input_block_ids = input_block_ids.flatten().tolist()
+        input_block_ids = torch.tensor(input_block_ids,
+                                       dtype=torch.long,
+                                       device=self.device)
+
         prefill_size = (self.chunked_prefill_size if self.chunked_prefill else
                         1 << (math.ceil(math.log2(max_seq_len))))
         input_tokens = make_tensor_with_pad(data.input_tokens,
@@ -246,9 +264,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                pad=0,
                                                dtype=torch.long,
                                                device=self.device)
-        input_block_ids = torch.tensor(input_block_ids,
-                                       dtype=torch.long,
-                                       device=self.device)
 
         logger.info("[RBLN] model input builder, prepare_prompt")
         logger.info("\tpadded input_tokens = %s", input_tokens)
@@ -265,7 +280,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert len(seq_group_metadata_list) > 0
 
-        arr_input_block_ids: List[int] = []
+        list_input_block_ids: List[int] = []
         block_size = self.block_size
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
@@ -280,10 +295,12 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                 assert seq_group_metadata.block_tables is not None
                 block_table = seq_group_metadata.block_tables[seq_id]
                 assert len(block_table) >= 1
-                for i in range(len(block_table)):
-                    assert block_table[i] != self.max_num_seqs
-                    arr_input_block_ids.append(block_table[i])
 
+                #for i in range(len(block_table)):
+                #    assert block_table[i] != self.max_num_seqs
+                #    arr_input_block_ids.append(block_table)
+                #FIXME(jindol21)
+                list_input_block_ids.append(block_table)
                 data.max_decode_seq_len = max(data.max_decode_seq_len, seq_len)
                 data.input_tokens.append([generation_token])
                 data.input_positions.append([token_position])
@@ -296,10 +313,17 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                 data.slot_mapping.append(block_offset)
 
         # batch padding
-        batch_padding_szie = self.max_num_seqs - len(data.input_tokens)
-        data.input_tokens.extend([[0]] * batch_padding_szie)
-        data.input_positions.extend([[0]] * batch_padding_szie)
-        arr_input_block_ids.extend([self.max_num_seqs] * batch_padding_szie)
+        batch_padding_size = self.max_num_seqs - len(data.input_tokens)
+        data.input_tokens.extend([[0]] * batch_padding_size)
+        data.input_positions.extend([[0]] * batch_padding_size)
+
+        num_partition = self.max_model_len // block_size
+        dummy = self.runner.cache_config.num_gpu_blocks
+        input_block_ids = make_tensor_with_pad(list_input_block_ids,
+                                               max_len=num_partition,
+                                               pad=dummy,
+                                               dtype=torch.long,
+                                               device=self.device)
 
         input_tokens = make_tensor_with_pad(data.input_tokens,
                                             max_len=1,
@@ -311,9 +335,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                pad=0,
                                                dtype=torch.long,
                                                device=self.device)
-        input_block_ids = torch.tensor(arr_input_block_ids,
-                                       dtype=torch.long,
-                                       device=self.device)
 
         logger.info("[RBLN] model input builder, prepare_decode")
         logger.info("\tpadded input_tokens = %s", data.input_tokens)
@@ -414,7 +435,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     backend="rbln",
                     options={
                         "compile_context": self.compile_context,
-                        "cache_dir": "./rsd_cache_dir",
+                        #"cache_dir": "./rsd_cache_dir",
                         "tensor_parallel_size": _TP_SIZE,
                     },
                     dynamic=False,
@@ -425,7 +446,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     backend="rbln",
                     options={
                         "compile_context": self.compile_context,
-                        "cache_dir": "./cache_dir",
+                        #"cache_dir": "./cache_dir",
                     },
                     dynamic=False,
                 )

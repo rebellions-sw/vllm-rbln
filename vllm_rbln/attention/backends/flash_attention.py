@@ -206,7 +206,10 @@ class RBLNAttentionBackend(AttentionBackend):
         kv_cache_shape= [B, H, 1, S, D]
         query_shape   = [1, H, G, L, D]
         """
-        return (2, num_blocks, num_kv_heads, 1, block_size, head_size)
+        # for partition skip, we need dummy block slot.
+        no_dummy_slots = 1
+        return (2, num_blocks + no_dummy_slots, num_kv_heads, 1, block_size,
+                head_size)
 
     @staticmethod
     def swap_blocks(
@@ -237,10 +240,8 @@ class RBLNAttentionMetadataBuilder(
         self.chunked_prefill = input_builder.chunked_prefill
         self.chunked_prefill_size = input_builder.chunked_prefill_size
         self.input_builder = input_builder
-        # model max sequence length (cache_config.num_cpu_blocks)
-        self.max_seq_len = 128 * 1024
-        # flash attention partition size (cache_config.block_size)
-        self.partition_len = 1024
+
+        self.partition_len = input_builder.block_size
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
@@ -264,8 +265,13 @@ class RBLNAttentionMetadataBuilder(
         steps = [[input_positions[0]]
                  for input_positions in input_data.input_positions]
         seq_idx = torch.tensor(steps, dtype=torch.int32)
-        max_seq_len = self.max_seq_len
         partition_len = self.partition_len
+        # no. of block(HW constraint) determines max sequence length.
+        # max_model_len(Model constraint) determines max sequence length.
+        # One of them is selected for max_seq_len.
+        block_length = self.input_builder.runner.cache_config.num_gpu_blocks * \
+                                            partition_len
+        max_seq_len = min(self.input_builder.max_model_len, block_length)
         num_partition = max_seq_len // partition_len
 
         batch_size = 1 if input_data.num_prefills else len(steps)
@@ -300,7 +306,7 @@ class RBLNAttentionMetadataBuilder(
                                                  1,
                                                  1,
                                                  prefill_chunk_size,
-                                                 self.max_seq_len,
+                                                 max_seq_len,
                                                  dtype=torch.float32)
             causal_mask = 1 - torch.triu(torch.ones(1, 1, prefill_chunk_size,
                                                     prefill_chunk_size),
@@ -315,7 +321,7 @@ class RBLNAttentionMetadataBuilder(
                                                 1,
                                                 1,
                                                 1,
-                                                self.max_seq_len,
+                                                max_seq_len,
                                                 dtype=torch.float32)
             for batch_index, batch_step in enumerate(steps):
                 decode_attention_mask[batch_index, :, :, :, :batch_step[0] +
