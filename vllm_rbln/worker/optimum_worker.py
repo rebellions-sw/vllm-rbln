@@ -66,6 +66,8 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
 
     def load_model(self):
         self.model_runner.load_model()
+        # Check the vllm configuration and compiled configuration are matched
+        self.check_rbln_config()
 
     def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of available KV blocks.
@@ -143,4 +145,48 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
         ensure_model_parallel_initialized(
             1,
             1,
+        )
+
+    def check_rbln_config(self):
+        kvcache_partition_len = None
+        max_seq_len = None
+
+        rbln_config = self.model_runner.model.rbln_model_config
+        submodules = rbln_config.submodules
+        batch_size = rbln_config.batch_size
+
+        # NOTE It is based on the decoder submodule is only one.
+        for submodule in submodules:
+            submodule_config = getattr(rbln_config, submodule)
+            if kvcache_partition_len is None:
+                kvcache_partition_len = getattr(submodule_config, "kvcache_partition_len", None)
+            if max_seq_len is None:
+                max_seq_len = getattr(submodule_config, "max_seq_len", None)
+            if max_seq_len is None:
+                max_seq_len = getattr(submodule_config, "dec_max_seq_len", None)
+            
+            submodule_batch_size =  getattr(submodule_config, "batch_size", None)
+            # FIXME
+            if batch_size != submodule_batch_size:
+                batch_size = submodule_batch_size
+    
+        if kvcache_partition_len is None:
+            assert self.vllm_config.cache_config.block_size == max_seq_len, (
+                "`block_size` must match `max_seq_len` of the compiled RBLN model."
+            )
+        else:
+            assert self.vllm_config.cache_config.block_size == kvcache_partition_len, (
+                "`block_size` must match the `kvcache_partition_len` of the compiled RBLN model."
+            )
+
+        if max_seq_len:
+            assert self.scheduler_config.max_num_batched_tokens == max_seq_len, (
+                "`max_num_batched_tokens` must match the `max_seq_len` of the compiled RBLM model."
+            )
+            assert self.model_config.max_model_len == max_seq_len, (
+                "`max_model_len` must match the `max_seq_len` of the compiled RBLM model."
+            )
+        
+        assert self.scheduler_config.max_num_seqs == batch_size, (
+            "`max_num_seqs` must match the `batch_size` of the compiled RBLM model."
         )
