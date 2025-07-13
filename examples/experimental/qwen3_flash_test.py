@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ruff: noqa: E501
+
 from vllm import LLM, SamplingParams
 
 prompts = [
-"""
+    """
 Rebellions, SK Telecom, and DOCOMO Innovations Partner to Accelerate Next-Gen AI Infrastructure
 News
 Apr 24, 2025
@@ -32,8 +34,7 @@ Rebellions recently established a Japanese subsidiary, further accelerating its 
 Yoshikazu Akinaga, CEO of DOCOMO Innovations, added: “At DOCOMO Innovations, we are dedicated to driving forward innovation in practical AI solutions by working closely with global technology leaders. This partnership—bringing together Rebellions’ advanced semiconductor technology and SK Telecom’s infrastructure capabilities—will allow us to explore and assess the potential of scalable, sustainable AI systems, while maintaining a technology-agnostic approach to ensure optimal solutions for future applications.”
 
 Sangmin Lee, Vice President of Growth Business Development Office at SK Telecom, commented: “SK Telecom delivers world-class, AI-optimized cloud services. This collaboration provides an opportunity to demonstrate our NPU cloud technology, which integrates a wide range of AI data center solutions. We are committed to contributing to the success of next-generation AI infrastructure services—powered not just by GPUs, but also by NPUs.”
-""",
-"""
+""", """
 Rebellions Partners on Strategic Collaboration Initiative to Advance Global AI Data Center Ecosystem
 News
 Mar 04, 2025
