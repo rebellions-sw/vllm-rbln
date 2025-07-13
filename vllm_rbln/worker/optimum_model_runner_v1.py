@@ -13,7 +13,7 @@ from tqdm import tqdm
 import vllm.envs as envs
 
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
-from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
+from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, DeviceMemoryProfiler,
@@ -30,20 +30,20 @@ from vllm.distributed.parallel_state import (
     prepare_communication_buffer_for_model)
 from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
                                               CommonAttentionMetadata)
-class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
+class RBLNOptimumModelRunner(GPUModelRunner):
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
-        self.compilation_config = vllm_config.compilation_config
-        self.lora_config = vllm_config.lora_config
-        self.load_config = vllm_config.load_config
+        # self.compilation_config = vllm_config.compilation_config
+        # self.lora_config = vllm_config.lora_config
+        # self.load_config = vllm_config.load_config
         self.parallel_config = vllm_config.parallel_config
         self.scheduler_config = vllm_config.scheduler_config
-        self.speculative_config = vllm_config.speculative_config
-        self.prompt_adapter_config = vllm_config.prompt_adapter_config
-        self.observability_config = vllm_config.observability_config
+        # self.speculative_config = vllm_config.speculative_config
+        # self.prompt_adapter_config = vllm_config.prompt_adapter_config
+        # self.observability_config = vllm_config.observability_config
 
         from vllm.model_executor.models.utils import set_cpu_offload_max_bytes
         set_cpu_offload_max_bytes(
@@ -110,26 +110,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.encoder_cache: dict[str, dict[int, torch.Tensor]] = {}
 
         self.use_aux_hidden_state_outputs = False
-        # Set up speculative decoding.
-        # NOTE(Jiayi): currently we put the entire draft model on
-        # the last PP rank. This is not ideal if there are many
-        # layers in the draft model.
-        if self.speculative_config and get_pp_group().is_last_rank:
-            if self.speculative_config.method == "ngram":
-                self.drafter = NgramProposer(self.vllm_config)
-            elif self.speculative_config.use_eagle():
-                self.drafter = EagleProposer(self.vllm_config, self.device,
-                                             self)  # type: ignore
-                if self.speculative_config.method == "eagle3":
-                    self.use_aux_hidden_state_outputs = True
-            elif self.speculative_config.method == "medusa":
-                self.drafter = MedusaProposer(
-                    vllm_config=self.vllm_config,
-                    device=self.device)  # type: ignore
-            else:
-                raise ValueError("Unknown speculative decoding method: "
-                                 f"{self.speculative_config.method}")
-            self.rejection_sampler = RejectionSampler()
 
         # Request states.
         self.requests: dict[str, CachedRequestState] = {}
@@ -151,24 +131,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             pin_memory=self.pin_memory,
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[self.cache_config.block_size],
-            is_spec_decode=bool(self.vllm_config.speculative_config),
+            is_spec_decode=False,
         )
-        
-
-        # FIXME(eunji): replace with `is_torch_compile`
-        self.use_cuda_graph = (
-            self.vllm_config.compilation_config.level
-            == CompilationLevel.PIECEWISE
-            and self.vllm_config.compilation_config.use_cudagraph
-            and not self.model_config.enforce_eager)
-        # TODO(woosuk): Provide an option to tune the max cudagraph batch size.
-        # The convention is different.
-        # self.cudagraph_batch_sizes sorts in ascending order.
-        # The batch sizes in the config are in descending order.
-        self.cudagraph_batch_sizes = list(
-            reversed(self.compilation_config.cudagraph_capture_sizes))
-
-        self.full_cuda_graph = self.compilation_config.full_cuda_graph
 
         # Cache the device properties.
         self._init_device_properties()
@@ -264,6 +228,75 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def get_model(self) -> nn.Module:
         return self.model
-    
-    # FIXME(eunji): prepare_prompts, execute_model
-    
+
+    @torch.inference_mode()
+    def execute_model(
+        self,
+        scheduler_output: "SchedulerOutput",
+        intermediate_tensors: Optional[IntermediateTensors] = None,
+    ) -> Union[ModelRunnerOutput, IntermediateTensors]:
+        return ModelRunnerOutput(
+            req_ids=self.input_batch.req_ids,
+            req_id_to_index=self.input_batch.req_id_to_index,
+            sampled_token_ids=valid_sampled_token_ids,
+            spec_token_ids=spec_token_ids,
+            logprobs=logprobs_lists,
+            prompt_logprobs_dict=prompt_logprobs_dict,
+            pooler_output=[],
+            num_nans_in_logits=num_nans_in_logits,
+        )
+
+    def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
+        """
+        Generates the KVCacheSpec by parsing the kv cache format from each
+        Attention module in the static forward context.
+        Returns:
+            KVCacheSpec: A dictionary mapping layer names to their KV cache
+            format. Layers that do not need KV cache are not included.
+        """
+
+        layers = get_layers_from_vllm_config(self.vllm_config, Attention)
+        block_size = self.vllm_config.cache_config.block_size
+        kv_cache_spec: dict[str, KVCacheSpec] = {}
+        for layer_name, attn_module in layers.items():
+            if (kv_tgt_layer :=
+                    attn_module.kv_sharing_target_layer_name) is not None:
+                # The layer doesn't need its own KV cache and will use that of
+                # the target layer. We skip creating a KVCacheSpec for it, so
+                # that KV cache management logic will act as this layer does
+                # not exist, and doesn't allocate KV cache for the layer. This
+                # enables the memory saving of cross-layer kv sharing, allowing
+                # a given amount of memory to accommodate longer context lengths
+                # or enable more requests to be processed simultaneously.
+                self.shared_kv_cache_layers[layer_name] = kv_tgt_layer
+                continue
+
+            if attn_module.attn_type == AttentionType.DECODER:
+                if attn_module.sliding_window is not None:
+                    kv_cache_spec[layer_name] = SlidingWindowSpec(
+                        block_size=block_size,
+                        num_kv_heads=attn_module.num_kv_heads,
+                        head_size=attn_module.head_size,
+                        dtype=self.kv_cache_dtype,
+                        sliding_window=attn_module.sliding_window,
+                        use_mla=False,
+                    )
+                else:
+                    kv_cache_spec[layer_name] = FullAttentionSpec(
+                        block_size=block_size,
+                        num_kv_heads=attn_module.num_kv_heads,
+                        head_size=attn_module.head_size,
+                        dtype=self.kv_cache_dtype,
+                        use_mla=False,
+                    )
+            elif attn_module.attn_type in (AttentionType.ENCODER,
+                                           AttentionType.ENCODER_ONLY):
+                # encoder-only attention does not need KV cache.
+                continue
+            elif attn_module.attn_type == AttentionType.ENCODER_DECODER:
+                raise NotImplementedError
+            else:
+                raise ValueError(
+                    f"Unknown attention type: {attn_module.attn_type}")
+
+        return kv_cache_spec

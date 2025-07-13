@@ -29,6 +29,7 @@ from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
 from vllm_rbln.logger import init_logger
+from vllm import envs
 
 logger = init_logger(__name__)
 
@@ -145,18 +146,19 @@ class RblnPlatform(Platform):
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
         if is_torch_compile:
+            if parallel_config.worker_cls == "auto":
+                parallel_config.worker_cls = "vllm_rbln.worker.worker.RBLNWorker"
+            scheduler_config.scheduler_cls = "vllm_rbln.core.scheduler.RBLNScheduler"
+        else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = "vllm_rbln.worker.optimum_worker_v1.RBLNOptimumWorker"
+                # if needed, modify scheduler_config more
                 scheduler_config.scheduler_cls = "vllm_rbln.core.optimum_scheduler_v1.RBLNOptimumScheduler"
             else:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
                 scheduler_config.scheduler_cls = "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
-        else:
-            if parallel_config.worker_cls == "auto":
-                parallel_config.worker_cls = "vllm_rbln.worker.worker.RBLNWorker
-            scheduler_config.scheduler_cls = "vllm_rbln.core.scheduler.RBLNScheduler"
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -193,3 +195,7 @@ class RblnPlatform(Platform):
         logger.info("Using RBLN Attention Backend: %s", attn_backend_cls)
 
         return attn_backend_cls
+
+    @classmethod
+    def supports_v1(cls, model_config: "ModelConfig") -> bool:
+        return True
