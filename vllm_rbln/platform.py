@@ -144,14 +144,16 @@ class RblnPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         if parallel_config.worker_cls == "auto":
-            parallel_config.worker_cls = (
-                "vllm_rbln.worker.worker.RBLNWorker" if is_torch_compile else
-                "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker")
-
-        scheduler_config = vllm_config.scheduler_config
-        scheduler_config.scheduler_cls = (
-            "vllm_rbln.core.scheduler.RBLNScheduler" if is_torch_compile else
-            "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler")
+            if is_torch_compile:
+                if envs.VLLM_USE_V1:
+                    parallel_config.worker_cls = "vllm_rbln.worker.optimum_worker_v1.RBLNOptimumWorker"
+                    scheduler_config.scheduler_cls = "vllm_rbln.core.optimum_scheduler_v1.RBLNOptimumScheduler"
+                else:
+                    parallel_config.worker_cls = "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
+                    scheduler_config.scheduler_cls = "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
+            else:
+                parallel_config.worker_cls = "vllm_rbln.worker.worker.RBLNWorker
+                scheduler_config.scheduler_cls = "vllm_rbln.core.scheduler.RBLNScheduler"
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
