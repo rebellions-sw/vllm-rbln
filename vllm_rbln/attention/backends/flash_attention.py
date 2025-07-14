@@ -238,7 +238,9 @@ class RBLNAttentionMetadataBuilder(
         self.chunked_prefill_size = input_builder.chunked_prefill_size
         self.input_builder = input_builder
         # model max sequence length (cache_config.num_cpu_blocks)
-        self.max_seq_len = 128 * 1024
+        # default flash attention max sequence length = 16k
+        # default flash attention partition size = 1024 = 1k
+        self.max_seq_len = 16 * 1024
         # flash attention partition size (cache_config.block_size)
         self.partition_len = 1024
 
@@ -469,7 +471,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         # if there is not positional embedding,
         # it can be merged into attention mask
         # attn_masks = _make_alibi_bias(alibi_slopes, dtype, seq_lens)
-        # seq_lens_tensor (1, num_partition = 128k / k = 128)
+        # seq_lens_tensor (1, num_partition = max_seq_len / partition_size)
         # ex) tensor[partition0 = 1024, partition1 = 10,
         # partition2 = 0, partition3 = 0] for len=1034
         # block_tables tensor (1, num_blocks = 256)

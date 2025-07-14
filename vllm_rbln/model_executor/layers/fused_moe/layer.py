@@ -70,14 +70,27 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
     # topk_weights, expert_weights, expert_mask.shape = [b, seq, top_k]
     # NOTE - convert for loop scalar operation into tensor compare
 
+    # [1,num_tokens,hidden_size]
     hidden_states = hidden_states.reshape(1, num_tokens, -1)
+    # [num_experts,1,1,1]
     expert_idx_array = torch.arange(0,
                                     num_experts).reshape(num_experts, 1, 1, 1)
+    # [1,1,num_tokens,topk]
     selected_experts_array = selected_experts.reshape(-1, 1, num_tokens, top_k)
+    # [num_experts,1,num_tokens,topk]
     expert_mask_array = selected_experts_array == expert_idx_array
+    # [num_experts,1,num_tokens,topk]
     topk_weights_array = topk_weights.reshape(-1, 1, num_tokens, top_k)
+    # [num_experts,1,num_tokens,1]
     expert_weights_array = (topk_weights_array * expert_mask_array).sum(
         dim=-1, keepdim=True)
+    # [1,num_tokens,1]
+    temp_expert_weights = expert_weights_array[0]
+    # NOTE - make explicit dependence between hidden_states and expert_weights
+    # [1,num_tokens,hidden_size]
+    # [1,num_tokens,1] <- broadcast add
+    hidden_states = hidden_states + temp_expert_weights - temp_expert_weights
+    # [num_experts,1,num_tokens,1] -> [num_experts,1,num_tokens,hidden_size]
     expert_weights_array = expert_weights_array.broadcast_to(
         (num_experts, 1, num_tokens, hidden_size))
     # solution1. make custom operation for expert loop
@@ -86,8 +99,6 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
         expert_w1 = w1[expert_idx]
         expert_w2 = w2[expert_idx]
         expert_weights = expert_weights_array[expert_idx]
-        # NOTE - to prevent expert loop graph break, allow expert_weights use
-        hidden_states = hidden_states + expert_weights - expert_weights
         x = F.linear(hidden_states, expert_w1)
         gate = F.silu(x[..., :intermediate_size])
         x = x[..., intermediate_size:] * gate
