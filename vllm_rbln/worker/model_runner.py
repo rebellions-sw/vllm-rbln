@@ -507,7 +507,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         from rebel.compile_context import CompileContext
 
         self.compile_context = CompileContext(use_weight_sharing=True)
-        compiled_graph = self.compile_model(self.model)
+        compiled_graph = self.compile_model(model_wrapper)
         self.model_executable = compiled_graph
 
     def get_model(self) -> nn.Module:

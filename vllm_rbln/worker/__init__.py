@@ -14,7 +14,6 @@
 
 import vllm_rbln.attention.layer  # noqa
 import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
-import vllm_rbln.model_executor.layers.linear  # noqa
 import vllm_rbln.model_executor.layers.logits_processor # noqa
 import vllm_rbln.model_executor.layers.rotary_embedding  # noqa
 import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
