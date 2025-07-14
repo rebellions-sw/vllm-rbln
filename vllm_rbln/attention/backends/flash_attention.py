@@ -475,7 +475,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         # if there is not positional embedding,
         # it can be merged into attention mask
         # attn_masks = _make_alibi_bias(alibi_slopes, dtype, seq_lens)
-        # seq_lens_tensor (1, num_partition = 128k / k = 128)
+        # seq_lens_tensor (1, num_partition = max_seq_len / partition_size)
         # ex) tensor[partition0 = 1024, partition1 = 10,
         # partition2 = 0, partition3 = 0] for len=1034
         # block_tables tensor (1, num_blocks = 256)
