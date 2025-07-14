@@ -170,7 +170,7 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
             
             submodule_batch_size =  getattr(submodule_config, "batch_size", None)
             # FIXME
-            if batch_size != submodule_batch_size:
+            if submodule_batch_size is not None and batch_size != submodule_batch_size:
                 batch_size = submodule_batch_size
 
         if kvcache_partition_len is None:
