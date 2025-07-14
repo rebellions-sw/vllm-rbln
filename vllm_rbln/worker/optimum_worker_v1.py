@@ -11,13 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import torch.nn as nn
+import torch
+import torch.distributed
 from vllm.v1.worker.worker_base import WorkerBase
 from vllm_rbln.worker.optimum_model_runner_v1 import RBLNOptimumModelRunner
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
+from vllm.config import VllmConfig
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.logger import init_logger
-
+from vllm.lora.request import LoRARequest
+from vllm.v1.outputs import ModelRunnerOutput
+from vllm.model_executor import set_random_seed
+from typing import Optional
 logger = init_logger(__name__)
 
 
@@ -43,7 +50,7 @@ class RBLNOptimumWorker(WorkerBase):
             from vllm.utils import init_cached_hf_modules
             init_cached_hf_modules()
 
-        self.model_runner = RBLNOptimumModelRunner(self.vllm_config, device)
+        self.model_runner = RBLNOptimumModelRunner(self.vllm_config, self.device)
         self.profiler = None
 
     def init_device(self) -> None:
@@ -51,9 +58,17 @@ class RBLNOptimumWorker(WorkerBase):
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
+    @torch.inference_mode()
+    def determine_available_memory(self) -> int:
+        available_blocks = self.determine_num_available_blocks()
+        print("available_blocks", available_blocks)
+        print("blocks", self.vllm_config.cache_config.block_size)
+        BYTES_PER_BLOCK = 128
+        return available_blocks * self.vllm_config.cache_config.block_size * BYTES_PER_BLOCK
+
     # FIXME(eunji) In V0, we returned both num_gpu_blocks and num_cpu_blocks.
     # Now we can only return num_gpu_blocks
-    def determine_available_memory(self) -> int:
+    def determine_num_available_blocks(self) -> int:
         """Determine the number of available KV blocks.
 
         Swapping is not yet supported, so always return num_cpu_blocks=0.
@@ -93,7 +108,23 @@ class RBLNOptimumWorker(WorkerBase):
         self,
         scheduler_output: "SchedulerOutput",
     ) -> Optional[ModelRunnerOutput]:
-        self.model_runner.execute_model()
+        intermediate_tensors = None
+        if not get_pp_group().is_first_rank:
+            intermediate_tensors = IntermediateTensors(
+                get_pp_group().recv_tensor_dict(
+                    all_gather_group=get_tp_group()))
+
+        output = self.model_runner.execute_model(scheduler_output,
+                                                 intermediate_tensors)
+        parallel_config = self.vllm_config.parallel_config
+        if parallel_config.distributed_executor_backend != "external_launcher" \
+            and not get_pp_group().is_last_rank:
+            assert isinstance(output, IntermediateTensors)
+            get_pp_group().send_tensor_dict(output.tensors,
+                                            all_gather_group=get_tp_group())
+            return None
+        assert isinstance(output, ModelRunnerOutput)
+        return output if self.is_driver_worker else None
 
     def profile(self, is_start: bool = True):
         raise RuntimeError("Profiler is not enabled.")
@@ -117,6 +148,13 @@ class RBLNOptimumWorker(WorkerBase):
         """Allocate NPU KV cache with the specified kv_cache_config."""
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
+    def get_cache_block_size_bytes(self) -> int:
+        """Determine the size in bytes of a cache block.
+
+        This is required for speculative decoding; it is not yet implemented.
+        """
+        raise NotImplementedError
+
     def init_distributed_environment(self):
         """RBLN uses rebel-compiler for tensor parallelism.
 
@@ -133,3 +171,13 @@ class RBLNOptimumWorker(WorkerBase):
             1,
             1,
         )
+
+
+    def remove_lora(self, lora_id: int) -> bool:
+        raise NotImplementedError
+
+    def list_loras(self) -> set[int]:
+        raise NotImplementedError
+
+    def pin_lora(self, lora_id: int) -> bool:
+        raise NotImplementedError
