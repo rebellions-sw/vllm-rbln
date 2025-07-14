@@ -13,9 +13,12 @@
 # limitations under the License.
 
 from vllm.v1.core.sched.scheduler import Scheduler
-
+from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm_rbln.logger import init_logger
-
+from vllm.config import ParallelConfig, VllmConfig
+from vllm.v1.structured_output import StructuredOutputManager
+from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm_rbln.core.optimum_kv_cache_manager import RBLNOptimumKVCacheManager
 logger = init_logger(__name__)
 
 

@@ -25,6 +25,7 @@ from vllm.lora.request import LoRARequest
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.model_executor import set_random_seed
 from typing import Optional
+from vllm.distributed.parallel_state import get_pp_group, get_tp_group
 logger = init_logger(__name__)
 
 
@@ -60,37 +61,9 @@ class RBLNOptimumWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        available_blocks = self.determine_num_available_blocks()
-        print("available_blocks", available_blocks)
-        print("blocks", self.vllm_config.cache_config.block_size)
-        BYTES_PER_BLOCK = 128
-        return available_blocks * self.vllm_config.cache_config.block_size * BYTES_PER_BLOCK
-
-    # FIXME(eunji) In V0, we returned both num_gpu_blocks and num_cpu_blocks.
-    # Now we can only return num_gpu_blocks
-    def determine_num_available_blocks(self) -> int:
-        """Determine the number of available KV blocks.
-
-        Swapping is not yet supported, so always return num_cpu_blocks=0.
-
-        """
-        attn_impl = self.model_runner.model.model.get_attn_impl() if hasattr(
-            self.model_runner.model.model, "get_attn_impl") else None
-
-        if attn_impl is not None and attn_impl == "flash_attn":
-            # We use the last block as dummy block
-            num_gpu_blocks = (
-                self.model_runner.model.model.get_kvcache_num_blocks() - 1)
-
-            if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
-                num_gpu_blocks = int(npu_num_blocks) - 1
-        else:
-            # Set the number of GPU blocks to be the same as the maximum
-            # number of sequences that can be processed in a single batch.
-            # This is equivalent to schedule without PagedAttention.
-            num_gpu_blocks = self.scheduler_config.max_num_seqs
-
-        return num_gpu_blocks
+        # FIXME(eunji): it's temporary
+        available_memory_bytes = 1e10 
+        return available_memory_bytes
 
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:
@@ -136,7 +109,11 @@ class RBLNOptimumWorker(WorkerBase):
         self.model_runner.load_model()
 
     def compile_or_warm_up_model(self) -> None:
-        raise RuntimeError("Compilation in vLLM is not supported yet.")
+        # Reset the seed to ensure that the random state is not affected by
+        # the model initialization and profiling.
+        set_random_seed(self.model_config.seed)
+        # TODO(eunji): warmup is required
+        # self.model_runner.warming_up_model()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
