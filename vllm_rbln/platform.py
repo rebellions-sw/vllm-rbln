@@ -129,9 +129,10 @@ class RblnPlatform(Platform):
             raise NotImplementedError(
                 "Multi-step execution is not supported for RBLN")
 
-        # torch.compile() is currently disabled.
+        # By default, torch.compile() is currently disabled.
+        # To enable torch.compile, enable dynamic check via is_torch_compile_supported
         # TODO: Replace with dynamic check via is_torch_compile_supported().
-        is_torch_compile = False
+        is_torch_compile = is_torch_compile_supported(vllm_config)
         model_config = vllm_config.model_config
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
