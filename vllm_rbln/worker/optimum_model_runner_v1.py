@@ -3,7 +3,8 @@ import time
 import weakref
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Optional, Union
-
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from vllm.multimodal.inputs import MultiModalKwargs
 import numpy as np
 import torch
 import torch.distributed
@@ -36,6 +37,10 @@ from vllm.v1.kv_cache_interface import (AttentionSpec, FullAttentionSpec,
                                         SlidingWindowSpec)
 from vllm.attention.layer import Attention
 from vllm.sampling_params import SamplingType
+from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
+from vllm_rbln.worker.optimum_input_batch import RBLNInputBatch
+from vllm.model_executor.sampling_metadata import SamplingMetadata
+
 class RBLNOptimumModelRunner(GPUModelRunner):
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
@@ -128,7 +133,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         # solution, we initialize the input batch here, and re-initialize it
         # in `initialize_kv_cache` if the block_sizes here is different from
         # the block_sizes in the kv cache config.
-        self.input_batch = InputBatch(
+        self.input_batch = RBLNInputBatch(
             max_num_reqs=self.max_num_reqs,
             max_model_len=self.max_model_len,
             max_num_batched_tokens=self.max_num_tokens,
@@ -137,22 +142,19 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[self.cache_config.block_size],
         )
+        # print("max_model_len", self.max_model_len)
+        # print("block_size", self.cache_config.block_size)
+        # print(self.input_batch.block_table.block_tables[0].block_table.shape)
         # Cache the device properties.
         # self._init_device_properties()
 
         # Persistent buffers for CUDA graphs.
-        self.input_ids = torch.zeros(self.max_num_tokens,
-                                     dtype=torch.int32,
-                                     device=self.device)
-        self.positions = torch.zeros(self.max_num_tokens,
+        self.input_ids = torch.zeros(self.max_num_reqs, self.max_num_tokens,
                                      dtype=torch.int64,
                                      device=self.device)
-        self.query_start_loc = torch.zeros(self.max_num_reqs + 1,
-                                           dtype=torch.int32,
-                                           device=self.device)
-        self.seq_lens = torch.zeros(self.max_num_reqs,
-                                    dtype=torch.int32,
-                                    device=self.device)
+        self.positions = torch.zeros(self.max_num_reqs, self.max_num_tokens,
+                                     dtype=torch.int32,
+                                     device=self.device)
         self.slot_mapping = torch.zeros(self.max_num_tokens,
                                         dtype=torch.int64,
                                         device=self.device)
@@ -199,30 +201,15 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         # NOTE(woosuk): These tensors are "stateless", i.e., they are literally
         # a faster version of creating a new tensor every time. Thus, we should
         # not make any assumptions about the values in these tensors.
-        self.input_ids_cpu = torch.zeros(self.max_num_tokens,
-                                         dtype=torch.int32,
-                                         device="cpu",
-                                         pin_memory=self.pin_memory)
-        self.positions_cpu = torch.zeros(self.max_num_tokens,
+        self.input_ids_cpu = torch.zeros(self.max_num_reqs, self.max_num_tokens,
                                          dtype=torch.int64,
                                          device="cpu",
                                          pin_memory=self.pin_memory)
+        self.positions_cpu = torch.zeros(self.max_num_reqs, self.max_num_tokens,
+                                         dtype=torch.int32,
+                                         device="cpu",
+                                         pin_memory=self.pin_memory)
         self.positions_np = self.positions_cpu.numpy()
-        self.query_start_loc_cpu = torch.zeros(self.max_num_reqs + 1,
-                                               dtype=torch.int32,
-                                               device="cpu",
-                                               pin_memory=self.pin_memory)
-        self.query_start_loc_np = self.query_start_loc_cpu.numpy()
-        self.seq_lens_cpu = torch.zeros(self.max_num_reqs,
-                                        dtype=torch.int32,
-                                        device="cpu",
-                                        pin_memory=self.pin_memory)
-        self.seq_lens_np = self.seq_lens_cpu.numpy()
-
-        # Layer pairings for cross-layer KV sharing.
-        # If an Attention layer `layer_name` is in the keys of this dict, it
-        # means this layer will perform attention using the keys and values
-        # from the KV cache of `shared_kv_cache_layers[layer_name]`.
         self.shared_kv_cache_layers: dict[str, str] = {}
         self.use_cuda_graph = False
 
@@ -239,9 +226,60 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
-        print("scheduler_output", scheduler_output)
+        self._update_states(scheduler_output)
+        sampling_metadata = self.input_batch.sampling_metadata
+        if not scheduler_output.total_num_scheduled_tokens:
+            # Return empty ModelRunnerOutput if there's no work to do.
+            return EMPTY_MODEL_RUNNER_OUTPUT
+        # Prepare the decoder inputs.
+        model_input = self._prepare_inputs(scheduler_output)
+
+        hidden_states = self.model(model_input)
+        logits = self.model.compute_logits(hidden_states, None)
+        sampler_output = self.sampler(
+            logits=logits,
+            sampling_metadata=sampling_metadata,
+        )
+        valid_sampled_token_ids = sampler_output.sampled_token_ids
+        max_gen_len = valid_sampled_token_ids.shape[-1]
+        if max_gen_len == 1:
+            # No spec decode tokens.
+            valid_sampled_token_ids = valid_sampled_token_ids.tolist()
+        
+        return ModelRunnerOutput(
+            req_ids=self.input_batch.req_ids,
+            req_id_to_index=self.input_batch.req_id_to_index,
+            sampled_token_ids=valid_sampled_token_ids,
+            spec_token_ids=None,
+            logprobs=None,
+            prompt_logprobs_dict={},
+        )
+
+
+    def _prepare_inputs(
+        self,
+        scheduler_output: "SchedulerOutput",
+    ) -> ModelInputForRBLN:
+        """
+        :return: tuple[
+            attn_metadata: layer-to-attention_metadata mapping,
+            attention_cuda_graphs: whether attention can run in cudagraph
+            logits_indices, spec_decode_metadata
+        ]
+        """
+        total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+        assert total_num_scheduled_tokens > 0
+        num_reqs = self.input_batch.num_reqs
+        assert num_reqs > 0
+
+        # OPTIMIZATION: Start copying the block table first.
+        # This way, we can overlap the copy with the following CPU operations.
+        self.input_batch.block_table.commit(num_reqs)
+        # print("scheduler_output", scheduler_output)
+
         num_prefill_reqs = len(scheduler_output.scheduled_new_reqs)
         num_decode_reqs = len(scheduler_output.scheduled_cached_reqs)
+        finished_requests_ids = scheduler_output.finished_req_ids
         is_prefill = False
         
         if num_prefill_reqs > 1 or (num_prefill_reqs >= 1 and num_decode_reqs > 0):
@@ -249,171 +287,40 @@ class RBLNOptimumModelRunner(GPUModelRunner):
 
         if num_prefill_reqs > 0:
             is_prefill = True
-        
-        self._update_states(scheduler_output)
-        if not scheduler_output.total_num_scheduled_tokens:
-            # Return empty ModelRunnerOutput if there's no work to do.
-            return EMPTY_MODEL_RUNNER_OUTPUT
-        # Prepare the decoder inputs.
-        logits_indices = self._prepare_inputs(scheduler_output)
-        num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        num_input_tokens = num_scheduled_tokens
 
-        # Padding for DP
-        num_pad, num_tokens_across_dp = self.get_dp_padding(num_input_tokens)
-        num_input_tokens += num_pad
-
-        # _prepare_inputs may reorder the batch, so we must gather multi
-        # modal outputs after that to ensure the correct order
-        if self.is_multimodal_model:
-            # Run the multimodal encoder if any.
-            self._execute_mm_encoder(scheduler_output)
-            mm_embeds = self._gather_mm_embeddings(scheduler_output)
+        if is_prefill:
+            input_ids, positions, block_tables, multi_modal_kwargs, running_request_ids = self._prepare_prefill(scheduler_output)
         else:
-            mm_embeds = []
-
-        if self.is_multimodal_model and get_pp_group().is_first_rank:
-            # NOTE(woosuk): To unify token ids and soft tokens (vision
-            # embeddings), we always use embeddings (rather than token ids)
-            # as input to the multimodal model, even when the input is text.
-            input_ids = self.input_ids[:num_scheduled_tokens]
-            if mm_embeds:
-                inputs_embeds = self.model.get_input_embeddings(
-                    input_ids, mm_embeds)
-            else:
-                inputs_embeds = self.model.get_input_embeddings(input_ids)
-            # TODO(woosuk): Avoid the copy. Optimize.
-            self.inputs_embeds[:num_scheduled_tokens].copy_(inputs_embeds)
-            inputs_embeds = self.inputs_embeds[:num_input_tokens]
-            input_ids = None
-        else:
-            # For text-only models, we use token ids as input.
-            # While it is possible to use embeddings as input just like the
-            # multimodal models, it is not desirable for performance since
-            # then the embedding layer is not included in the CUDA graph.
-            input_ids = self.input_ids[:num_input_tokens]
-            inputs_embeds = None
-        if self.uses_mrope:
-            positions = self.mrope_positions[:, :num_input_tokens]
-        else:
-            positions = self.positions[:num_input_tokens]
+            input_ids, positions, block_tables, running_request_ids = self._prepare_decode(scheduler_output)
 
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
         else:
             intermediate_tensors = self.sync_and_slice_intermediate_tensors(
                 num_input_tokens, intermediate_tensors, True)
-
-        
-        model_output = self.model(
-            input_ids=input_ids,
-            positions=positions,
-            intermediate_tensors=intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-            is_prefill=is_prefill,
-        )
-
-        # # FIXME
-        # self.maybe_wait_for_kv_save()
-        # finished_sending, finished_recving = (
-        #     self.get_finished_kv_transfers(scheduler_output))
-
-        if self.use_aux_hidden_state_outputs:
-            hidden_states, aux_hidden_states = model_output
+        if get_pp_group().is_first_rank:
+            intermediate_tensors = None
         else:
-            hidden_states = model_output
-        # Broadcast PP output for external_launcher (torchrun)
-        # to make sure we are synced across pp ranks
-        # TODO: Support overlapping mirco-batches
-        # https://github.com/vllm-project/vllm/issues/18019
-        broadcast_pp_output = \
-            self.parallel_config.distributed_executor_backend \
-            == "external_launcher" and len(get_pp_group().ranks) > 0
-        if not get_pp_group().is_last_rank:
-            # For mid-pipeline stages, return the hidden states.
-            if not broadcast_pp_output:
-                return hidden_states
-            assert isinstance(hidden_states, IntermediateTensors)
-            get_pp_group().send_tensor_dict(hidden_states.tensors,
-                                            all_gather_group=get_tp_group())
-            logits = None
-        else:
-            sample_hidden_states = hidden_states[logits_indices]
-            logits = self.model.compute_logits(sample_hidden_states, None)
-        if broadcast_pp_output:
-            model_output_broadcast_data = {
-                "logits": logits.contiguous(),
-            } if logits is not None else {}
-            model_output_broadcast_data = get_pp_group().broadcast_tensor_dict(
-                model_output_broadcast_data, src=len(get_pp_group().ranks) - 1)
-            assert model_output_broadcast_data is not None
-            logits = model_output_broadcast_data["logits"]
+            raise NotImplementedError("For now PP is not supported yet.")
 
-        # Apply structured output bitmasks if present
-        if scheduler_output.grammar_bitmask is not None:
-            self.apply_grammar_bitmask(scheduler_output, logits)
+        # print("input_ids", input_ids.shape, input_ids)
+        # print("positions", positions.shape, positions)
+        # print("block_tables", block_tables.shape, block_tables)
 
-        sampler_output = self.sampler(
-            logits=logits,
-            sampling_metadata=sampling_metadata,
+        model_input = ModelInputForRBLN(
+            input_tokens=input_ids,
+            input_positions=positions,
+            sampling_metadata=None,
+            multi_modal_kwargs=multi_modal_kwargs if is_prefill else None,
+            block_tables=block_tables,
+            running_requests_ids=running_request_ids,
+            finished_requests_ids=scheduler_output.finished_req_ids,
+            token_type_ids=None,
+            pooling_metadata=None, # FIXME
+            is_prompt=is_prefill
         )
+        return model_input
 
-        # TODO(woosuk): The following loop can be slow since it iterates over
-        # the requests one by one. Optimize.
-        discard_sampled_tokens_req_indices = []
-        for i, req_id in enumerate(self.input_batch.req_ids):
-            req_state = self.requests[req_id]
-            seq_len = (req_state.num_computed_tokens +
-                       scheduler_output.num_scheduled_tokens[req_id])
-            if seq_len < req_state.num_tokens:
-                # Ignore the sampled token for partial prefills.
-                # Rewind the generator state as if the token was not sampled.
-                # This relies on cuda-specific torch-internal impl details
-                generator = self.input_batch.generators.get(i)
-                if generator is not None:
-                    generator.set_offset(generator.get_offset() - 4)
-                # Record the index of the request that should not be sampled,
-                # so that we could clear the sampled tokens before returning.
-                discard_sampled_tokens_req_indices.append(i)
-
-        # NOTE: GPU -> CPU Sync happens here.
-        # Move as many CPU operations as possible before this sync point.
-        logprobs_tensors = sampler_output.logprobs_tensors
-        logprobs_lists = logprobs_tensors.tolists() \
-            if logprobs_tensors is not None else None
-
-        # Compute prompt logprobs if needed.
-        prompt_logprobs_dict = self._get_prompt_logprobs_dict(
-            hidden_states[:num_scheduled_tokens],
-            scheduler_output,
-        )
-
-        # Get the valid generated tokens.
-        sampled_token_ids = sampler_output.sampled_token_ids
-        max_gen_len = sampled_token_ids.shape[-1]
-        if max_gen_len == 1:
-            # No spec decode tokens.
-            valid_sampled_token_ids = sampled_token_ids.tolist()
-        else:
-            # Includes spec decode tokens.
-            valid_sampled_token_ids = self.rejection_sampler.parse_output(
-                sampled_token_ids,
-                self.input_batch.vocab_size,
-            )
-        # Mask out the sampled tokens that should not be sampled.
-        for i in discard_sampled_tokens_req_indices:
-            valid_sampled_token_ids[i].clear()
-
-        return ModelRunnerOutput(
-            req_ids=self.input_batch.req_ids,
-            req_id_to_index=self.input_batch.req_id_to_index,
-            sampled_token_ids=valid_sampled_token_ids,
-            spec_token_ids=None,
-            logprobs=logprobs_lists,
-            prompt_logprobs_dict=prompt_logprobs_dict,
-            finished_sending=finished_sending,
-            finished_recving=finished_recving,
-        )
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
@@ -440,210 +347,66 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                 dtype=self.kv_cache_dtype,
                 use_mla=False,
             )
-        print("kv_cache_spec", kv_cache_spec)
         return kv_cache_spec
 
-    def _prepare_inputs(
+    def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> torch.Tensor:
-        total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        assert total_num_scheduled_tokens > 0
-        num_reqs = self.input_batch.num_reqs
-        assert num_reqs > 0
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[MultiModalKwargs], list[str]]:
+        input_tokens: List[List[int]] = []
+        input_positions: List[List[int]] = []
+        block_tables_list = []
+        running_request_ids = []
+        multi_modal_kwargs: Optional[MultiModalKwargs] = None
 
-        # OPTIMIZATION: Start copying the block table first.
-        # This way, we can overlap the copy with the following CPU operations.
-        self.input_batch.block_table.commit(num_reqs)
-
-        # Get the number of scheduled tokens for each request.
-        req_ids = self.input_batch.req_ids
-        tokens = [scheduler_output.num_scheduled_tokens[i] for i in req_ids]
-        num_scheduled_tokens = np.array(tokens, dtype=np.int32)
-        max_num_scheduled_tokens = max(tokens)
-
-        # Get request indices.
-        # E.g., [2, 5, 3] -> [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
-        req_indices = np.repeat(self.arange_np[:num_reqs],
-                                num_scheduled_tokens)
-
-        # cu_num_tokens: [2, 5, 3] -> [2, 7, 10]
-        # arange: [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
-        cu_num_tokens, arange = self._get_cumsum_and_arange(
-            num_scheduled_tokens)
-
-        # Get positions.
-        positions_np = self.positions_np[:total_num_scheduled_tokens]
-        np.add(self.input_batch.num_computed_tokens_cpu[req_indices],
-               arange,
-               out=positions_np)
-
-        # Calculate M-RoPE positions.
-        # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-        if self.uses_mrope:
-            self._calc_mrope_positions(scheduler_output)
-
-        # Get token indices.
-        # E.g., [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
-        # -> [0, 1, M, M + 1, M + 2, M + 3, M + 4, 2 * M, 2 * M + 1, 2 * M + 2]
-        # where M is the max_model_len.
-        token_indices = (positions_np +
-                         req_indices * self.input_batch.token_ids_cpu.shape[1])
-
-        # NOTE(woosuk): We use torch.index_select instead of np.take here
-        # because torch.index_select is much faster than np.take for large
-        # tensors.
-        torch.index_select(self.input_batch.token_ids_cpu_tensor.flatten(),
-                           0,
-                           torch.from_numpy(token_indices),
-                           out=self.input_ids_cpu[:total_num_scheduled_tokens])
-
-        # Calculate the slot mapping for each KV cache group.
-        for kv_cache_group_id, kv_cache_group_spec in enumerate(
-                self.kv_cache_config.kv_cache_groups):
-            block_size = kv_cache_group_spec.kv_cache_spec.block_size
-            block_table: BlockTable = self.input_batch.block_table[
-                kv_cache_group_id]
-            # E.g., [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
-            # -> [0, 0, K, K, K + 1, K + 1, K + 2, 2 * K, 2 * K, 2 * K + 1]
-            # where K is the max_num_blocks_per_req and the block size is 2.
-            # NOTE(woosuk): We can't simply use `token_indices // block_size`
-            # here because M (max_model_len) is not necessarily divisible by
-            # block_size.
-            block_table_indices = (
-                req_indices * block_table.max_num_blocks_per_req +
-                positions_np // block_size)
-            block_table_cpu = block_table.get_cpu_tensor()
-            block_numbers = block_table_cpu.flatten(
-            )[block_table_indices].numpy()
-            block_offsets = positions_np % block_size
-            np.add(
-                block_numbers * block_size,
-                block_offsets,
-                out=block_table.slot_mapping_np[:total_num_scheduled_tokens])
-
-        # Prepare the attention metadata.
-        self.query_start_loc_np[0] = 0
-        self.query_start_loc_np[1:num_reqs + 1] = cu_num_tokens
-
-        self.seq_lens_np[:num_reqs] = (
-            self.input_batch.num_computed_tokens_cpu[:num_reqs] +
-            num_scheduled_tokens)
-
-        # Copy the tensors to the GPU.
-        self.input_ids[:total_num_scheduled_tokens].copy_(
-            self.input_ids_cpu[:total_num_scheduled_tokens], non_blocking=True)
-        if self.uses_mrope:
-            # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-            self.mrope_positions[:, :total_num_scheduled_tokens].copy_(
-                self.mrope_positions_cpu[:, :total_num_scheduled_tokens],
-                non_blocking=True)
+        for scheduled in scheduler_output.scheduled_new_reqs:
+            prompt_tokens = scheduled.prompt_token_ids
+            input_tokens.append(prompt_tokens)
+            seq_len = len(prompt_tokens)
+            input_positions.append(list(range(seq_len)))
+            block_tables_list = scheduled.block_ids
+            running_request_ids.append(scheduled.req_id)
+            
+        if self.is_multimodal_model:
+            raise NotImplementedError
         else:
-            # Common case (1D positions)
-            self.positions[:total_num_scheduled_tokens].copy_(
-                self.positions_cpu[:total_num_scheduled_tokens],
-                non_blocking=True)
+            multi_modal_kwargs = None
 
-        self.query_start_loc[:num_reqs + 1].copy_(
-            self.query_start_loc_cpu[:num_reqs + 1], non_blocking=True)
-        self.seq_lens[:num_reqs].copy_(self.seq_lens_cpu[:num_reqs],
-                                       non_blocking=True)
+        input_tokens = torch.tensor(input_tokens)
+        input_positions = torch.tensor(input_positions)
+        block_tables = torch.tensor(block_tables_list)
 
-        # Fill unused with -1. Needed for reshape_and_cache
-        self.seq_lens[num_reqs:].fill_(0)
-        # Note: pad query_start_loc to be non-decreasing, as kernels
-        # like FlashAttention requires that
-        self.query_start_loc[num_reqs + 1:].fill_(
-            self.query_start_loc_cpu[num_reqs].item())
 
-        query_start_loc = self.query_start_loc[:num_reqs + 1]
-        seq_lens = self.seq_lens[:num_reqs]
+        return input_tokens, input_positions, block_tables, multi_modal_kwargs, running_request_ids
 
-        # common_attn_metadata = CommonAttentionMetadata(
-        #     query_start_loc=query_start_loc, seq_lens=seq_lens)
+    def _prepare_decode(
+        self,
+        scheduler_output: "SchedulerOutput",
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+        input_tokens: List[List[int]] = []
+        input_positions: List[List[int]] = []
+        block_tables_list = []
+        running_request_ids = []
+        multi_modal_kwargs: Optionnal[MultiModalKwargs]
 
-        # attn_metadata: dict[str, Any] = {}
-        # # Prepare the attention metadata for each KV cache group and make layers
-        # # in the same group share the same metadata.
-        # for kv_cache_group_id, kv_cache_group_spec in enumerate(
-        #         self.kv_cache_config.kv_cache_groups):
+        for req_id, scheduled in zip(self.input_batch.req_ids, scheduler_output.scheduled_cached_reqs):
+            input_tokens.append(scheduled.new_token_ids)
+            input_positions.append(scheduled.num_computed_tokens)
+            req_index = self.input_batch.req_id_to_index[req_id]
+            block_table = self.input_batch.block_table.block_tables[0].block_table[req_index]
+            block_tables_list.append(block_table)
+            running_request_ids.append(scheduled.req_id)
 
-        #     # Prepare for cascade attention if enabled & beneficial.
-        #     common_prefix_len = 0
-        #     if self.cascade_attn_enabled:
-        #         common_prefix_len = self._compute_cascade_attn_prefix_len(
-        #             num_scheduled_tokens,
-        #             scheduler_output.
-        #             num_common_prefix_blocks[kv_cache_group_id],
-        #             kv_cache_group_spec.kv_cache_spec,
-        #             self.attn_metadata_builders[kv_cache_group_id],
-        #         )
-
-        #     attn_metadata_i = (
-        #         self.attn_metadata_builders[kv_cache_group_id].build(
-        #             num_reqs=num_reqs,
-        #             num_actual_tokens=total_num_scheduled_tokens,
-        #             max_query_len=max_num_scheduled_tokens,
-        #             common_prefix_len=common_prefix_len,
-        #             common_attn_metadata=common_attn_metadata))
-        #     for layer_name in kv_cache_group_spec.layer_names:
-        #         attn_metadata[layer_name] = attn_metadata_i
-
-        use_spec_decode = len(
-            scheduler_output.scheduled_spec_decode_tokens) > 0
-        if not use_spec_decode:
-            # NOTE(woosuk): Due to chunked prefills, the batch may contain
-            # partial requests. While we should not sample any token
-            # from these partial requests, we do so for simplicity.
-            # We will ignore the sampled tokens from the partial requests.
-            # TODO: Support prompt logprobs.
-            logits_indices = query_start_loc[1:] - 1
-            spec_decode_metadata = None
+        if self.is_multimodal_model:
+            raise NotImplementedError
         else:
-            # Get the number of draft tokens for each request.
-            # Iterate over the dictionary rather than all requests since not all
-            # requests have draft tokens.
-            num_draft_tokens = np.zeros(num_reqs, dtype=np.int32)
-            for req_id, draft_token_ids in (
-                    scheduler_output.scheduled_spec_decode_tokens.items()):
-                req_idx = self.input_batch.req_id_to_index[req_id]
-                num_draft_tokens[req_idx] = len(draft_token_ids)
+            multi_modal_kwargs = None
 
-        # Hot-Swap lora model
-        # if self.lora_config:
-        #     self.set_active_loras(self.input_batch, num_scheduled_tokens)
+        input_tokens = torch.tensor(input_tokens)
+        input_positions = torch.tensor(input_positions)
+        block_tables = torch.stack(block_tables_list)
 
-        return logits_indices
-
-
-    # def initialize_kv_cache_tensors(
-    #         self, kv_cache_config: KVCacheConfig) -> dict[str, torch.Tensor]:
-    #     """
-    #     Initialize the memory buffer for KV cache.
-
-    #     Args:
-    #         kv_cache_config: The KV cache config
-    #     Returns:
-    #         Dict[str, torch.Tensor]: A map between layer names to their
-    #         corresponding memory buffer for KV cache.
-    #     """
-    #     # Initialize the memory buffer for KV cache
-    #     kv_cache_raw_tensors = self._allocate_kv_cache_tensors(kv_cache_config)
-    #     # Change the memory buffer to the desired shape
-    #     kv_caches = self._reshape_kv_cache_tensors(kv_cache_config,
-    #                                                kv_cache_raw_tensors)
-
-    #     # Setup `kv_cache_config` and `kv_caches` for models
-    #     # with cross-layer KV sharing
-    #     if self.shared_kv_cache_layers:
-    #         initialize_kv_cache_for_kv_sharing(
-    #             self.shared_kv_cache_layers,
-    #             kv_cache_config.kv_cache_groups,
-    #             kv_caches,
-    #         )
-
-    #     return kv_caches
-
+        return input_tokens, input_positions, block_tables, running_request_ids
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         """
@@ -858,6 +621,3 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             self.input_batch.condense(removed_req_indices)
 
         # batch_reordered = self._may_reorder_batch(scheduler_output)
-
-        if batch_changed or batch_reordered:
-            self.input_batch.refresh_sampling_metadata()

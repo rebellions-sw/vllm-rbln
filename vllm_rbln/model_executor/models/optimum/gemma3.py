@@ -171,7 +171,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
-        position_ids = model_input.input_positions.to(torch.int32)
+        position_ids = model_input.input_positions
         block_tables = model_input.block_tables
         is_prompt = model_input.sampling_metadata.num_prompts > 0
 
