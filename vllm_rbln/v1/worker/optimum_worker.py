@@ -85,7 +85,6 @@ class RBLNOptimumWorker(WorkerBase):
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-    # TODO(eunji) implement following V1
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
