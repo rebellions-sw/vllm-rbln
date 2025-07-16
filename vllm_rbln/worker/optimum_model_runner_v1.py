@@ -233,7 +233,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             return EMPTY_MODEL_RUNNER_OUTPUT
         # Prepare the decoder inputs.
         model_input = self._prepare_inputs(scheduler_output)
-
         hidden_states = self.model(model_input)
         logits = self.model.compute_logits(hidden_states, None)
         sampler_output = self.sampler(
@@ -289,9 +288,15 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             is_prefill = True
 
         if is_prefill:
+            print("=== Prefill ===")
             input_ids, positions, block_tables, multi_modal_kwargs, running_request_ids = self._prepare_prefill(scheduler_output)
         else:
+            print("=== Decode ===")
             input_ids, positions, block_tables, running_request_ids = self._prepare_decode(scheduler_output)
+        print("input_ids", input_ids.shape, input_ids)
+        print("positions", positions.shape, positions)
+        print("block_tables", block_tables.shape, block_tables)
+        print("======================")
 
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
@@ -303,9 +308,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         else:
             raise NotImplementedError("For now PP is not supported yet.")
 
-        # print("input_ids", input_ids.shape, input_ids)
-        # print("positions", positions.shape, positions)
-        # print("block_tables", block_tables.shape, block_tables)
 
         model_input = ModelInputForRBLN(
             input_tokens=input_ids,
@@ -390,9 +392,10 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         multi_modal_kwargs: Optionnal[MultiModalKwargs]
 
         for req_id, scheduled in zip(self.input_batch.req_ids, scheduler_output.scheduled_cached_reqs):
-            input_tokens.append(scheduled.new_token_ids)
-            input_positions.append(scheduled.num_computed_tokens)
             req_index = self.input_batch.req_id_to_index[req_id]
+            input_position = int(self.input_batch.num_tokens[req_index] - 1)
+            input_tokens.append([self.input_batch.token_ids_cpu[req_index][input_position]])
+            input_positions.append([input_position])
             block_table = self.input_batch.block_table.block_tables[0].block_table[req_index]
             block_tables_list.append(block_table)
             running_request_ids.append(scheduled.req_id)
@@ -416,6 +419,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             cache size of each layer
         """
         # TODO(eunji)
+        print("kv_cache_config", kv_cache_config)
         self.kv_cache_config = kv_cache_config
         # kv_caches = self.initialize_kv_cache_tensors(kv_cache_config)
 

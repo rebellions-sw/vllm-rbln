@@ -101,136 +101,21 @@ class RBLNOptimumScheduler(Scheduler):
         # Change the order would be better
         # First, schedule the RUNNING requests.
         req_index = 0
-        while req_index < len(self.running) and token_budget > 0:
-            request = self.running[req_index]
-
-            num_new_tokens = (request.num_tokens_with_spec -
-                              request.num_computed_tokens)
-            if (0 < self.scheduler_config.long_prefill_token_threshold <
-                    num_new_tokens):
-                num_new_tokens = (
-                    self.scheduler_config.long_prefill_token_threshold)
-            num_new_tokens = min(num_new_tokens, token_budget)
-
-            # Make sure the input position does not exceed the max model len.
-            # This is necessary when using spec decoding.
-            num_new_tokens = min(
-                num_new_tokens,
-                self.max_model_len - request.num_computed_tokens)
-
-            # Schedule encoder inputs.
-            encoder_inputs_to_schedule = None
-            new_encoder_budget = encoder_budget
-            if request.has_encoder_inputs:
-                (encoder_inputs_to_schedule, num_new_tokens,
-                 new_encoder_budget) = self._try_schedule_encoder_inputs(
-                     request, request.num_computed_tokens, num_new_tokens,
-                     encoder_budget)
-
-            if num_new_tokens == 0:
-                # The request cannot be scheduled because one of the following
-                # reasons:
-                # 1. No new tokens to schedule. This may happen when PP>1 and
-                #    we have already scheduled all prompt tokens but they are
-                #    not finished yet.
-                # 2. The encoder budget is exhausted.
-                # 3. The encoder cache is exhausted.
-                # NOTE(woosuk): Here, by doing `continue` instead of `break`,
-                # we do not strictly follow the FCFS scheduling policy and
-                # allow the lower-priority requests to be scheduled.
-                req_index += 1
-                continue
-
-            num_draft_tokens = max(
-                num_new_tokens + request.num_computed_tokens -
-                request.num_tokens, 0)
-
-            while True:
-                new_blocks = self.kv_cache_manager.allocate_slots(
-                    request,
-                    num_new_tokens,
-                    num_draft_tokens=num_draft_tokens,
-                    num_lookahead_tokens=self.num_lookahead_tokens)
-                if new_blocks is None:
-                    # The request cannot be scheduled.
-                    # Preempt the lowest-priority request.
-                    preempted_req = self.running.pop()
-                    self.kv_cache_manager.free(preempted_req)
-                    preempted_req.status = RequestStatus.PREEMPTED
-                    preempted_req.num_computed_tokens = 0
-                    if self.log_stats:
-                        preempted_req.record_event(
-                            EngineCoreEventType.PREEMPTED, scheduled_timestamp)
-
-                    self.waiting.appendleft(preempted_req)
-                    preempted_reqs.append(preempted_req)
-                    if preempted_req == request:
-                        # No more request to preempt.
-                        can_schedule = False
-                        break
-                else:
-                    # The request can be scheduled.
-                    can_schedule = True
-                    break
-            if not can_schedule:
-                break
-            assert new_blocks is not None
-
-            # Schedule the request.
-            scheduled_running_reqs.append(request)
-            if request.use_structured_output:
-                # PERF: in case of chunked prefill,
-                # request might not include any new tokens.
-                # Therefore, we might introduce some additional
-                # cycle to fill in the bitmask, which could be a big no-op.
-                structured_output_request_ids[request.request_id] = req_index
-            req_to_new_block_ids[request.request_id] = (
-                new_blocks.get_block_ids())
-            num_scheduled_tokens[request.request_id] = num_new_tokens
-            token_budget -= num_new_tokens
-            req_index += 1
-
-            # Speculative decode related.
-            if request.spec_token_ids:
-                num_scheduled_spec_tokens = (num_new_tokens +
-                                             request.num_computed_tokens -
-                                             request.num_tokens)
-                if num_scheduled_spec_tokens > 0:
-                    # Trim spec_token_ids list to num_scheduled_spec_tokens.
-                    del request.spec_token_ids[num_scheduled_spec_tokens:]
-                    scheduled_spec_decode_tokens[request.request_id] = (
-                        request.spec_token_ids)
-
-            # # Encoder-related.
-            # if encoder_inputs_to_schedule:
-            #     scheduled_encoder_inputs[request.request_id] = (
-            #         encoder_inputs_to_schedule)
-            #     # Allocate the encoder cache.
-            #     for i in encoder_inputs_to_schedule:
-            #         self.encoder_cache_manager.allocate(request, i)
-            #     encoder_budget = new_encoder_budget
-
-        # Record the LoRAs in scheduled_running_reqs
-        # scheduled_loras: set[int] = set()
-        # if self.lora_config:
-        #     scheduled_loras = set(
-        #         req.lora_request.lora_int_id for req in scheduled_running_reqs
-        #         if req.lora_request and req.lora_request.lora_int_id > 0)
-        #     assert len(scheduled_loras) <= self.lora_config.max_loras
 
         # Use a temporary deque to collect requests that need to be skipped
         # and put back at the head of the waiting queue later
         skipped_waiting_requests: deque[Request] = deque()
 
+        ###################################################################################
         # Next, schedule the WAITING requests.
         if not preempted_reqs:
             while self.waiting and token_budget > 0:
                 if len(self.running) == self.max_num_running_reqs:
                     break
 
-                # NOTE(eunji): prefill phase will be started the decode phase is all done.
                 request = self.waiting[0]
-                if req_index > 0 and request.status == RequestStatus.WAITING:
+                # NOTE(eunji): prefill request is allowed only one
+                if req_index > 0:
                     break
 
                 # KVTransfer: skip request if still waiting for remote kvs.
@@ -396,6 +281,127 @@ class RBLNOptimumScheduler(Scheduler):
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
             self.waiting.extendleft(skipped_waiting_requests)
+
+        ###################################################################################
+        # NOTE(eunji): if we are going to process a request in prefill phase,
+        # we cannot process requests in decode phase
+        if req_index == 0:
+            while req_index < len(self.running) and token_budget > 0:
+                request = self.running[req_index]
+
+                num_new_tokens = (request.num_tokens_with_spec -
+                                request.num_computed_tokens)
+                if (0 < self.scheduler_config.long_prefill_token_threshold <
+                        num_new_tokens):
+                    num_new_tokens = (
+                        self.scheduler_config.long_prefill_token_threshold)
+                num_new_tokens = min(num_new_tokens, token_budget)
+
+                # Make sure the input position does not exceed the max model len.
+                # This is necessary when using spec decoding.
+                num_new_tokens = min(
+                    num_new_tokens,
+                    self.max_model_len - request.num_computed_tokens)
+
+                # Schedule encoder inputs.
+                encoder_inputs_to_schedule = None
+                new_encoder_budget = encoder_budget
+                if request.has_encoder_inputs:
+                    (encoder_inputs_to_schedule, num_new_tokens,
+                    new_encoder_budget) = self._try_schedule_encoder_inputs(
+                        request, request.num_computed_tokens, num_new_tokens,
+                        encoder_budget)
+
+                if num_new_tokens == 0:
+                    # The request cannot be scheduled because one of the following
+                    # reasons:
+                    # 1. No new tokens to schedule. This may happen when PP>1 and
+                    #    we have already scheduled all prompt tokens but they are
+                    #    not finished yet.
+                    # 2. The encoder budget is exhausted.
+                    # 3. The encoder cache is exhausted.
+                    # NOTE(woosuk): Here, by doing `continue` instead of `break`,
+                    # we do not strictly follow the FCFS scheduling policy and
+                    # allow the lower-priority requests to be scheduled.
+                    req_index += 1
+                    continue
+
+                num_draft_tokens = max(
+                    num_new_tokens + request.num_computed_tokens -
+                    request.num_tokens, 0)
+
+                while True:
+                    new_blocks = self.kv_cache_manager.allocate_slots(
+                        request,
+                        num_new_tokens,
+                        num_draft_tokens=num_draft_tokens,
+                        num_lookahead_tokens=self.num_lookahead_tokens)
+                    if new_blocks is None:
+                        # The request cannot be scheduled.
+                        # Preempt the lowest-priority request.
+                        preempted_req = self.running.pop()
+                        self.kv_cache_manager.free(preempted_req)
+                        preempted_req.status = RequestStatus.PREEMPTED
+                        preempted_req.num_computed_tokens = 0
+                        if self.log_stats:
+                            preempted_req.record_event(
+                                EngineCoreEventType.PREEMPTED, scheduled_timestamp)
+
+                        self.waiting.appendleft(preempted_req)
+                        preempted_reqs.append(preempted_req)
+                        if preempted_req == request:
+                            # No more request to preempt.
+                            can_schedule = False
+                            break
+                    else:
+                        # The request can be scheduled.
+                        can_schedule = True
+                        break
+                if not can_schedule:
+                    break
+                assert new_blocks is not None
+
+                # Schedule the request.
+                scheduled_running_reqs.append(request)
+                if request.use_structured_output:
+                    # PERF: in case of chunked prefill,
+                    # request might not include any new tokens.
+                    # Therefore, we might introduce some additional
+                    # cycle to fill in the bitmask, which could be a big no-op.
+                    structured_output_request_ids[request.request_id] = req_index
+                req_to_new_block_ids[request.request_id] = (
+                    new_blocks.get_block_ids())
+                num_scheduled_tokens[request.request_id] = num_new_tokens
+                token_budget -= num_new_tokens
+                req_index += 1
+
+                # Speculative decode related.
+                if request.spec_token_ids:
+                    num_scheduled_spec_tokens = (num_new_tokens +
+                                                request.num_computed_tokens -
+                                                request.num_tokens)
+                    if num_scheduled_spec_tokens > 0:
+                        # Trim spec_token_ids list to num_scheduled_spec_tokens.
+                        del request.spec_token_ids[num_scheduled_spec_tokens:]
+                        scheduled_spec_decode_tokens[request.request_id] = (
+                            request.spec_token_ids)
+
+                # # Encoder-related.
+                # if encoder_inputs_to_schedule:
+                #     scheduled_encoder_inputs[request.request_id] = (
+                #         encoder_inputs_to_schedule)
+                #     # Allocate the encoder cache.
+                #     for i in encoder_inputs_to_schedule:
+                #         self.encoder_cache_manager.allocate(request, i)
+                #     encoder_budget = new_encoder_budget
+
+            # Record the LoRAs in scheduled_running_reqs
+            # scheduled_loras: set[int] = set()
+            # if self.lora_config:
+            #     scheduled_loras = set(
+            #         req.lora_request.lora_int_id for req in scheduled_running_reqs
+            #         if req.lora_request and req.lora_request.lora_int_id > 0)
+            #     assert len(scheduled_loras) <= self.lora_config.max_loras
 
         # Check if the scheduling constraints are satisfied.
         total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
