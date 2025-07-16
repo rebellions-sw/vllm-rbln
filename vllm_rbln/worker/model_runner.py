@@ -473,21 +473,22 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             positions: torch.Tensor,
             intermediate_tensors: Optional[IntermediateTensors] = None,
             inputs_embeds: Optional[torch.Tensor] = None,
-            num_prefills: Optional[int] = None,
             selected_token_indices: Optional[torch.Tensor] = None,
         ) -> Union[torch.Tensor, IntermediateTensors]:
-            model_output = self.model(input_ids=input_ids,
-                                      positions=positions,
-                                      intermediate_tensors=intermediate_tensors,
-                                      inputs_embeds=inputs_embeds)
+            model_output = self.model(
+                input_ids=input_ids,
+                positions=positions,
+                intermediate_tensors=intermediate_tensors,
+                inputs_embeds=inputs_embeds)
 
-            if num_prefills > 0:
-                # aten::select -> adv_index --> contrib_dynamic_take (tensor -> scalar)
-                # aten::index_select --> take --> contrib_dynamic_take (tensor -> scalar)
+            if selected_token_indices is not None:
+                # aten::select -> adv_index -->
+                #     contrib_dynamic_take (tensor -> scalar)
+                # aten::index_select --> take -->
+                #     contrib_dynamic_take (tensor -> scalar)
                 model_output = model_output[:, selected_token_indices]
             logits = self.model.compute_logits(model_output, None)
             return logits
-
 
         # NOTE - refer to pytorch 2.5 release notes
         # torch.compile regional compilation without recompilations
@@ -566,8 +567,19 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             execute_model_kwargs.update(
                 {"previous_hidden_states": previous_hidden_states})
 
+        assert model_input.attn_metadata is not None
         num_prefills = model_input.attn_metadata.num_prefills
-        selected_token_indices = model_input.sampling_metadata.selected_token_indices
+        selected_token_indices = \
+            model_input.sampling_metadata.selected_token_indices
+        len_token_indices = len(selected_token_indices)
+        token_indices = None
+        if num_prefills > 0:
+            assert len_token_indices == 0 or len_token_indices == 1
+            num_prefill_tokens = model_input.attn_metadata.num_prefill_tokens
+            token_indices = torch.tensor([num_prefill_tokens - 1],
+                                         dtype=selected_token_indices.dtype)
+            if len_token_indices == 1:
+                assert torch.equal(selected_token_indices, token_indices)
 
         with set_forward_context(model_input.attn_metadata, self.vllm_config,
                                  model_input.virtual_engine):
@@ -580,18 +592,18 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
                 intermediate_tensors=intermediate_tensors,
-                num_prefills=num_prefills,
-                selected_token_indices=selected_token_indices,
+                selected_token_indices=token_indices,
                 **execute_model_kwargs,
             )
             # Gather logits for TP
-            hidden_states = self.model.logits_processor._gather_logits(hidden_states)
+            hidden_states = self.model.logits_processor._gather_logits(
+                hidden_states)
 
             hidden_states = hidden_states.view(-1, hidden_states.size(-1))
             assert hidden_states.dim() == 2
 
         # Compute the logits. -> moved to model executable
-        if num_prefills > 0:
+        if num_prefills > 0 and len_token_indices != 0:
             logits = hidden_states
         else:
             logits = hidden_states[selected_token_indices]
@@ -605,11 +617,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             logits=logits,
             sampling_metadata=model_input.sampling_metadata,
         )
-        if self.return_hidden_states:
-            # we only need to pass hidden states of most recent token
-            if model_input.is_prompt:
-                output.prefill_hidden_states = hidden_states
-            output.hidden_states = hidden_states
+
+        assert self.return_hidden_states is False, \
+            "Rebel worker does not support return_hidden_states."
+
         return [output]
 
     def _prepare_model_input_tensors(
