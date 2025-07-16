@@ -37,7 +37,7 @@ from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
-from vllm_rbln.worker.optimum_input_batch import RBLNInputBatch
+from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 
 
 class RBLNOptimumModelRunner(GPUModelRunner):
@@ -105,15 +105,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
 
         Will be lazily initialized when the model is loaded.
         """
-
-        # Lazy initializations
-        # self.model: nn.Module  # Set after load_model
-        # Initialize in initialize_kv_cache
-        # self.kv_caches: list[torch.Tensor] = []
-        # self.attn_metadata_builders: list[AttentionMetadataBuilder] = []
-        # self.attn_backends: list[type[AttentionBackend]] = []
-        # self.kv_cache_config: KVCacheConfig
-
         # req_id -> (input_id -> encoder_output)
         self.encoder_cache: dict[str, dict[int, torch.Tensor]] = {}
 
@@ -140,13 +131,11 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[self.cache_config.block_size],
         )
-        # print("max_model_len", self.max_model_len)
-        # print("block_size", self.cache_config.block_size)
-        # print(self.input_batch.block_table.block_tables[0].block_table.shape)
+
         # Cache the device properties.
         # self._init_device_properties()
 
-        # Persistent buffers for CUDA graphs.
+        # NOTE The shape of input_ids, positions are modified for optimum
         self.input_ids = torch.zeros(self.max_num_reqs,
                                      self.max_num_tokens,
                                      dtype=torch.int64,
@@ -155,11 +144,9 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                                      self.max_num_tokens,
                                      dtype=torch.int32,
                                      device=self.device)
-        self.slot_mapping = torch.zeros(self.max_num_tokens,
-                                        dtype=torch.int64,
-                                        device=self.device)
 
         # None in the first PP rank. The rest are set after load_model.
+        # TODO(eunji) It will be implemented for PP
         self.intermediate_tensors: Optional[IntermediateTensors] = None
 
         # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
@@ -177,42 +164,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             self.mrope_positions = torch.zeros((3, self.max_num_tokens + 1),
                                                dtype=torch.int64,
                                                device=self.device)
-            self.mrope_positions_cpu = torch.zeros(
-                (3, self.max_num_tokens + 1),
-                dtype=torch.int64,
-                device="cpu",
-                pin_memory=self.pin_memory)
-
-        # Only relevant for models using ALiBi (e.g, MPT)
-        self.use_alibi = check_use_alibi(model_config)
-
-        self.inputs_embeds = torch.zeros(
-            (self.max_num_tokens, self.hidden_size),
-            dtype=self.dtype,
-            device=self.device)
-
-        # OPTIMIZATION: Cache the tensors rather than creating them every step.
-        # Keep in int64 to avoid overflow with long context
-        self.arange_np = np.arange(max(self.max_num_reqs + 1,
-                                       self.max_model_len,
-                                       self.max_num_tokens),
-                                   dtype=np.int64)
-        # NOTE(woosuk): These tensors are "stateless", i.e., they are literally
-        # a faster version of creating a new tensor every time. Thus, we should
-        # not make any assumptions about the values in these tensors.
-        self.input_ids_cpu = torch.zeros(self.max_num_reqs,
-                                         self.max_num_tokens,
-                                         dtype=torch.int64,
-                                         device="cpu",
-                                         pin_memory=self.pin_memory)
-        self.positions_cpu = torch.zeros(self.max_num_reqs,
-                                         self.max_num_tokens,
-                                         dtype=torch.int32,
-                                         device="cpu",
-                                         pin_memory=self.pin_memory)
-        self.positions_np = self.positions_cpu.numpy()
-        self.shared_kv_cache_layers: dict[str, str] = {}
-        self.use_cuda_graph = False
 
     def load_model(self) -> None:
         self.model = get_optimum_model(model_config=self.model_config,
@@ -274,7 +225,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         # OPTIMIZATION: Start copying the block table first.
         # This way, we can overlap the copy with the following CPU operations.
         self.input_batch.block_table.commit(num_reqs)
-        # print("scheduler_output", scheduler_output)
 
         num_prefill_reqs = len(scheduler_output.scheduled_new_reqs)
         num_decode_reqs = len(scheduler_output.scheduled_cached_reqs)
@@ -321,8 +271,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             format. Layers that do not need KV cache are not included.
         """
 
-        # FIXME!!!(temporary code)
-        # layers = get_layers_from_vllm_config(self.vllm_config, Attention)
+        # TODO It is temporary basic attention setting
         head_size = self.model_config.get_head_size()
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         num_kv_heads = self.model_config.get_num_kv_heads(self.parallel_config)
@@ -410,13 +359,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             kv_cache_config: Configuration for the KV cache, including the KV
             cache size of each layer
         """
-        # TODO(eunji)
-        print("kv_cache_config", kv_cache_config)
-        self.kv_cache_config = kv_cache_config
-        # kv_caches = self.initialize_kv_cache_tensors(kv_cache_config)
-
-        # if has_kv_transfer_group():
-        #     get_kv_transfer_group().register_kv_caches(kv_caches)
+        pass
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler

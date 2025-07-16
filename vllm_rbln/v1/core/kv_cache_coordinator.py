@@ -21,7 +21,7 @@ from vllm.v1.core.single_type_kv_cache_manager import (
     FullAttentionManager, get_manager_for_kv_cache_spec)
 from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheConfig
 
-from vllm_rbln.core.block_pool_v1 import RBLNOptimumBlockPool
+from vllm_rbln.v1.core.block_pool import RBLNOptimumBlockPool
 
 
 class RBLNOptimumKVCacheCoordinator(KVCacheCoordinator):

@@ -20,7 +20,7 @@ from vllm.v1.core.kv_cache_utils import BlockHash
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import PrefixCacheStats
 
-from vllm_rbln.core.kv_cache_coordinator_v1 import get_kv_cache_coordinator
+from vllm_rbln.v1.core.kv_cache_coordinator import get_kv_cache_coordinator
 
 
 class RBLNOptimumKVCacheManager(KVCacheManager):
