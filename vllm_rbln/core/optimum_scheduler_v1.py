@@ -27,7 +27,7 @@ from typing import Any, Optional, Union
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
                                        SchedulerOutput)
-                                       
+from vllm.v1.engine import EngineCoreEventType                                 
 logger = init_logger(__name__)
 
 # FIXME (eunji):
@@ -231,7 +231,7 @@ class RBLNOptimumScheduler(Scheduler):
                 # NOTE(eunji): prefill phase will be started the decode phase is all done.
                 request = self.waiting[0]
                 if req_index > 0 and request.status == RequestStatus.WAITING:
-                    continue
+                    break
 
                 # KVTransfer: skip request if still waiting for remote kvs.
                 if request.status == RequestStatus.WAITING_FOR_REMOTE_KVS:
