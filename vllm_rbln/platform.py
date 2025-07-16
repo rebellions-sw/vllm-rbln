@@ -156,9 +156,9 @@ class RblnPlatform(Platform):
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = \
-                        "vllm_rbln.worker.optimum_worker_v1.RBLNOptimumWorker"
+                        "vllm_rbln.v1.worker.optimum_worker.RBLNOptimumWorker"
                 scheduler_config.scheduler_cls = \
-                        "vllm_rbln.core.optimum_scheduler_v1.RBLNOptimumScheduler"
+                        "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler"
             else:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = \

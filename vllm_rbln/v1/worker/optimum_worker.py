@@ -27,7 +27,7 @@ from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.worker.worker_base import WorkerBase
 
-from vllm_rbln.worker.optimum_model_runner_v1 import RBLNOptimumModelRunner
+from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 logger = init_logger(__name__)
 
@@ -67,7 +67,7 @@ class RBLNOptimumWorker(WorkerBase):
     def determine_available_memory(self) -> int:
         max_model_len = self.vllm_config.model_config.max_model_len
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        print("len(kv_cache_spec.items())", len(kv_cache_spec.items()))
+
         # FIXME accessing the last dummy block raise an error.
         num_gpu_blocks = self.scheduler_config.max_num_seqs
         block_size = self.cache_config.block_size
@@ -91,22 +91,10 @@ class RBLNOptimumWorker(WorkerBase):
         scheduler_output: "SchedulerOutput",
     ) -> Optional[ModelRunnerOutput]:
         intermediate_tensors = None
-        # NOTE This is not working now.
-        # if not get_pp_group().is_first_rank:
-        #     intermediate_tensors = IntermediateTensors(
-        #         get_pp_group().recv_tensor_dict(
-        #             all_gather_group=get_tp_group()))
+        # TODO setting intermediate_tensors for PP
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
-        # parallel_config = self.vllm_config.parallel_config
-        # if parallel_config.distributed_executor_backend \
-        # != "external_launcher" \
-        #     and not get_pp_group().is_last_rank:
-        #     assert isinstance(output, IntermediateTensors)
-        #     get_pp_group().send_tensor_dict(output.tensors,
-        #                                     all_gather_group=get_tp_group())
-        #     return None
         assert isinstance(output, ModelRunnerOutput)
         return output if self.is_driver_worker else None
 
@@ -123,7 +111,7 @@ class RBLNOptimumWorker(WorkerBase):
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
-        # TODO(eunji): warmup is required
+        # TODO(eunji): warmup is required?
         # self.model_runner.warming_up_model()
 
     def get_model(self) -> nn.Module:
