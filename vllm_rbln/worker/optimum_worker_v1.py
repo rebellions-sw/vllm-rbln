@@ -64,18 +64,13 @@ class RBLNOptimumWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        # NOTE I just calculated the total memory size(bytes) for kv cache
-        available_memory_bytes = 0
-        max_num_batched_tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
         max_model_len =  self.vllm_config.model_config.max_model_len
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        for layer_name, layer_spec in kv_cache_spec.items():
-            if isinstance(layer_spec, AttentionSpec):
-                dtype = layer_spec.dtype
-                available_memory_bytes += 2 * max_num_batched_tokens * max_model_len * layer_spec.num_kv_heads * layer_spec.head_size * get_dtype_size(dtype)
-            else:
-                raise NotImplementedError
-        return available_memory_bytes
+        print("len(kv_cache_spec.items())", len(kv_cache_spec.items()))
+        # FIXME accessing the last dummy block raise an error.
+        num_gpu_blocks = self.scheduler_config.max_num_seqs
+        block_size = self.cache_config.block_size
+        return num_gpu_blocks * block_size * len(kv_cache_spec.items()) * max_model_len
 
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:
