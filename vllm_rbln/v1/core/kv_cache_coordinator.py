@@ -14,8 +14,7 @@
 
 from typing import Callable, Optional
 
-from vllm.v1.core.kv_cache_coordinator import (HybridKVCacheCoordinator,
-                                               KVCacheCoordinator)
+from vllm.v1.core.kv_cache_coordinator import KVCacheCoordinator
 from vllm.v1.core.kv_cache_utils import BlockHash, KVCacheBlock
 from vllm.v1.core.single_type_kv_cache_manager import (
     FullAttentionManager, get_manager_for_kv_cache_spec)
@@ -94,8 +93,7 @@ class RBLNOptimumUnitaryKVCacheCoordinator(RBLNOptimumKVCacheCoordinator):
         return hit_blocks, len(hit_blocks[0]) * self.block_size
 
 
-class RBLNOptimumHybridKVCacheCoordinator(RBLNOptimumKVCacheCoordinator,
-                                          HybridKVCacheCoordinator):
+class RBLNOptimumHybridKVCacheCoordinator(RBLNOptimumKVCacheCoordinator):
     """
     KV cache coordinator for hybrid models with multiple KV cache types, and
     thus multiple kv cache groups.

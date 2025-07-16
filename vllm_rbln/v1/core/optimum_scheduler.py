@@ -25,8 +25,9 @@ from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.structured_output import StructuredOutputManager
 
-from vllm_rbln.v1.core.optimum_kv_cache_manager import RBLNOptimumKVCacheManager
 from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.core.optimum_kv_cache_manager import (
+    RBLNOptimumKVCacheManager)
 
 logger = init_logger(__name__)
 

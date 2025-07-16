@@ -84,6 +84,7 @@ class RBLNOptimumBlockPool(BlockPool):
         """
         for block in ordered_blocks:
             block.decr_ref()
-            # NOTE(eunji): We are not using null_block
+            # NOTE We are not using null_block.
+            # So I changed the if branch condition.
             if block.ref_cnt == 0:
                 self.free_block_queue.append(block)
