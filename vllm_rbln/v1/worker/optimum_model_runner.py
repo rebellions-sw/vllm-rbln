@@ -11,9 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union, list, tuple
 
-import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
@@ -23,8 +22,7 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import MultiModalKwargs
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
-from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, check_use_alibi,
-                        is_pin_memory_available)
+from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
 from vllm.v1.core.encoder_cache_manager import compute_encoder_budget
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
@@ -291,10 +289,10 @@ class RBLNOptimumModelRunner(GPUModelRunner):
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor,
                Optional[MultiModalKwargs], list[str]]:
-        input_tokens: List[List[int]] = []
-        input_positions: List[List[int]] = []
+        input_tokens: list[list[int]] = []
+        input_positions: list[list[int]] = []
         block_tables_list = []
         running_request_ids = []
         multi_modal_kwargs: Optional[MultiModalKwargs] = None
@@ -322,9 +320,9 @@ class RBLNOptimumModelRunner(GPUModelRunner):
     def _prepare_decode(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
-        input_tokens: List[List[int]] = []
-        input_positions: List[List[int]] = []
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+        input_tokens: list[list[int]] = []
+        input_positions: list[list[int]] = []
         block_tables_list = []
         running_request_ids = []
         # multi_modal_kwargs: Optional[MultiModalKwargs]
