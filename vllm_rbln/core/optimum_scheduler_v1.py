@@ -12,29 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from vllm.v1.core.sched.scheduler import Scheduler
-from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
-from vllm_rbln.logger import init_logger
-from vllm.config import ParallelConfig, VllmConfig
-from vllm.v1.structured_output import StructuredOutputManager
-from vllm.v1.kv_cache_interface import KVCacheConfig
-from vllm_rbln.core.optimum_kv_cache_manager import RBLNOptimumKVCacheManager
-from vllm.v1.core.sched.output import SchedulerOutput
 import time
-from collections import defaultdict, deque
-from collections.abc import Iterable
-from typing import Any, Optional, Union
+from collections import deque
+
+from vllm.config import VllmConfig
+from vllm.distributed.kv_events import KVEventBatch
+from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
+from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
+from vllm.v1.core.sched.scheduler import Scheduler
+from vllm.v1.engine import EngineCoreEventType
+from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.request import Request, RequestStatus
-from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
-                                       SchedulerOutput)
-from vllm.v1.engine import EngineCoreEventType                                 
+from vllm.v1.structured_output import StructuredOutputManager
+
+from vllm_rbln.core.optimum_kv_cache_manager import RBLNOptimumKVCacheManager
+from vllm_rbln.logger import init_logger
+
 logger = init_logger(__name__)
 
 # FIXME (eunji):
 # lookahead token
 # prefill이면 하나만 스케줄링
 
+
 class RBLNOptimumScheduler(Scheduler):
+
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -148,7 +150,7 @@ class RBLNOptimumScheduler(Scheduler):
                 #         len(scheduled_loras) == self.lora_config.max_loras
                 #         and request.lora_request.lora_int_id
                 #         not in scheduled_loras):
-                    # Scheduling would exceed max_loras, skip.
+                # Scheduling would exceed max_loras, skip.
                     self.waiting.popleft()
                     skipped_waiting_requests.appendleft(request)
                     continue
@@ -290,14 +292,15 @@ class RBLNOptimumScheduler(Scheduler):
                 request = self.running[req_index]
 
                 num_new_tokens = (request.num_tokens_with_spec -
-                                request.num_computed_tokens)
+                                  request.num_computed_tokens)
                 if (0 < self.scheduler_config.long_prefill_token_threshold <
                         num_new_tokens):
                     num_new_tokens = (
                         self.scheduler_config.long_prefill_token_threshold)
                 num_new_tokens = min(num_new_tokens, token_budget)
 
-                # Make sure the input position does not exceed the max model len.
+                # Make sure the input position does not
+                # exceed the max model len.
                 # This is necessary when using spec decoding.
                 num_new_tokens = min(
                     num_new_tokens,
@@ -308,21 +311,21 @@ class RBLNOptimumScheduler(Scheduler):
                 new_encoder_budget = encoder_budget
                 if request.has_encoder_inputs:
                     (encoder_inputs_to_schedule, num_new_tokens,
-                    new_encoder_budget) = self._try_schedule_encoder_inputs(
-                        request, request.num_computed_tokens, num_new_tokens,
-                        encoder_budget)
+                     new_encoder_budget) = self._try_schedule_encoder_inputs(
+                         request, request.num_computed_tokens, num_new_tokens,
+                         encoder_budget)
 
+                # The request cannot be scheduled because one of the following
+                # reasons:
+                # 1. No new tokens to schedule. This may happen when PP>1 and
+                #    we have already scheduled all prompt tokens but they are
+                #    not finished yet.
+                # 2. The encoder budget is exhausted.
+                # 3. The encoder cache is exhausted.
+                # NOTE(woosuk): Here, by doing `continue` instead of `break`,
+                # we do not strictly follow the FCFS scheduling policy and
+                # allow the lower-priority requests to be scheduled.
                 if num_new_tokens == 0:
-                    # The request cannot be scheduled because one of the following
-                    # reasons:
-                    # 1. No new tokens to schedule. This may happen when PP>1 and
-                    #    we have already scheduled all prompt tokens but they are
-                    #    not finished yet.
-                    # 2. The encoder budget is exhausted.
-                    # 3. The encoder cache is exhausted.
-                    # NOTE(woosuk): Here, by doing `continue` instead of `break`,
-                    # we do not strictly follow the FCFS scheduling policy and
-                    # allow the lower-priority requests to be scheduled.
                     req_index += 1
                     continue
 
@@ -345,7 +348,8 @@ class RBLNOptimumScheduler(Scheduler):
                         preempted_req.num_computed_tokens = 0
                         if self.log_stats:
                             preempted_req.record_event(
-                                EngineCoreEventType.PREEMPTED, scheduled_timestamp)
+                                EngineCoreEventType.PREEMPTED,
+                                scheduled_timestamp)
 
                         self.waiting.appendleft(preempted_req)
                         preempted_reqs.append(preempted_req)
@@ -368,7 +372,8 @@ class RBLNOptimumScheduler(Scheduler):
                     # request might not include any new tokens.
                     # Therefore, we might introduce some additional
                     # cycle to fill in the bitmask, which could be a big no-op.
-                    structured_output_request_ids[request.request_id] = req_index
+                    structured_output_request_ids[
+                        request.request_id] = req_index
                 req_to_new_block_ids[request.request_id] = (
                     new_blocks.get_block_ids())
                 num_scheduled_tokens[request.request_id] = num_new_tokens
@@ -378,30 +383,15 @@ class RBLNOptimumScheduler(Scheduler):
                 # Speculative decode related.
                 if request.spec_token_ids:
                     num_scheduled_spec_tokens = (num_new_tokens +
-                                                request.num_computed_tokens -
-                                                request.num_tokens)
+                                                 request.num_computed_tokens -
+                                                 request.num_tokens)
                     if num_scheduled_spec_tokens > 0:
                         # Trim spec_token_ids list to num_scheduled_spec_tokens.
                         del request.spec_token_ids[num_scheduled_spec_tokens:]
                         scheduled_spec_decode_tokens[request.request_id] = (
                             request.spec_token_ids)
 
-                # # Encoder-related.
-                # if encoder_inputs_to_schedule:
-                #     scheduled_encoder_inputs[request.request_id] = (
-                #         encoder_inputs_to_schedule)
-                #     # Allocate the encoder cache.
-                #     for i in encoder_inputs_to_schedule:
-                #         self.encoder_cache_manager.allocate(request, i)
-                #     encoder_budget = new_encoder_budget
-
-            # Record the LoRAs in scheduled_running_reqs
-            # scheduled_loras: set[int] = set()
-            # if self.lora_config:
-            #     scheduled_loras = set(
-            #         req.lora_request.lora_int_id for req in scheduled_running_reqs
-            #         if req.lora_request and req.lora_request.lora_int_id > 0)
-            #     assert len(scheduled_loras) <= self.lora_config.max_loras
+        # [skip] lora, encoder-related tasks
 
         # Check if the scheduling constraints are satisfied.
         total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
@@ -465,7 +455,7 @@ class RBLNOptimumScheduler(Scheduler):
             # instead of being newly scheduled in this step.
             # It contains the request IDs that are finished in between
             # the previous and the current steps.
-            finished_req_ids=self.finished_req_ids,
+            finished_req_ids=self.finished_req_ids,  # type: ignore
             free_encoder_input_ids=self.encoder_cache_manager.get_freed_ids(),
             structured_output_request_ids=structured_output_request_ids,
             grammar_bitmask=grammar_bitmask,
@@ -496,5 +486,5 @@ class RBLNOptimumScheduler(Scheduler):
         for req_id, num_scheduled_token in num_scheduled_tokens.items():
             self.requests[req_id].num_computed_tokens += num_scheduled_token
 
-        self.finished_req_ids = set()
+        self.finished_req_ids: set[str] = set()
         return scheduler_output
