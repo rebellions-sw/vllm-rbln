@@ -18,6 +18,7 @@ from collections import deque
 from vllm.config import VllmConfig
 from vllm.distributed.kv_events import KVEventBatch
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
+from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.v1.engine import EngineCoreEventType
@@ -26,8 +27,6 @@ from vllm.v1.request import Request, RequestStatus
 from vllm.v1.structured_output import StructuredOutputManager
 
 from vllm_rbln.logger import init_logger
-from vllm_rbln.v1.core.optimum_kv_cache_manager import (
-    RBLNOptimumKVCacheManager)
 
 logger = init_logger(__name__)
 
@@ -48,7 +47,7 @@ class RBLNOptimumScheduler(Scheduler):
                          include_finished_set, log_stats)
 
         # With V0 -> V1, block_manager is changed to kv_cache_manager
-        self.kv_cache_manager = RBLNOptimumKVCacheManager(
+        self.kv_cache_manager = KVCacheManager(
             kv_cache_config=kv_cache_config,
             max_model_len=self.max_model_len,
             enable_caching=self.cache_config.enable_prefix_caching,

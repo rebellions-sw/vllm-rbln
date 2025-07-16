@@ -68,8 +68,7 @@ class RBLNOptimumWorker(WorkerBase):
         max_model_len = self.vllm_config.model_config.max_model_len
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
 
-        # FIXME accessing the last dummy block raise an error.
-        num_gpu_blocks = self.scheduler_config.max_num_seqs
+        num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
         block_size = self.cache_config.block_size
         return num_gpu_blocks * block_size * len(
             kv_cache_spec.items()) * max_model_len

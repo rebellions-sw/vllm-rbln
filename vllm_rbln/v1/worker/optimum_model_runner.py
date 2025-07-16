@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Optional, Union, list, tuple
+from typing import Optional, Union
 
 import torch
 import torch.distributed
@@ -203,6 +203,24 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             prompt_logprobs_dict={},
         )
 
+    def mask_block_table(
+        self,
+        block_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """This function serves as an interface to convert VLLM block tables
+        to the format expected by Optimum-RBLN.
+
+        In V1, the block with block_id 0 is used as a dummy block
+        called null_block, so valid blocks start from 1.
+        
+        However, in Optimum-RBLN, the last block is used as the dummy block,
+        and valid blocks start from 0.
+        """
+        block_ids = block_ids - 1
+        dummy_block = self.cache_config.num_gpu_blocks
+        block_ids[block_ids == -1] = dummy_block
+        return block_ids
+
     def _prepare_inputs(
         self,
         scheduler_output: "SchedulerOutput",
@@ -245,7 +263,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                 = self._prepare_decode(scheduler_output)
 
         # TODO interemediate_tensor should be set
-
         model_input = ModelInputForRBLN(
             input_tokens=input_ids,
             input_positions=positions,
@@ -292,16 +309,22 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                Optional[MultiModalKwargs], list[str]]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
-        block_tables_list = []
         running_request_ids = []
         multi_modal_kwargs: Optional[MultiModalKwargs] = None
 
-        for scheduled in scheduler_output.scheduled_new_reqs:
+        assert len(scheduler_output.scheduled_new_reqs) == 1
+
+        for req_id, scheduled in zip(self.input_batch.req_ids,
+                                     scheduler_output.scheduled_new_reqs):
+            req_index = self.input_batch.req_id_to_index[req_id]
             prompt_tokens = scheduled.prompt_token_ids
             input_tokens.append(prompt_tokens)
             seq_len = len(prompt_tokens)
             input_positions.append(list(range(seq_len)))
-            block_tables_list = scheduled.block_ids
+            block_table = self.input_batch.block_table.block_tables[
+                0].block_table[req_index]
+            block_table = self.mask_block_table(block_table)
+            block_table = block_table.unsqueeze(0)
             running_request_ids.append(scheduled.req_id)
 
         if self.is_multimodal_model:
@@ -311,9 +334,8 @@ class RBLNOptimumModelRunner(GPUModelRunner):
 
         input_tokens = torch.tensor(input_tokens)
         input_positions = torch.tensor(input_positions)
-        block_tables = torch.tensor(block_tables_list)
 
-        return input_tokens, input_positions, block_tables, \
+        return input_tokens, input_positions, block_table, \
             multi_modal_kwargs, running_request_ids
 
     def _prepare_decode(
@@ -335,6 +357,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             input_positions.append([input_position])
             block_table = self.input_batch.block_table.block_tables[
                 0].block_table[req_index]
+            block_table = self.mask_block_table(block_table)
             block_tables_list.append(block_table)
             running_request_ids.append(scheduled.req_id)
 
