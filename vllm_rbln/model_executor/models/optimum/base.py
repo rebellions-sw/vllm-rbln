@@ -93,11 +93,11 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     block_tables: torch.Tensor
     running_requests_ids: List[str]
     finished_requests_ids: List[str]
-    sampling_metadata: "SamplingMetadata" = None,
+    is_prompt: bool = False  # for V1
+    sampling_metadata: "SamplingMetadata" = None,  # for V0
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     token_type_ids: Optional[torch.Tensor] = None
-    pooling_metadata: Optional[PoolingMetadata] = None
-    is_prompt: Optional[bool] = False
+    pooling_metadata: Optional[PoolingMetadata] = None  # for V0
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:

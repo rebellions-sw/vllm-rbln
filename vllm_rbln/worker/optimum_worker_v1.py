@@ -11,23 +11,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import torch.nn as nn
+from typing import Optional
+
 import torch
 import torch.distributed
-from vllm.v1.worker.worker_base import WorkerBase
-from vllm_rbln.worker.optimum_model_runner_v1 import RBLNOptimumModelRunner
+import torch.nn as nn
+from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
-from vllm.config import VllmConfig
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
-from vllm.v1.outputs import ModelRunnerOutput
 from vllm.model_executor import set_random_seed
-from typing import Optional
-from vllm.distributed.parallel_state import get_pp_group, get_tp_group
-from vllm.utils import get_dtype_size
-from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
+from vllm.v1.outputs import ModelRunnerOutput
+from vllm.v1.worker.worker_base import WorkerBase
+
+from vllm_rbln.worker.optimum_model_runner_v1 import RBLNOptimumModelRunner
 
 logger = init_logger(__name__)
 
@@ -54,7 +54,8 @@ class RBLNOptimumWorker(WorkerBase):
             from vllm.utils import init_cached_hf_modules
             init_cached_hf_modules()
 
-        self.model_runner = RBLNOptimumModelRunner(self.vllm_config, self.device)
+        self.model_runner = RBLNOptimumModelRunner(self.vllm_config,
+                                                   self.device)
         self.profiler = None
 
     def init_device(self) -> None:
@@ -64,13 +65,14 @@ class RBLNOptimumWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        max_model_len =  self.vllm_config.model_config.max_model_len
+        max_model_len = self.vllm_config.model_config.max_model_len
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
         print("len(kv_cache_spec.items())", len(kv_cache_spec.items()))
         # FIXME accessing the last dummy block raise an error.
         num_gpu_blocks = self.scheduler_config.max_num_seqs
         block_size = self.cache_config.block_size
-        return num_gpu_blocks * block_size * len(kv_cache_spec.items()) * max_model_len
+        return num_gpu_blocks * block_size * len(
+            kv_cache_spec.items()) * max_model_len
 
     def initialize_cache(self, num_gpu_blocks: int,
                          num_cpu_blocks: int) -> None:
@@ -83,32 +85,34 @@ class RBLNOptimumWorker(WorkerBase):
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-    # TODO(eunji) implment following V1
+    # TODO(eunji) implement following V1
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
     ) -> Optional[ModelRunnerOutput]:
         intermediate_tensors = None
-        if not get_pp_group().is_first_rank:
-            intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict(
-                    all_gather_group=get_tp_group()))
+        # NOTE This is not working now.
+        # if not get_pp_group().is_first_rank:
+        #     intermediate_tensors = IntermediateTensors(
+        #         get_pp_group().recv_tensor_dict(
+        #             all_gather_group=get_tp_group()))
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
-        parallel_config = self.vllm_config.parallel_config
-        if parallel_config.distributed_executor_backend != "external_launcher" \
-            and not get_pp_group().is_last_rank:
-            assert isinstance(output, IntermediateTensors)
-            get_pp_group().send_tensor_dict(output.tensors,
-                                            all_gather_group=get_tp_group())
-            return None
+        # parallel_config = self.vllm_config.parallel_config
+        # if parallel_config.distributed_executor_backend \
+        # != "external_launcher" \
+        #     and not get_pp_group().is_last_rank:
+        #     assert isinstance(output, IntermediateTensors)
+        #     get_pp_group().send_tensor_dict(output.tensors,
+        #                                     all_gather_group=get_tp_group())
+        #     return None
         assert isinstance(output, ModelRunnerOutput)
         return output if self.is_driver_worker else None
 
     def profile(self, is_start: bool = True):
         raise RuntimeError("Profiler is not enabled.")
-    
+
     def add_lora(self, lora_request: LoRARequest) -> bool:
         raise RuntimeError("LoRA is not enabled.")
 
@@ -155,7 +159,6 @@ class RBLNOptimumWorker(WorkerBase):
             1,
             1,
         )
-
 
     def remove_lora(self, lora_id: int) -> bool:
         raise NotImplementedError

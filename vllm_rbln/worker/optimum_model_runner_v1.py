@@ -1,45 +1,44 @@
-import gc
-import time
-import weakref
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Optional, Union
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
-from vllm.multimodal.inputs import MultiModalKwargs
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
-from tqdm import tqdm
-from vllm.forward_context import (DPMetadata, get_forward_context,
-                                  set_forward_context)
+from vllm.config import VllmConfig
+from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
+from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.multimodal.inputs import MultiModalKwargs
+from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
-import vllm.envs as envs
-from vllm.config import (CompilationLevel, VllmConfig,
-                         get_layers_from_vllm_config)
-from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsTensors,
-                             ModelRunnerOutput)
-from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, check_use_alibi,
+                        is_pin_memory_available)
+from vllm.v1.core.encoder_cache_manager import compute_encoder_budget
+from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
+                                        KVCacheSpec)
+from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
+from vllm.v1.sample.sampler import Sampler
+from vllm.v1.worker.gpu_input_batch import CachedRequestState
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, check_use_alibi,
-                        is_pin_memory_available, round_up)
-from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.v1.core.encoder_cache_manager import compute_encoder_budget
-from vllm.v1.sample.sampler import Sampler
-# from vllm.attention.backends.abstract import (AttentionBackend,
-#                                               AttentionMetadataBuilder)
-from vllm.distributed.parallel_state import (
-    get_pp_group, get_tp_group)
-# from vllm.v1.attention.backends.utils import (CommonAttentionMetadata)
-from vllm.v1.kv_cache_interface import (AttentionSpec, FullAttentionSpec,
-                                        KVCacheConfig, KVCacheSpec,
-                                        SlidingWindowSpec)
-from vllm.attention.layer import Attention
-from vllm.sampling_params import SamplingType
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.worker.optimum_input_batch import RBLNInputBatch
-from vllm.model_executor.sampling_metadata import SamplingMetadata
+
 
 class RBLNOptimumModelRunner(GPUModelRunner):
 
@@ -101,7 +100,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
 
         # Sampler
         self.sampler = Sampler()
-
         """
         State of the expert parallelism load balancer.
 
@@ -149,16 +147,17 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         # self._init_device_properties()
 
         # Persistent buffers for CUDA graphs.
-        self.input_ids = torch.zeros(self.max_num_reqs, self.max_num_tokens,
+        self.input_ids = torch.zeros(self.max_num_reqs,
+                                     self.max_num_tokens,
                                      dtype=torch.int64,
                                      device=self.device)
-        self.positions = torch.zeros(self.max_num_reqs, self.max_num_tokens,
+        self.positions = torch.zeros(self.max_num_reqs,
+                                     self.max_num_tokens,
                                      dtype=torch.int32,
                                      device=self.device)
         self.slot_mapping = torch.zeros(self.max_num_tokens,
                                         dtype=torch.int64,
                                         device=self.device)
-
 
         # None in the first PP rank. The rest are set after load_model.
         self.intermediate_tensors: Optional[IntermediateTensors] = None
@@ -201,11 +200,13 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         # NOTE(woosuk): These tensors are "stateless", i.e., they are literally
         # a faster version of creating a new tensor every time. Thus, we should
         # not make any assumptions about the values in these tensors.
-        self.input_ids_cpu = torch.zeros(self.max_num_reqs, self.max_num_tokens,
+        self.input_ids_cpu = torch.zeros(self.max_num_reqs,
+                                         self.max_num_tokens,
                                          dtype=torch.int64,
                                          device="cpu",
                                          pin_memory=self.pin_memory)
-        self.positions_cpu = torch.zeros(self.max_num_reqs, self.max_num_tokens,
+        self.positions_cpu = torch.zeros(self.max_num_reqs,
+                                         self.max_num_tokens,
                                          dtype=torch.int32,
                                          device="cpu",
                                          pin_memory=self.pin_memory)
@@ -244,7 +245,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         if max_gen_len == 1:
             # No spec decode tokens.
             valid_sampled_token_ids = valid_sampled_token_ids.tolist()
-        
+
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
@@ -253,7 +254,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             logprobs=None,
             prompt_logprobs_dict={},
         )
-
 
     def _prepare_inputs(
         self,
@@ -280,34 +280,24 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         num_decode_reqs = len(scheduler_output.scheduled_cached_reqs)
         finished_requests_ids = scheduler_output.finished_req_ids
         is_prefill = False
-        
-        if num_prefill_reqs > 1 or (num_prefill_reqs >= 1 and num_decode_reqs > 0):
-            raise RuntimeError("prefill stage request cannot processed with other requests.")
+
+        if num_prefill_reqs > 1 or (num_prefill_reqs >= 1
+                                    and num_decode_reqs > 0):
+            raise RuntimeError(
+                "prefill stage request cannot processed with other requests.")
 
         if num_prefill_reqs > 0:
             is_prefill = True
 
         if is_prefill:
-            print("=== Prefill ===")
-            input_ids, positions, block_tables, multi_modal_kwargs, running_request_ids = self._prepare_prefill(scheduler_output)
+            input_ids, positions, block_tables, \
+            multi_modal_kwargs, running_request_ids \
+                = self._prepare_prefill(scheduler_output)
         else:
-            print("=== Decode ===")
-            input_ids, positions, block_tables, running_request_ids = self._prepare_decode(scheduler_output)
-        print("input_ids", input_ids.shape, input_ids)
-        print("positions", positions.shape, positions)
-        print("block_tables", block_tables.shape, block_tables)
-        print("======================")
+            input_ids, positions, block_tables, running_request_ids \
+                = self._prepare_decode(scheduler_output)
 
-        if get_pp_group().is_first_rank:
-            intermediate_tensors = None
-        else:
-            intermediate_tensors = self.sync_and_slice_intermediate_tensors(
-                num_input_tokens, intermediate_tensors, True)
-        if get_pp_group().is_first_rank:
-            intermediate_tensors = None
-        else:
-            raise NotImplementedError("For now PP is not supported yet.")
-
+        # TODO interemediate_tensor should be set
 
         model_input = ModelInputForRBLN(
             input_tokens=input_ids,
@@ -316,13 +306,11 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             multi_modal_kwargs=multi_modal_kwargs if is_prefill else None,
             block_tables=block_tables,
             running_requests_ids=running_request_ids,
-            finished_requests_ids=scheduler_output.finished_req_ids,
+            finished_requests_ids=list(finished_requests_ids),
             token_type_ids=None,
-            pooling_metadata=None, # FIXME
-            is_prompt=is_prefill
-        )
+            pooling_metadata=None,  # FIXME
+            is_prompt=is_prefill)
         return model_input
-
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
@@ -354,7 +342,8 @@ class RBLNOptimumModelRunner(GPUModelRunner):
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[MultiModalKwargs], list[str]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+               Optional[MultiModalKwargs], list[str]]:
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
         block_tables_list = []
@@ -368,7 +357,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             input_positions.append(list(range(seq_len)))
             block_tables_list = scheduled.block_ids
             running_request_ids.append(scheduled.req_id)
-            
+
         if self.is_multimodal_model:
             raise NotImplementedError
         else:
@@ -378,8 +367,8 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         input_positions = torch.tensor(input_positions)
         block_tables = torch.tensor(block_tables_list)
 
-
-        return input_tokens, input_positions, block_tables, multi_modal_kwargs, running_request_ids
+        return input_tokens, input_positions, block_tables, \
+            multi_modal_kwargs, running_request_ids
 
     def _prepare_decode(
         self,
@@ -389,21 +378,24 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         input_positions: List[List[int]] = []
         block_tables_list = []
         running_request_ids = []
-        multi_modal_kwargs: Optionnal[MultiModalKwargs]
+        # multi_modal_kwargs: Optional[MultiModalKwargs]
 
-        for req_id, scheduled in zip(self.input_batch.req_ids, scheduler_output.scheduled_cached_reqs):
+        for req_id, scheduled in zip(self.input_batch.req_ids,
+                                     scheduler_output.scheduled_cached_reqs):
             req_index = self.input_batch.req_id_to_index[req_id]
             input_position = int(self.input_batch.num_tokens[req_index] - 1)
-            input_tokens.append([self.input_batch.token_ids_cpu[req_index][input_position]])
+            input_tokens.append(
+                [self.input_batch.token_ids_cpu[req_index][input_position]])
             input_positions.append([input_position])
-            block_table = self.input_batch.block_table.block_tables[0].block_table[req_index]
+            block_table = self.input_batch.block_table.block_tables[
+                0].block_table[req_index]
             block_tables_list.append(block_table)
             running_request_ids.append(scheduled.req_id)
 
-        if self.is_multimodal_model:
-            raise NotImplementedError
-        else:
-            multi_modal_kwargs = None
+        # if self.is_multimodal_model:
+        #     raise NotImplementedError
+        # else:
+        #     multi_modal_kwargs = None
 
         input_tokens = torch.tensor(input_tokens)
         input_positions = torch.tensor(input_positions)
@@ -605,7 +597,8 @@ class RBLNOptimumModelRunner(GPUModelRunner):
 
         # Check if the batch has changed. If not, we can skip copying the
         # sampling metadata from CPU to GPU.
-        batch_changed = len(removed_req_indices) > 0 or len(req_ids_to_add) > 0
+        # batch_changed = len(removed_req_indices) > 0
+        # or len(req_ids_to_add) > 0
 
         # Add the new or resumed requests to the persistent batch.
         # The smaller empty indices are filled first.
@@ -625,3 +618,5 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             self.input_batch.condense(removed_req_indices)
 
         # batch_reordered = self._may_reorder_batch(scheduler_output)
+        # if batch_changed or batch_reordered:
+        #     self.input_batch.refresh_sampling_metadata()

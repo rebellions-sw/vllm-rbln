@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import torch
-from typing import Optional
 from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
-from vllm.sequence import IntermediateTensors
+
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 
@@ -50,9 +49,10 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         block_tables = model_input.block_tables
 
         request_nums = input_ids.shape[0]
-
+        # V1
         if model_input.sampling_metadata is None:
             is_prompt = model_input.is_prompt
+        # V0
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
         kwargs = self.preprocess_for_decoder(

@@ -1,34 +1,30 @@
-from vllm.v1.core.kv_cache_manager import KVCacheManager
-from vllm_rbln.core.kv_cache_coordinator_v1 import get_kv_cache_coordinator
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Optional
 
-from vllm.distributed.kv_events import KVCacheEvent
-from vllm.logger import init_logger
 from vllm.utils import sha256
-from vllm.v1.core.kv_cache_utils import (BlockHash, KVCacheBlock,
-                                         hash_request_tokens)
+from vllm.v1.core.kv_cache_manager import KVCacheManager
+from vllm.v1.core.kv_cache_utils import BlockHash
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import PrefixCacheStats
-from vllm.v1.request import Request, RequestStatus
+
+from vllm_rbln.core.kv_cache_coordinator_v1 import get_kv_cache_coordinator
 
 
 class RBLNOptimumKVCacheManager(KVCacheManager):
-    # _allocate_sequence에서는 중간에 BlockTable -> RBLNOptimumBlockTable로 바뀜
-    # can_allocate에서는 중간에 if seq_group.is_encoder_decoder():만 빠짐
-    # Allocate에서는 if seq_group.is_encoder_decoder():에서 block_table = self._allocate_sequence(encoder_seq) 빠짐
-    pass
 
-    # 호출하는 함수
-    # get_block_ids
-    # get_common_prefix_blocks
-    # take_events
-    # allocate_slots
-    # free
-    # get_computed_blocks
-    # create_empty_block_list
     def __init__(
         self,
         kv_cache_config: KVCacheConfig,

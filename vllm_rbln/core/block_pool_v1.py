@@ -1,17 +1,24 @@
+# Copyright 2025 Rebellions Inc. All rights reserved.
 
-from vllm.v1.core.block_pool import BlockPool
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Callable, Optional
 
-from vllm.distributed.kv_events import (AllBlocksCleared, BlockRemoved,
-                                        BlockStored, KVCacheEvent)
-from vllm.logger import init_logger
-from vllm.v1.core.kv_cache_utils import (BlockHash, BlockHashWithGroupId,
-                                         FreeKVCacheBlockQueue, KVCacheBlock,
-                                         generate_block_hash_extra_keys,
-                                         hash_block_tokens)
-from vllm.v1.request import Request
+from vllm.distributed.kv_events import KVCacheEvent
+from vllm.v1.core.block_pool import BlockPool
+from vllm.v1.core.kv_cache_utils import (BlockHashWithGroupId,
+                                         FreeKVCacheBlockQueue, KVCacheBlock)
 
 
 class RBLNOptimumBlockPool(BlockPool):
@@ -66,7 +73,6 @@ class RBLNOptimumBlockPool(BlockPool):
 
         self.enable_kv_cache_events = enable_kv_cache_events
         self.kv_event_queue: list[KVCacheEvent] = []
-
 
     def free_blocks(self, ordered_blocks: Iterable[KVCacheBlock]) -> None:
         """Free a list of blocks. The blocks should be ordered by their

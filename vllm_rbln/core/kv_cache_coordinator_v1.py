@@ -1,15 +1,28 @@
-from vllm_rbln.core.block_pool_v1 import RBLNOptimumBlockPool
+# Copyright 2025 Rebellions Inc. All rights reserved.
 
-from abc import ABC, abstractmethod
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import Callable, Optional
 
-from vllm.v1.core.block_pool import BlockPool
+from vllm.v1.core.kv_cache_coordinator import (HybridKVCacheCoordinator,
+                                               KVCacheCoordinator)
 from vllm.v1.core.kv_cache_utils import BlockHash, KVCacheBlock
 from vllm.v1.core.single_type_kv_cache_manager import (
     FullAttentionManager, get_manager_for_kv_cache_spec)
 from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheConfig
-from vllm.v1.request import Request
-from vllm.v1.core.kv_cache_coordinator import KVCacheCoordinator, UnitaryKVCacheCoordinator, HybridKVCacheCoordinator
+
+from vllm_rbln.core.block_pool_v1 import RBLNOptimumBlockPool
+
 
 class RBLNOptimumKVCacheCoordinator(KVCacheCoordinator):
     """
@@ -29,8 +42,9 @@ class RBLNOptimumKVCacheCoordinator(KVCacheCoordinator):
         self.max_model_len = max_model_len
         self.enable_caching = enable_caching
 
-        self.block_pool = RBLNOptimumBlockPool(kv_cache_config.num_blocks, enable_caching,
-                                    enable_kv_cache_events)
+        self.block_pool = RBLNOptimumBlockPool(kv_cache_config.num_blocks,
+                                               enable_caching,
+                                               enable_kv_cache_events)
 
         # Needs special handling for find_longest_cache_hit if eagle is enabled
         self.use_eagle = use_eagle
@@ -50,6 +64,7 @@ class RBLNOptimumUnitaryKVCacheCoordinator(RBLNOptimumKVCacheCoordinator):
     case for models with only one KV cache type, e.g., all attention layers use
     full attention or all attention layers use sliding window attention.
     """
+
     # I just copied the methods of `UnitaryKVCacheCoordinator`
     def __init__(self, kv_cache_config: KVCacheConfig, max_model_len: int,
                  use_eagle: bool, enable_caching: bool,
@@ -79,7 +94,8 @@ class RBLNOptimumUnitaryKVCacheCoordinator(RBLNOptimumKVCacheCoordinator):
         return hit_blocks, len(hit_blocks[0]) * self.block_size
 
 
-class RBLNOptimumHybridKVCacheCoordinator(RBLNOptimumKVCacheCoordinator, HybridKVCacheCoordinator):
+class RBLNOptimumHybridKVCacheCoordinator(RBLNOptimumKVCacheCoordinator,
+                                          HybridKVCacheCoordinator):
     """
     KV cache coordinator for hybrid models with multiple KV cache types, and
     thus multiple kv cache groups.
@@ -87,6 +103,7 @@ class RBLNOptimumHybridKVCacheCoordinator(RBLNOptimumKVCacheCoordinator, HybridK
     two types of KV cache groups, and one of them must be full attention.
     May extend to more general cases in the future.
     """
+
     # I just copied the methods of `HybridKVCacheCoordinator`
 
     def __init__(self, kv_cache_config: KVCacheConfig, max_model_len: int,
@@ -230,10 +247,12 @@ def get_kv_cache_coordinator(
         enable_caching: bool, caching_hash_fn: Callable,
         enable_kv_cache_events: bool) -> RBLNOptimumKVCacheCoordinator:
     if len(kv_cache_config.kv_cache_groups) == 1:
-        return RBLNOptimumUnitaryKVCacheCoordinator(kv_cache_config, max_model_len,
-                                         use_eagle, enable_caching,
-                                         caching_hash_fn,
-                                         enable_kv_cache_events)
-    return RBLNOptimumHybridKVCacheCoordinator(kv_cache_config, max_model_len, use_eagle,
-                                    enable_caching, caching_hash_fn,
-                                    enable_kv_cache_events)
+        return RBLNOptimumUnitaryKVCacheCoordinator(kv_cache_config,
+                                                    max_model_len, use_eagle,
+                                                    enable_caching,
+                                                    caching_hash_fn,
+                                                    enable_kv_cache_events)
+    return RBLNOptimumHybridKVCacheCoordinator(kv_cache_config, max_model_len,
+                                               use_eagle, enable_caching,
+                                               caching_hash_fn,
+                                               enable_kv_cache_events)

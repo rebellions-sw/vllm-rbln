@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Optional
 import torch
 
 if TYPE_CHECKING:
-    from vllm.config import VllmConfig
+    from vllm.config import ModelConfig, VllmConfig
 else:
     VllmConfig = None
 import os
@@ -25,11 +25,11 @@ from pathlib import Path
 
 import rebel
 from torch._dynamo import register_backend
+from vllm import envs
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
 from vllm_rbln.logger import init_logger
-from vllm import envs
 
 logger = init_logger(__name__)
 
@@ -81,6 +81,7 @@ class RblnPlatform(Platform):
     ray_device_key: str = "RBLN"
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
+    is_torch_compile: bool = False
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
@@ -132,7 +133,7 @@ class RblnPlatform(Platform):
 
         # torch.compile() is currently disabled.
         # TODO: Replace with dynamic check via is_torch_compile_supported().
-        is_torch_compile = False
+
         model_config = vllm_config.model_config
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
@@ -145,20 +146,25 @@ class RblnPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
-        if is_torch_compile:
+        if cls.is_torch_compile:
             if parallel_config.worker_cls == "auto":
-                parallel_config.worker_cls = "vllm_rbln.worker.worker.RBLNWorker"
-            scheduler_config.scheduler_cls = "vllm_rbln.core.scheduler.RBLNScheduler"
+                parallel_config.worker_cls = \
+                    "vllm_rbln.worker.worker.RBLNWorker"
+            scheduler_config.scheduler_cls = \
+                "vllm_rbln.core.scheduler.RBLNScheduler"
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
-                    parallel_config.worker_cls = "vllm_rbln.worker.optimum_worker_v1.RBLNOptimumWorker"
-                # if needed, modify scheduler_config more
-                scheduler_config.scheduler_cls = "vllm_rbln.core.optimum_scheduler_v1.RBLNOptimumScheduler"
+                    parallel_config.worker_cls = \
+                        "vllm_rbln.worker.optimum_worker_v1.RBLNOptimumWorker"
+                scheduler_config.scheduler_cls = \
+                        "vllm_rbln.core.optimum_scheduler_v1.RBLNOptimumScheduler"
             else:
                 if parallel_config.worker_cls == "auto":
-                    parallel_config.worker_cls = "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
-                scheduler_config.scheduler_cls = "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
+                    parallel_config.worker_cls = \
+                        "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
+                scheduler_config.scheduler_cls = \
+                    "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -198,4 +204,4 @@ class RblnPlatform(Platform):
 
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
-        return True
+        return not cls.is_torch_compile
