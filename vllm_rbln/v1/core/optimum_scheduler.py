@@ -31,10 +31,6 @@ from vllm_rbln.v1.core.optimum_kv_cache_manager import (
 
 logger = init_logger(__name__)
 
-# FIXME (eunji):
-# lookahead token
-# prefill이면 하나만 스케줄링
-
 
 class RBLNOptimumScheduler(Scheduler):
 
