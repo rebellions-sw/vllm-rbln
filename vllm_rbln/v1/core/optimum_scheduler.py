@@ -95,18 +95,20 @@ class RBLNOptimumScheduler(Scheduler):
         # For logging.
         scheduled_timestamp = time.monotonic()
 
-        # TODO(eunji): For now, the requests are scheduled RUNNING -> WAITING
-        # But it make slow prefill -> high TTFT
-        # Change the order would be better
-        # First, schedule the RUNNING requests.
-        req_index = 0
+        # NOTE We changed the scheduling process like below.
+        # (1) vllm-rbln distinguishes
+        #   between requests in the prefill and decode phases.
+        #   If a request is in the prefill phase,
+        #   it is given priority and processed exclusively (only one at a time).
+        # (2) For (1), vllm-rbln schedules the requests WAITING -> RUNNING.
+        #   In the vLLM, requests are scheduled RUNNING -> WAITING.
 
+        req_index = 0
         # Use a temporary deque to collect requests that need to be skipped
         # and put back at the head of the waiting queue later
         skipped_waiting_requests: deque[Request] = deque()
 
-        ###################################################################################
-        # Next, schedule the WAITING requests.
+        # First, schedule the WAITING requests.
         if not preempted_reqs:
             while self.waiting and token_budget > 0:
                 if len(self.running) == self.max_num_running_reqs:
@@ -281,9 +283,7 @@ class RBLNOptimumScheduler(Scheduler):
         if skipped_waiting_requests:
             self.waiting.extendleft(skipped_waiting_requests)
 
-        ###################################################################################
-        # NOTE(eunji): if we are going to process a request in prefill phase,
-        # we cannot process requests in decode phase
+        # Next, schedule the RUNNING requests.
         if req_index == 0:
             while req_index < len(self.running) and token_budget > 0:
                 request = self.running[req_index]
