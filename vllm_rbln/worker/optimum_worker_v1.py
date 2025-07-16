@@ -26,6 +26,9 @@ from vllm.v1.outputs import ModelRunnerOutput
 from vllm.model_executor import set_random_seed
 from typing import Optional
 from vllm.distributed.parallel_state import get_pp_group, get_tp_group
+from vllm.utils import get_dtype_size
+from vllm.v1.kv_cache_interface import AttentionSpec
+
 logger = init_logger(__name__)
 
 
@@ -61,8 +64,17 @@ class RBLNOptimumWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        # FIXME(eunji): it's temporary
-        available_memory_bytes = 1e10 
+        # NOTE I just calculated the total memory size(bytes) for kv cache
+        available_memory_bytes = 0
+        max_num_batched_tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
+        max_model_len =  self.vllm_config.model_config.max_model_len
+        kv_cache_spec = self.model_runner.get_kv_cache_spec()
+        for layer_name, layer_spec in kv_cache_spec.items():
+            if isinstance(layer_spec, AttentionSpec):
+                dtype = layer_spec.dtype
+                available_memory_bytes += 2 * max_num_batched_tokens * max_model_len * layer_spec.num_kv_heads * layer_spec.head_size * get_dtype_size(dtype)
+            else:
+                raise NotImplementedError
         return available_memory_bytes
 
     def initialize_cache(self, num_gpu_blocks: int,
