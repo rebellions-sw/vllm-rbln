@@ -95,7 +95,7 @@ class RBLNOptimumScheduler(Scheduler):
         # For logging.
         scheduled_timestamp = time.monotonic()
 
-        # NOTE We changed the scheduling process like below.
+        # NOTE The scheduling process is changed like below.
         # (1) vllm-rbln distinguishes
         #   between requests in the prefill and decode phases.
         #   If a request is in the prefill phase,
