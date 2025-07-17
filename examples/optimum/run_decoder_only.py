@@ -27,7 +27,7 @@ async def generate(engine: AsyncLLMEngine, prompt: str, model: str,
     example_input = {
         "stream": True,
         "temperature": 0.0,
-        "request_id": requst_id,
+        "request_id": str(requst_id),
     }
     # start the generation
     conversation = [{"role": "user", "content": prompt}]

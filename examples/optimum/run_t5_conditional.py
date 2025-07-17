@@ -31,7 +31,7 @@ async def generate(
     print(f"generate request_id={requst_id}, prompt={prompt}")
     example_input = {
         "temperature": 0.0,
-        "request_id": requst_id,
+        "request_id": str(requst_id),
     }
     # start the generation
     encoder_prompt_token_ids = tokenizer.encode(

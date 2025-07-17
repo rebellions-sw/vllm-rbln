@@ -30,7 +30,7 @@ async def generate(engine: AsyncLLMEngine,
     example_input = {
         "stream": True,
         "temperature": 0.0,
-        "request_id": requst_id,
+        "request_id": str(requst_id),
     }
     # start the generation
     tokenizer = AutoTokenizer.from_pretrained(model)
