@@ -500,7 +500,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         # similar to RBLN kv cache binding
         from rebel.compile_context import CompileContext
 
-        self.compile_context = CompileContext(use_weight_sharing=True)
+        self.compile_context = CompileContext.get_global_context() 
+        self.compile_context.is_eager_mode = True
+
         compiled_graph = self.compile_model(model_wrapper)
         self.model_executable = compiled_graph
 

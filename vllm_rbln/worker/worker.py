@@ -371,7 +371,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             rank=self.rank,
             local_rank=self.local_rank,
             distributed_init_method=self.distributed_init_method,
-            backend="gloo",
+            backend="rbln",
         )
 
         # warm up test for torch.distributed
