@@ -183,6 +183,8 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         # Prepare the decoder inputs.
         model_input = self._prepare_inputs(scheduler_output)
         hidden_states = self.model(model_input)
+        # FIXME [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
+        hidden_states = hidden_states.squeeze(1)
         logits = self.model.compute_logits(hidden_states, None)
         sampler_output = self.sampler(
             logits=logits,
@@ -255,10 +257,12 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             is_prefill = True
 
         if is_prefill:
+            print("=== PREFILL ===")
             input_ids, positions, block_tables, \
             multi_modal_kwargs, running_request_ids \
                 = self._prepare_prefill(scheduler_output)
         else:
+            print("=== DECODE ===")
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
 
@@ -441,7 +445,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
-
+            print("new sampling params", sampling_params)
             self.requests[req_id] = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
