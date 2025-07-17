@@ -560,7 +560,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
 
         # Check if the batch has changed. If not, we can skip copying the
         # sampling metadata from CPU to GPU.
-        # batch_changed = len(removed_req_indices) > 0
+        batch_changed = len(removed_req_indices) > 0 or len(req_ids_to_add) > 0
         # or len(req_ids_to_add) > 0
 
         # Add the new or resumed requests to the persistent batch.
@@ -581,5 +581,5 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             self.input_batch.condense(removed_req_indices)
 
         # batch_reordered = self._may_reorder_batch(scheduler_output)
-        # if batch_changed or batch_reordered:
-        #     self.input_batch.refresh_sampling_metadata()
+        if batch_changed:
+            self.input_batch.refresh_sampling_metadata()
