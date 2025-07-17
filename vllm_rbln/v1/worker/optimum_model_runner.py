@@ -257,12 +257,10 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             is_prefill = True
 
         if is_prefill:
-            print("=== PREFILL ===")
             input_ids, positions, block_tables, \
             multi_modal_kwargs, running_request_ids \
                 = self._prepare_prefill(scheduler_output)
         else:
-            print("=== DECODE ===")
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
 
@@ -445,7 +443,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
-            print("new sampling params", sampling_params)
             self.requests[req_id] = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
