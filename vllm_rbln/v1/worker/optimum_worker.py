@@ -26,6 +26,7 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.worker.worker_base import WorkerBase
+from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
@@ -65,25 +66,15 @@ class RBLNOptimumWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        max_model_len = self.vllm_config.model_config.max_model_len
-        kv_cache_spec = self.model_runner.get_kv_cache_spec()
-
-        num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
-        block_size = self.cache_config.block_size
-        return num_gpu_blocks * block_size * len(
-            kv_cache_spec.items()) * max_model_len
-
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
-        """Initialize the KV cache.
+        """It follows the way to calculate num_blocks in vLLM.
         """
-
-        # Different values are not tested.
-        assert num_cpu_blocks == 0
-
-        self.cache_config.num_gpu_blocks = num_gpu_blocks
-        self.cache_config.num_cpu_blocks = num_cpu_blocks
-
+        kv_cache_spec = self.model_runner.get_kv_cache_spec()
+        num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
+        num_layers = len(kv_cache_spec)
+        page_size = get_uniform_page_size(kv_cache_spec)
+        
+        return num_gpu_blocks * page_size * num_layers
+    
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",

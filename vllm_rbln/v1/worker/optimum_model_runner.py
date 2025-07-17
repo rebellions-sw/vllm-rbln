@@ -310,7 +310,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
         running_request_ids = []
-        multi_modal_kwargs: Optional[MultiModalKwargs] = None
+        multi_modal_inputs_list: list[MultiModalKwargs] = []
 
         assert len(scheduler_output.scheduled_new_reqs) == 1
 
@@ -326,11 +326,10 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             block_table = self.mask_block_table(block_table)
             block_table = block_table.unsqueeze(0)
             running_request_ids.append(scheduled.req_id)
+            if self.is_multimodal_model:
+                multi_modal_inputs_list.append(scheduled.mm_inputs[0])
 
-        if self.is_multimodal_model:
-            raise NotImplementedError
-        else:
-            multi_modal_kwargs = None
+        multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_inputs_list)
 
         input_tokens = torch.tensor(input_tokens)
         input_positions = torch.tensor(input_positions)
