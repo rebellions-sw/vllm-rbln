@@ -22,6 +22,7 @@ from vllm.distributed import (ensure_model_parallel_initialized,
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
+from vllm.utils import cdiv
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
@@ -69,7 +70,9 @@ class RBLNOptimumWorker(WorkerBase):
         """It follows the way to calculate num_blocks in vLLM.
         """
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
+        max_model_len = self.model_config.max_model_len
+        block_size = self.cache_config.block_size
+        num_gpu_blocks = cdiv(max_model_len, block_size)
         num_layers = len(kv_cache_spec)
         page_size = get_uniform_page_size(kv_cache_spec)
 
