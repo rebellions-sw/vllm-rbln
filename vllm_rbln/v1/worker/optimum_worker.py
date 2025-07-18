@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Optional
+import os
 
 import torch
 import torch.distributed
@@ -72,7 +73,21 @@ class RBLNOptimumWorker(WorkerBase):
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
         max_model_len = self.model_config.max_model_len
         block_size = self.cache_config.block_size
-        num_gpu_blocks = cdiv(max_model_len, block_size)
+
+        attn_impl = self.model_runner.model.model.get_attn_impl() if hasattr(
+            self.model_runner.model.model, "get_attn_impl") else None
+
+        if attn_impl is not None and attn_impl == "flash_attn":
+            # We use the last block as dummy block
+            num_gpu_blocks = (
+                self.model_runner.model.model.get_kvcache_num_blocks() - 1)
+
+            if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
+                num_gpu_blocks = int(npu_num_blocks) - 1
+
+        else:
+            num_gpu_blocks = self.scheduler_config.max_num_seqs
+
         num_layers = len(kv_cache_spec)
         page_size = get_uniform_page_size(kv_cache_spec)
 
