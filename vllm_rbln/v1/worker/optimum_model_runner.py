@@ -183,7 +183,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             # Because in the case of LLMs,
             # `finished_request_ids` is provided separately
             # from new requests.
-            if has_attr(self.model, "clear_local_block_table"):
+            if hasattr(self.model, "clear_local_block_table"):
                 self.model.clear_local_block_table()
             # Return empty ModelRunnerOutput if there's no work to do.
             return EMPTY_MODEL_RUNNER_OUTPUT
