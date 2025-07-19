@@ -178,6 +178,13 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         self._update_states(scheduler_output)
         sampling_metadata = self.input_batch.sampling_metadata
         if not scheduler_output.total_num_scheduled_tokens:
+            # NOTE If local block table exists in the model,
+            # clear the local block table.
+            # Because in the case of LLMs,
+            # `finished_request_ids` is provided separately
+            # from new requests.
+            if has_attr(self.model, "clear_local_block_table"):
+                self.model.clear_local_block_table()
             # Return empty ModelRunnerOutput if there's no work to do.
             return EMPTY_MODEL_RUNNER_OUTPUT
         # Prepare the decoder inputs.
@@ -328,7 +335,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             block_table = self.mask_block_table(block_table)
             block_table = block_table.unsqueeze(0)
             running_request_ids.append(scheduled.req_id)
-            if self.is_multimodal_model:
+            if self.is_multimodal_model and scheduled.mm_inputs:
                 multi_modal_inputs_list.append(scheduled.mm_inputs[0])
 
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_inputs_list)

@@ -173,7 +173,13 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         input_ids = model_input.input_tokens
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables
-        is_prompt = model_input.sampling_metadata.num_prompts > 0
+
+        # V1
+        if model_input.sampling_metadata is None:
+            is_prompt = model_input.is_prompt
+        # V0
+        else:
+            is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
@@ -320,3 +326,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
             _validate_shape(d)
 
         return data
+
+    def clear_local_block_table(self):
+        self.sliding_window_table = {}
