@@ -122,7 +122,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
     ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
-        
+
         get_extra_values_fn = None
         attention_mask = None
 
@@ -149,7 +149,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
             table_ids = result
             return table_ids, [], [attention_mask]
         else:
-            result = cast(Tuple[list[int], list[int], list[torch.Tensor]], result)
+            result = cast(Tuple[list[int], list[int], list[torch.Tensor]],
+                          result)
             table_ids, padded_cache_lengths, attention_masks = result
             return table_ids, padded_cache_lengths, attention_masks
 
