@@ -294,8 +294,9 @@ class RBLNOptimumDictTableMixin:
                     extra_values.append(result)
 
             if get_extra_values_fn:
-                extra_values_lists = list(zip(
-                    *extra_values)) if extra_values else []
+                extra_values_lists: list[list[Any]] = [
+                    list(col) for col in zip(*extra_values)
+                ]
                 return (table_ids, *extra_values_lists)
             return table_ids
 
