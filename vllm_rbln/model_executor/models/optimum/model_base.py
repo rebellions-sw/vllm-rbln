@@ -296,8 +296,7 @@ class RBLNOptimumDictTableMixin:
             if get_extra_values_fn:
                 extra_values_lists = list(zip(
                     *extra_values)) if extra_values else []
-                return (table_ids, *extra_values_lists
-                        )  # type: ignore[arg-type]
+                return (table_ids, *extra_values_lists)
             return table_ids
 
     def clear_table_mapping(self, table_mapping: Dict[str, Any]):
