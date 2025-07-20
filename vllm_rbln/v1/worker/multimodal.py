@@ -1,32 +1,31 @@
-from abc import ABC, abstractmethod
-from collections import UserDict, defaultdict
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from functools import partial
-from itertools import accumulate
-from typing import (TYPE_CHECKING, Any, Literal, Optional, TypedDict, TypeVar,
-                    Union, cast, final)
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+from collections import defaultdict
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
-from typing_extensions import NotRequired, TypeAlias
-
-from vllm.jsontree import JSONTree, json_map_leaves
-from vllm.utils import LazyLoader, full_groupby, is_list_of
+from vllm.multimodal.inputs import (BatchedTensorInputs, MultiModalKwargs,
+                                    NestedTensors)
+from vllm.utils import LazyLoader, is_list_of
 
 if TYPE_CHECKING:
     import torch
     import torch.types
-    from PIL.Image import Image
-    from transformers.feature_extraction_utils import BatchFeature
 
-    from .hasher import MultiModalHashDict
 else:
     torch = LazyLoader("torch", globals(), "torch")
 
-_T = TypeVar("_T")
-
-
-from vllm.multimodal.inputs import MultiModalKwargs, NestedTensors, BatchedTensorInputs
 
 class RBLNOptimumMultiModalKwargs(MultiModalKwargs):
 
@@ -50,7 +49,8 @@ class RBLNOptimumMultiModalKwargs(MultiModalKwargs):
             return torch.tensor(nested_tensors)
 
         stacked = [
-            RBLNOptimumMultiModalKwargs._try_stack(t, pin_memory) for t in nested_tensors
+            RBLNOptimumMultiModalKwargs._try_stack(t, pin_memory)
+            for t in nested_tensors
         ]
         if not is_list_of(stacked, torch.Tensor, check="all"):
             # Only tensors (not lists) can be stacked.
@@ -86,7 +86,6 @@ class RBLNOptimumMultiModalKwargs(MultiModalKwargs):
         otherwise, the output value is a list containing the original value
         from each input.
         """
-        print("batch!!!!!!")
         if len(inputs_list) == 0:
             return {}
 
