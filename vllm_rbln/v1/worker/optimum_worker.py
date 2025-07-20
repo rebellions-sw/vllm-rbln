@@ -11,8 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Optional
+
 import os
+from typing import Optional
 
 import torch
 import torch.distributed
@@ -23,7 +24,6 @@ from vllm.distributed import (ensure_model_parallel_initialized,
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
-from vllm.utils import cdiv
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
@@ -71,8 +71,8 @@ class RBLNOptimumWorker(WorkerBase):
         """It follows the way to calculate num_blocks in vLLM.
         """
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        max_model_len = self.model_config.max_model_len
-        block_size = self.cache_config.block_size
+        num_layers = len(kv_cache_spec)
+        page_size = get_uniform_page_size(kv_cache_spec)
 
         attn_impl = self.model_runner.model.model.get_attn_impl() if hasattr(
             self.model_runner.model.model, "get_attn_impl") else None
@@ -87,9 +87,6 @@ class RBLNOptimumWorker(WorkerBase):
 
         else:
             num_gpu_blocks = self.scheduler_config.max_num_seqs
-
-        num_layers = len(kv_cache_spec)
-        page_size = get_uniform_page_size(kv_cache_spec)
 
         return num_gpu_blocks * page_size * num_layers
 

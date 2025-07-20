@@ -19,11 +19,11 @@ import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import MultiModalKwargs
+from vllm.multimodal.inputs import BatchedTensorInputs
+from vllm.multimodal.utils import group_mm_inputs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
-from vllm.v1.core.encoder_cache_manager import compute_encoder_budget
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
@@ -35,6 +35,7 @@ from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
+from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
 
 class RBLNOptimumModelRunner(GPUModelRunner):
@@ -87,13 +88,13 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         self.mm_registry = MULTIMODAL_REGISTRY
         self.uses_mrope = model_config.uses_mrope
 
-        encoder_compute_budget, encoder_cache_size = compute_encoder_budget(
-            model_config=model_config,
-            scheduler_config=scheduler_config,
-            mm_registry=self.mm_registry,
-        )
-        self.max_num_encoder_input_tokens = encoder_compute_budget
-        self.encoder_cache_size = encoder_cache_size
+        # encoder_compute_budget, encoder_cache_size = compute_encoder_budget(
+        #     model_config=model_config,
+        #     scheduler_config=scheduler_config,
+        #     mm_registry=self.mm_registry,
+        # )
+        # self.max_num_encoder_input_tokens = encoder_compute_budget
+        # self.encoder_cache_size = encoder_cache_size
 
         # Sampler
         self.sampler = Sampler()
@@ -178,11 +179,12 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         self._update_states(scheduler_output)
         sampling_metadata = self.input_batch.sampling_metadata
         if not scheduler_output.total_num_scheduled_tokens:
-            # NOTE If local block table exists in the model,
+            # FIXME If local block table exists in the model,
             # clear the local block table.
-            # Because in the case of LLMs,
+            # Because in the case of LLM (not AsyncLLMEngine),
             # `finished_request_ids` is provided separately
             # from new requests.
+            # It is a temporary solution.
             if hasattr(self.model, "clear_local_block_table"):
                 self.model.clear_local_block_table()
             # Return empty ModelRunnerOutput if there's no work to do.
@@ -311,17 +313,52 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             )
         return kv_cache_spec
 
+    def _get_multi_kwargs(self, scheduler_output: "SchedulerOutput") -> int:
+        scheduled_encoder_inputs = scheduler_output.scheduled_encoder_inputs
+        if not scheduled_encoder_inputs:
+            return
+
+        # Batch the multi-modal inputs.
+        mm_inputs = list[RBLNOptimumMultiModalKwargs]()
+        for req_id, encoder_input_ids in scheduled_encoder_inputs.items():
+            req_state = self.requests[req_id]
+            for mm_input_id in encoder_input_ids:
+                mm_inputs.append(req_state.mm_inputs[mm_input_id])
+
+        # Batch mm inputs as much as we can: if a request in the batch has
+        # multiple modalities or a different modality than the previous one,
+        # we process it separately to preserve item order.
+        # FIXME(ywang96): This is a hacky way to deal with multiple modalities
+        # in the same batch while still being able to benefit from batching
+        # multimodal inputs. The proper solution should be reordering the
+        # encoder outputs.
+        grouped_mm_inputs_list = group_mm_inputs_by_modality(mm_inputs)
+
+        assert len(grouped_mm_inputs_list) == 1
+
+        grouped_mm_inputs = grouped_mm_inputs_list[0]
+        batched_mm_inputs = RBLNOptimumMultiModalKwargs.batch(
+            grouped_mm_inputs)
+        batched_mm_inputs = RBLNOptimumMultiModalKwargs.as_kwargs(
+            batched_mm_inputs,
+            device=self.device,
+        )
+
+        return batched_mm_inputs
+
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor,
-               Optional[MultiModalKwargs], list[str]]:
+               Optional[RBLNOptimumMultiModalKwargs], list[str]]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
         running_request_ids = []
-        multi_modal_inputs_list: list[MultiModalKwargs] = []
-
+        batched_mm_inputs: Optional[BatchedTensorInputs] = None
         assert len(scheduler_output.scheduled_new_reqs) == 1
+
+        req_id = self.input_batch.req_ids[0]
+        scheduled = scheduler_output.scheduled_new_reqs[0]
 
         for req_id, scheduled in zip(self.input_batch.req_ids,
                                      scheduler_output.scheduled_new_reqs):
@@ -335,16 +372,15 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             block_table = self.mask_block_table(block_table)
             block_table = block_table.unsqueeze(0)
             running_request_ids.append(scheduled.req_id)
-            if self.is_multimodal_model and scheduled.mm_inputs:
-                multi_modal_inputs_list.append(scheduled.mm_inputs[0])
 
-        multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_inputs_list)
+        if self.is_multimodal_model:
+            batched_mm_inputs = self._get_multi_kwargs(scheduler_output)
 
         input_tokens = torch.tensor(input_tokens)
         input_positions = torch.tensor(input_positions)
 
         return input_tokens, input_positions, block_table, \
-            multi_modal_kwargs, running_request_ids
+            batched_mm_inputs, running_request_ids
 
     def _prepare_decode(
         self,
@@ -368,11 +404,6 @@ class RBLNOptimumModelRunner(GPUModelRunner):
             block_table = self.mask_block_table(block_table)
             block_tables_list.append(block_table)
             running_request_ids.append(scheduled.req_id)
-
-        # if self.is_multimodal_model:
-        #     raise NotImplementedError
-        # else:
-        #     multi_modal_kwargs = None
 
         input_tokens = torch.tensor(input_tokens)
         input_positions = torch.tensor(input_positions)
