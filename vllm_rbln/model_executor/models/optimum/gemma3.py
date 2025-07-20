@@ -21,7 +21,7 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
                                                   Gemma3ImagePixelInputs)
 
 from .base import ModelInputForRBLN, version_error
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumLocalBlockTableMixin
 
 logger = init_logger(__name__)
 
@@ -34,7 +34,8 @@ class SlidingWindowEntry:
 
 
 class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
-                                                RBLNOptimumDecoderMixin):
+                                                RBLNOptimumDecoderMixin,
+                                                RBLNOptimumLocalBlockTableMixin):
 
     def __init__(
         self,
@@ -121,48 +122,31 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         finished_requests_ids: list[str],
     ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
         if is_prompt:
-            # Generate attention mask without padding
             attention_mask = torch.ones_like(input_ids).squeeze(0)
-
-            # Determine sliding_window_table_id
-            # FIXME:
-            # finished_requests_ids is typed as list[str],
-            # but used as list[int].
-            if finished_requests_ids:
-                first_id = finished_requests_ids[0]
-                local_table_id = self.sliding_window_table[
-                    first_id].local_table_id
-
-                for request_id in finished_requests_ids:
-                    self.sliding_window_table.pop(request_id)
-            else:
-                used_ids = {
-                    v.local_table_id
-                    for v in self.sliding_window_table.values()
-                }
-                available_ids = set(range(self.decoder_batch_size)) - used_ids
-                assert len(available_ids) > 0
-                local_table_id = min(available_ids)
-
-            if len(self.sliding_window_table) > self.decoder_batch_size:
-                raise ValueError(
-                    "Sliding window table size must not exceed the batch size."
-                )
-
-            return [local_table_id], [], [attention_mask]
-
+            table_ids = self.get_table_mapping_values(
+                self.sliding_window_table,
+                self.decoder_batch_size,
+                is_prompt,
+                finished_requests_ids,
+                running_requests_ids,
+                get_entry_fn=lambda entry: entry.local_table_id,
+                get_extra_values_fn=None
+            )
+            return table_ids, [], [attention_mask]
         else:
-            local_table_ids: List[int] = []
-            padded_cache_lengths: List[int] = []
-            attention_masks: List[torch.Tensor] = []
-
-            for request_id in running_requests_ids:
-                sliding_window = self.sliding_window_table[request_id]
-                local_table_ids.append(sliding_window.local_table_id)
-                padded_cache_lengths.append(sliding_window.padded_cache_length)
-                attention_masks.append(sliding_window.attention_mask)
-
-            return local_table_ids, padded_cache_lengths, attention_masks
+            table_ids, padded_cache_lengths, attention_masks = self.get_table_mapping_values(
+                self.sliding_window_table,
+                self.decoder_batch_size,
+                is_prompt,
+                finished_requests_ids,
+                running_requests_ids,
+                get_entry_fn=lambda entry: entry.local_table_id,
+                get_extra_values_fn=lambda entry: (
+                    entry.padded_cache_length,
+                    entry.attention_mask
+                )
+            )
+            return table_ids, padded_cache_lengths, attention_masks
 
     def get_pixel_values(self, model_input: ModelInputForRBLN):
         image_input = None

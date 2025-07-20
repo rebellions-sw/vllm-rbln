@@ -18,13 +18,14 @@ from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumLocalBlockTableMixin
 
 logger = init_logger(__name__)
 
 
 class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
-                                                 RBLNOptimumDecoderMixin):
+                                                 RBLNOptimumDecoderMixin,
+                                                 RBLNOptimumLocalBlockTableMixin):
     INVALID_TOKEN = 100
 
     def __init__(
@@ -52,25 +53,13 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         finished_requests_ids: list[str],
         running_requests_ids: list[str],
     ) -> list[int]:
-        if is_prompt:
-            if finished_requests_ids:
-                first_id = finished_requests_ids[0]
-                table_id = self.table_mapping[first_id]
-
-                for request_id in finished_requests_ids:
-                    self.table_mapping.pop(request_id)
-            else:
-                used_ids = set(self.table_mapping.values())
-                available_ids = set(range(self.decoder_batch_size)) - used_ids
-                assert len(available_ids) > 0
-                table_id = min(available_ids)
-            return [table_id]
-        else:
-            table_ids = []
-            for request_id in running_requests_ids:
-                table_id = self.table_mapping[request_id]
-                table_ids.append(table_id)
-            return table_ids
+        return self.get_table_mapping_values(
+            self.table_mapping,
+            self.decoder_batch_size,
+            is_prompt,
+            finished_requests_ids,
+            running_requests_ids,
+        )
 
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
@@ -107,9 +96,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         if is_prompt:
             _ = self.model.encoder(input_features=input_features,
                                    block_tables=block_tables)
-            # FIXME Is `is_languaged_detected` required
-            # unless the time stamp is not supported in vLLM?
-            self.model.is_language_detected = True
             lm_logits = torch.zeros(
                 1, 1, self.model.config.vocab_size + self.INVALID_TOKEN)
             # Set the probability of INVALID_TOKEN (the last token in
@@ -117,7 +103,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             lm_logits[0][0][-1] = 1
             self.table_mapping[running_requests_ids[0]] = table_ids[0]
             self.dec_lengths[table_ids[0]] = 0
-            self.model.is_language_detected = False
+
         else:
             input_ids[input_ids == (
                 self.model.config.vocab_size + self.INVALID_TOKEN -
