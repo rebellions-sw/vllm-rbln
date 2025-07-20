@@ -371,7 +371,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                 0].block_table[req_index]
             block_table = self.mask_block_table(block_table)
             block_table = block_table.unsqueeze(0)
-            running_request_ids.append(scheduled.req_id)
+            running_request_ids.append(req_id)
 
         if self.is_multimodal_model:
             batched_mm_inputs = self._get_multi_kwargs(scheduler_output)
@@ -403,7 +403,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
                 0].block_table[req_index]
             block_table = self.mask_block_table(block_table)
             block_tables_list.append(block_table)
-            running_request_ids.append(scheduled.req_id)
+            running_request_ids.append(req_id)
 
         input_tokens = torch.tensor(input_tokens)
         input_positions = torch.tensor(input_positions)
