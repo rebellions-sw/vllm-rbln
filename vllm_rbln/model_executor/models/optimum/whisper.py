@@ -18,7 +18,8 @@ from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumDictTableMixin
+from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
+                         RBLNOptimumModelBase)
 
 logger = init_logger(__name__)
 

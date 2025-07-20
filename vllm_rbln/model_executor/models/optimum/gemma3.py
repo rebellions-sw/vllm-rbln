@@ -21,7 +21,8 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
                                                   Gemma3ImagePixelInputs)
 
 from .base import ModelInputForRBLN, version_error
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumDictTableMixin
+from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
+                         RBLNOptimumModelBase)
 
 logger = init_logger(__name__)
 
@@ -130,22 +131,22 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                 finished_requests_ids,
                 running_requests_ids,
                 get_entry_fn=lambda entry: entry.local_table_id,
-                get_extra_values_fn=None
-            )
+                get_extra_values_fn=None)
             return table_ids, [], [attention_mask]
         else:
-            table_ids, padded_cache_lengths, attention_masks = self.get_table_mapping_values(
-                self.sliding_window_table,
-                self.decoder_batch_size,
-                is_prompt,
-                finished_requests_ids,
-                running_requests_ids,
-                get_entry_fn=lambda entry: entry.local_table_id,
-                get_extra_values_fn=lambda entry: (
-                    entry.padded_cache_length,
-                    entry.attention_mask
-                )
-            )
+            table_ids, padded_cache_lengths, attention_masks = \
+                self.get_table_mapping_values(
+                        self.sliding_window_table,
+                        self.decoder_batch_size,
+                        is_prompt,
+                        finished_requests_ids,
+                        running_requests_ids,
+                        get_entry_fn=lambda entry: entry.local_table_id,
+                        get_extra_values_fn=lambda entry: (
+                            entry.padded_cache_length,
+                            entry.attention_mask
+                        )
+                    )
             return table_ids, padded_cache_lengths, attention_masks
 
     def get_pixel_values(self, model_input: ModelInputForRBLN):
