@@ -51,8 +51,14 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
-        is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables
+
+        # V1
+        if model_input.sampling_metadata is None:
+            is_prompt = model_input.is_prompt
+        # V0
+        else:
+            is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         image_input = None
         pixel_values = None
