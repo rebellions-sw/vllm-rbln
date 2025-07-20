@@ -18,14 +18,14 @@ from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumLocalBlockTableMixin
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumDictTableMixin
 
 logger = init_logger(__name__)
 
 
 class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
                                                  RBLNOptimumDecoderMixin,
-                                                 RBLNOptimumLocalBlockTableMixin):
+                                                 RBLNOptimumDictTableMixin):
     INVALID_TOKEN = 100
 
     def __init__(

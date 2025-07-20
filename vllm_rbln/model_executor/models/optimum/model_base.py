@@ -239,7 +239,11 @@ class RBLNOptimumDecoderMixin:
         index = bisect.bisect_left(decoder_batch_sizes, original_batch_size)
         return decoder_batch_sizes[index]
 
-class RBLNOptimumLocalBlockTableMixin:
+class RBLNOptimumDictTableMixin:
+    """
+        It is intended for a model that utilizes a table implemented as a dictionary.
+        The key of table is request ID.
+    """
     def get_table_mapping_values(
         self,
         table_mapping: Dict[str, Any],

@@ -21,7 +21,7 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
                                                   Gemma3ImagePixelInputs)
 
 from .base import ModelInputForRBLN, version_error
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumLocalBlockTableMixin
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase, RBLNOptimumDictTableMixin
 
 logger = init_logger(__name__)
 
@@ -35,7 +35,7 @@ class SlidingWindowEntry:
 
 class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                                 RBLNOptimumDecoderMixin,
-                                                RBLNOptimumLocalBlockTableMixin):
+                                                RBLNOptimumDictTableMixin):
 
     def __init__(
         self,
