@@ -62,6 +62,8 @@ class RBLNOptimumMultiModalKwargs(MultiModalKwargs):
         #     # - produce exactly same result as `torch.stack(tensors_)`
         #     # - will achieve zero-copy if the tensor is contiguous
         #     return tensors_[0].unsqueeze(0).contiguous()
+        # NOTE(eunji): This optimization in vllm-rbln is not working.
+        # So I turned it off.
 
         if any(t.shape != tensors_[0].shape for t in tensors_):
             # The tensors have incompatible shapes and can't be stacked.
