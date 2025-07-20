@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import torch
 from vllm.config import ModelConfig, SchedulerConfig
@@ -122,31 +122,35 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
     ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
+        
+        get_extra_values_fn = None
+        attention_mask = None
+
         if is_prompt:
             attention_mask = torch.ones_like(input_ids).squeeze(0)
-            table_ids = self.get_table_mapping_values(
-                self.sliding_window_table,
-                self.decoder_batch_size,
-                is_prompt,
-                finished_requests_ids,
-                running_requests_ids,
-                get_entry_fn=lambda entry: entry.local_table_id,
-                get_extra_values_fn=None)
+        else:
+            get_extra_values_fn = lambda entry: (
+                entry.padded_cache_length,
+                entry.attention_mask,
+            )
+
+        result = self.get_table_mapping_values(
+            self.sliding_window_table,
+            self.decoder_batch_size,
+            is_prompt,
+            finished_requests_ids,
+            running_requests_ids,
+            get_entry_fn=lambda entry: entry.local_table_id,
+            get_extra_values_fn=get_extra_values_fn,
+        )
+
+        if is_prompt:
+            result = cast(list[int], result)
+            table_ids = result
             return table_ids, [], [attention_mask]
         else:
-            table_ids, padded_cache_lengths, attention_masks = \
-                self.get_table_mapping_values(
-                        self.sliding_window_table,
-                        self.decoder_batch_size,
-                        is_prompt,
-                        finished_requests_ids,
-                        running_requests_ids,
-                        get_entry_fn=lambda entry: entry.local_table_id,
-                        get_extra_values_fn=lambda entry: (
-                            entry.padded_cache_length,
-                            entry.attention_mask
-                        )
-                    )
+            result = cast(Tuple[list[int], list[int], list[torch.Tensor]], result)
+            table_ids, padded_cache_lengths, attention_masks = result
             return table_ids, padded_cache_lengths, attention_masks
 
     def get_pixel_values(self, model_input: ModelInputForRBLN):
