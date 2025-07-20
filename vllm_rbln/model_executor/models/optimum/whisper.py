@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import torch
 from vllm.config import ModelConfig, SchedulerConfig
@@ -54,13 +54,15 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         finished_requests_ids: list[str],
         running_requests_ids: list[str],
     ) -> list[int]:
-        return self.get_table_mapping_values(
+        result = self.get_table_mapping_values(
             self.table_mapping,
             self.decoder_batch_size,
             is_prompt,
             finished_requests_ids,
             running_requests_ids,
         )
+        result = cast(result, list[int])
+        return result
 
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
