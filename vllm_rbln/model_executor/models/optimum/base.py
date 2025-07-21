@@ -38,6 +38,7 @@ _RBLN_GENERATION_MODELS: Dict[str, Tuple[str, str]] = {
     "ExaoneForCausalLM": ("exaone", "RBLNExaoneForCausalLM"),
     "Qwen2ForCausalLM": ("qwen2", "RBLNQwen2ForCausalLM"),
     "OPTForCausalLM": ("opt", "RBLNOPTForCausalLM"),
+    "Qwen3ForCausalLM": ("qwen3", "RBLNQwen3ForCausalLM"),
 }
 
 _RBLN_ENCODER_DECODER_MODELS: Dict[str, Tuple[str, str]] = {
