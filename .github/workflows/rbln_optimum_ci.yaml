@@ -77,7 +77,7 @@ jobs:
 
       - name: Install local vllm-rbln package
         run: |
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl
+          pip install --force-reinstall --no-cache-dir --pre dist/vllm_rbln*.whl
 
       - name: Run decoder-only test (eager attn)
         env:
