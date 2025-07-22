@@ -81,6 +81,9 @@ class RblnPlatform(Platform):
     ray_device_key: str = "RBLN"
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
+
+    # torch.compile() is currently disabled.
+    # TODO: Replace with dynamic check via is_torch_compile_supported().
     is_torch_compile: bool = False
 
     @classmethod
@@ -130,9 +133,6 @@ class RblnPlatform(Platform):
         if vllm_config.scheduler_config.is_multi_step:
             raise NotImplementedError(
                 "Multi-step execution is not supported for RBLN")
-
-        # torch.compile() is currently disabled.
-        # TODO: Replace with dynamic check via is_torch_compile_supported().
 
         model_config = vllm_config.model_config
         logger.info("original model_config.dtype = %s", model_config.dtype)
