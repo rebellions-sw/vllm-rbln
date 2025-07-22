@@ -30,6 +30,7 @@ from .llava_next import (  # noqa: F401
     RBLNOptimumLlavaNextForConditionalGeneration)
 from .qwen2_5_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration)
+from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
 
 logger = init_logger(__name__)
 

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import torch
 from vllm.config import ModelConfig, SchedulerConfig
@@ -21,7 +21,8 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
                                                   Gemma3ImagePixelInputs)
 
 from .base import ModelInputForRBLN, version_error
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
+from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
+                         RBLNOptimumModelBase)
 
 logger = init_logger(__name__)
 
@@ -34,7 +35,8 @@ class SlidingWindowEntry:
 
 
 class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
-                                                RBLNOptimumDecoderMixin):
+                                                RBLNOptimumDecoderMixin,
+                                                RBLNOptimumDictTableMixin):
 
     def __init__(
         self,
@@ -120,49 +122,37 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
     ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
+
+        get_extra_values_fn = None
+        attention_mask = None
+
         if is_prompt:
-            # Generate attention mask without padding
             attention_mask = torch.ones_like(input_ids).squeeze(0)
-
-            # Determine sliding_window_table_id
-            # FIXME:
-            # finished_requests_ids is typed as list[str],
-            # but used as list[int].
-            if finished_requests_ids:
-                first_id = finished_requests_ids[0]
-                local_table_id = self.sliding_window_table[
-                    first_id].local_table_id
-
-                for request_id in finished_requests_ids:
-                    self.sliding_window_table.pop(request_id)
-            else:
-                used_ids = {
-                    v.local_table_id
-                    for v in self.sliding_window_table.values()
-                }
-                available_ids = set(range(self.decoder_batch_size)) - used_ids
-                assert len(available_ids) > 0
-                local_table_id = min(available_ids)
-
-            if len(self.sliding_window_table) > self.decoder_batch_size:
-                raise ValueError(
-                    "Sliding window table size must not exceed the batch size."
-                )
-
-            return [local_table_id], [], [attention_mask]
-
         else:
-            local_table_ids: List[int] = []
-            padded_cache_lengths: List[int] = []
-            attention_masks: List[torch.Tensor] = []
+            get_extra_values_fn = lambda entry: (
+                entry.padded_cache_length,
+                entry.attention_mask,
+            )
 
-            for request_id in running_requests_ids:
-                sliding_window = self.sliding_window_table[request_id]
-                local_table_ids.append(sliding_window.local_table_id)
-                padded_cache_lengths.append(sliding_window.padded_cache_length)
-                attention_masks.append(sliding_window.attention_mask)
+        result = self.get_table_mapping_values(
+            self.sliding_window_table,
+            self.decoder_batch_size,
+            is_prompt,
+            finished_requests_ids,
+            running_requests_ids,
+            get_entry_fn=lambda entry: entry.local_table_id,
+            get_extra_values_fn=get_extra_values_fn,
+        )
 
-            return local_table_ids, padded_cache_lengths, attention_masks
+        if is_prompt:
+            result = cast(list[int], result)
+            table_ids = result
+            return table_ids, [], [attention_mask]
+        else:
+            result = cast(Tuple[list[int], list[int], list[torch.Tensor]],
+                          result)
+            table_ids, padded_cache_lengths, attention_masks = result
+            return table_ids, padded_cache_lengths, attention_masks
 
     def get_pixel_values(self, model_input: ModelInputForRBLN):
         image_input = None
