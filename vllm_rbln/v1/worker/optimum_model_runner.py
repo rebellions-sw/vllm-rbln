@@ -18,6 +18,7 @@ import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
+from vllm.model_executor.layers.sampler import get_sampler
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import BatchedTensorInputs
 from vllm.multimodal.utils import group_mm_inputs_by_modality
@@ -28,8 +29,6 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
-from vllm.v1.sample.sampler import Sampler
-from vllm.model_executor.layers.sampler import get_sampler
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 

@@ -15,15 +15,11 @@
 import time
 from collections import deque
 
-from vllm.config import VllmConfig
 from vllm.distributed.kv_events import KVEventBatch
-from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.v1.engine import EngineCoreEventType
-from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.request import Request, RequestStatus
-from vllm.v1.structured_output import StructuredOutputManager
 
 from vllm_rbln.logger import init_logger
 
@@ -31,6 +27,7 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumScheduler(Scheduler):
+
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
@@ -425,7 +422,7 @@ class RBLNOptimumScheduler(Scheduler):
             # instead of being newly scheduled in this step.
             # It contains the request IDs that are finished in between
             # the previous and the current steps.
-            finished_req_ids=self.finished_req_ids,  # type: ignore
+            finished_req_ids=self.finished_req_ids,
             free_encoder_input_ids=self.encoder_cache_manager.get_freed_ids(),
             structured_output_request_ids=structured_output_request_ids,
             grammar_bitmask=grammar_bitmask,
@@ -456,5 +453,5 @@ class RBLNOptimumScheduler(Scheduler):
         for req_id, num_scheduled_token in num_scheduled_tokens.items():
             self.requests[req_id].num_computed_tokens += num_scheduled_token
 
-        self.finished_req_ids: set[str] = set()
+        self.finished_req_ids = set()
         return scheduler_output
