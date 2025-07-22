@@ -22,12 +22,12 @@ from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
 async def generate(engine: AsyncLLMEngine, prompt: str, model: str,
-                   requst_id: int, max_tokens: int):
-    print(f"generate request_id={requst_id}, prompt={prompt}")
+                   request_id: int, max_tokens: int):
+    print(f"generate request_id={request_id}, prompt={prompt}")
     example_input = {
         "stream": True,
         "temperature": 0.0,
-        "request_id": str(requst_id),
+        "request_id": str(request_id),
     }
     # start the generation
     conversation = [{"role": "user", "content": prompt}]
@@ -112,7 +112,7 @@ async def main(
                 generate(engine,
                          prompt=p,
                          model=model_id,
-                         requst_id=i,
+                         request_id=i,
                          max_tokens=max_seq_len)))
 
     result = await asyncio.gather(*futures)
