@@ -238,10 +238,17 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
     ) -> ModelInputForRBLN:
         """
-        :return: tuple[
-            attn_metadata: layer-to-attention_metadata mapping,
-            attention_cuda_graphs: whether attention can run in cudagraph
-            logits_indices, spec_decode_metadata
+        :return: ModelInputForRBLN[
+            input_tokens: Token IDs,
+            input_positions: Potision IDs,
+            sampling_metadata, pooling_metadata: It is `None` in V1,
+            multi_modal_kwargs: Batched multi-modal data,
+            block_tables: [num_reqs, num_blocks_per_req] shaped tensor,
+            running_requests_ids: RUNNING request IDs,
+            finished_requests_ids: FINISHED request IDs in between
+                the previous and the current steps,
+            token_type_ids: Not used,
+            is_prompt: It is used only in V1
         ]
         """
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
