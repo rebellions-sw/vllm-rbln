@@ -13,6 +13,7 @@
 # limitations under the License.
 import bisect
 import os
+from abc import ABC, abstractmethod
 from functools import cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -240,7 +241,7 @@ class RBLNOptimumDecoderMixin:
         return decoder_batch_sizes[index]
 
 
-class RBLNOptimumDictTableMixin:
+class RBLNOptimumDictTableMixin(ABC):
     """
     Mixin for models using a request-ID keyed table implemented as a dictionary.
     """
@@ -297,5 +298,6 @@ class RBLNOptimumDictTableMixin:
             return (table_ids, *extra_values_lists)
         return table_ids
 
-    def clear_table_mapping(self, table_mapping: Dict[str, Any]):
-        table_mapping.clear()
+    @abstractmethod
+    def clear_dict_table(self):
+        pass
