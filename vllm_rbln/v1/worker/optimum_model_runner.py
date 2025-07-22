@@ -26,7 +26,8 @@ from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
 from vllm.v1.core.sched.output import SchedulerOutput
-from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheSpec
+from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
+                                        KVCacheSpec)
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
@@ -610,3 +611,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # batch_reordered = self._may_reorder_batch(scheduler_output)
         if batch_changed:
             self.input_batch.refresh_sampling_metadata()
+
+    def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
+        pass
