@@ -276,27 +276,26 @@ class RBLNOptimumDictTableMixin:
                 table_id = min(available_ids)
             return [table_id]
 
-        else:
-            table_ids = []
-            extra_values = []
+        table_ids = []
+        extra_values = []
 
-            for request_id in running_requests_ids:
-                entry = table_mapping[request_id]
-                table_id = get_entry_fn(entry) if get_entry_fn else entry
-                table_ids.append(table_id)
-
-                if get_extra_values_fn:
-                    result = get_extra_values_fn(entry)
-                    if not isinstance(result, tuple):
-                        result = (result, )
-                    extra_values.append(result)
+        for request_id in running_requests_ids:
+            entry = table_mapping[request_id]
+            table_id = get_entry_fn(entry) if get_entry_fn else entry
+            table_ids.append(table_id)
 
             if get_extra_values_fn:
-                extra_values_lists: list[list[Any]] = [
-                    list(col) for col in zip(*extra_values)
-                ]
-                return (table_ids, *extra_values_lists)
-            return table_ids
+                result = get_extra_values_fn(entry)
+                if not isinstance(result, tuple):
+                    result = (result, )
+                extra_values.append(result)
+
+        if get_extra_values_fn:
+            extra_values_lists: list[list[Any]] = [
+                list(col) for col in zip(*extra_values)
+            ]
+            return (table_ids, *extra_values_lists)
+        return table_ids
 
     def clear_table_mapping(self, table_mapping: Dict[str, Any]):
         table_mapping.clear()
