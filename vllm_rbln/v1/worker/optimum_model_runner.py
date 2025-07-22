@@ -360,6 +360,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         req_id = self.input_batch.req_ids[0]
         scheduled = scheduler_output.scheduled_new_reqs[0]
+        block_tables_cpu = self.input_batch.block_table.block_tables[
+                0].get_cpu_tensor()
 
         for req_id, scheduled in zip(self.input_batch.req_ids,
                                      scheduler_output.scheduled_new_reqs):
@@ -368,8 +370,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_tokens.append(prompt_tokens)
             seq_len = len(prompt_tokens)
             input_positions.append(list(range(seq_len)))
-            block_table = self.input_batch.block_table.block_tables[
-                0].block_table[req_index]
+            block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table)
             block_table = block_table.unsqueeze(0)
             running_request_ids.append(req_id)
@@ -391,7 +392,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_positions: list[list[int]] = []
         block_tables_list = []
         running_request_ids = []
-        # multi_modal_kwargs: Optional[MultiModalKwargs]
+        block_tables_cpu = self.input_batch.block_table.block_tables[
+                0].get_cpu_tensor()
 
         for req_id, scheduled in zip(self.input_batch.req_ids,
                                      scheduler_output.scheduled_cached_reqs):
@@ -400,8 +402,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_tokens.append(
                 [self.input_batch.token_ids_cpu[req_index][input_position]])
             input_positions.append([input_position])
-            block_table = self.input_batch.block_table.block_tables[
-                0].block_table[req_index]
+            block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table)
             block_tables_list.append(block_table)
             running_request_ids.append(req_id)
