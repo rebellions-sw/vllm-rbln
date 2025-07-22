@@ -31,6 +31,7 @@ from .llava_next import (  # noqa: F401
 from .qwen2_5_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
+from .model_base import RBLNOptimumDictTableMixin
 
 logger = init_logger(__name__)
 
@@ -72,4 +73,5 @@ __all__ = [
     "load_model",
     "get_rbln_model_info",
     "ModelInputForRBLN",
+    "RBLNOptimumDictTableMixin",
 ]

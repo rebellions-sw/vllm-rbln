@@ -33,7 +33,8 @@ from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
+from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
+                                                     RBLNOptimumDictTableMixin)
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
 
@@ -184,8 +185,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # `finished_request_ids` is provided separately
             # from new requests.
             # It is a temporary solution.
-            if hasattr(self.model, "clear_local_block_table"):
-                self.model.clear_local_block_table()
+            if isinstance(self.model, RBLNOptimumDictTableMixin):
+                self.model.clear_dict_table()
             # Return empty ModelRunnerOutput if there's no work to do.
             return EMPTY_MODEL_RUNNER_OUTPUT
         # Prepare the decoder inputs.

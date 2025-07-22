@@ -327,5 +327,5 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
         return data
 
-    def clear_local_block_table(self):
-        self.sliding_window_table = {}
+    def clear_dict_table(self):
+        self.sliding_window_table.clear()
