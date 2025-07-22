@@ -249,10 +249,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_reqs = self.input_batch.num_reqs
         assert num_reqs > 0
 
-        # OPTIMIZATION: Start copying the block table first.
-        # This way, we can overlap the copy with the following CPU operations.
-        self.input_batch.block_table.commit(num_reqs)
-
         num_prefill_reqs = len(scheduler_output.scheduled_new_reqs)
         num_decode_reqs = len(scheduler_output.scheduled_cached_reqs)
         finished_requests_ids = scheduler_output.finished_req_ids
@@ -361,7 +357,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         req_id = self.input_batch.req_ids[0]
         scheduled = scheduler_output.scheduled_new_reqs[0]
         block_tables_cpu = self.input_batch.block_table.block_tables[
-                0].get_cpu_tensor()
+            0].get_cpu_tensor()
 
         for req_id, scheduled in zip(self.input_batch.req_ids,
                                      scheduler_output.scheduled_new_reqs):
@@ -393,7 +389,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_tables_list = []
         running_request_ids = []
         block_tables_cpu = self.input_batch.block_table.block_tables[
-                0].get_cpu_tensor()
+            0].get_cpu_tensor()
 
         for req_id, scheduled in zip(self.input_batch.req_ids,
                                      scheduler_output.scheduled_cached_reqs):
