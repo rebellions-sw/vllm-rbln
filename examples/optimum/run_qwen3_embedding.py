@@ -12,35 +12,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from vllm.inputs.data import TokensPrompt
-from transformers import AutoTokenizer
-from vllm import AsyncEngineArgs, AsyncLLMEngine, PoolingParams
-import fire
 import asyncio
-import math
+
+import fire
 import torch
+from vllm import AsyncEngineArgs, AsyncLLMEngine, PoolingParams
 
-def get_detailed_instruct(task_description: str, query: str) -> str:
-    return f'Instruct: {task_description}\nQuery:{query}'
-
-# Each query must come with a one-sentence instruction that describes the task
-TASK = 'Given a web search query, retrieve relevant passages that answer the query'
-QUERIES = [
-    get_detailed_instruct(TASK, 'What is the capital of China?'),
-    get_detailed_instruct(TASK, 'Explain gravity')
-]
-DOCUMENTS = [
-    "The capital of China is Beijing.",
-    "Gravity is a force that attracts two bodies towards each other. It gives weight to physical objects and is responsible for the movement of planets around the sun."
-]
-
-INPUT_TEXTS = QUERIES + DOCUMENTS
 
 def get_input_prompts() -> list[str]:
-    return QUERIES + DOCUMENTS
+
+    def get_detailed_instruct(task_description: str, query: str) -> str:
+        return f'Instruct: {task_description}\nQuery:{query}'
+
+    # Each query must come with a one-sentence instruction
+    # that describes the task
+    task = ('Given a web search query, '
+            'retrieve relevant passages that answer the query')
+    documents = [
+        "The capital of China is Beijing.",
+        ("Gravity is a force that attracts two bodies towards each other. "
+         "It gives weight to physical objects and "
+         "is responsible for the movement of planets around the sun."
+        )
+    ]
+
+    queries = [
+        get_detailed_instruct(task, 'What is the capital of China?'),
+        get_detailed_instruct(task, 'Explain gravity')
+    ]
+
+    inputs_texts = queries + documents
+    return inputs_texts
+
 
 async def embed(engine: AsyncLLMEngine, prompt: str, model: str,
-                   requst_id: int):
+                requst_id: int):
     print(f"embed request_id={requst_id}, prompt={prompt}")
     pooling_params = PoolingParams()
     results_generator = engine.encode(
@@ -54,6 +60,7 @@ async def embed(engine: AsyncLLMEngine, prompt: str, model: str,
     async for request_output in results_generator:
         final_output = request_output
     return final_output
+
 
 async def main(
     batch_size: int,
@@ -69,25 +76,26 @@ async def main(
                                   max_model_len=max_seq_len,
                                   block_size=kvcache_block_size,
                                   task="embed")
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt_list = get_input_prompts()
     if len(prompt_list) > 2 * num_input_prompt:
-        raise RuntimeError("The len(QUERIES) and len(DOCUMENTS) should be 2 * `num_input_prompt`.")
+        raise RuntimeError(
+            "The len(QUERIES) and len(DOCUMENTS) ",
+            "should be equal with 2 * `num_input_prompt`."
+        )
     futures = []
     for i, p in enumerate(prompt_list):
         if i == num_input_prompt * 2:
             break
-        print(p)
         futures.append(
             asyncio.create_task(
-                embed(engine,
-                         prompt=p,
-                         model=model_id,
-                         requst_id=i,
-                )
-            )
-        )
+                embed(
+                    engine,
+                    prompt=p,
+                    model=model_id,
+                    requst_id=i,
+                )))
 
     outputs = await asyncio.gather(*futures)
 
@@ -96,12 +104,14 @@ async def main(
 
     print(f"scores: {scores.tolist()}")
 
+
 def entry_point(
     batch_size: int = 1,
     max_seq_len: int = 32768,
     kvcache_block_size: int = 32768,
     num_input_prompt: int = 2,
-    model_id: str = "/qwen3-0.6b-b1-embedding",
+    model_id:
+    str = "/qwen3-0.6b-b1-embedding",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
