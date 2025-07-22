@@ -28,10 +28,10 @@ from .gemma3 import RBLNOptimumGemma3ForConditionalGeneration  # noqa: F401
 from .idefics3 import RBLNOptimumIdefics3ForConditionalGeneration  # noqa: F401
 from .llava_next import (  # noqa: F401
     RBLNOptimumLlavaNextForConditionalGeneration)
+from .model_base import RBLNOptimumDictTableMixin
 from .qwen2_5_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
-from .model_base import RBLNOptimumDictTableMixin
 
 logger = init_logger(__name__)
 
