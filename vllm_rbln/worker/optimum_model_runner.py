@@ -31,10 +31,9 @@ from vllm.worker.model_runner_base import ModelRunnerBase
 
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
-                                                     get_rbln_model_info,
-                                                     is_enc_dec_arch,
-                                                     is_pooling_arch)
+from vllm_rbln.model_executor.models.optimum import (
+    ModelInputForRBLN, RBLNOptimumForEncoderModel, get_rbln_model_info,
+    is_enc_dec_arch, is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -54,6 +53,11 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         if model_cls_name in ["RBLNT5EncoderModel"]:
             vllm_config.model_config.hf_config.__dict__[
                 "is_encoder_decoder"] = False
+        if model_cls_name in ["RBLNQwen3ForCausalLM"
+                              ] and vllm_config.model_config.task == "embed":
+            vllm_config.model_config.hf_config.__dict__["architectures"] = [
+                "Qwen3Model"
+            ]
 
         ModelRunnerBase.__init__(self, vllm_config)
         model_config = self.model_config
@@ -317,7 +321,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     ) -> Optional[SamplerOutput]:
 
         hidden_states = self.model(model_input=model_input)
-        if is_pooling_arch(self.model_config.hf_config):
+        if isinstance(self.model, RBLNOptimumForEncoderModel):
             return [
                 self.model.pool(hidden_states, model_input.pooling_metadata)
             ]

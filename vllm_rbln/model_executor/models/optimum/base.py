@@ -72,6 +72,7 @@ _RBLN_EMBEDDING_MODELS = {
     "XLMRobertaForSequenceClassification":
     ("xlm_roberta_classification", "RBLNXLMRobertaForSequenceClassification"),
     "XLMRobertaModel": ("xlm_roberta", "RBLNXLMRobertaModel"),
+    "Qwen3Model": ("qwen3", "RBLNQwen3Model"),
 }
 
 _RBLN_SUPPORTED_MODELS = {
