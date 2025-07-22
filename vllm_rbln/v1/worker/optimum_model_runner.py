@@ -29,6 +29,7 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
 from vllm.v1.sample.sampler import Sampler
+from vllm.model_executor.layers.sampler import get_sampler
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 
@@ -97,7 +98,7 @@ class RBLNOptimumModelRunner(GPUModelRunner):
         # self.encoder_cache_size = encoder_cache_size
 
         # Sampler
-        self.sampler = Sampler()
+        self.sampler = get_sampler()
         """
         State of the expert parallelism load balancer.
 
