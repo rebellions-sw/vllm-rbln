@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import asyncio
+import os
+from pathlib import Path
 
 import fire
 import torch
@@ -109,6 +111,12 @@ def entry_point(
     num_input_prompt: int = 2,
     model_id: str = "/qwen3-0.6b-b1-embedding",
 ):
+    assert Path(os.path.join(model_id, "modules.json")).is_file(
+    ) or Path(os.path.join(model_id, "1_Pooling")).is_dir(), (
+        "You need `modules.json` and `1_Pooling` "
+        "for pooling configuration of Qwen3 Embedding models."
+        "https://github.com/vllm-project/vllm/blob/3779eb8c81449b924a23457fc77e45a0e6171178/docs/models/pooling_models.md?plain=1#L49"
+        "Please download them and save into the `model_id`.")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
         main(
