@@ -242,9 +242,7 @@ class RBLNOptimumDecoderMixin:
 
 class RBLNOptimumDictTableMixin:
     """
-        It is intended for a model that utilizes a table
-        implemented as a dictionary.
-        The key of table is request ID.
+    Mixin for models using a request-ID keyed table implemented as a dictionary.
     """
 
     def get_table_mapping_values(
