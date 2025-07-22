@@ -28,17 +28,16 @@ def get_input_prompts() -> list[str]:
     # that describes the task
     task = ('Given a web search query, '
             'retrieve relevant passages that answer the query')
-    documents = [
-        "The capital of China is Beijing.",
-        ("Gravity is a force that attracts two bodies towards each other. "
-         "It gives weight to physical objects and "
-         "is responsible for the movement of planets around the sun."
-        )
-    ]
 
     queries = [
         get_detailed_instruct(task, 'What is the capital of China?'),
         get_detailed_instruct(task, 'Explain gravity')
+    ]
+    documents = [
+        "The capital of China is Beijing.",
+        ("Gravity is a force that attracts two bodies towards each other. "
+         "It gives weight to physical objects and "
+         "is responsible for the movement of planets around the sun.")
     ]
 
     inputs_texts = queries + documents
@@ -80,10 +79,8 @@ async def main(
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt_list = get_input_prompts()
     if len(prompt_list) > 2 * num_input_prompt:
-        raise RuntimeError(
-            "The len(QUERIES) and len(DOCUMENTS) ",
-            "should be equal with 2 * `num_input_prompt`."
-        )
+        raise RuntimeError("The len(QUERIES) and len(DOCUMENTS) ",
+                           "should be equal with 2 * `num_input_prompt`.")
     futures = []
     for i, p in enumerate(prompt_list):
         if i == num_input_prompt * 2:
@@ -110,8 +107,7 @@ def entry_point(
     max_seq_len: int = 32768,
     kvcache_block_size: int = 32768,
     num_input_prompt: int = 2,
-    model_id:
-    str = "/qwen3-0.6b-b1-embedding",
+    model_id: str = "/qwen3-0.6b-b1-embedding",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
