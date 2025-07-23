@@ -62,7 +62,6 @@ class RBLNOptimumWorker(WorkerBase):
         self.profiler = None
 
     def init_device(self) -> None:
-        self.init_distributed_environment()
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -138,23 +137,6 @@ class RBLNOptimumWorker(WorkerBase):
         This is required for speculative decoding; it is not yet implemented.
         """
         raise NotImplementedError
-
-    def init_distributed_environment(self):
-        """RBLN uses rebel-compiler for tensor parallelism.
-
-        vLLM still needs the environment inited when TP/PP > 1
-        """
-        init_distributed_environment(
-            world_size=1,
-            rank=self.rank,
-            local_rank=self.local_rank,
-            distributed_init_method=self.distributed_init_method,
-            backend="gloo",
-        )
-        ensure_model_parallel_initialized(
-            1,
-            1,
-        )
 
     def remove_lora(self, lora_id: int) -> bool:
         raise NotImplementedError
