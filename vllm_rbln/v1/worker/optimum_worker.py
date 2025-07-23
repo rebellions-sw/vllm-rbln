@@ -88,6 +88,10 @@ class RBLNOptimumWorker(WorkerBase):
         else:
             num_gpu_blocks = self.scheduler_config.max_num_seqs
 
+        # NOTE vLLM tried to leave a dummy block before execution.
+        # It prevents vLLM from # of blocks == 0 in case of batch size is 1.
+        if num_gpu_blocks == 1:
+            num_gpu_blocks = 2
         return num_gpu_blocks * page_size * num_layers
 
     def execute_model(
