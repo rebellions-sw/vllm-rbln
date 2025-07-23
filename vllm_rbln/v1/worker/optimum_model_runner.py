@@ -17,7 +17,6 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.layers.sampler import get_sampler
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import BatchedTensorInputs
@@ -480,7 +479,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 video_grid_thw = []
                 second_per_grid_ts = []
                 audio_feature_lengths = []
-                use_audio_in_video = False
                 for mm_input in self.requests[req_id].mm_inputs:
                     if mm_input.get("image_grid_thw") is not None:
                         image_grid_thw.extend(
@@ -494,10 +492,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     if mm_input.get("audio_feature_lengths") is not None:
                         audio_feature_lengths.extend(
                             mm_input["audio_feature_lengths"])
-                    if mm_input.get("use_audio_in_video") is True:
-                        use_audio_in_video = True
-
-                hf_config = self.model_config.hf_config
 
             req_ids_to_add.append(req_id)
 
