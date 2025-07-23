@@ -18,7 +18,6 @@ import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
-from vllm.model_executor.layers.sampler import get_sampler
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import BatchedTensorInputs
 from vllm.multimodal.utils import group_mm_inputs_by_modality
@@ -37,7 +36,7 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
 from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
                                                      RBLNOptimumDictTableMixin)
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
-
+from vllm_rbln.v1.sample.sampler import Sampler
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
@@ -98,7 +97,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.encoder_cache_size = encoder_cache_size
 
         # Sampler
-        self.sampler = get_sampler()
+        self.sampler = Sampler()
         """
         State of the expert parallelism load balancer.
 
