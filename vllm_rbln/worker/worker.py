@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A RBLN worker class."""
-import math
 import os
 from typing import Dict, List, Optional, Tuple
 
@@ -290,16 +289,19 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # sequences that can be processed in a single batch. This is equivalent
         # to schedule without PagedAttention.
 
-        # self.model_config or self.scheduler_config or self.vllm_config
-        block_size = self.model_runner.block_size
-        max_num_seqs = self.model_runner.scheduler_config.max_num_seqs
-        max_model_len = self.model_runner.scheduler_config.max_model_len
+        block_size = self.cache_config.block_size
+        max_model_len = self.model_config.max_model_len
 
-        # no of blocks is determined by user-defined value or model spec
-        # -1 : this means that we need a last block as dummy block.
-        num_gpu_blocks = math.ceil(max_model_len / block_size) * max_num_seqs
+        # TODO : we should implement get_kvcache_num_blocks
+        if True:
+            num_gpu_blocks = max_model_len // block_size
+        else:
+            num_gpu_blocks = (
+                self.model_runner.model.model.get_kvcache_num_blocks() - 1)
+
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1
+        num_cpu_blocks = 0
 
         # Swap not yet supported with RBLN backend.
         num_cpu_blocks = 0
