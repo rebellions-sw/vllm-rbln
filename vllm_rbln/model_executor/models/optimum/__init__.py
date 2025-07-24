@@ -74,4 +74,5 @@ __all__ = [
     "get_rbln_model_info",
     "ModelInputForRBLN",
     "RBLNOptimumDictTableMixin",
+    "RBLNOptimumForEncoderModel"
 ]
