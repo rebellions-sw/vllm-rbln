@@ -69,7 +69,6 @@ def load_model(
 
 
 __all__ = [
-    "load_model",
-    "get_rbln_model_info",
-    "ModelInputForRBLN",
+    "load_model", "get_rbln_model_info", "ModelInputForRBLN",
+    "RBLNOptimumForEncoderModel"
 ]

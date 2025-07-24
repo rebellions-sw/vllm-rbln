@@ -114,14 +114,17 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
         if token_type_ids:
             kwargs["token_type_ids"] = token_type_ids
         else:
-            rbln_model_input_names = self.rbln_model_config.model_input_names
-            if "token_type_ids" in rbln_model_input_names:
-                kwargs["token_type_ids"] = torch.zeros_like(input_ids)
+            model_input_names = getattr(self.rbln_model_config,
+                                        "model_input_names", None)
+            if model_input_names is not None:
+                rbln_model_input_names = \
+                    self.rbln_model_config.model_input_names
+                if "token_type_ids" in rbln_model_input_names:
+                    kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
         embeds = self.model.forward(**kwargs)
 
         hidden_states = embeds[0]
-
         if isinstance(hidden_states, tuple):
             hidden_states = hidden_states[0]
 
