@@ -135,6 +135,24 @@ class RblnPlatform(Platform):
                 "Multi-step execution is not supported for RBLN")
 
         model_config = vllm_config.model_config
+        task = model_config.task
+        supported_tasks = set(model_config.supported_tasks)
+        pooling_tasks = {"embed", "classify", "reward", "score"}
+
+        if task == "auto":
+            is_pooling = bool(pooling_tasks & supported_tasks)
+            is_generate = "generate" in supported_tasks
+        else:
+            is_pooling = task in pooling_tasks
+            is_generate = task == "generate"
+
+        if is_pooling and envs.VLLM_USE_V1:
+            raise ValueError("Pooling models are only supported on v0.")
+
+        if is_generate and cls.supports_v1(
+                model_config) and not envs.VLLM_USE_V1:
+            raise ValueError("V0 support for decoder models is deprecated.")
+
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
             logger.warning("bfloat16 is not supported on RBLN.")

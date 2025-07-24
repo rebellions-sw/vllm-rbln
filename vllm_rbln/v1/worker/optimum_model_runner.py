@@ -17,7 +17,6 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import BatchedTensorInputs
 from vllm.multimodal.utils import group_mm_inputs_by_modality
@@ -146,22 +145,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # None in the first PP rank. The rest are set after load_model.
         # TODO(eunji) It will be implemented for PP
         self.intermediate_tensors: Optional[IntermediateTensors] = None
-
-        # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-        if self.uses_mrope:
-            # NOTE: `mrope_positions` is implemented with one additional dummy
-            # position on purpose to make it non-contiguous so that it can work
-            # with torch compile.
-            # See detailed explanation in https://github.com/vllm-project/vllm/pull/12128#discussion_r1926431923
-
-            # NOTE: When M-RoPE is enabled, position ids are 3D regardless of
-            # the modality of inputs. For text-only inputs, each dimension has
-            # identical position IDs, making M-RoPE functionally equivalent to
-            # 1D-RoPE.
-            # See page 5 of https://arxiv.org/abs/2409.12191
-            self.mrope_positions = torch.zeros((3, self.max_num_tokens + 1),
-                                               dtype=torch.int64,
-                                               device=self.device)
 
     def load_model(self) -> None:
         self.model = get_optimum_model(model_config=self.model_config,
@@ -495,7 +478,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 video_grid_thw = []
                 second_per_grid_ts = []
                 audio_feature_lengths = []
-                use_audio_in_video = False
                 for mm_input in self.requests[req_id].mm_inputs:
                     if mm_input.get("image_grid_thw") is not None:
                         image_grid_thw.extend(
@@ -509,22 +491,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     if mm_input.get("audio_feature_lengths") is not None:
                         audio_feature_lengths.extend(
                             mm_input["audio_feature_lengths"])
-                    if mm_input.get("use_audio_in_video") is True:
-                        use_audio_in_video = True
-
-                hf_config = self.model_config.hf_config
-
-                self.requests[req_id].mrope_positions, \
-                    self.requests[req_id].mrope_position_delta = \
-                    MRotaryEmbedding.get_input_positions_tensor(
-                        self.requests[req_id].prompt_token_ids,
-                        hf_config=hf_config,
-                        image_grid_thw=image_grid_thw,
-                        video_grid_thw=video_grid_thw,
-                        second_per_grid_ts=second_per_grid_ts,
-                        audio_feature_lengths=audio_feature_lengths,
-                        use_audio_in_video=use_audio_in_video,
-                    )
 
             req_ids_to_add.append(req_id)
 
