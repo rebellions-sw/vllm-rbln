@@ -34,8 +34,9 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
                                                      RBLNOptimumDictTableMixin)
-from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 from vllm_rbln.v1.sample.sampler import Sampler
+from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
+
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
