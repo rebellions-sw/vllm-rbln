@@ -33,10 +33,10 @@ jobs:
       NUM_INPUT_PROMPT: 1
       RBLN_VERBOSE: 6
     steps:
-      - name: Set up Python 3.9
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.12"
 
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
