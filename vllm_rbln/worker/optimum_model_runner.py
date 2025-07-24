@@ -53,14 +53,20 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         if model_cls_name in ["RBLNT5EncoderModel"]:
             vllm_config.model_config.hf_config.__dict__[
                 "is_encoder_decoder"] = False
-        # NOTE The architecture of Qwen3-Embedding model in huggingface
-        # is `Qwen3ForCausalLM`. But it have to be mapped to `Qwen3Model`
-        # for optimum-rbln.
         if model_cls_name in ["RBLNQwen3ForCausalLM"
                               ] and vllm_config.model_config.task == "embed":
+            # NOTE The architecture of Qwen3-Embedding model in huggingface
+            # is `Qwen3ForCausalLM`. But it have to be mapped to `Qwen3Model`
+            # for optimum-rbln.
             vllm_config.model_config.hf_config.__dict__["architectures"] = [
                 "Qwen3Model"
             ]
+            # NOTE It is for cases
+            # where the pooling configuration files (modules.json, ...)
+            # do not exist in the compiled Qwen3 embedding model directory.
+            if vllm_config.model_config.pooler_config.pooling_type is None:
+                vllm_config.model_config.pooler_config.pooling_type = "LAST"
+                vllm_config.model_config.pooler_config.normalize = True
 
         ModelRunnerBase.__init__(self, vllm_config)
         model_config = self.model_config
