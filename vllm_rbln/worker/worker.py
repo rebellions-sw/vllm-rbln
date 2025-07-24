@@ -298,7 +298,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             config=self.model_config,
             tensor_parallel_size=self.parallel_config.tensor_parallel_size,
             kvcache_block_size=block_size,
-            nbits_per_param=16,  # quantization?
+            # quantization : 4 (This is an ad-hoc value. Need to fix it)
+            nbits_per_param=16 if not self.model_config.quantization else 4,
             n_model_params=sum(p.numel()
                                for p in self.model_runner.model.parameters()),
             # 1 : prefill

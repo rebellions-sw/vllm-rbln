@@ -197,7 +197,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         seq_group_metadata_list: List[SequenceGroupMetadata],
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert len(seq_group_metadata_list) > 0
-        list_input_block_ids: List[int] = []
+        list_input_block_ids: List[List[int]] = []
 
         block_size = self.runner.block_size
         assert (
@@ -221,7 +221,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
             block_table = seq_group_metadata.block_tables[seq_id]
             assert len(block_table) == math.ceil(seq_data.get_len() /
                                                  block_size)
-            list_input_block_ids.extend(block_table)
+            list_input_block_ids.append(block_table)
             data.input_tokens.append(tokens)
             data.input_positions.append(list(range(computed_len, seq_len)))
             data.num_prefills += 1
@@ -241,7 +241,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         dummy = self.runner.cache_config.num_gpu_blocks
         # make_tensor_with_pad takes List[List[]] as input
         # To make it work, input_block_ids is expanded
-        input_block_ids = make_tensor_with_pad([list_input_block_ids],
+        input_block_ids = make_tensor_with_pad(list_input_block_ids,
                                                max_len=num_partition,
                                                pad=dummy,
                                                dtype=torch.long,
