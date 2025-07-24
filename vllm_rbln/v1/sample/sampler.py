@@ -71,14 +71,15 @@ class Sampler(VLLMSampler):
             self, sorted_logits: torch.Tensor,
             sampling_metadata: SamplingMetadata) -> torch.Tensor:
         if sampling_metadata.temperature is not None:
-            sorted_logits = sorted_logits.div_(sampling_metadata.temperature)
+            sorted_logits = sorted_logits.div_(
+                sampling_metadata.temperature.unsqueeze(-1))
 
         # Convert to probabilities
         sorted_probs = torch.softmax(sorted_logits, dim=-1)
         # Calculate cumulative probabilities
         cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
         # Create mask for tokens to keep (cumulative probability <= top_p)
-        top_p_threshold = sampling_metadata.top_p
+        top_p_threshold = sampling_metadata.top_p.unsqueeze(-1)
         mask = cumsum_probs <= top_p_threshold
 
         # Always keep at least the first token
