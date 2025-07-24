@@ -29,7 +29,7 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
-
+from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
@@ -37,6 +37,20 @@ from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
 from vllm_rbln.v1.sample.sampler import Sampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
+import os
+
+
+def _create_sampler():
+    """Create appropriate sampler based on environment configuration."""
+    TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
+    
+    use_rbln_sample = (
+        os.environ.get("VLLM_RBLN_SAMPLER", "")
+        .strip()
+        .lower() in TRUTHY_VALUES
+    )
+    
+    return RBLNSampler() if use_rbln_sample else Sampler()
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
@@ -97,7 +111,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.encoder_cache_size = encoder_cache_size
 
         # Sampler
-        sampler = Sampler()
+        sampler = _create_sampler()
         self.sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         """
         State of the expert parallelism load balancer.
