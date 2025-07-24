@@ -28,6 +28,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
+from vllm.v1.attention.backends.utils import validate_kv_sharing_target
 
 # @FIXME(RBLN): We hope to remove the Custom Attention forward.
 # The original vLLM forward function will be used in the future.
@@ -48,6 +49,7 @@ def __custom_init__(
     use_mla: bool = False,
     prefix: str = "",
     attn_type: str = AttentionType.DECODER,
+    kv_sharing_target_layer_name: Optional[str] = None,
     **extra_impl_args,
 ) -> None:
     """
@@ -90,6 +92,7 @@ def __custom_init__(
     # FlashAttn doesn't support quantizing the kv-cache only
     # but requires q to be quantized as well.
     self._q_scale = torch.tensor(1.0, dtype=torch.float32)
+    self._prob_scale = torch.tensor(1.0, dtype=torch.float32)
 
     # We also keep the float32 versions of k/v_scale for attention
     # backends that don't support tensors (Flashinfer)
@@ -110,8 +113,8 @@ def __custom_init__(
         # TODO (mgoin): kv cache dtype should be specified in the FP8
         # checkpoint config and become the "auto" behavior
         if self.kv_cache_dtype == "fp8_e5m2":
-            raise ValueError("fp8_e5m2 kv-cache is not supported with "
-                             "fp8 checkpoints.")
+            raise ValueError(
+                "fp8_e5m2 kv-cache is not supported with fp8 checkpoints.")
         # If quantization is enabled, we make "k_scale" and "v_scale"
         # parameters so that it can be loaded from the model checkpoint.
         # The k/v_scale will then be converted back to native float32
@@ -130,10 +133,20 @@ def __custom_init__(
                                     blocksparse_params is not None,
                                     use_mla=use_mla)
     impl_cls = attn_backend.get_impl_cls()
-    self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
-                         alibi_slopes, sliding_window, kv_cache_dtype,
-                         blocksparse_params, logits_soft_cap, attn_type,
-                         **extra_impl_args)
+    self.impl = impl_cls(
+        num_heads,
+        head_size,
+        scale,
+        num_kv_heads,
+        alibi_slopes,
+        sliding_window,
+        kv_cache_dtype,
+        blocksparse_params,
+        logits_soft_cap,
+        attn_type,
+        kv_sharing_target_layer_name,
+        **extra_impl_args,
+    )
     self.backend = backend_name_to_enum(attn_backend.get_name())
     self.dtype = dtype
 
@@ -151,6 +164,19 @@ def __custom_init__(
     compilation_config.static_forward_context[prefix] = self
     self.layer_name = prefix
     self.attn_type = attn_type
+
+    if kv_sharing_target_layer_name is not None:
+        if not envs.VLLM_USE_V1:
+            raise NotImplementedError(
+                "Cross-layer KV sharing is not supported in V0.")
+
+        validate_kv_sharing_target(
+            prefix,
+            kv_sharing_target_layer_name,
+            compilation_config.static_forward_context,
+        )
+    self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
+
     # use a placeholder kv cache tensor during init, which will be replaced
     # by bind_kv_cache
     # this variable will not be accessed if use_direct_call is True
@@ -163,7 +189,7 @@ def __custom_init__(
     self.k_range = torch.tensor(envs.K_SCALE_CONSTANT, dtype=torch.float32)
     self.v_range = torch.tensor(envs.V_SCALE_CONSTANT, dtype=torch.float32)
 
-    # FIXME(jiwoo.park)
+    # NOTE(jiwoo.park) layer index is required to use external binding KV cache.
     self.layer_index = extract_layer_index(self.layer_name)
 
 
@@ -191,8 +217,7 @@ def custom_attention_forward(
         if attn_metadata.enable_kv_scales_calculation:
             self.calc_kv_scales(query, key, value)
     if self.use_output:
-        output_shape = (output_shape
-                        if output_shape is not None else query.shape)
+        output_shape = output_shape if output_shape is not None else query.shape
         output = torch.empty(output_shape,
                              dtype=query.dtype,
                              device=query.device)
@@ -213,24 +238,28 @@ def custom_attention_forward(
         if self.use_direct_call:
             forward_context: ForwardContext = get_forward_context()
             attn_metadata = forward_context.attn_metadata
-            '''
+            if isinstance(attn_metadata, dict):
+                attn_metadata = attn_metadata[self.layer_name]
+            """
             NOTE(jiwoo.park) - To represent kv cache as model input,
             modify attention
             instead of attention layer's embedded kv cache(self.kv_cache),
             use attention metadata's kv cache.
             attention metadata's kv cache must equal
             the attention layer's embedded kv cache.
-            '''
+            """
             assert attn_metadata.kv_caches is not None
             assert self.layer_index < len(attn_metadata.kv_caches)
             self_kv_cache = attn_metadata.kv_caches[self.layer_index]
-            self.impl.forward(self,
-                              query,
-                              key,
-                              value,
-                              self_kv_cache,
-                              attn_metadata,
-                              output=output)
+            self.impl.forward(
+                self,
+                query,
+                key,
+                value,
+                self_kv_cache,
+                attn_metadata,
+                output=output,
+            )
         else:
             torch.ops.vllm.unified_attention_with_output(
                 query, key, value, output, self.layer_name)
@@ -239,14 +268,16 @@ def custom_attention_forward(
         if self.use_direct_call:
             forward_context = get_forward_context()
             attn_metadata = forward_context.attn_metadata
-            '''
+            if isinstance(attn_metadata, dict):
+                attn_metadata = attn_metadata[self.layer_name]
+            """
             NOTE(jiwoo.park) - To represent kv cache as model input,
             modify attention
             instead of attention layer's embedded kv cache(self.kv_cache),
             use attention metadata's kv cache.
             attention metadata's kv cache must equal
             the attention layer's embedded kv cache.
-            '''
+            """
             assert attn_metadata.kv_caches is not None
             assert self.layer_index < len(attn_metadata.kv_caches)
             self_kv_cache = attn_metadata.kv_caches[self.layer_index]

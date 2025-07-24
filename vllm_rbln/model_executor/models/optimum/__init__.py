@@ -70,8 +70,6 @@ def load_model(
 
 
 __all__ = [
-    "load_model",
-    "get_rbln_model_info",
-    "ModelInputForRBLN",
-    "RBLNOptimumDictTableMixin",
+    "load_model", "get_rbln_model_info", "ModelInputForRBLN",
+    "RBLNOptimumDictTableMixin", "RBLNOptimumForEncoderModel"
 ]
