@@ -73,22 +73,17 @@ class RBLNOptimumWorker(WorkerBase):
 
         attn_impl = self.model_runner.model.model.get_attn_impl() if hasattr(
             self.model_runner.model.model, "get_attn_impl") else None
-
+        # FIXME It requires more check.
         if attn_impl is not None and attn_impl == "flash_attn":
             # We use the last block as dummy block
             num_gpu_blocks = (
-                self.model_runner.model.model.get_kvcache_num_blocks() - 1)
+                self.model_runner.model.model.get_kvcache_num_blocks())
 
             if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
                 num_gpu_blocks = int(npu_num_blocks) - 1
 
         else:
-            num_gpu_blocks = self.scheduler_config.max_num_seqs
-
-        # NOTE vLLM tried to leave a dummy block before execution.
-        # It prevents vLLM from # of blocks == 0 in case of batch size is 1.
-        if num_gpu_blocks == 1:
-            num_gpu_blocks = 2
+            num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
         return num_gpu_blocks * page_size * num_layers
 
     def execute_model(
