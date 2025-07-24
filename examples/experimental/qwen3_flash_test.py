@@ -75,7 +75,7 @@ llm = LLM(
     #block_size=1024,
     enable_chunked_prefill=True,
     max_num_batched_tokens=128,
-    max_num_seqs=2,
+    max_num_seqs=5,
     #tensor_parallel_size=4,
     #enable_expert_parallel=True,
 )

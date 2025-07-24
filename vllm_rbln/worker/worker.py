@@ -38,6 +38,7 @@ except ImportError:
 
 from vllm_rbln.logger import init_logger
 from vllm_rbln.worker.model_runner import RBLNModelRunner
+from vllm_rbln.worker.utils import get_maximum_num_blocks
 
 logger = init_logger(__name__)
 
@@ -290,14 +291,19 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # to schedule without PagedAttention.
 
         block_size = self.cache_config.block_size
-        max_model_len = self.model_config.max_model_len
 
-        # TODO : we should implement get_kvcache_num_blocks
-        if True:
-            num_gpu_blocks = max_model_len // block_size
-        else:
-            num_gpu_blocks = (
-                self.model_runner.model.model.get_kvcache_num_blocks() - 1)
+        # This function comes from optimum-rbln.
+        # We must keep it updated as optimum is upgraded.
+        max_num_blocks = get_maximum_num_blocks(
+            config=self.model_config,
+            tensor_parallel_size=self.parallel_config.tensor_parallel_size,
+            kvcache_block_size=block_size,
+            nbits_per_param=16,  # quantization?
+            n_model_params=sum(p.numel()
+                               for p in self.model_runner.model.parameters()),
+            # 1 : prefill
+            num_runtimes=1 + self.scheduler_config.max_num_seqs)
+        num_gpu_blocks = (max_num_blocks - 1)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1

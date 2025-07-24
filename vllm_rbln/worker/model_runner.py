@@ -280,7 +280,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert len(seq_group_metadata_list) > 0
 
-        list_input_block_ids: List[int] = []
+        list_input_block_ids: List[List[int]] = []
         block_size = self.block_size
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
@@ -312,6 +312,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         batch_padding_size = self.max_num_seqs - len(data.input_tokens)
         data.input_tokens.extend([[0]] * batch_padding_size)
         data.input_positions.extend([[0]] * batch_padding_size)
+        list_input_block_ids.extend([[0]] * batch_padding_size)
 
         num_partition = self.max_model_len // block_size
         dummy = self.runner.cache_config.num_gpu_blocks
