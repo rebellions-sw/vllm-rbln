@@ -97,7 +97,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.encoder_cache_size = encoder_cache_size
 
         # Sampler
-        self.sampler = Sampler()
+        sampler = Sampler()
+        self.sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         """
         State of the expert parallelism load balancer.
 

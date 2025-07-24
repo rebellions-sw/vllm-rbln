@@ -33,7 +33,6 @@ class Sampler(VLLMSampler):
             dynamic=False,
             fullgraph=False,
             backend="rbln",
-            # options={"device": device},
         )
 
     @torch.compiler.disable
