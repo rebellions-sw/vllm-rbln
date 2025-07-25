@@ -80,7 +80,7 @@ class RBLNOptimumWorker(WorkerBase):
                 self.model_runner.model.model.get_kvcache_num_blocks())
 
             if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
-                num_gpu_blocks = int(npu_num_blocks) - 1
+                num_gpu_blocks = int(npu_num_blocks)
 
         else:
             num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
