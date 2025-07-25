@@ -13,7 +13,7 @@ import os
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Optional, Union
-
+import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
@@ -268,9 +268,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if num_prefill_reqs > 1 or (num_prefill_reqs >= 1
                                     and num_decode_reqs > 0):
             raise RuntimeError(
-                "prefill stage request cannot processed with other requests.")
+                "Prefill stage request cannot processed with other requests.")
 
         if num_prefill_reqs > 0:
+            is_prefill = True
+        elif num_decode_reqs == 1 and scheduler_output.scheduled_cached_reqs[0].resumed_from_preemption == True:
             is_prefill = True
 
         if is_prefill:
@@ -363,30 +365,41 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_positions: list[list[int]] = []
         running_request_ids = []
         batched_mm_inputs: Optional[BatchedTensorInputs] = None
-        assert len(scheduler_output.scheduled_new_reqs) == 1
+        is_preempted = False
+
+        if len(scheduler_output.scheduled_new_reqs) == 1:
+            reqs = scheduler_output.scheduled_new_reqs
+        elif len(scheduler_output.scheduled_cached_reqs) == 1:
+            reqs = scheduler_output.scheduled_cached_reqs
+            is_preempted = True
+        else:
+            raise RuntimeError("Prefill stage request cannot processed with other requests.")
 
         req_id = self.input_batch.req_ids[0]
-        scheduled = scheduler_output.scheduled_new_reqs[0]
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
 
-        for req_id, scheduled in zip(self.input_batch.req_ids,
-                                     scheduler_output.scheduled_new_reqs):
+        for req_id, scheduled in zip(self.input_batch.req_ids, reqs):
             req_index = self.input_batch.req_id_to_index[req_id]
-            prompt_tokens = scheduled.prompt_token_ids
-            input_tokens.append(prompt_tokens)
+            if is_preempted:
+                logger.warning("Request %s is resumed.", req_id)
+                num_token = int(self.input_batch.num_tokens[req_index])
+                prompt_tokens = self.input_batch.token_ids_cpu[req_index][:num_token]
+            else:
+                prompt_tokens = np.array(scheduled.prompt_token_ids)
             seq_len = len(prompt_tokens)
-            input_positions.append(list(range(seq_len)))
+            input_positions = list(range(seq_len))
             block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table)
-            block_table = block_table.unsqueeze(0)
             running_request_ids.append(req_id)
+
 
         if self.is_multimodal_model:
             batched_mm_inputs = self._get_multi_kwargs(scheduler_output)
 
-        input_tokens = torch.tensor(input_tokens)
-        input_positions = torch.tensor(input_positions)
+        input_tokens = torch.tensor(prompt_tokens).unsqueeze(0)
+        input_positions = torch.tensor(input_positions).unsqueeze(0)
+        block_table = block_table.unsqueeze(0)
 
         return input_tokens, input_positions, block_table, \
             batched_mm_inputs, running_request_ids
