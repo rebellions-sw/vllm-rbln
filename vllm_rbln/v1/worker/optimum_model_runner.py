@@ -13,6 +13,7 @@ import os
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Optional, Union
+
 import numpy as np
 import torch
 import torch.distributed
@@ -270,9 +271,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             raise RuntimeError(
                 "Prefill stage request cannot processed with other requests.")
 
-        if num_prefill_reqs > 0:
-            is_prefill = True
-        elif num_decode_reqs == 1 and scheduler_output.scheduled_cached_reqs[0].resumed_from_preemption == True:
+        if num_prefill_reqs > 0 or \
+            (num_decode_reqs == 1 and \
+            scheduler_output.scheduled_cached_reqs[0].resumed_from_preemption):
             is_prefill = True
 
         if is_prefill:
@@ -373,7 +374,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             reqs = scheduler_output.scheduled_cached_reqs
             is_preempted = True
         else:
-            raise RuntimeError("Prefill stage request cannot processed with other requests.")
+            raise RuntimeError(
+                "Prefill stage request cannot processed with other requests.")
 
         req_id = self.input_batch.req_ids[0]
         block_tables_cpu = self.input_batch.block_table.block_tables[
@@ -384,7 +386,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             if is_preempted:
                 logger.warning("Request %s is resumed.", req_id)
                 num_token = int(self.input_batch.num_tokens[req_index])
-                prompt_tokens = self.input_batch.token_ids_cpu[req_index][:num_token]
+                prompt_tokens = self.input_batch.token_ids_cpu[
+                    req_index][:num_token]
             else:
                 prompt_tokens = np.array(scheduled.prompt_token_ids)
             seq_len = len(prompt_tokens)
@@ -392,7 +395,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table)
             running_request_ids.append(req_id)
-
 
         if self.is_multimodal_model:
             batched_mm_inputs = self._get_multi_kwargs(scheduler_output)
