@@ -50,12 +50,18 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
-        is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables
 
         request_nums = input_ids.shape[0]
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
+
+        # V1
+        if model_input.sampling_metadata is None:
+            is_prompt = model_input.is_prompt
+        # V0
+        else:
+            is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         if is_prompt:
             image_input = None

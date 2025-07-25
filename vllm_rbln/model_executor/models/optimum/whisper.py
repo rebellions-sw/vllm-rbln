@@ -140,3 +140,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         if input_features is not None:
             input_features = input_features.squeeze(0)
         return input_features
+
+    def clear_dict_table(self):
+        self.table_mapping.clear()
