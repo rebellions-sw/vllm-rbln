@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import os
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,7 +18,6 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.model_executor.layers.sampler import get_sampler
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import BatchedTensorInputs
 from vllm.multimodal.utils import group_mm_inputs_by_modality
@@ -31,11 +31,23 @@ from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 
+from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
                                                      RBLNOptimumDictTableMixin)
+from vllm_rbln.v1.sample.sampler import Sampler
+from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
+
+logger = init_logger(__name__)
+
+
+def _use_rbln_sampler() -> bool:
+    """Check if RBLN sampler should be used based on environment variable."""
+    TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
+    return os.environ.get("VLLM_RBLN_SAMPLER",
+                          "").strip().lower() in TRUTHY_VALUES
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
@@ -97,7 +109,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.encoder_cache_size = encoder_cache_size
 
         # Sampler
-        self.sampler = get_sampler()
+        use_rbln_sampler = _use_rbln_sampler()
+        logger.info("Using RBLN sampler: %s", use_rbln_sampler)
+
+        sampler = RBLNSampler() if use_rbln_sampler else Sampler()
+
+        if use_rbln_sampler:
+            # Use torch.compile for optimized RBLN sampler
+            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
+
+        self.sampler = sampler
         """
         State of the expert parallelism load balancer.
 
