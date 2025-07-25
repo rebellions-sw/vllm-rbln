@@ -43,14 +43,11 @@ from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 logger = init_logger(__name__)
 
 
-def _create_sampler():
-    """Create appropriate sampler based on environment configuration."""
+def _use_rbln_sampler() -> bool:
+    """Check if RBLN sampler should be used based on environment variable."""
     TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
-
-    use_rbln_sample = (os.environ.get("VLLM_RBLN_SAMPLER", "").strip().lower()
-                       in TRUTHY_VALUES)
-    logger.info("Use rbln_sampler = %s", use_rbln_sample)
-    return RBLNSampler() if use_rbln_sample else Sampler()
+    return os.environ.get("VLLM_RBLN_SAMPLER",
+                          "").strip().lower() in TRUTHY_VALUES
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
@@ -112,8 +109,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.encoder_cache_size = encoder_cache_size
 
         # Sampler
-        sampler = _create_sampler()
-        self.sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
+        use_rbln_sampler = _use_rbln_sampler()
+        logger.info("Using RBLN sampler: %s", use_rbln_sampler)
+
+        sampler = RBLNSampler() if use_rbln_sampler else Sampler()
+
+        if use_rbln_sampler:
+            # Use torch.compile for optimized RBLN sampler
+            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
+
+        self.sampler = sampler
         """
         State of the expert parallelism load balancer.
 
