@@ -11,15 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+# isort: off
 import torch
 from vllm.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.ops.topk_topp_sampler import random_sample
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 
-from vllm_rbln.v1.sample.ops.penalties import (
-    apply_all_penalties as rbln_apply_all_penalties)
+from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
+                                               rbln_apply_all_penalties)
 
 logger = init_logger(__name__)
 
