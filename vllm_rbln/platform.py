@@ -152,7 +152,7 @@ class RblnPlatform(Platform):
         if is_generate and cls.supports_v1(
                 model_config
         ) and not envs.VLLM_USE_V1 and not model_config.is_encoder_decoder:
-            raise ValueError("V0 support for decoder models is deprecated.")
+            logger.warning("V0 support for decoder models is deprecated.")
 
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
