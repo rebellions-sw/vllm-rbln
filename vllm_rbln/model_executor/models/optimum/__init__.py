@@ -26,6 +26,7 @@ from .encoder import RBLNOptimumForEncoderModel
 from .encoder_decoder import RBLNOptimumEncoderDecoder
 from .gemma3 import RBLNOptimumGemma3ForConditionalGeneration  # noqa: F401
 from .idefics3 import RBLNOptimumIdefics3ForConditionalGeneration  # noqa: F401
+from .llava import RBLNOptimumLlavaForConditionalGeneration  # noqa: F401
 from .llava_next import (  # noqa: F401
     RBLNOptimumLlavaNextForConditionalGeneration)
 from .model_base import RBLNOptimumDictTableMixin
