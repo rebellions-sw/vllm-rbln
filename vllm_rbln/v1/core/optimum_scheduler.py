@@ -126,7 +126,8 @@ class RBLNOptimumScheduler(Scheduler):
 
                 num_external_computed_tokens = 0
                 load_kv_async = False
-
+                # from fpdb import ForkedPdb
+                # ForkedPdb().set_trace()
                 # Get already-cached tokens.
                 if request.num_computed_tokens == 0:
                     # Get locally-cached tokens.
@@ -135,10 +136,10 @@ class RBLNOptimumScheduler(Scheduler):
                             request)
 
                     # Get externally-cached tokens if using a KVConnector.
-                    if self.connector is not None:
-                        num_external_computed_tokens, load_kv_async = (
-                            self.connector.get_num_new_matched_tokens(
-                                request, num_new_local_computed_tokens))
+                    # if self.connector is not None:
+                    #     num_external_computed_tokens, load_kv_async = (
+                    #         self.connector.get_num_new_matched_tokens(
+                    #             request, num_new_local_computed_tokens))
 
                     # Total computed tokens (local + external).
                     num_computed_tokens = (num_new_local_computed_tokens +
@@ -198,12 +199,12 @@ class RBLNOptimumScheduler(Scheduler):
                 # if a load is needed. Note that
                 # This information is used to determine if a load is
                 # needed for this request.
-                if self.connector is not None:
-                    self.connector.update_state_after_alloc(
-                        request,
-                        new_computed_blocks + new_blocks,
-                        num_external_computed_tokens,
-                    )
+                # if self.connector is not None:
+                #     self.connector.update_state_after_alloc(
+                #         request,
+                #         new_computed_blocks + new_blocks,
+                #         num_external_computed_tokens,
+                #     )
 
                 self.waiting.popleft()
                 if load_kv_async:
@@ -434,9 +435,9 @@ class RBLNOptimumScheduler(Scheduler):
         # 1. Plan the KV cache store
         # 2. Wrap up all the KV cache load / save ops into an opaque object
         # 3. Clear the internal states of the connector
-        if self.connector is not None:
-            meta = self.connector.build_connector_meta(scheduler_output)
-            scheduler_output.kv_connector_metadata = meta
+        # if self.connector is not None:
+        #     meta = self.connector.build_connector_meta(scheduler_output)
+        #     scheduler_output.kv_connector_metadata = meta
 
         events = self.kv_cache_manager.take_events()
         if events:
