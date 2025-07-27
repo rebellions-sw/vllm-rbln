@@ -16,8 +16,10 @@ from typing import Any, List, Optional, Union
 import torch
 from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.llava import (LlavaImageInputs,
-                                                   LlavaImagePixelInputs)
+from vllm.model_executor.models.llava import (LlavaImageEmbeddingInputs,
+                                              LlavaImageInputs,
+                                              LlavaImagePixelInputs,
+                                              PixtralHFImagePixelInputs)
 from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN, version_error
@@ -27,7 +29,7 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
-                                                   RBLNOptimumDecoderMixin):
+                                               RBLNOptimumDecoderMixin):
 
     def __init__(
         self,
@@ -101,15 +103,20 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         request_nums = input_ids.shape[0]
-
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
                 **model_input.multi_modal_kwargs)
             if image_input is not None:
-                assert image_input["type"] == "pixel_values"
-                pixel_values = image_input["pixel_values"]
+                if image_input["type"] == "pixel_values":
+                    pixel_values = image_input["pixel_values"]
+                    image_sizes = None
+                elif image_input["type"] == "pixel_values_pixtral":
+                    pixel_values = image_input["pixel_values"]
+                    image_sizes = torch.tensor(
+                        pixel_values.shape[-2:]).unsqueeze(0)
         else:
             pixel_values = None
+            image_sizes = None
 
         kwargs = self.preprocess_for_decoder(
             is_prompt,
@@ -132,6 +139,7 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             input_ids=input_ids,
             cache_position=cache_position,
             pixel_values=pixel_values,
+            image_sizes=image_sizes,
         )
 
         if not is_prompt:
@@ -151,11 +159,12 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
-            # if self.config.vision_config.model_type == "pixtral":
-            #     return PixtralHFImagePixelInputs(
-            #         type="pixel_values_pixtral",
-            #         pixel_values=flatten_bn(pixel_values),
-            #     )
+            # Pixtral
+            if hasattr(self.model.rbln_config.vision_tower, "max_image_size"):
+                return PixtralHFImagePixelInputs(
+                    type="pixel_values_pixtral",
+                    pixel_values=flatten_bn(pixel_values),
+                )
 
             return LlavaImagePixelInputs(
                 type="pixel_values",
