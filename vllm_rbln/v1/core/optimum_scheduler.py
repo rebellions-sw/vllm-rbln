@@ -126,8 +126,7 @@ class RBLNOptimumScheduler(Scheduler):
 
                 num_external_computed_tokens = 0
                 load_kv_async = False
-                # from fpdb import ForkedPdb
-                # ForkedPdb().set_trace()
+
                 # Get already-cached tokens.
                 if request.num_computed_tokens == 0:
                     # Get locally-cached tokens.
