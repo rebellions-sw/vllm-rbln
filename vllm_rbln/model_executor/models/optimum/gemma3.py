@@ -14,6 +14,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, cast
 
+from transformers import AutoTokenizer
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
@@ -32,8 +33,6 @@ from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
                          RBLNOptimumModelBase)
 
 logger = init_logger(__name__)
-
-RBLN_GEMMA3_PAD_TOKEN_ID = 262143
 
 
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
@@ -55,8 +54,8 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
                 image_start + padded_seq_len) % image_prefill_chunk_size
             padded_seq_len += pad_needed
 
-        pad_token = "<unused6241>"
-        pad_token_id = RBLN_GEMMA3_PAD_TOKEN_ID
+        pad_token = self.info.get_hf_processor().tokenizer.pad_token
+        pad_token_id = self.info.get_hf_processor().tokenizer.pad_token_id
 
         prompt_ids = prompt_ids + [pad_token_id] * padded_seq_len
         prompt = prompt + pad_token * padded_seq_len
@@ -104,6 +103,9 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
         )
+
+        tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
+        self.pad_token_id = tokenizer.pad_token_id
 
         self.sliding_window_table: Dict[str, SlidingWindowEntry] = {}
 
@@ -159,8 +161,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                       1,
                                       dtype=position_id_dtype)
         cache_positions[:request_nums] = (position_ids[:request_nums])
-
-        position_ids = position_ids - padded_cache_lengths_tensor
+        position_ids[:request_nums] = position_ids[:request_nums] - padded_cache_lengths_tensor[:request_nums]
 
         return local_block_table_id, attention_mask, cache_positions, position_ids
 
@@ -176,9 +177,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         attention_mask = None
 
         if is_prompt:
-            attention_mask = torch.ones_like(input_ids).squeeze(0)
-            attention_mask = (input_ids != RBLN_GEMMA3_PAD_TOKEN_ID).to(
-                torch.int64).squeeze(0)
+            attention_mask = (input_ids != self.pad_token_id).to(torch.int64).squeeze(0)
         else:
             get_extra_values_fn = lambda entry: (
                 entry.padded_cache_length,
