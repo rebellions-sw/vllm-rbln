@@ -160,7 +160,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         cache_positions = torch.zeros(padded_batch_size,
                                       1,
                                       dtype=position_id_dtype)
-        cache_positions[:request_nums] = (position_ids[:request_nums])
+        cache_positions[:request_nums] = position_ids[:request_nums]
         position_ids[:request_nums] = position_ids[:request_nums] - padded_cache_lengths_tensor[:request_nums]
 
         return local_block_table_id, attention_mask, cache_positions, position_ids
