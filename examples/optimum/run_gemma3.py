@@ -120,11 +120,11 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 4,
-    max_seq_len: int = 32768,
-    kvcache_partition_len: int = 16384,
-    num_input_prompt: int = 10,
-    model_id: str = "/gemma3-4b-conditional-b4-flash",
+    batch_size: int = 2,
+    max_seq_len: int = 131072,
+    kvcache_partition_len: int = 4096,
+    num_input_prompt: int = 2,
+    model_id: str = "/mnt/shared_data/users/thkim/.cache/rbln-exec/compile_results/optimum-gemma3-multimodal/model_id__gemma-3-4b-it#batch_size__2#max_seq_len__131072#n_layers__3#sliding_window_pattern__2#tensor_parallel_size__4#kvcache_partition_len__4096/model",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(

@@ -22,6 +22,8 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
                                                   Gemma3ProcessingInfo,
                                                   Gemma3DummyInputsBuilder)
 from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.model_executor.models.interfaces import SupportsMultiModal
+from vllm.model_executor.models.interfaces_base import VllmModelForTextGeneration
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
