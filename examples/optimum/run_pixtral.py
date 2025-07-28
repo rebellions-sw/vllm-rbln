@@ -55,6 +55,7 @@ def generate_prompts(batch_size: int, model_id: str):
     labels = [dataset[i]["label"] for i in range(batch_size)]
     return inputs, labels
 
+
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     results_generator = engine.generate(
         request,
@@ -107,6 +108,7 @@ async def main(
         print(f"[{i}] Model Output:")
         print(output)
         print("=" * 80 + "\n")
+
 
 def entry_point(
     batch_size: int = 4,
