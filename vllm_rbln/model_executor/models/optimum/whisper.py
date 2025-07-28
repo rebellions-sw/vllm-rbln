@@ -14,7 +14,7 @@
 from typing import Any, Dict, Optional, cast
 
 import torch
-from vllm.config import ModelConfig, SchedulerConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
@@ -31,15 +31,13 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
-    ):
-        super().__init__(model_config=model_config,
-                         scheduler_config=scheduler_config)
+        vllm_config: VllmConfig,
+    ) -> None:
+        super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
             padding_value=self.padding_value,
-            vocab_size=model_config.get_vocab_size,
+            vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=False,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
@@ -63,7 +61,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         )
         return cast(list[int], table_ids)
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables
