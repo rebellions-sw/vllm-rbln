@@ -38,7 +38,7 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
 
     def is_classification_arch(self):
         architectures = getattr(
-            self.self.model_config.hf_config,
+            self.model_config.hf_config,
             "architectures",
             [],
         )
