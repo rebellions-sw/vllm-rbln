@@ -202,6 +202,7 @@ class RblnPlatform(Platform):
         if cache_config:
             assert vllm_config.cache_config.block_size is not None, (
                 "block_size must be configured for RBLN backend")
+            cache_config.enable_prefix_caching = False
 
     @classmethod
     def get_attn_backend_cls(
