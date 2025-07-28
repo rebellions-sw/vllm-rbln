@@ -14,10 +14,10 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from transformers import AutoTokenizer
 import torch
-from vllm.config import VllmConfig
 import vllm.envs as env
+from transformers import AutoTokenizer
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
                                                   Gemma3ImageInputs,
@@ -39,8 +39,8 @@ logger = init_logger(__name__)
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
     def _pad_for_gemma3(self, prompt_ids: list[int], prompt: str):
-        token_type_ids = torch.tensor(
-            prompt_ids) == self.info.get_hf_processor().image_token_id
+        token_type_ids = (torch.tensor(prompt_ids) ==
+                          self.info.get_hf_processor().image_token_id)
 
         image_prefill_chunk_size = self.info.get_hf_processor(
         ).image_seq_length
@@ -51,8 +51,9 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
         ]
         padded_seq_len = 0
         for image_start in image_starts:
-            pad_needed = image_prefill_chunk_size - (
-                image_start + padded_seq_len) % image_prefill_chunk_size
+            pad_needed = (
+                image_prefill_chunk_size -
+                (image_start + padded_seq_len) % image_prefill_chunk_size)
             padded_seq_len += pad_needed
 
         pad_token = self.info.get_hf_processor().tokenizer.pad_token
@@ -80,14 +81,18 @@ class SlidingWindowEntry:
     attention_mask: torch.Tensor
 
 
-@MULTIMODAL_REGISTRY.register_processor(RBLNGemma3MultiModalProcessor,
-                                        info=Gemma3ProcessingInfo,
-                                        dummy_inputs=Gemma3DummyInputsBuilder)
-class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
-                                                RBLNOptimumDecoderMixin,
-                                                RBLNOptimumDictTableMixin,
-                                                VllmModelForTextGeneration,
-                                                SupportsMultiModal):
+@MULTIMODAL_REGISTRY.register_processor(
+    RBLNGemma3MultiModalProcessor,
+    info=Gemma3ProcessingInfo,
+    dummy_inputs=Gemma3DummyInputsBuilder,
+)
+class RBLNOptimumGemma3ForConditionalGeneration(
+        RBLNOptimumModelBase,
+        RBLNOptimumDecoderMixin,
+        RBLNOptimumDictTableMixin,
+        VllmModelForTextGeneration,
+        SupportsMultiModal,
+):
 
     def __init__(
         self,
@@ -98,8 +103,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
             attn_impl=self.attn_impl,
             padding_value=self.padding_value,
             vocab_size=self.model_config.get_vocab_size,
-            use_multiple_decoder=getattr(self.model.rbln_config.language_model,
-                                         "use_multiple_decoder", False),
+            use_multiple_decoder=getattr(
+                self.model.rbln_config.language_model,
+                "use_multiple_decoder",
+                False,
+            ),
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
@@ -147,8 +155,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         padded_cache_lengths_tensor[:request_nums] = torch.tensor(
             padded_cache_lengths, dtype=position_id_dtype).unsqueeze(1)
 
-        attention_mask_dtype = attention_masks[
-            0].dtype if attention_masks else torch.bool
+        attention_mask_dtype = (attention_masks[0].dtype
+                                if attention_masks else torch.bool)
         attention_mask = torch.zeros(padded_batch_size,
                                      seq_len,
                                      dtype=attention_mask_dtype)
@@ -162,9 +170,16 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                       1,
                                       dtype=position_id_dtype)
         cache_positions[:request_nums] = position_ids[:request_nums]
-        position_ids[:request_nums] = position_ids[:request_nums] - padded_cache_lengths_tensor[:request_nums]
+        position_ids[:request_nums] = (
+            position_ids[:request_nums] -
+            padded_cache_lengths_tensor[:request_nums])
 
-        return local_block_table_id, attention_mask, cache_positions, position_ids
+        return (
+            local_block_table_id,
+            attention_mask,
+            cache_positions,
+            position_ids,
+        )
 
     def select_local_block_table_value(
         self,
@@ -173,12 +188,12 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
     ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
-
         get_extra_values_fn = None
         attention_mask = None
 
         if is_prompt:
-            attention_mask = (input_ids != self.pad_token_id).to(torch.int64).squeeze(0)
+            attention_mask = ((input_ids != self.pad_token_id).to(
+                torch.int64).squeeze(0))
         else:
             get_extra_values_fn = lambda entry: (
                 entry.padded_cache_length,
@@ -241,13 +256,13 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         request_nums = input_ids.shape[0]
 
         # In prefill phase, the length of list must be 1
-        sliding_window_table_ids, padded_cache_lengths, attention_masks = \
+        sliding_window_table_ids, padded_cache_lengths, attention_masks = (
             self.select_local_block_table_value(
                 is_prompt,
                 input_ids,
                 running_requests_ids,
                 finished_requests_ids,
-            )
+            ))
 
         kwargs = self.preprocess_for_decoder(
             is_prompt,
@@ -297,24 +312,32 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
             updated_padded_cache_length = output.padded_cache_lengths
 
             assert len(running_requests_ids) == 1
-            self.sliding_window_table[
-                running_requests_ids[0]] = SlidingWindowEntry(
-                    sliding_window_table_ids[0], updated_padded_cache_length,
-                    updated_attention_mask)
+            self.sliding_window_table[running_requests_ids[0]] = (
+                SlidingWindowEntry(
+                    sliding_window_table_ids[0],
+                    updated_padded_cache_length,
+                    updated_attention_mask,
+                ))
         else:
             if self.model.language_model.decoders is None:
                 raise ValueError("Decoders is None")
             padded_batch_size = kwargs.pop("padded_batch_size",
                                            self.decoder_batch_size)
-            self.model.language_model.decoder = \
-                self.model.language_model.decoders[padded_batch_size]
-            local_block_table_id, attention_mask, cache_position, position_ids \
-                    = self.pad_local_table_items(sliding_window_table_ids,
-                                                 attention_masks,
-                                                 position_ids,
-                                                 padded_cache_lengths,
-                                                 request_nums,
-                                                 padded_batch_size)
+            self.model.language_model.decoder = (
+                self.model.language_model.decoders[padded_batch_size])
+            (
+                local_block_table_id,
+                attention_mask,
+                cache_position,
+                position_ids,
+            ) = self.pad_local_table_items(
+                sliding_window_table_ids,
+                attention_masks,
+                position_ids,
+                padded_cache_lengths,
+                request_nums,
+                padded_batch_size,
+            )
 
             rows = torch.arange(attention_mask.size(0))
             cols = cache_position.squeeze(1)
