@@ -14,7 +14,7 @@
 from typing import Any, Dict, Optional
 
 import torch
-from vllm.config import ModelConfig, SchedulerConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.qwen2_5_vl import (
     Qwen2_5_VLImageEmbeddingInputs, Qwen2_5_VLImageInputs,
@@ -23,7 +23,7 @@ from vllm.model_executor.models.qwen2_5_vl import (
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from vllm.config import VllmConfig
+
 logger = init_logger(__name__)
 
 
@@ -46,7 +46,8 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
         )
         self.rope_deltas: Dict = dict()
 
-    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables

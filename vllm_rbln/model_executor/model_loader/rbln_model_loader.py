@@ -17,7 +17,5 @@ from vllm.config import VllmConfig
 from vllm_rbln.model_executor.models.optimum import load_model
 
 
-def get_optimum_model(
-    vllm_config: VllmConfig,
-) -> nn.Module:
+def get_optimum_model(vllm_config: VllmConfig, ) -> nn.Module:
     return load_model(vllm_config)

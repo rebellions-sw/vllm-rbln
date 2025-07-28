@@ -14,12 +14,12 @@
 from typing import List, Optional, Union
 
 import torch
-from vllm.config import ModelConfig, SchedulerConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from vllm.config import VllmConfig
+
 logger = init_logger(__name__)
 
 
@@ -113,7 +113,8 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
 
         return logits
 
-    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         is_prompt = model_input.sampling_metadata.num_prompts > 0

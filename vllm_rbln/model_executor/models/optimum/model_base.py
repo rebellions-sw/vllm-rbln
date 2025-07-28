@@ -21,12 +21,12 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 import optimum.rbln
 import torch
 import torch.nn as nn
-from vllm.config import ModelConfig, SchedulerConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.config import VllmConfig
+
 from .base import get_rbln_model_info
 
 logger = init_logger(__name__)
@@ -39,7 +39,7 @@ class RBLNOptimumModelBase(nn.Module):
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__()
-        self.model_config =  vllm_config.model_config
+        self.model_config = vllm_config.model_config
         self.scheduler_config = vllm_config.scheduler_config
         self.init_model()
         self.padding_value = self.get_padding_value()

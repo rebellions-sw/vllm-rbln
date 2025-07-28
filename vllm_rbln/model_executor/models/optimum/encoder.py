@@ -15,11 +15,11 @@
 from typing import Optional
 
 import torch
-from vllm.config import ModelConfig, PoolerConfig, SchedulerConfig
+from vllm.config import PoolerConfig, VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import Pooler, PoolingType
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
-from vllm.config import VllmConfig
+
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
 
@@ -93,7 +93,8 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
             )
         return None
 
-    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids, token_type_ids, positions = self.preprocess(
             model_input.input_tokens,
             model_input.token_type_ids,
