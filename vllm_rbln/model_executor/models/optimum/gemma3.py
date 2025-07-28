@@ -14,10 +14,10 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from transformers import AutoTokenizer
 import torch
-from vllm.config import VllmConfig
 import vllm.envs as env
+from transformers import AutoTokenizer
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
                                                   Gemma3ImageInputs,
@@ -162,7 +162,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                       1,
                                       dtype=position_id_dtype)
         cache_positions[:request_nums] = position_ids[:request_nums]
-        position_ids[:request_nums] = position_ids[:request_nums] - padded_cache_lengths_tensor[:request_nums]
+        position_ids[:
+                     request_nums] = position_ids[:
+                                                  request_nums] - padded_cache_lengths_tensor[:
+                                                                                              request_nums]
 
         return local_block_table_id, attention_mask, cache_positions, position_ids
 
@@ -178,7 +181,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         attention_mask = None
 
         if is_prompt:
-            attention_mask = (input_ids != self.pad_token_id).to(torch.int64).squeeze(0)
+            attention_mask = (input_ids
+                              != self.pad_token_id).to(torch.int64).squeeze(0)
         else:
             get_extra_values_fn = lambda entry: (
                 entry.padded_cache_length,
