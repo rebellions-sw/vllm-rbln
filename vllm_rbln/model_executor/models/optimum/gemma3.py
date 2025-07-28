@@ -156,9 +156,15 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
     def get_pixel_values(self, model_input: ModelInputForRBLN):
         image_input = None
+        is_v1 = True
+
+        # V1
+        if model_input.sampling_metadata is not None:
+            is_v1 = False
 
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
+                is_v1,
                 **model_input.multi_modal_kwargs)
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
@@ -285,13 +291,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         return logits
 
     def _parse_and_validate_image_input(
-            self, **kwargs: Any) -> Optional[Gemma3ImageInputs]:
+            self, is_v1: bool, **kwargs: Any) -> Optional[Gemma3ImageInputs]:
         pixel_values: torch.Tensor = kwargs.get("pixel_values")
         num_crops: torch.Tensor = kwargs.get("num_crops")
         embed_is_patch = kwargs.get("embed_is_patch")
         num_embeds = kwargs.get("num_embeds")
-
-        pixel_values = pixel_values.squeeze(0)
 
         if pixel_values is None:
             return None
@@ -299,6 +303,12 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         if not isinstance(pixel_values, (torch.Tensor, list)):
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
+
+        # NOTE The multi modal shape is different following the vLLM's engine version
+        if is_v1:
+            pixel_values = pixel_values.squeeze(1)
+        else:
+            pixel_values = pixel_values.squeeze(0)
 
         return Gemma3ImagePixelInputs(
             type="pixel_values",
