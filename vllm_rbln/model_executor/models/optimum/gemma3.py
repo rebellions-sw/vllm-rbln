@@ -22,6 +22,7 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
                                                   Gemma3ProcessingInfo,
                                                   Gemma3DummyInputsBuilder)
 from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.model_executor.models.gemma3_mm import Gemma3MultiModalProcessor
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.interfaces_base import VllmModelForTextGeneration
 
@@ -29,78 +30,45 @@ from .base import ModelInputForRBLN, version_error
 from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
                          RBLNOptimumModelBase)
 
-from ....models.gemma3_mm import RBLNGemma3MultiModalProcessor, Gemma3MultiModalProcessor
 
 logger = init_logger(__name__)
 
-# class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
-#     def apply(
-#         self,
-#         prompt: Union[str, list[int]],
-#         mm_data: MultiModalDataDict,
-#         hf_processor_mm_kwargs: Mapping[str, object],
-#         tokenization_kwargs: Optional[Mapping[str, object]] = None,
-#         return_mm_hashes: bool = False,
-#     ) -> MultiModalInputs:
-#         """
-#         Process multi-modal inputs to be used in vLLM.
+RBLN_GEMMA3_PAD_TOKEN_ID = 262143
 
-#         The main steps are:
-
-#         1. Apply HF Processor on prompt text and multi-modal data together,
-#            outputting token IDs and processed tensors.
-#         2. Find and update sequences in the token IDs with placeholder tokens.
-#            The number of placeholder tokens equals the feature size of the
-#            multi-modal data outputted by the multi-modal encoder.
-#         3. Extract information about the placeholder tokens from the
-#            processed token IDs.
-#         """
-#         print("apply!!!! ")
-#         from fpdb import ForkedPdb; ForkedPdb().set_trace()
-#         mm_items = self._to_mm_items(mm_data)
-
-#         if tokenization_kwargs is None:
-#             tokenization_kwargs = {}
-
-#         (
-#             prompt_ids,
-#             mm_kwargs,
-#             mm_hashes,
-#             is_update_applied,
-#         ) = self._cached_apply_hf_processor(
-#             prompt,
-#             mm_items,
-#             hf_processor_mm_kwargs,
-#             tokenization_kwargs=tokenization_kwargs,
-#             return_mm_hashes=return_mm_hashes,
-#         )
-
-#         # Padding.
-#         from fpdb import ForkedPdb; ForkedPdb().set_trace()
-
-#         # NOTE: tokenization_kwargs are not required to init processor
-#         prompt_ids, prompt, mm_placeholders = self._maybe_apply_prompt_updates(
-#             mm_items=mm_items,
-#             hf_processor_mm_kwargs=hf_processor_mm_kwargs,
-#             prompt_ids=prompt_ids,
-#             mm_kwargs=mm_kwargs,
-#             is_update_applied=is_update_applied,
-#         )
-
-#         mm_placeholder_ranges = {
-#             modality: [item.to_range() for item in placeholders]
-#             for modality, placeholders in mm_placeholders.items()
-#         }
-
-#         return MultiModalInputs(
-#             type="multimodal",
-#             prompt=prompt,
-#             prompt_token_ids=prompt_ids,
-#             mm_kwargs=mm_kwargs,
-#             mm_hashes=mm_hashes,
-#             mm_placeholders=mm_placeholder_ranges,
-#         )
+class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
+    
+    def _pad_for_gemma3(self, prompt_ids: list[int], prompt: str):
+        token_type_ids = torch.tensor(prompt_ids)==self.info.get_hf_processor().image_token_id
+        
+        image_prefill_chunk_size = self.info.get_hf_processor().image_seq_length
+        # Find image start positions
+        image_starts = [
+            s
+            for s in torch.where(token_type_ids)[0]
+            if torch.all(token_type_ids[s : s + image_prefill_chunk_size])
+        ]
+        padded_seq_len = 0  
+        for image_start in image_starts:
+            pad_needed = image_prefill_chunk_size - (image_start + padded_seq_len) % image_prefill_chunk_size
+            padded_seq_len += pad_needed
+        
+        pad_token = "<unused6241>"
+        pad_token_id = RBLN_GEMMA3_PAD_TOKEN_ID
+        
+        prompt_ids = prompt_ids + [pad_token_id] * padded_seq_len
+        prompt = prompt + pad_token * padded_seq_len
+        return prompt_ids, prompt
+    
+    
+    def apply(self, *args, **kwargs):
+        output = super().apply(*args, **kwargs)
+        prompt_ids, prompt = self._pad_for_gemma3(output["prompt_token_ids"], output["prompt"])
+        
+        output["prompt_token_ids"] = prompt_ids
+        output["prompt"] = prompt
+        
+        return output
 
 
 @dataclass
@@ -208,7 +176,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
         if is_prompt:
             attention_mask = torch.ones_like(input_ids).squeeze(0)
-            attention_mask = (input_ids != 262143).to(torch.int64).squeeze(0)
+            attention_mask = (input_ids != RBLN_GEMMA3_PAD_TOKEN_ID).to(torch.int64).squeeze(0)
         else:
             get_extra_values_fn = lambda entry: (
                 entry.padded_cache_length,
