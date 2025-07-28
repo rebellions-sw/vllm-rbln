@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import torch
+import vllm.envs as env
 from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
@@ -174,10 +175,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables
 
-        # V1
-        if model_input.sampling_metadata is None:
+        if env.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
-        # V0
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
@@ -291,14 +290,17 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         embed_is_patch = kwargs.get("embed_is_patch")
         num_embeds = kwargs.get("num_embeds")
 
-        pixel_values = pixel_values.squeeze(0)
-
         if pixel_values is None:
             return None
 
         if not isinstance(pixel_values, (torch.Tensor, list)):
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
+
+        if env.VLLM_USE_V1:
+            pixel_values = pixel_values.squeeze(1)
+        else:
+            pixel_values = pixel_values.squeeze(0)
 
         return Gemma3ImagePixelInputs(
             type="pixel_values",
