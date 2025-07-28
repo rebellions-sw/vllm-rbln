@@ -14,7 +14,6 @@
 
 import dataclasses
 import math
-import os
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
@@ -42,6 +41,7 @@ from vllm.worker.model_runner_base import (
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
@@ -49,11 +49,6 @@ logger = init_logger(__name__)
 TModelInputForRebel = TypeVar("TModelInputForRebel",
                               bound="ModelInputForRebel")
 _PAD_SLOT_ID = -1
-
-# NOTE - for qwen3 model, set true to make partitioned graph
-
-_COMPILE_MODEL = os.getenv("COMPILE_MODEL", "True").lower() in ("true", "1")
-_TP_SIZE = int(os.getenv("TP_SIZE", 1))
 
 
 @dataclass(frozen=True)
@@ -407,15 +402,15 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 cast(RBLNModelRunner, weakref.proxy(self)))
 
     def compile_model(self, model):
-        if _COMPILE_MODEL:
-            if _TP_SIZE > 1:
+        if envs.RBLN_COMPILE_MODEL:
+            if envs.RBLN_TP_SIZE > 1:
                 compiled_model = torch.compile(
                     model,
                     backend="rbln",
                     options={
                         "compile_context": self.compile_context,
                         "cache_dir": "./rsd_cache_dir",
-                        "tensor_parallel_size": _TP_SIZE,
+                        "tensor_parallel_size": envs.RBLN_TP_SIZE,
                     },
                     dynamic=False,
                 )

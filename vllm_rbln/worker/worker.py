@@ -17,7 +17,6 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed
-import vllm.envs as envs
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, VllmConfig)
@@ -36,12 +35,11 @@ except ImportError:
     from vllm.worker.worker_base import (
         LoraNotSupportedWorkerBase as LoRANotSupportedWorkerBase, )
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.worker.model_runner import RBLNModelRunner
 
 logger = init_logger(__name__)
-
-_TP_SIZE = int(os.getenv("TP_SIZE", 1))
 
 
 class RBLNCacheEngine:
@@ -185,11 +183,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.rank = rank
         self.parallel_config.rank = rank
 
-        if self.parallel_config.distributed_executor_backend == "mp":
-            self.set_device()
-        else:
+        if self.parallel_config.distributed_executor_backend == "ray":
             logger.info(
                 "Running on Ray backend. Skipping device env var setup.")
+        else:
+            self.set_device()
 
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
@@ -242,7 +240,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         world_size = self.parallel_config.world_size
         env_var = current_platform.device_control_env_var
 
-        total_device_count = world_size * _TP_SIZE
+        total_device_count = world_size * envs.RBLN_TP_SIZE
 
         if env_var not in os.environ:
             device_ids = [str(i) for i in range(total_device_count)]
@@ -253,8 +251,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             raise RuntimeError(f"{env_var} has {len(device_ids)} devices"
                                " but required {total_device_count}")
 
-        start_idx = self.local_rank * _TP_SIZE
-        end_idx = start_idx + _TP_SIZE
+        start_idx = self.local_rank * envs.RBLN_TP_SIZE
+        end_idx = start_idx + envs.RBLN_TP_SIZE
         selected_devices = ",".join(device_ids[start_idx:end_idx])
 
         os.environ[env_var] = selected_devices
