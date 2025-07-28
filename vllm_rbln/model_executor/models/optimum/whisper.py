@@ -61,7 +61,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         )
         return cast(list[int], table_ids)
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables

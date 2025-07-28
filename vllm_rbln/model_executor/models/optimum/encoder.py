@@ -93,7 +93,7 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
             )
         return None
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids, token_type_ids, positions = self.preprocess(
             model_input.input_tokens,
             model_input.token_type_ids,

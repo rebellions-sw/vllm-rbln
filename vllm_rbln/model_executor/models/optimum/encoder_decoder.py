@@ -113,7 +113,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
 
         return logits
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         is_prompt = model_input.sampling_metadata.num_prompts > 0

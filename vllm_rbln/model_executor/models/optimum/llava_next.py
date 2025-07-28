@@ -120,7 +120,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
 
         return logits
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
