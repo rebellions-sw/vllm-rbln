@@ -434,9 +434,9 @@ class RBLNOptimumScheduler(Scheduler):
         # 1. Plan the KV cache store
         # 2. Wrap up all the KV cache load / save ops into an opaque object
         # 3. Clear the internal states of the connector
-        # if self.connector is not None:
-        #     meta = self.connector.build_connector_meta(scheduler_output)
-        #     scheduler_output.kv_connector_metadata = meta
+        if self.connector is not None:
+            meta = self.connector.build_connector_meta(scheduler_output)
+            scheduler_output.kv_connector_metadata = meta
 
         events = self.kv_cache_manager.take_events()
         if events:
