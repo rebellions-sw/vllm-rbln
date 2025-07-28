@@ -18,11 +18,16 @@ import torch
 from vllm.config import ModelConfig, SchedulerConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
-                                                  Gemma3ImagePixelInputs)
+                                                  Gemma3ImagePixelInputs,
+                                                  Gemma3ProcessingInfo,
+                                                  Gemma3DummyInputsBuilder)
+from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
                          RBLNOptimumModelBase)
+
+from ....models.gemma3_mm import RBLNGemma3MultiModalProcessor, Gemma3MultiModalProcessor
 
 logger = init_logger(__name__)
 
@@ -33,7 +38,9 @@ class SlidingWindowEntry:
     padded_cache_length: int
     attention_mask: torch.Tensor
 
-
+# @MULTIMODAL_REGISTRY.register_processor(Gemma3MultiModalProcessor,
+#                                         info=Gemma3ProcessingInfo,
+#                                         dummy_inputs=Gemma3DummyInputsBuilder)
 class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                                 RBLNOptimumDecoderMixin,
                                                 RBLNOptimumDictTableMixin):
@@ -110,10 +117,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                       1,
                                       dtype=position_id_dtype)
         cache_positions[:request_nums] = (
-            position_ids[:request_nums] +
-            padded_cache_lengths_tensor[:request_nums])
+            position_ids[:request_nums] )
+        
+        position_ids = position_ids - padded_cache_lengths_tensor
 
-        return local_block_table_id, attention_mask, cache_positions
+        return local_block_table_id, attention_mask, cache_positions, position_ids
 
     def select_local_block_table_value(
         self,
@@ -128,6 +136,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
         if is_prompt:
             attention_mask = torch.ones_like(input_ids).squeeze(0)
+            attention_mask = (input_ids != 262143).to(torch.int64).squeeze(0)
         else:
             get_extra_values_fn = lambda entry: (
                 entry.padded_cache_length,
@@ -177,7 +186,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
     def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
         input_ids = model_input.input_tokens
         position_ids = model_input.input_positions
-        block_tables = model_input.block_tables
+        block_tables = model_input.block_tables        
 
         # V1
         if model_input.sampling_metadata is None:
@@ -258,7 +267,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                            self.decoder_batch_size)
             self.model.language_model.decoder = \
                 self.model.language_model.decoders[padded_batch_size]
-            local_block_table_id, attention_mask, cache_position \
+            local_block_table_id, attention_mask, cache_position, position_ids \
                     = self.pad_local_table_items(sliding_window_table_ids,
                                                  attention_masks,
                                                  position_ids,
