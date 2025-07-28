@@ -170,8 +170,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.intermediate_tensors: Optional[IntermediateTensors] = None
 
     def load_model(self) -> None:
-        self.model = get_optimum_model(model_config=self.model_config,
-                                       scheduler_config=self.scheduler_config)
+        self.model = get_optimum_model(vllm_config=self.vllm_config)
+
 
     def get_model(self) -> nn.Module:
         return self.model
