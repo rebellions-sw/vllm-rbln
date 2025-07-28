@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from transformers import AutoTokenizer
 import torch
 from vllm.config import VllmConfig
+import vllm.envs as env
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
                                                   Gemma3ImageInputs,
@@ -230,10 +231,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables
 
-        # V1
-        if model_input.sampling_metadata is None:
+        if env.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
-        # V0
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
@@ -354,7 +353,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
 
-        if is_v1:
+        if env.VLLM_USE_V1:
             pixel_values = pixel_values.squeeze(1)
         else:
             pixel_values = pixel_values.squeeze(0)
