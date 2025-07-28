@@ -22,7 +22,7 @@ from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-
+from vllm.config import VllmConfig
 logger = init_logger(__name__)
 
 
@@ -31,11 +31,9 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
+        vllm_config: VllmConfig,
     ) -> None:
-        super().__init__(model_config=model_config,
-                         scheduler_config=scheduler_config)
+        super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
             padding_value=self.padding_value,

@@ -32,7 +32,7 @@ from .model_base import RBLNOptimumDictTableMixin
 from .qwen2_5_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
-
+from vllm.config import VllmConfig
 logger = init_logger(__name__)
 
 _RBLN_OPTIMUM_MULTIMODAL_MODELS = {
@@ -42,15 +42,16 @@ _RBLN_OPTIMUM_MULTIMODAL_MODELS = {
 
 
 def load_model(
-    model_config: ModelConfig,
-    scheduler_config: SchedulerConfig,
+    vllm_config: VllmConfig,
 ) -> nn.Module:
+    # model_config = vllm_config.model_config
+    # scheduler_config = vllm_config.scheduler_config
+
     if is_multi_modal(model_config.hf_config):
         architectures = getattr(model_config.hf_config, "architectures", [])
         if architectures[0] in _RBLN_OPTIMUM_MULTIMODAL_MODELS:
             rbln_model_arch = _RBLN_OPTIMUM_MULTIMODAL_MODELS[architectures[0]]
-            rbln_model = rbln_model_arch(model_config=model_config,
-                                         scheduler_config=scheduler_config)
+            rbln_model = rbln_model_arch(vllm_config)
         else:
             raise NotImplementedError(
                 f"Model architectures {architectures} are "
@@ -59,13 +60,12 @@ def load_model(
                 f"{list(_RBLN_OPTIMUM_MULTIMODAL_MODELS.keys())}")
     elif is_enc_dec_arch(model_config.hf_config):
         rbln_model = RBLNOptimumEncoderDecoder(
-            model_config=model_config, scheduler_config=scheduler_config)
+            vllm_config)
     elif is_pooling_arch(model_config.hf_config):
         rbln_model = RBLNOptimumForEncoderModel(
-            model_config=model_config, scheduler_config=scheduler_config)
+            vllm_config)
     else:
-        rbln_model = RBLNOptimumForCausalLM(model_config=model_config,
-                                            scheduler_config=scheduler_config)
+        rbln_model = RBLNOptimumForCausalLM(vllm_config)
     return rbln_model.eval()
 
 

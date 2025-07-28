@@ -85,8 +85,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
 
     def load_model(self) -> None:
-        self.model = get_optimum_model(model_config=self.model_config,
-                                       scheduler_config=self.scheduler_config)
+        self.model = get_optimum_model(vllm_config=self.vllm_config)
 
     def get_model(self):
         return self.model

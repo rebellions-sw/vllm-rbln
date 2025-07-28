@@ -19,7 +19,7 @@ from vllm.config import ModelConfig, PoolerConfig, SchedulerConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import Pooler, PoolingType
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
-
+from vllm.config import VllmConfig
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
 
@@ -31,15 +31,14 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
+        vllm_config: VllmConfig,
     ) -> None:
-        super().__init__(model_config, scheduler_config)
-        self._pooler = self._build_pooler(model_config.pooler_config)
+        super().__init__(vllm_config=vllm_config)
+        self._pooler = self._build_pooler(self.model_config.pooler_config)
 
     def is_classification_arch(self):
         architectures = getattr(
-            self.model_config.hf_config,
+            self.self.model_config.hf_config,
             "architectures",
             [],
         )

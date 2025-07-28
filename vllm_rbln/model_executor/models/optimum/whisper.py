@@ -20,7 +20,7 @@ from vllm.logger import init_logger
 from .base import ModelInputForRBLN
 from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
                          RBLNOptimumModelBase)
-
+from vllm.config import VllmConfig
 logger = init_logger(__name__)
 
 
@@ -31,15 +31,13 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
-    ):
-        super().__init__(model_config=model_config,
-                         scheduler_config=scheduler_config)
+        vllm_config: VllmConfig,
+    ) -> None:
+        super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
             padding_value=self.padding_value,
-            vocab_size=model_config.get_vocab_size,
+            vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=False,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],

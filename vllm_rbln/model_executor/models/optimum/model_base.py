@@ -26,7 +26,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-
+from vllm.config import VllmConfig
 from .base import get_rbln_model_info
 
 logger = init_logger(__name__)
@@ -36,12 +36,11 @@ class RBLNOptimumModelBase(nn.Module):
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
+        vllm_config: VllmConfig,
     ) -> None:
         super().__init__()
-        self.model_config = model_config
-        self.scheduler_config = scheduler_config
+        self.model_config =  vllm_config.model_config
+        self.scheduler_config = vllm_config.scheduler_config
         self.init_model()
         self.padding_value = self.get_padding_value()
         self.batch_size = self.scheduler_config.max_num_seqs

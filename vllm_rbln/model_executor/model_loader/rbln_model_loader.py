@@ -12,13 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import torch.nn as nn
-from vllm.config import ModelConfig, SchedulerConfig
+from vllm.config import VllmConfig
 
 from vllm_rbln.model_executor.models.optimum import load_model
 
 
 def get_optimum_model(
-    model_config: ModelConfig,
-    scheduler_config: SchedulerConfig,
+    vllm_config: VllmConfig,
 ) -> nn.Module:
-    return load_model(model_config, scheduler_config)
+    return load_model(vllm_config)
