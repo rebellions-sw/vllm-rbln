@@ -78,8 +78,8 @@ class RBLNOptimumWorker(WorkerBase):
             # We use the last block as dummy block
             num_gpu_blocks = (
                 self.model_runner.model.model.get_kvcache_num_blocks() + 1) \
-                    if self.model_runner.model.model.rbln_config.batch_size == 1 \
-                    else (self.model_runner.model.model.get_kvcache_num_blocks())
+                if self.model_runner.model.model.rbln_config.batch_size == 1 \
+                else (self.model_runner.model.model.get_kvcache_num_blocks())
 
             if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
                 num_gpu_blocks = int(npu_num_blocks)
