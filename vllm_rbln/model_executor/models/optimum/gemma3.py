@@ -223,15 +223,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
 
     def get_pixel_values(self, model_input: ModelInputForRBLN):
         image_input = None
-        is_v1 = True
-
-        # V1
-        if model_input.sampling_metadata is not None:
-            is_v1 = False
 
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
-                is_v1, **model_input.multi_modal_kwargs)
+                **model_input.multi_modal_kwargs)
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
@@ -364,7 +359,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         return logits
 
     def _parse_and_validate_image_input(
-            self, is_v1: bool, **kwargs: Any) -> Optional[Gemma3ImageInputs]:
+            self, **kwargs: Any) -> Optional[Gemma3ImageInputs]:
         pixel_values: torch.Tensor = kwargs.get("pixel_values")
         num_crops: torch.Tensor = kwargs.get("num_crops")
         embed_is_patch = kwargs.get("embed_is_patch")
