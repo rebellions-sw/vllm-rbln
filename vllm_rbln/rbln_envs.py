@@ -2,24 +2,24 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
-from vllm.envs import environment_variables as vllm_envs
 from typing import TYPE_CHECKING
+
+from vllm.envs import environment_variables as vllm_envs
 
 if TYPE_CHECKING:
     RBLN_COMPILE_MODEL: bool = True
     RBLN_TP_SIZE: int = 1
-
 
 # extended environments
 environment_variables = {
     **vllm_envs,
     # If true, will compile models using torch.compile.
     # Otherwise, run the CPU eager mode, if possible.
-    "RBLN_COMPILE_MODEL": (
-        lambda: os.environ.get("COMPILE_MODEL", "True").lower() in ("true", "1")
-    ),
+    "RBLN_COMPILE_MODEL":
+    (lambda: os.environ.get("COMPILE_MODEL", "True").lower() in ("true", "1")),
     # TP Size for RSD.
-    "RBLN_TP_SIZE": lambda: int(os.environ.get("TP_SIZE", 1)),
+    "RBLN_TP_SIZE":
+    lambda: int(os.environ.get("TP_SIZE", 1)),
 }
 
 
