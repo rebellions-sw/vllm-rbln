@@ -126,7 +126,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         padded_cache_lengths: List[int],
         request_nums: int,
         padded_batch_size: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # Validate input
         if request_nums > 0 and not attention_masks:
             raise ValueError(
