@@ -113,6 +113,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             decoder_batch_sizes,
         )
 
+        # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
         self.pad_token_id = tokenizer.pad_token_id
 
