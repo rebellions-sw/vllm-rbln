@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import torch
-from vllm.config import ModelConfig, SchedulerConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
                                                   Gemma3ImagePixelInputs,
@@ -31,6 +31,75 @@ from ....models.gemma3_mm import RBLNGemma3MultiModalProcessor, Gemma3MultiModal
 
 logger = init_logger(__name__)
 
+# class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
+
+#     def apply(
+#         self,
+#         prompt: Union[str, list[int]],
+#         mm_data: MultiModalDataDict,
+#         hf_processor_mm_kwargs: Mapping[str, object],
+#         tokenization_kwargs: Optional[Mapping[str, object]] = None,
+#         return_mm_hashes: bool = False,
+#     ) -> MultiModalInputs:
+#         """
+#         Process multi-modal inputs to be used in vLLM.
+
+#         The main steps are:
+
+#         1. Apply HF Processor on prompt text and multi-modal data together,
+#            outputting token IDs and processed tensors.
+#         2. Find and update sequences in the token IDs with placeholder tokens.
+#            The number of placeholder tokens equals the feature size of the
+#            multi-modal data outputted by the multi-modal encoder.
+#         3. Extract information about the placeholder tokens from the
+#            processed token IDs.
+#         """
+#         print("apply!!!! ")
+#         from fpdb import ForkedPdb; ForkedPdb().set_trace()
+#         mm_items = self._to_mm_items(mm_data)
+
+#         if tokenization_kwargs is None:
+#             tokenization_kwargs = {}
+
+#         (
+#             prompt_ids,
+#             mm_kwargs,
+#             mm_hashes,
+#             is_update_applied,
+#         ) = self._cached_apply_hf_processor(
+#             prompt,
+#             mm_items,
+#             hf_processor_mm_kwargs,
+#             tokenization_kwargs=tokenization_kwargs,
+#             return_mm_hashes=return_mm_hashes,
+#         )
+
+#         # Padding.
+#         from fpdb import ForkedPdb; ForkedPdb().set_trace()
+
+#         # NOTE: tokenization_kwargs are not required to init processor
+#         prompt_ids, prompt, mm_placeholders = self._maybe_apply_prompt_updates(
+#             mm_items=mm_items,
+#             hf_processor_mm_kwargs=hf_processor_mm_kwargs,
+#             prompt_ids=prompt_ids,
+#             mm_kwargs=mm_kwargs,
+#             is_update_applied=is_update_applied,
+#         )
+
+#         mm_placeholder_ranges = {
+#             modality: [item.to_range() for item in placeholders]
+#             for modality, placeholders in mm_placeholders.items()
+#         }
+
+#         return MultiModalInputs(
+#             type="multimodal",
+#             prompt=prompt,
+#             prompt_token_ids=prompt_ids,
+#             mm_kwargs=mm_kwargs,
+#             mm_hashes=mm_hashes,
+#             mm_placeholders=mm_placeholder_ranges,
+#         )
+
 
 @dataclass
 class SlidingWindowEntry:
@@ -38,24 +107,25 @@ class SlidingWindowEntry:
     padded_cache_length: int
     attention_mask: torch.Tensor
 
-# @MULTIMODAL_REGISTRY.register_processor(Gemma3MultiModalProcessor,
-#                                         info=Gemma3ProcessingInfo,
-#                                         dummy_inputs=Gemma3DummyInputsBuilder)
+
+@MULTIMODAL_REGISTRY.register_processor(RBLNGemma3MultiModalProcessor,
+                                        info=Gemma3ProcessingInfo,
+                                        dummy_inputs=Gemma3DummyInputsBuilder)
 class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                                                 RBLNOptimumDecoderMixin,
-                                                RBLNOptimumDictTableMixin):
+                                                RBLNOptimumDictTableMixin,
+                                                VllmModelForTextGeneration,
+                                                SupportsMultiModal):
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
+        vllm_config: VllmConfig,
     ) -> None:
-        super().__init__(model_config=model_config,
-                         scheduler_config=scheduler_config)
+        super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
             padding_value=self.padding_value,
-            vocab_size=model_config.get_vocab_size,
+            vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=getattr(self.model.rbln_config.language_model,
                                          "use_multiple_decoder", False),
             default_batch_size=self.scheduler_config.max_num_seqs,
@@ -183,7 +253,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
         return pixel_values
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables        

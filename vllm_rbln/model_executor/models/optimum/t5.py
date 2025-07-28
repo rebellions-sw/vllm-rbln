@@ -23,4 +23,5 @@ class RBLNT5ForConditionalGeneration(_RBLNT5ForConditionalGeneration,
                                      VllmModelForTextGeneration):
 
     def is_text_generation_model(self):
+        print("tr")
         return True
