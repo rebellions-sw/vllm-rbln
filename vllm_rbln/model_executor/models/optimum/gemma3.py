@@ -164,8 +164,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
-                is_v1,
-                **model_input.multi_modal_kwargs)
+                is_v1, **model_input.multi_modal_kwargs)
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
@@ -304,7 +303,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
 
-        # NOTE The multi modal shape is different following the vLLM's engine version
         if is_v1:
             pixel_values = pixel_values.squeeze(1)
         else:
