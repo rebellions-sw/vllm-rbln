@@ -175,10 +175,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables
 
-        # V1
         if env.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
-        # V0
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
