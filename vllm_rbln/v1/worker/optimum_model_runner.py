@@ -172,7 +172,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
 
-
     def get_model(self) -> nn.Module:
         return self.model
 
