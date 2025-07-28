@@ -308,7 +308,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1
-        num_cpu_blocks = 0
 
         # Swap not yet supported with RBLN backend.
         num_cpu_blocks = 0
