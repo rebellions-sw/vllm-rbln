@@ -17,57 +17,59 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.gemma3_mm import (Gemma3ImageInputs,
+from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
+                                                  Gemma3ImageInputs,
                                                   Gemma3ImagePixelInputs,
-                                                  Gemma3ProcessingInfo,
-                                                  Gemma3DummyInputsBuilder)
-from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.model_executor.models.gemma3_mm import Gemma3MultiModalProcessor
+                                                  Gemma3MultiModalProcessor,
+                                                  Gemma3ProcessingInfo)
 from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.model_executor.models.interfaces_base import VllmModelForTextGeneration
+from vllm.model_executor.models.interfaces_base import (
+    VllmModelForTextGeneration)
+from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
                          RBLNOptimumModelBase)
 
-
 logger = init_logger(__name__)
-
 
 RBLN_GEMMA3_PAD_TOKEN_ID = 262143
 
+
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
-    
+
     def _pad_for_gemma3(self, prompt_ids: list[int], prompt: str):
-        token_type_ids = torch.tensor(prompt_ids)==self.info.get_hf_processor().image_token_id
-        
-        image_prefill_chunk_size = self.info.get_hf_processor().image_seq_length
+        token_type_ids = torch.tensor(
+            prompt_ids) == self.info.get_hf_processor().image_token_id
+
+        image_prefill_chunk_size = self.info.get_hf_processor(
+        ).image_seq_length
         # Find image start positions
         image_starts = [
-            s
-            for s in torch.where(token_type_ids)[0]
-            if torch.all(token_type_ids[s : s + image_prefill_chunk_size])
+            s for s in torch.where(token_type_ids)[0]
+            if torch.all(token_type_ids[s:s + image_prefill_chunk_size])
         ]
-        padded_seq_len = 0  
+        padded_seq_len = 0
         for image_start in image_starts:
-            pad_needed = image_prefill_chunk_size - (image_start + padded_seq_len) % image_prefill_chunk_size
+            pad_needed = image_prefill_chunk_size - (
+                image_start + padded_seq_len) % image_prefill_chunk_size
             padded_seq_len += pad_needed
-        
+
         pad_token = "<unused6241>"
         pad_token_id = RBLN_GEMMA3_PAD_TOKEN_ID
-        
+
         prompt_ids = prompt_ids + [pad_token_id] * padded_seq_len
         prompt = prompt + pad_token * padded_seq_len
         return prompt_ids, prompt
-    
-    
+
     def apply(self, *args, **kwargs):
         output = super().apply(*args, **kwargs)
-        prompt_ids, prompt = self._pad_for_gemma3(output["prompt_token_ids"], output["prompt"])
-        
+        prompt_ids, prompt = self._pad_for_gemma3(output["prompt_token_ids"],
+                                                  output["prompt"])
+
         output["prompt_token_ids"] = prompt_ids
         output["prompt"] = prompt
-        
+
         return output
 
 
@@ -156,9 +158,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
         cache_positions = torch.zeros(padded_batch_size,
                                       1,
                                       dtype=position_id_dtype)
-        cache_positions[:request_nums] = (
-            position_ids[:request_nums] )
-        
+        cache_positions[:request_nums] = (position_ids[:request_nums])
+
         position_ids = position_ids - padded_cache_lengths_tensor
 
         return local_block_table_id, attention_mask, cache_positions, position_ids
@@ -176,7 +177,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
 
         if is_prompt:
             attention_mask = torch.ones_like(input_ids).squeeze(0)
-            attention_mask = (input_ids != RBLN_GEMMA3_PAD_TOKEN_ID).to(torch.int64).squeeze(0)
+            attention_mask = (input_ids != RBLN_GEMMA3_PAD_TOKEN_ID).to(
+                torch.int64).squeeze(0)
         else:
             get_extra_values_fn = lambda entry: (
                 entry.padded_cache_length,
@@ -227,7 +229,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(RBLNOptimumModelBase,
                 **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         position_ids = model_input.input_positions
-        block_tables = model_input.block_tables        
+        block_tables = model_input.block_tables
 
         # V1
         if model_input.sampling_metadata is None:
