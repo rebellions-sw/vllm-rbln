@@ -108,6 +108,7 @@ class RBLNOptimumWorker(WorkerBase):
 
     def load_model(self):
         self.model_runner.load_model()
+        self.check_rbln_config()
 
     def compile_or_warm_up_model(self) -> None:
         # Reset the seed to ensure that the random state is not affected by
@@ -141,3 +142,53 @@ class RBLNOptimumWorker(WorkerBase):
 
     def pin_lora(self, lora_id: int) -> bool:
         raise NotImplementedError
+
+    def check_rbln_config(self):
+        rbln_config = self.model_runner.model.rbln_model_config
+        submodules = rbln_config.submodules
+        batch_size = rbln_config.batch_size
+        kvcache_partition_len = getattr(rbln_config, "kvcache_partition_len",
+                                        None)
+        max_seq_len = getattr(rbln_config, "max_seq_len", None)
+        max_model_len = self.model_config.max_model_len
+        max_num_seqs = self.scheduler_config.max_num_seqs
+        block_size = self.vllm_config.cache_config.block_size
+        max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
+        # NOTE It is based on the decoder submodule is only one.
+        for submodule in submodules:
+            submodule_config = getattr(rbln_config, submodule)
+            if kvcache_partition_len is None:
+                kvcache_partition_len = getattr(submodule_config,
+                                                "kvcache_partition_len", None)
+            if max_seq_len is None:
+                max_seq_len = getattr(
+                    submodule_config, "max_seq_len", None) or getattr(
+                        submodule_config, "dec_max_seq_len", None)
+            submodule_batch_size = getattr(submodule_config, "batch_size",
+                                        None)
+            # FIXME
+            if submodule_batch_size is not None \
+                and batch_size != submodule_batch_size:
+                batch_size = submodule_batch_size
+        if kvcache_partition_len is None:
+            assert block_size == max_seq_len, (
+                f"`block_size({block_size})` must match "
+                f"`max_seq_len({max_seq_len})` "
+                "of the compiled RBLN model.")
+        else:
+            assert block_size == kvcache_partition_len, (
+                f"`block_size({block_size})` must match "
+                f"the `kvcache_partition_len({kvcache_partition_len})` "
+                "of the compiled RBLN model.")
+        if max_seq_len:
+            assert max_num_batched_tokens == max_seq_len, (
+                f"`max_num_batched_tokens({max_num_batched_tokens})` "
+                f"must match the `max_seq_len({max_seq_len})` "
+                "of the compiled RBLM model.")
+            assert max_model_len == max_seq_len, (
+                f"`max_model_len({max_model_len})` must match "
+                f"the `max_seq_len({max_seq_len})` "
+                "of the compiled RBLM model.")
+        assert max_num_seqs == batch_size, (
+            f"`max_num_seqs({max_num_seqs})` must match "
+            f"the `batch_size({batch_size})` of the compiled RBLM model.")
