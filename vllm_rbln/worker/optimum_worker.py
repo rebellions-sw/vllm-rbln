@@ -189,7 +189,7 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
                     f"`max_seq_len({max_seq_len})` "
                     "of the compiled RBLN model.")
             elif dec_max_seq_len is not None:
-                assert block_size == max_seq_len, (
+                assert block_size == dec_max_seq_len, (
                     f"`block_size({block_size})` must match "
                     f"`dec_max_seq_len({dec_max_seq_len})` "
                     "of the compiled RBLN model.")
