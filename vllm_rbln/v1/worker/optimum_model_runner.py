@@ -393,6 +393,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions = list(range(seq_len))
             block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table)
+            logger.debug(
+                "Request %s is now scheduled with block(s): %s",
+                req_id, block_table.tolist())
             running_request_ids.append(req_id)
 
         if self.is_multimodal_model:

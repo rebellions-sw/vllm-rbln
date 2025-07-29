@@ -193,10 +193,6 @@ class RBLNOptimumScheduler(Scheduler):
                 if new_blocks is None:
                     # The request cannot be scheduled.
                     break
-                else:
-                    logger.debug(
-                        "Request %s is trying to be scheduled with blocks %s.",
-                        request.request_id, new_blocks.get_block_ids())
 
                 # KVTransfer: the connector uses this info to determine
                 # if a load is needed. Note that
