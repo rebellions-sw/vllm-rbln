@@ -309,13 +309,13 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                 data.slot_mapping.append(block_offset)
 
         # batch padding
+        dummy = self.runner.cache_config.num_gpu_blocks
         batch_padding_size = self.max_num_seqs - len(data.input_tokens)
         data.input_tokens.extend([[0]] * batch_padding_size)
         data.input_positions.extend([[0]] * batch_padding_size)
-        list_input_block_ids.extend([[0]] * batch_padding_size)
+        list_input_block_ids.extend([[dummy]] * batch_padding_size)
 
         num_partition = self.max_model_len // block_size
-        dummy = self.runner.cache_config.num_gpu_blocks
         input_block_ids = make_tensor_with_pad(list_input_block_ids,
                                                max_len=num_partition,
                                                pad=dummy,

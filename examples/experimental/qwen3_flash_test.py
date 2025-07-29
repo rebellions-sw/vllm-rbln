@@ -67,17 +67,12 @@ qwen1_5_moe_model_id = "Qwen/Qwen1.5-MoE-A2.7B"
 # Create a sampling params object.
 sampling_params = SamplingParams(temperature=0.0, max_tokens=256)
 llm = LLM(
-    #model=qwen1_5_moe_model_id,
     model=qwen3_4_model_id,
     max_model_len=16 * 128,
-    #max_model_len=2048,
     block_size=128,
-    #block_size=1024,
     enable_chunked_prefill=True,
     max_num_batched_tokens=128,
     max_num_seqs=5,
-    #tensor_parallel_size=4,
-    #enable_expert_parallel=True,
 )
 
 # Generate texts from the prompts. The output is a list of RequestOutput objects
