@@ -38,6 +38,7 @@ _RBLN_GENERATION_MODELS: Dict[str, Tuple[str, str]] = {
     "ExaoneForCausalLM": ("exaone", "RBLNExaoneForCausalLM"),
     "Qwen2ForCausalLM": ("qwen2", "RBLNQwen2ForCausalLM"),
     "OPTForCausalLM": ("opt", "RBLNOPTForCausalLM"),
+    "Qwen3ForCausalLM": ("qwen3", "RBLNQwen3ForCausalLM"),
 }
 
 _RBLN_ENCODER_DECODER_MODELS: Dict[str, Tuple[str, str]] = {
@@ -58,6 +59,8 @@ _RBLN_MULTIMODAL_MODELS = {
     ("blip2", "RBLNBlip2ForConditionalGeneration"),
     "Gemma3ForConditionalGeneration": ("gemma3",
                                        "RBLNGemma3ForConditionalGeneration"),
+    "WhisperForConditionalGeneration": ("whisper",
+                                        "RBLNWhisperForConditionalGeneration"),
 }
 
 _RBLN_EMBEDDING_MODELS = {
@@ -69,6 +72,7 @@ _RBLN_EMBEDDING_MODELS = {
     "XLMRobertaForSequenceClassification":
     ("xlm_roberta_classification", "RBLNXLMRobertaForSequenceClassification"),
     "XLMRobertaModel": ("xlm_roberta", "RBLNXLMRobertaModel"),
+    "Qwen3Model": ("qwen3", "RBLNQwen3Model"),
 }
 
 _RBLN_SUPPORTED_MODELS = {
@@ -89,12 +93,13 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     input_tokens: torch.Tensor
     input_positions: torch.Tensor
     block_tables: torch.Tensor
-    sampling_metadata: "SamplingMetadata"
     running_requests_ids: List[str]
     finished_requests_ids: List[str]
+    is_prompt: bool = False  # for V1
+    sampling_metadata: "SamplingMetadata" = None,  # for V0
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     token_type_ids: Optional[torch.Tensor] = None
-    pooling_metadata: Optional[PoolingMetadata] = None
+    pooling_metadata: Optional[PoolingMetadata] = None  # for V0
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:

@@ -11,59 +11,28 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import asyncio
 
 import fire
 from datasets import load_dataset
-from transformers import AutoProcessor, AutoTokenizer
+from transformers import AutoTokenizer
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
 def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild",
-                           split="train").shuffle(seed=42)
-    processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
-    messages = [[
-        {
-            "role":
-            "system",
-            "content": [{
-                "type":
-                "text",
-                "text":
-                "You are a helpful assistant."
-                "Answer the each question based on the image.",
-            }],
-        },
-        {
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "image"
-                },
-                {
-                    "type": "text",
-                    "text": dataset[i]["question"]
-                },
-            ],
-        },
-    ] for i in range(batch_size)]
-    images = [[dataset[i]["image"]] for i in range(batch_size)]
+    dataset = load_dataset("distil-whisper/librispeech_asr-noise",
+                           "test-pub-noise",
+                           split="40")
 
-    texts = processor.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=False,
-    )
-
-    return [{
-        "prompt": text,
+    messages = [{
+        "prompt": "<|startoftranscript|>",
         "multi_modal_data": {
-            "image": image
-        }
-    } for text, image in zip(texts, images)]
+            "audio": (dataset[i]["audio"]["array"],
+                      dataset[i]["audio"]["sampling_rate"])
+        },
+    } for i in range(batch_size)]
+
+    return messages
 
 
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
@@ -73,8 +42,8 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
                        ignore_eos=False,
                        skip_special_tokens=True,
                        stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=200),
-        str(request_id),
+                       max_tokens=448),
+        request_id,
     )
 
     final_output = None
@@ -86,7 +55,6 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
 async def main(
     batch_size: int,
     max_seq_len: int,
-    kvcache_partition_len: int,
     num_input_prompt: int,
     model_id: str,
 ):
@@ -95,7 +63,8 @@ async def main(
                                   max_num_seqs=batch_size,
                                   max_num_batched_tokens=max_seq_len,
                                   max_model_len=max_seq_len,
-                                  block_size=kvcache_partition_len)
+                                  block_size=max_seq_len,
+                                  limit_mm_per_prompt={"audio": 1})
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -121,18 +90,18 @@ async def main(
 
 def entry_point(
     batch_size: int = 4,
-    max_seq_len: int = 32768,
-    kvcache_partition_len: int = 16384,
-    num_input_prompt: int = 10,
-    model_id: str = "/gemma3-4b-conditional-b4-flash",
+    max_seq_len: int = 448,
+    num_input_prompt: int = 1,
+    model_id: str = "/whisper-base-b4-wo-token-timestamps",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
-        main(batch_size=batch_size,
-             max_seq_len=max_seq_len,
-             kvcache_partition_len=kvcache_partition_len,
-             num_input_prompt=num_input_prompt,
-             model_id=model_id))
+        main(
+            batch_size=batch_size,
+            max_seq_len=max_seq_len,
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        ))
 
 
 if __name__ == "__main__":
