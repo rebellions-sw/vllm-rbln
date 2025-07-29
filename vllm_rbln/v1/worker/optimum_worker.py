@@ -178,10 +178,16 @@ class RBLNOptimumWorker(WorkerBase):
                 batch_size = submodule_batch_size
 
         if kvcache_partition_len is None:
-            assert block_size == max_seq_len, (
-                f"`block_size({block_size})` must match "
-                f"`max_seq_len({max_seq_len})` "
-                "of the compiled RBLN model.")
+            if max_seq_len is not None:
+                assert block_size == max_seq_len, (
+                    f"`block_size({block_size})` must match "
+                    f"`max_seq_len({max_seq_len})` "
+                    "of the compiled RBLN model.")
+            elif dec_max_seq_len is not None:
+                assert block_size == max_seq_len, (
+                    f"`block_size({block_size})` must match "
+                    f"`dec_max_seq_len({dec_max_seq_len})` "
+                    "of the compiled RBLN model.")
         else:
             assert block_size == kvcache_partition_len, (
                 f"`block_size({block_size})` must match "
