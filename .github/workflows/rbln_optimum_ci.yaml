@@ -141,6 +141,7 @@ jobs:
       - name : Run text embedding model
         run: >
           python3 examples/optimum/run_encoder_only.py
+          --max_seq_len 1024
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/bge-m3-1k-batch4
           --q_prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/q_prompts.txt
