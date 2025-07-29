@@ -14,6 +14,7 @@
 from typing import Any, Optional
 
 import torch
+import vllm.envs as env
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.idefics3 import (Idefics3ImageEmbeddingInputs,
@@ -53,12 +54,11 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
         block_tables = model_input.block_tables
 
         request_nums = input_ids.shape[0]
-        # V1
-        if model_input.sampling_metadata is None:
+        if env.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
-        # V0
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
+
         kwargs = self.preprocess_for_decoder(
             is_prompt,
             block_tables,

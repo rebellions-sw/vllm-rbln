@@ -393,6 +393,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions = list(range(seq_len))
             block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table)
+            logger.debug("Request %s is now scheduled with block(s): %s",
+                         req_id, block_table.tolist())
             running_request_ids.append(req_id)
 
         if self.is_multimodal_model:
@@ -446,6 +448,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         """
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
+            logger.debug("Request %s is finished.", req_id)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
