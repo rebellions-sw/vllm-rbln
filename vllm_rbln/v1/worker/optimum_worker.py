@@ -195,15 +195,15 @@ class RBLNOptimumWorker(WorkerBase):
                 "of the compiled RBLN model.")
 
         if dec_max_seq_len is not None:  # encoder-decoder
-            assert max_num_batched_tokens == max_seq_len, (
+            assert max_num_batched_tokens == dec_max_seq_len, (
                 f"`max_num_batched_tokens({max_num_batched_tokens})` "
                 f"must match the `dec_max_seq_len({dec_max_seq_len})` "
                 "of the compiled RBLM model.")
-            assert max_model_len == max_seq_len, (
+            assert max_model_len == dec_max_seq_len, (
                 f"`max_model_len({max_model_len})` must match "
                 f"the `dec_max_seq_len({dec_max_seq_len})` "
                 "of the compiled RBLM model.")
-        elif max_seq_len:  # including decoder
+        elif max_seq_len is not None:  # including decoder
             assert max_num_batched_tokens == max_seq_len, (
                 f"`max_num_batched_tokens({max_num_batched_tokens})` "
                 f"must match the `max_seq_len({max_seq_len})` "
