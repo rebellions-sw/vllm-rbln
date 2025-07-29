@@ -446,6 +446,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         """
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
+            logger.debug("Request %s is finished.", req_id)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
