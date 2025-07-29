@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import math
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
@@ -26,12 +25,11 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.paged_attn import PagedAttentionMetadata
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.worker.model_runner import ModelInputForRebelBuilder
 
 logger = init_logger(__name__)
-
-_COMPILE_MODEL = os.getenv("COMPILE_MODEL", "True").lower() in ("true", "1")
 
 
 # RBLN custom op (flash attention naive prefill/decode)
@@ -48,7 +46,7 @@ def flash_attention_naive_prefill_impl(
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
 ) -> torch.Tensor:
-    if not _COMPILE_MODEL:
+    if not envs.RBLN_COMPILE_MODEL:
         # attn_weights = MM(q,kt) * scale
         # attn_weights = add(attn_weights + mask)
         # attn_weights = softmax(attn_weights)
@@ -105,7 +103,7 @@ def flash_attention_naive_decode_impl(
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
 ) -> torch.Tensor:
-    if not _COMPILE_MODEL:
+    if not envs.RBLN_COMPILE_MODEL:
         # NOTE - multiple decode kernel implementation is necessary
         assert q.size(0) == 1
         partition = kv_cache.size(-2)
@@ -481,7 +479,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         assert kv_cache is not None
 
         # kv cache update
-        if not _COMPILE_MODEL:
+        if not envs.RBLN_COMPILE_MODEL:
             s = attn_metadata.seq_lens_tensor.to(torch.int16)[0][0]
             e = s + q_len
             block = attn_metadata.block_tables.to(torch.int16)[0]
@@ -526,7 +524,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
 
         # 2. attention output reshape for attention backend return
         # attn_output = [batch,H*4,L,D] -> [batch,L,H*4,D] -> [batch,L,H*4*D]
-        if not _COMPILE_MODEL:
+        if not envs.RBLN_COMPILE_MODEL:
             attn_output = attn_output.reshape(b_size, self.num_heads, q_len,
                                               self.head_size).transpose(1, 2)
             attn_output = attn_output.reshape(b_size, q_len,
