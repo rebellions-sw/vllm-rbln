@@ -89,6 +89,7 @@ class Sampler(VLLMSampler):
         sorted_probs = torch.softmax(sorted_logits, dim=-1)
         return sorted_probs
 
+    @torch.compiler.disable
     def apply_penalties(
         self,
         logits: torch.Tensor,

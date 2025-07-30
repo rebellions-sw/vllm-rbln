@@ -28,6 +28,7 @@ from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.worker.worker_base import WorkerBase
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 logger = init_logger(__name__)
@@ -113,8 +114,16 @@ class RBLNOptimumWorker(WorkerBase):
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
-        # TODO(eunji): warmup is required?
-        # self.model_runner.warming_up_model()
+
+        if not envs.RBLN_ENABLE_WARM_UP:
+            logger.info(
+                "Warm up is disabled. " \
+                "Set RBLN_ENABLE_WARM_UP=1 to enable warm up."
+            )
+            return
+
+        logger.info("Running dummy warm up.")
+        self.model_runner.dummy_sampler_run()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
