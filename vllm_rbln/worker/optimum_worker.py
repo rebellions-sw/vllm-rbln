@@ -27,6 +27,7 @@ from vllm.worker.worker_base import (LocalOrDistributedWorkerBase,
                                      LoRANotSupportedWorkerBase, WorkerBase,
                                      WorkerInput)
 
+from vllm_rbln.utils import check_rbln_config
 from vllm_rbln.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 logger = init_logger(__name__)
@@ -66,6 +67,8 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
 
     def load_model(self):
         self.model_runner.load_model()
+        check_rbln_config(self.model_runner.model.rbln_model_config,
+                          self.vllm_config)
 
     def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of available KV blocks.
