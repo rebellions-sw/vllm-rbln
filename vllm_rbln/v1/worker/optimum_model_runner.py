@@ -28,6 +28,7 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
+from vllm.v1.sample.sampler import Sampler
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 
@@ -37,7 +38,7 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
                                                      RBLNOptimumDictTableMixin)
-from vllm_rbln.v1.sample.sampler import Sampler
+from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
 from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
@@ -607,208 +608,111 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         pass
 
     def dummy_sampler_run(self):
+        if not self.use_rbln_sampler:
+            return
 
-        def set_sampling_tensors(
-            input_batch,
-            *,
-            temperature: float = 0.0,
-            top_p: Optional[float] = None,
-            top_k: Optional[int] = None,
-            min_p: Optional[float] = None,
-            frequency_penalty: Optional[float] = None,
-            repetition_penalty: Optional[float] = None,
-            presence_penalty: Optional[float] = None,
-        ):
-            input_batch.temperature_cpu_tensor.fill_(temperature)
-            input_batch.temperature.fill_(temperature)
+        def set_sampling_tensors(input_batch, **params):
+            input_batch.temperature_cpu_tensor.fill_(params["temperature"])
+            input_batch.temperature.fill_(params["temperature"])
 
-            if top_p is not None:
-                input_batch.top_p_cpu_tensor.fill_(top_p)
-                input_batch.top_p.fill_(top_p)
+            optional_keys = [
+                ("top_p", input_batch.top_p_cpu_tensor, input_batch.top_p),
+                ("top_k", input_batch.top_k_cpu_tensor, input_batch.top_k),
+                ("min_p", input_batch.min_p_cpu_tensor, input_batch.min_p),
+                ("frequency_penalties",
+                 input_batch.frequency_penalties_cpu_tensor,
+                 input_batch.frequency_penalties),
+                ("presence_penalties",
+                 input_batch.presence_penalties_cpu_tensor,
+                 input_batch.presence_penalties),
+                ("repetition_penalties",
+                 input_batch.repetition_penalties_cpu_tensor,
+                 input_batch.repetition_penalties),
+            ]
 
-            if top_k is not None:
-                input_batch.top_k_cpu_tensor.fill_(top_k)
-                input_batch.top_k.fill_(top_k)
+            for key, cpu_tensor, dev_tensor in optional_keys:
+                val = params.get(key)
+                if val is not None:
+                    cpu_tensor.fill_(val)
+                    dev_tensor.fill_(val)
 
-            if min_p is not None:
-                input_batch.min_p_cpu_tensor.fill_(min_p)
-                input_batch.min_p.fill_(min_p)
+        def populate_reqs(input_batch, base_config, batch_size):
+            for i in range(batch_size):
+                req_id = f"{base_config['name']}_req_{i}"
+                input_batch._req_ids.append(req_id)
+                input_batch.req_id_to_index[req_id] = i
 
-            if frequency_penalty is not None:
-                input_batch.frequency_penalties_cpu_tensor.fill_(
-                    frequency_penalty)
-                input_batch.frequency_penalties.fill_(frequency_penalty)
+                if base_config["all_greedy"]:
+                    input_batch.greedy_reqs.add(req_id)
+                elif base_config["all_random"]:
+                    input_batch.random_reqs.add(req_id)
 
-            if presence_penalty is not None:
-                input_batch.presence_penalties_cpu_tensor.fill_(
-                    presence_penalty)
-                input_batch.presence_penalties.fill_(presence_penalty)
+                for attr, req_set in [
+                    ("top_p", input_batch.top_p_reqs),
+                    ("top_k", input_batch.top_k_reqs),
+                    ("frequency_penalties",
+                     input_batch.frequency_penalties_reqs),
+                    ("repetition_penalties",
+                     input_batch.repetition_penalties_reqs),
+                    ("presence_penalties",
+                     input_batch.presence_penalties_reqs),
+                ]:
+                    if base_config.get(attr) is not None:
+                        req_set.add(req_id)
 
-            if repetition_penalty is not None:
-                input_batch.repetition_penalties_cpu_tensor.fill_(
-                    repetition_penalty)
-                input_batch.repetition_penalties.fill_(repetition_penalty)
+        def clear_reqs(input_batch):
+            input_batch._req_ids.clear()
+            input_batch.req_id_to_index.clear()
+            input_batch.greedy_reqs.clear()
+            input_batch.random_reqs.clear()
+            input_batch.top_p_reqs.clear()
+            input_batch.top_k_reqs.clear()
+            input_batch.frequency_penalties_reqs.clear()
+            input_batch.repetition_penalties_reqs.clear()
+            input_batch.presence_penalties_reqs.clear()
 
         def dummy_run_batches(base_config):
             for batch_size in range(1, self.input_batch.max_num_reqs + 1):
-                # Clear request mappings
                 input_batch = self.input_batch
-                # Fill up to batch_size
-                for i in range(batch_size):
-                    req_id = f"{base_config['name']}_req_{i}"
-                    input_batch._req_ids.append(req_id)
-                    input_batch.req_id_to_index[req_id] = i
-
-                    if base_config["all_greedy"]:
-                        input_batch.greedy_reqs.add(req_id)
-                    elif base_config["all_random"]:
-                        input_batch.random_reqs.add(req_id)
-
-                    if "top_p" in base_config and base_config[
-                            "top_p"] is not None:
-                        input_batch.top_p_reqs.add(req_id)
-
-                    if "top_k" in base_config and base_config[
-                            "top_k"] is not None:
-                        input_batch.top_k_reqs.add(req_id)
-
-                    if "frequency_penalties" in base_config and base_config[
-                            "frequency_penalties"] is not None:
-                        input_batch.frequency_penalties_reqs.add(req_id)
-
-                    if "repetition_penalties" in base_config and base_config[
-                            "repetition_penalties"] is not None:
-                        input_batch.repetition_penalties_reqs.add(req_id)
-
-                    if "presence_penalties" in base_config and base_config[
-                            "presence_penalties"] is not None:
-                        input_batch.presence_penalties_reqs.add(req_id)
+                populate_reqs(input_batch, base_config, batch_size)
 
                 metadata = input_batch._make_sampling_metadata()
                 metadata.no_penalties = base_config["no_penalties"]
                 metadata.all_greedy = base_config["all_greedy"]
                 metadata.all_random = base_config["all_random"]
+
                 if (not metadata.no_penalties
                         and metadata.prompt_token_ids is None):
-                    batch_size = len(self.input_batch._req_ids)
                     metadata.prompt_token_ids = torch.zeros((batch_size, 1),
                                                             dtype=torch.long,
                                                             device="cpu")
 
+                logger.info(
+                    "Running dummy compile with batch_size=%d, vocab_size=%d",
+                    batch_size, input_batch.vocab_size)
+                logger.info("Sampling metadata: %s", metadata)
+
                 with torch.inference_mode():
                     empty_logits = torch.empty(batch_size,
-                                               self.input_batch.vocab_size,
+                                               input_batch.vocab_size,
                                                dtype=torch.float32)
-                    logger.info(
-                        "Running dummy compile with batch_size=%d, " \
-                        "vocab_size=%d", batch_size,
-                        self.input_batch.vocab_size)
-                    logger.info("Sampling metadata: %s", metadata)
                     _ = self.sampler(logits=empty_logits,
                                      sampling_metadata=metadata)
 
-                input_batch._req_ids.clear()
-                input_batch.req_id_to_index.clear()
-                input_batch.greedy_reqs.clear()
-                input_batch.random_reqs.clear()
-                input_batch.top_p_reqs.clear()
-                input_batch.top_k_reqs.clear()
-                input_batch.frequency_penalties_reqs.clear()
-                input_batch.repetition_penalties_reqs.clear()
-                input_batch.presence_penalties_reqs.clear()
+                clear_reqs(input_batch)
 
-        if not self.use_rbln_sampler:
-            return
+        for config in WARM_UP_CONFIGS:
+            logger.info("Running dummy sampler config: %s", config["name"])
 
-        configs = [
-            {
-                "name": "no_penalty_greedy",
-                "no_penalties": True,
-                "all_greedy": True,
-                "all_random": False,
-                "temperature": 0.0
-            },
-            {
-                "name": "no_penalty_topp",
-                "no_penalties": True,
-                "all_greedy": False,
-                "all_random": True,
-                "top_p": 0.9,
-                "temperature": 0.5
-            },
-            {
-                "name": "no_penalty_topk",
-                "no_penalties": True,
-                "all_greedy": False,
-                "all_random": True,
-                "top_k": 1.0,
-                "temperature": 0.5
-            },
-            {
-                "name": "no_penalty_topp_topk",
-                "no_penalties": True,
-                "all_greedy": False,
-                "all_random": True,
-                "top_p": 0.9,
-                "top_k": 1.0,
-                "temperature": 0.5
-            },
-            {
-                "name": "penalty_greedy",
-                "no_penalties": False,
-                "frequency_penalties": 0.1,
-                "presence_penalties": 0.1,
-                "repetition_penalties": 1.0,
-                "all_greedy": True,
-                "all_random": False,
-                "temperature": 0.0
-            },
-            {
-                "name": "penalty_topp",
-                "no_penalties": False,
-                "frequency_penalties": 0.1,
-                "presence_penalties": 0.1,
-                "repetition_penalties": 1.0,
-                "all_greedy": False,
-                "all_random": True,
-                "top_p": 0.9,
-                "temperature": 0.5
-            },
-            {
-                "name": "penalty_topk",
-                "no_penalties": False,
-                "frequency_penalties": 0.1,
-                "presence_penalties": 0.1,
-                "repetition_penalties": 1.0,
-                "all_greedy": False,
-                "all_random": True,
-                "top_k": 1.0,
-                "temperature": 0.5
-            },
-            {
-                "name": "penalty_topp_topk",
-                "no_penalties": False,
-                "frequency_penalties": 0.1,
-                "presence_penalties": 0.1,
-                "repetition_penalties": 1.0,
-                "all_greedy": False,
-                "all_random": True,
-                "top_p": 0.9,
-                "top_k": 1.0,
-                "temperature": 0.5
-            },
-        ]
-
-        for config in configs:
             set_sampling_tensors(
                 self.input_batch,
                 temperature=config["temperature"],
-                top_p=config.get("top_p", None),
-                top_k=config.get("top_k", None),
-                frequency_penalty=config.get("frequency_penalties", None),
-                repetition_penalty=config.get("repetition_penalties", None),
-                presence_penalty=config.get("presence_penalties", None),
+                top_p=config.get("top_p"),
+                top_k=config.get("top_k"),
+                min_p=config.get("min_p"),
+                frequency_penalties=config.get("frequency_penalties"),
+                repetition_penalties=config.get("repetition_penalties"),
+                presence_penalties=config.get("presence_penalties"),
             )
 
-            logger.info("Running dummy sampler config: %s", config["name"])
             dummy_run_batches(config)
