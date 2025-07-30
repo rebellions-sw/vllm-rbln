@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import vllm_rbln.v1.attention.layer  # noqa
-
 # import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
 import vllm_rbln.model_executor.layers.rotary_embedding  # noqa
+import vllm_rbln.v1.attention.layer  # noqa
+
 # import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
 # import vllm_rbln.models.deepseek_v2  # noqa
 # import vllm_rbln.models.qwen2_moe  # noqa
