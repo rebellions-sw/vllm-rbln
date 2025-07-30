@@ -24,13 +24,11 @@ from vllm.config import CacheConfig, get_current_vllm_config
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.model_executor.layers.linear import UnquantizedLinearMethod
 from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig,
-)
+    QuantizationConfig)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
 from vllm.v1.attention.backends.utils import validate_kv_sharing_target
-
 
 # @FIXME(RBLN): We hope to remove the Custom Attention forward.
 # The original vLLM forward function will be used in the future.
@@ -107,21 +105,16 @@ def __custom_init__(
     self.num_kv_heads = num_kv_heads
     self.sliding_window = sliding_window
 
-    quant_method = (
-        quant_config.get_quant_method(self, prefix=prefix)
-        if quant_config
-        else None
-    )
-    if quant_method is not None and not isinstance(
-        quant_method, UnquantizedLinearMethod
-    ):
+    quant_method = (quant_config.get_quant_method(self, prefix=prefix)
+                    if quant_config else None)
+    if quant_method is not None and not isinstance(quant_method,
+                                                   UnquantizedLinearMethod):
         assert isinstance(quant_method, BaseKVCacheMethod)
         # TODO (mgoin): kv cache dtype should be specified in the FP8
         # checkpoint config and become the "auto" behavior
         if self.kv_cache_dtype == "fp8_e5m2":
             raise ValueError(
-                "fp8_e5m2 kv-cache is not supported with fp8 checkpoints."
-            )
+                "fp8_e5m2 kv-cache is not supported with fp8 checkpoints.")
         # If quantization is enabled, we make "k_scale" and "v_scale"
         # parameters so that it can be loaded from the model checkpoint.
         # The k/v_scale will then be converted back to native float32
@@ -163,9 +156,8 @@ def __custom_init__(
     # torch.compile works by registering the attention as one giant
     # opaque custom op. For other platforms, we directly call them
     # and let torch.compile handle them.
-    self.use_direct_call = (
-        not current_platform.is_cuda_alike() and not current_platform.is_cpu()
-    )
+    self.use_direct_call = (not current_platform.is_cuda_alike()
+                            and not current_platform.is_cpu())
 
     self.use_output = attn_backend.accept_output_buffer
     compilation_config = get_current_vllm_config().compilation_config
@@ -178,8 +170,7 @@ def __custom_init__(
     if kv_sharing_target_layer_name is not None:
         if not envs.VLLM_USE_V1:
             raise NotImplementedError(
-                "Cross-layer KV sharing is not supported in V0."
-            )
+                "Cross-layer KV sharing is not supported in V0.")
 
         validate_kv_sharing_target(
             prefix,
@@ -192,10 +183,8 @@ def __custom_init__(
     # by bind_kv_cache
     # this variable will not be accessed if use_direct_call is True
     self.kv_cache = [
-        torch.tensor([])
-        for _ in range(
-            get_current_vllm_config().parallel_config.pipeline_parallel_size
-        )
+        torch.tensor([]) for _ in range(
+            get_current_vllm_config().parallel_config.pipeline_parallel_size)
     ]
 
     self.q_range = torch.tensor(envs.Q_SCALE_CONSTANT, dtype=torch.float32)
@@ -231,9 +220,9 @@ def custom_attention_forward(
             self.calc_kv_scales(query, key, value)
     if self.use_output:
         output_shape = output_shape if output_shape is not None else query.shape
-        output = torch.empty(
-            output_shape, dtype=query.dtype, device=query.device
-        )
+        output = torch.empty(output_shape,
+                             dtype=query.dtype,
+                             device=query.device)
         hidden_size = output_shape[-1]
         # We skip reshaping query, key and value tensors for the MLA
         # backend since these tensors have different semantics and are
@@ -275,8 +264,7 @@ def custom_attention_forward(
             )
         else:
             torch.ops.vllm.unified_attention_with_output(
-                query, key, value, output, self.layer_name
-            )
+                query, key, value, output, self.layer_name)
         return output.view(-1, hidden_size)
     else:
         if self.use_direct_call:
@@ -284,7 +272,6 @@ def custom_attention_forward(
             attn_metadata = forward_context.attn_metadata
             if isinstance(attn_metadata, dict):
                 attn_metadata = attn_metadata[self.layer_name]
-
             """
             NOTE(jiwoo.park) - To represent kv cache as model input,
             modify attention
@@ -296,13 +283,11 @@ def custom_attention_forward(
             assert attn_metadata.kv_caches is not None
             assert self.layer_index < len(attn_metadata.kv_caches)
             self_kv_cache = attn_metadata.kv_caches[self.layer_index]
-            return self.impl.forward(
-                self, query, key, value, self_kv_cache, attn_metadata
-            )
+            return self.impl.forward(self, query, key, value, self_kv_cache,
+                                     attn_metadata)
         else:
-            return torch.ops.vllm.unified_attention(
-                query, key, value, self.layer_name
-            )
+            return torch.ops.vllm.unified_attention(query, key, value,
+                                                    self.layer_name)
     '''
     if self.calculate_kv_scales:
         attn_metadata = get_forward_context().attn_metadata

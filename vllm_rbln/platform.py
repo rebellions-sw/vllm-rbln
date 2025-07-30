@@ -130,6 +130,7 @@ class RblnPlatform(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
+        # FIXME(jiwoo.park)
         cls.is_torch_compile = is_torch_compile_supported(vllm_config)
         if vllm_config.scheduler_config.is_multi_step:
             raise NotImplementedError(
@@ -170,16 +171,13 @@ class RblnPlatform(Platform):
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
-                        "vllm_rbln.v1.worker.rbln_worker.RBLNWorker"
-                    )
+                        "vllm_rbln.v1.worker.rbln_worker.RBLNWorker")
             else:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
-                        "vllm_rbln.worker.worker.RBLNWorker"
-                    )
+                        "vllm_rbln.worker.worker.RBLNWorker")
                 scheduler_config.scheduler_cls = (
-                    "vllm_rbln.core.scheduler.RBLNScheduler"
-                )
+                    "vllm_rbln.core.scheduler.RBLNScheduler")
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
@@ -216,18 +214,14 @@ class RblnPlatform(Platform):
         if envs.VLLM_USE_V1 and cls.is_torch_compile:
             from vllm.config import CompilationLevel
 
-            if (
-                vllm_config.compilation_config.level
-                != CompilationLevel.NO_COMPILATION
-            ):
+            if (vllm_config.compilation_config.level
+                    != CompilationLevel.NO_COMPILATION):
                 logger.info("RBLN doesn't @support_torch_compile decorator")
                 vllm_config.compilation_config.level = (
-                    CompilationLevel.NO_COMPILATION
-                )
-                if (
-                    len(vllm_config.compilation_config.custom_ops) == 1
-                    and vllm_config.compilation_config.custom_ops[0] == "none"
-                ):
+                    CompilationLevel.NO_COMPILATION)
+                if (len(vllm_config.compilation_config.custom_ops) == 1
+                        and vllm_config.compilation_config.custom_ops[0]
+                        == "none"):
                     vllm_config.compilation_config.custom_ops = []
 
             if not model_config.disable_cascade_attn:
