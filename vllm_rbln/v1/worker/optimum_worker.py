@@ -118,7 +118,7 @@ class RBLNOptimumWorker(WorkerBase):
         if not envs.RBLN_ENABLE_WARM_UP:
             logger.info(
                 "Warm up is disabled. " \
-                "Set RBLN_ENABLE_WARM_UP=1 to enable warm up."
+                "Set VLLM_RBLN_ENABLE_WARM_UP=1 to enable warm up."
             )
             return
 
