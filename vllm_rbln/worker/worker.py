@@ -186,11 +186,15 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.rank = rank
         self.parallel_config.rank = rank
 
-        if self.parallel_config.distributed_executor_backend == "ray":
-            logger.info(
-                "Running on Ray backend. Skipping device env var setup.")
-        else:
+        if self.parallel_config.distributed_executor_backend == "mp":
+            logger.info("distributed executor backend mp enabled")
             self.set_device()
+        elif self.parallel_config.distributed_executor_backend == "ray":
+            logger.info("distributed executor backend ray enabled")
+            self.set_device()
+        else:
+            logger.info(
+                "Running on other backend. Skipping device env var setup.")
 
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
@@ -250,9 +254,13 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         else:
             device_ids = os.environ[env_var].split(",")
 
-        if len(device_ids) < total_device_count:
-            raise RuntimeError(f"{env_var} has {len(device_ids)} devices"
-                               " but required {total_device_count}")
+        # This check is only valid for single node mp backends, invalid for ray
+        # ex) node#0 : RBLN_DEVICES=0,1
+        #     node#1 : RBLN_DEVICES=2,3
+        if self.parallel_config.distributed_executor_backend == "mp":
+            if len(device_ids) < total_device_count:
+                raise RuntimeError(f"{env_var} has devices {device_ids}"
+                                   f" but required {total_device_count}")
 
         start_idx = self.local_rank * envs.RBLN_TP_SIZE
         end_idx = start_idx + envs.RBLN_TP_SIZE
