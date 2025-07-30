@@ -17,29 +17,24 @@ import os
 from typing import TYPE_CHECKING, Optional
 
 import torch
-from vllm.config import (
-    VllmConfig,
-)
-from vllm.distributed import (
-    ensure_model_parallel_initialized,
-    init_distributed_environment,
-)
+import torch.nn as nn
+from vllm.config import VllmConfig
+from vllm.distributed import (ensure_model_parallel_initialized,
+                              init_distributed_environment,
+                              set_custom_all_reduce)
+from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
+from vllm.distributed.parallel_state import get_pp_group, get_tp_group
+from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
-
-from vllm_rbln.logger import init_logger
-
-from vllm.v1.worker.worker_base import WorkerBase
-from vllm.distributed import set_custom_all_reduce
-from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
+from vllm.sequence import IntermediateTensors
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.utils import report_usage_stats
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
-from vllm.distributed.parallel_state import get_pp_group, get_tp_group
-from vllm.sequence import IntermediateTensors
-import torch.nn as nn
-from vllm.lora.request import LoRARequest
+from vllm.v1.worker.worker_base import WorkerBase
+
 import vllm_rbln.rbln_envs as envs
+from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
 
 logger = init_logger(__name__)
@@ -71,8 +66,7 @@ class RBLNWorker(WorkerBase):
 
         if self.parallel_config.distributed_executor_backend == "ray":
             logger.info(
-                "Running on Ray backend. Skipping device env var setup."
-            )
+                "Running on Ray backend. Skipping device env var setup.")
         else:
             self._init_device_env()
 
@@ -96,8 +90,7 @@ class RBLNWorker(WorkerBase):
                 ],
                 with_stack=True,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True
-                ),
+                    torch_profiler_trace_dir, use_gzip=True),
             )
         else:
             self.profiler = None
@@ -111,11 +104,8 @@ class RBLNWorker(WorkerBase):
             self.profiler.start()
         else:
             self.profiler.stop()
-            print(
-                self.profiler.key_averages().table(
-                    sort_by="self_cuda_time_total"
-                )
-            )
+            print(self.profiler.key_averages().table(
+                sort_by="self_cuda_time_total"))
 
     def _init_device_env(self) -> None:
         world_size = self.parallel_config.world_size
@@ -129,10 +119,8 @@ class RBLNWorker(WorkerBase):
             device_ids = os.environ[env_var].split(",")
 
         if len(device_ids) < total_device_count:
-            raise RuntimeError(
-                f"{env_var} has {len(device_ids)} devices"
-                " but required {total_device_count}"
-            )
+            raise RuntimeError(f"{env_var} has {len(device_ids)} devices"
+                               " but required {total_device_count}")
 
         start_idx = self.local_rank * envs.RBLN_TP_SIZE
         end_idx = start_idx + envs.RBLN_TP_SIZE
@@ -158,8 +146,7 @@ class RBLNWorker(WorkerBase):
         set_random_seed(self.model_config.seed)
 
         self.model_runner: RBLNModelRunner = RBLNModelRunner(
-            self.vllm_config, self.device
-        )
+            self.vllm_config, self.device)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -205,21 +192,17 @@ class RBLNWorker(WorkerBase):
         intermediate_tensors = None
         if not get_pp_group().is_first_rank:
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict(all_gather_group=get_tp_group())
-            )
+                get_pp_group().recv_tensor_dict(
+                    all_gather_group=get_tp_group()))
 
-        output = self.model_runner.execute_model(
-            scheduler_output, intermediate_tensors
-        )
+        output = self.model_runner.execute_model(scheduler_output,
+                                                 intermediate_tensors)
         parallel_config = self.vllm_config.parallel_config
-        if (
-            parallel_config.distributed_executor_backend != "external_launcher"
-            and not get_pp_group().is_last_rank
-        ):
+        if (parallel_config.distributed_executor_backend != "external_launcher"
+                and not get_pp_group().is_last_rank):
             assert isinstance(output, IntermediateTensors)
-            get_pp_group().send_tensor_dict(
-                output.tensors, all_gather_group=get_tp_group()
-            )
+            get_pp_group().send_tensor_dict(output.tensors,
+                                            all_gather_group=get_tp_group())
             return None
         assert isinstance(output, ModelRunnerOutput)
         return output if self.is_driver_worker else None
