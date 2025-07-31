@@ -6,7 +6,6 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import os
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,26 +28,21 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
+from vllm.v1.sample.sampler import Sampler
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
                                                      RBLNOptimumDictTableMixin)
-from vllm_rbln.v1.sample.sampler import Sampler
+from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
 from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
 logger = init_logger(__name__)
-
-
-def _use_rbln_sampler() -> bool:
-    """Check if RBLN sampler should be used based on environment variable."""
-    TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
-    return os.environ.get("VLLM_RBLN_SAMPLER",
-                          "").strip().lower() in TRUTHY_VALUES
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
@@ -101,21 +95,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.mm_registry = MULTIMODAL_REGISTRY
         self.uses_mrope = model_config.uses_mrope
 
-        # encoder_compute_budget, encoder_cache_size = compute_encoder_budget(
-        #     model_config=model_config,
-        #     scheduler_config=scheduler_config,
-        #     mm_registry=self.mm_registry,
-        # )
-        # self.max_num_encoder_input_tokens = encoder_compute_budget
-        # self.encoder_cache_size = encoder_cache_size
-
         # Sampler
-        use_rbln_sampler = _use_rbln_sampler()
-        logger.info("Using RBLN sampler: %s", use_rbln_sampler)
-
-        sampler = RBLNSampler() if use_rbln_sampler else Sampler()
-
-        if use_rbln_sampler:
+        self.use_rbln_sampler = envs.RBLN_SAMPLER
+        logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
+        sampler = RBLNSampler() if self.use_rbln_sampler else Sampler()
+        if self.use_rbln_sampler:
             # Use torch.compile for optimized RBLN sampler
             sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
 
@@ -622,3 +606,113 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         pass
+
+    def dummy_sampler_run(self):
+        if not self.use_rbln_sampler:
+            return
+
+        def set_sampling_tensors(input_batch, **params):
+            input_batch.temperature_cpu_tensor.fill_(params["temperature"])
+            input_batch.temperature.fill_(params["temperature"])
+
+            optional_keys = [
+                ("top_p", input_batch.top_p_cpu_tensor, input_batch.top_p),
+                ("top_k", input_batch.top_k_cpu_tensor, input_batch.top_k),
+                ("min_p", input_batch.min_p_cpu_tensor, input_batch.min_p),
+                ("frequency_penalties",
+                 input_batch.frequency_penalties_cpu_tensor,
+                 input_batch.frequency_penalties),
+                ("presence_penalties",
+                 input_batch.presence_penalties_cpu_tensor,
+                 input_batch.presence_penalties),
+                ("repetition_penalties",
+                 input_batch.repetition_penalties_cpu_tensor,
+                 input_batch.repetition_penalties),
+            ]
+
+            for key, cpu_tensor, dev_tensor in optional_keys:
+                val = params.get(key)
+                if val is not None:
+                    cpu_tensor.fill_(val)
+                    dev_tensor.fill_(val)
+
+        def populate_reqs(input_batch, base_config, batch_size):
+            for i in range(batch_size):
+                req_id = f"{base_config['name']}_req_{i}"
+                input_batch._req_ids.append(req_id)
+                input_batch.req_id_to_index[req_id] = i
+
+                if base_config["all_greedy"]:
+                    input_batch.greedy_reqs.add(req_id)
+                elif base_config["all_random"]:
+                    input_batch.random_reqs.add(req_id)
+
+                for attr, req_set in [
+                    ("top_p", input_batch.top_p_reqs),
+                    ("top_k", input_batch.top_k_reqs),
+                    ("frequency_penalties",
+                     input_batch.frequency_penalties_reqs),
+                    ("repetition_penalties",
+                     input_batch.repetition_penalties_reqs),
+                    ("presence_penalties",
+                     input_batch.presence_penalties_reqs),
+                ]:
+                    if base_config.get(attr) is not None:
+                        req_set.add(req_id)
+
+        def clear_reqs(input_batch):
+            input_batch._req_ids.clear()
+            input_batch.req_id_to_index.clear()
+            input_batch.greedy_reqs.clear()
+            input_batch.random_reqs.clear()
+            input_batch.top_p_reqs.clear()
+            input_batch.top_k_reqs.clear()
+            input_batch.frequency_penalties_reqs.clear()
+            input_batch.repetition_penalties_reqs.clear()
+            input_batch.presence_penalties_reqs.clear()
+
+        def dummy_run_batches(base_config):
+            for batch_size in range(1, self.input_batch.max_num_reqs + 1):
+                input_batch = self.input_batch
+                populate_reqs(input_batch, base_config, batch_size)
+
+                metadata = input_batch._make_sampling_metadata()
+                metadata.no_penalties = base_config["no_penalties"]
+                metadata.all_greedy = base_config["all_greedy"]
+                metadata.all_random = base_config["all_random"]
+
+                if (not metadata.no_penalties
+                        and metadata.prompt_token_ids is None):
+                    metadata.prompt_token_ids = torch.zeros((batch_size, 1),
+                                                            dtype=torch.long,
+                                                            device="cpu")
+
+                logger.info(
+                    "Running dummy compile with batch_size=%d, vocab_size=%d",
+                    batch_size, input_batch.vocab_size)
+                logger.info("Sampling metadata: %s", metadata)
+
+                with torch.inference_mode():
+                    empty_logits = torch.empty(batch_size,
+                                               input_batch.vocab_size,
+                                               dtype=torch.float32)
+                    _ = self.sampler(logits=empty_logits,
+                                     sampling_metadata=metadata)
+
+                clear_reqs(input_batch)
+
+        for config in WARM_UP_CONFIGS:
+            logger.info("Running dummy sampler config: %s", config["name"])
+
+            set_sampling_tensors(
+                self.input_batch,
+                temperature=config["temperature"],
+                top_p=config.get("top_p"),
+                top_k=config.get("top_k"),
+                min_p=config.get("min_p"),
+                frequency_penalties=config.get("frequency_penalties"),
+                repetition_penalties=config.get("repetition_penalties"),
+                presence_penalties=config.get("presence_penalties"),
+            )
+
+            dummy_run_batches(config)
