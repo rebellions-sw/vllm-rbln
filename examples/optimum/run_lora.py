@@ -13,80 +13,60 @@
 # limitations under the License.
 
 import asyncio
+import json
 
 import fire
-from datasets import load_dataset
-from transformers import AutoProcessor, AutoTokenizer
+from simphile import jaccard_similarity
+from transformers import AutoTokenizer
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
+from datasets import load_dataset
 
+async def generate(engine: AsyncLLMEngine, prompt: str, model: str,
+                   request_id: int, max_tokens: int):
+    print(f"generate request_id={request_id}, prompt={prompt}")
+    example_input = {
+        "stream": True,
+        "temperature": 0.0,
+        "request_id": str(request_id),
+    }
 
-def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild",
-                           split="train").shuffle(seed=42)
-    processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
-    messages = [[
-        {
-            "role":
-            "system",
-            "content": [{
-                "type":
-                "text",
-                "text":
-                "You are a helpful assistant."
-                "Answer the each question based on the image.",
-            }],
-        },
-        {
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "image"
-                },
-                {
-                    "type": "text",
-                    "text": dataset[i]["question"]
-                },
-            ],
-        },
-    ] for i in range(batch_size)]
-    images = [[dataset[i]["image"]] for i in range(batch_size)]
-
-    texts = processor.apply_chat_template(
-        messages,
+    # start the generation
+    conversation = [{"role": "user", "content": f"Summarize the paper:\n{prompt}"}]
+    tokenizer = AutoTokenizer.from_pretrained(model)
+    chat = tokenizer.apply_chat_template(
+        conversation,
         add_generation_prompt=True,
         tokenize=False,
     )
 
-    return [{
-        "prompt": text,
-        "multi_modal_data": {
-            "image": image
-        }
-    } for text, image in zip(texts, images)]
-
-
-async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     results_generator = engine.generate(
-        request,
-        SamplingParams(temperature=0,
+        chat,
+        SamplingParams(temperature=example_input["temperature"],
                        ignore_eos=False,
                        skip_special_tokens=True,
                        stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=200),
-        str(request_id),
+                       max_tokens=max_tokens),
+        example_input["request_id"],
     )
 
+    # get the results
     final_output = None
     async for request_output in results_generator:
         final_output = request_output
     return final_output
 
 
+def get_input_prompts() -> list[str]:
+    dataset = load_dataset("common-pile/arxiv_papers")["train"]
+    paper_text = dataset[0]["text"]
+    paper_text = paper_text[:4096]
+    return paper_text
+
+
 async def main(
     batch_size: int,
     max_seq_len: int,
-    kvcache_partition_len: int,
+    kvcache_block_size: int,
     num_input_prompt: int,
     model_id: str,
 ):
@@ -95,20 +75,24 @@ async def main(
                                   max_num_seqs=batch_size,
                                   max_num_batched_tokens=max_seq_len,
                                   max_model_len=max_seq_len,
-                                  block_size=kvcache_partition_len)
+                                  block_size=kvcache_block_size)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    inputs = generate_prompts(num_input_prompt, model_id)
-
+    prompt = get_input_prompts()
     futures = []
-    for request_id, request in enumerate(inputs):
+    for i, p in enumerate(prompt):
+        if i == num_input_prompt:
+            break
+
         futures.append(
             asyncio.create_task(
-                generate(engine, tokenizer, request_id, request)))
+                generate(engine,
+                         prompt=p,
+                         model=model_id,
+                         request_id=i,
+                         max_tokens=max_seq_len)))
 
     results = await asyncio.gather(*futures)
-
     for i, result in enumerate(results):
         output = result.outputs[0].text
         print(
@@ -118,24 +102,23 @@ async def main(
             "===============================================================\n"
         )
 
-
 def entry_point(
-    batch_size: int = 4,
-    max_seq_len: int = 32768,
-    kvcache_partition_len: int = 16384,
-    num_input_prompt: int = 10,
-    model_id: str = "/llava-v1.6-mistral-7b-hf-32k-b4-kv16k",
+    batch_size: int = 1,
+    max_seq_len: int = 8192,
+    kvcache_block_size: int = 4096,
+    num_input_prompt: int = 1,
+    model_id: str = "/llama3.1-8b-b1-lora",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
         main(
             batch_size=batch_size,
             max_seq_len=max_seq_len,
-            kvcache_partition_len=kvcache_partition_len,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
         ))
     loop.close()
+
 
 if __name__ == "__main__":
     fire.Fire(entry_point)
