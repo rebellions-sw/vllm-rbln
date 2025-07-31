@@ -124,7 +124,7 @@ def entry_point(
             truncate_prompt_tokens=truncate_prompt_tokens,
             model_id=model_id,
         ))
-
+    loop.close()
 
 if __name__ == "__main__":
     fire.Fire(entry_point)

@@ -124,7 +124,7 @@ def entry_point(
             p_prompt_txt=p_prompt_txt,
             golden_json=golden_json,
         ))
-
+    loop.close()
 
 if __name__ == "__main__":
     fire.Fire(entry_point)
