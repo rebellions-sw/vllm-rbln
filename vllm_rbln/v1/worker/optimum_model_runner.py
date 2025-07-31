@@ -53,7 +53,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
         # self.compilation_config = vllm_config.compilation_config
-        # self.lora_config = vllm_config.lora_config
+        self.lora_config = vllm_config.lora_config
         # self.load_config = vllm_config.load_config
         self.parallel_config = vllm_config.parallel_config
         self.scheduler_config = vllm_config.scheduler_config
@@ -156,6 +156,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
+        if self.lora_config and not self.model.model.use_lora:
+            raise RuntimeError("The compiled model is for LoRA." 
+            "Please compile the model with `rbln_lora_config`")
+        if not self.lora_config and self.model.model.use_lora:
+            raise RuntimeError("The model is compiled for LoRA."
+            "Please set `enable_lora=True` in vLLM.")
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -278,6 +284,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         else:
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
+
+        # Hot-Swap lora model
+        if self.lora_config:
+            self.set_active_loras(self.input_batch)
 
         # TODO interemediate_tensor should be set
         model_input = ModelInputForRBLN(
@@ -746,3 +756,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             )
 
             dummy_run_batches(config)
+
+
+    def set_active_loras(self, input_batch: InputBatch) -> None:
+        # prompt_lora_mapping: tuple[int, ...]  # of size input_batch.num_reqs
+        # token_lora_mapping: tuple[int,
+        #                           ...]  # of size np.sum(num_scheduled_tokens)
+        # lora_requests: set[LoRARequest]
+        # prompt_lora_mapping, token_lora_mapping, lora_requests = \
+        #                     input_batch.make_lora_inputs(num_scheduled_tokens)
+        # return self._set_active_loras(prompt_lora_mapping, token_lora_mapping,
+        #                               lora_requests)
+        req_lora_mapping_list = input_batch.request_lora_mapping[:self.num_reqs].tolist()
+        self.model.set_lora_int_ids(req_lora_mapping_list)
