@@ -193,8 +193,6 @@ class RblnPlatform(Platform):
                 parallel_config.distributed_executor_backend,
             )
 
-        assert (vllm_config.lora_config
-                is None), "LoRA is not supported for RBLN backend."
         assert (not vllm_config.speculative_config
                 ), "Speculative decoding not yet supported for RBLN backend."
 
@@ -225,3 +223,7 @@ class RblnPlatform(Platform):
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
         return not cls.is_torch_compile
+
+    @classmethod
+    def get_punica_wrapper(cls) -> str:
+        return "vllm_rbln.lora.punica_wrapper.punica_rbln.PunicaWrapperRBLN"
