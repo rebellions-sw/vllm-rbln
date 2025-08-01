@@ -762,6 +762,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_reqs = self.input_batch.num_reqs
         req_lora_mapping_list = input_batch.request_lora_mapping[:num_reqs].tolist()
         # Padding
-        if num_reqs < self.max_num_seqs:
-            req_lora_mapping_list += [0] * (self.max_num_seqs - num_reqs)
+        if num_reqs < self.max_num_reqs:
+            req_lora_mapping_list += [0] * (self.max_num_reqs - num_reqs)
         self.model.model.set_lora_int_ids(req_lora_mapping_list)
