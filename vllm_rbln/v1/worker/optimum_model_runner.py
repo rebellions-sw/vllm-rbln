@@ -156,10 +156,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
-        if self.lora_config and not self.model.model.use_lora:
+        if self.lora_config and not self.model.model.rbln_config.use_lora:
             raise RuntimeError("The compiled model is for LoRA." 
             "Please compile the model with `rbln_lora_config`")
-        if not self.lora_config and self.model.model.use_lora:
+        if not self.lora_config and self.model.model.rbln_config.use_lora:
             raise RuntimeError("The model is compiled for LoRA."
             "Please set `enable_lora=True` in vLLM.")
 
@@ -759,13 +759,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
 
     def set_active_loras(self, input_batch: InputBatch) -> None:
-        # prompt_lora_mapping: tuple[int, ...]  # of size input_batch.num_reqs
-        # token_lora_mapping: tuple[int,
-        #                           ...]  # of size np.sum(num_scheduled_tokens)
-        # lora_requests: set[LoRARequest]
-        # prompt_lora_mapping, token_lora_mapping, lora_requests = \
-        #                     input_batch.make_lora_inputs(num_scheduled_tokens)
-        # return self._set_active_loras(prompt_lora_mapping, token_lora_mapping,
-        #                               lora_requests)
-        req_lora_mapping_list = input_batch.request_lora_mapping[:self.num_reqs].tolist()
-        self.model.set_lora_int_ids(req_lora_mapping_list)
+        num_reqs = self.input_batch.num_reqs
+        req_lora_mapping_list = input_batch.request_lora_mapping[:num_reqs].tolist()
+        # Padding
+        if num_reqs < self.max_num_seqs:
+            req_lora_mapping_list += [0] * (self.max_num_seqs - num_reqs)
+        self.model.model.set_lora_int_ids(req_lora_mapping_list)
