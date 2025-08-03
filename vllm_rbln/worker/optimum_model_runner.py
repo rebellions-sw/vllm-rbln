@@ -71,9 +71,6 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         ModelRunnerBase.__init__(self, vllm_config)
         model_config = self.model_config
 
-        if model_config is not None and model_config.get_sliding_window():
-            raise RuntimeError("Sliding window is not supported on RBLN. "
-                           "The model will run without sliding window.")
         self.device = self.device_config.device
         self.pin_memory = is_pin_memory_available()
 
