@@ -311,19 +311,29 @@ class RBLNFlashAttentionMetadataBuilder:
         suffix_kv_lens = None
         prefix_scheduler_metadata = None
 
+        seq_idx = self.runner.positions_cpu[:num_reqs]
+        num_partition = self.max_seq_len // self.partition_len
+        cs = seq_idx.repeat(1, num_partition)
+        pidx = torch.arange(num_partition, dtype=torch.int32)
+        # RBLN - seq_lens tensor dtype SHOULD be int16
+        dyn_size_for_partitions = torch.clamp(
+            cs - pidx * self.partition_len, 0, self.partition_len
+        ).to(torch.int16)
+        seq_lens_tensor = dyn_size_for_partitions
+
         is_prefills = (self.input_batch.num_computed_tokens_cpu
                        < self.input_batch.num_prompt_tokens)
         # The prefill and decode cannot be mixed.
-        assert len(is_prefills) > 0 and all(is_prefill == is_prefills[0]
-                                            for is_prefill in is_prefills)
+        assert len(is_prefills) > 0 and all(
+            is_prefill == is_prefills[0]
+            for is_prefill in is_prefills[:num_reqs]
+        )
         if is_prefills[0]:
-            prefill_chunk_size = (self.chunked_prefill_size
-                                  if self.chunked_prefill else 1 <<
-                                  (math.ceil(math.log2(max_seq_len))))
-            # TODO(jiwoo.park) This is temporary workaround.
-            # We must remove this code when we implement chunk padding.
-            prefill_chunk_size = max_seq_len
-
+            prefill_chunk_size = (
+                self.chunked_prefill_size
+                if self.chunked_prefill
+                else 1 << (math.ceil(math.log2(max_seq_len)))
+            )
             chunked_attention_mask = torch.zeros(
                 1,
                 1,
@@ -336,41 +346,58 @@ class RBLNFlashAttentionMetadataBuilder:
                 torch.ones(1, 1, prefill_chunk_size, prefill_chunk_size),
                 diagonal=1,
             )
-            chunked_attention_mask[:, :, :, :,
-                                   0:0 + prefill_chunk_size] = (causal_mask)
+            step = seq_idx[0]
+            if step >= prefill_chunk_size:
+                chunked_attention_mask[:, :, :, :, :step] = 1
+            chunked_attention_mask[
+                :, :, :, :, step : step + prefill_chunk_size
+            ] = causal_mask
             attn_masks = chunked_attention_mask
         else:
+            # batch padding
             batch_size = num_reqs
-            decode_attention_mask = torch.zeros(batch_size,
-                                                1,
-                                                1,
-                                                1,
-                                                self.max_seq_len,
-                                                dtype=torch.float32)
+            batch_padding_size = self.runner.max_num_seqs - batch_size
+            seq_lens_tensor = torch.cat(
+                [
+                    seq_lens_tensor,
+                    torch.full(
+                        (batch_padding_size, seq_lens_tensor.shape[-1]),
+                        0,
+                    ),
+                ]
+            )
+            block_table_tensor = torch.cat(
+                [
+                    block_table_tensor,
+                    torch.full(
+                        (batch_padding_size, block_table_tensor.shape[-1]),
+                        block_table_tensor.numel() - 1,
+                    ),
+                ]
+            )
+            decode_attention_mask = torch.zeros(
+                self.runner.max_num_seqs,
+                1,
+                1,
+                1,
+                self.max_seq_len,
+                dtype=torch.float32,
+            )
             for batch_index, batch_step in enumerate(seq_lens):
                 decode_attention_mask[batch_index, :, :, :, :batch_step +
                                       1] = 1
             attn_masks = decode_attention_mask
-
-        seq_idx = self.runner.positions_cpu[:num_reqs]
-        num_partition = self.max_seq_len // self.partition_len
-        cs = seq_idx.repeat(1, num_partition)
-        pidx = torch.arange(num_partition, dtype=torch.int32)
-        # RBLN - seq_lens tensor dtype SHOULD be int16
-        dyn_size_for_partitions = torch.clamp(cs - pidx * self.partition_len,
-                                              0, self.partition_len).to(
-                                                  torch.int16)
 
         attn_metadata = RBLNFlashAttentionMetadata(
             num_actual_tokens=num_actual_tokens,
             max_query_len=max_query_len,
             query_start_loc=query_start_loc,
             max_seq_len=max_seq_len,
-            seq_lens=dyn_size_for_partitions,
+            seq_lens=seq_lens_tensor,
             # TODO(jiwoo.park) assume single batch, single partition
             # The block table should be fixed for multiple partitions.
             # block_table=block_table_tensor,
-            block_table=block_table_tensor[0][:1],
+            block_table=block_table_tensor[:, :1].flatten(),
             slot_mapping=slot_mapping,
             use_cascade=False,
             common_prefix_len=common_prefix_len,
@@ -389,7 +416,7 @@ class RBLNFlashAttentionMetadataBuilder:
         logger.info("\tblock_table size = %s", block_table_tensor.size())
         logger.info("\tattn_masks size = %s", attn_masks.size())
         logger.info("\tattn_masks = %s", attn_masks[:, :, :, :, :32])
-        logger.info("\tseq_lens size= %s", seq_lens.size())
+        logger.info("\tseq_lens_tensor size= %s", seq_lens_tensor.size())
         return attn_metadata
 
     def use_cascade_attention(self, *args, **kwargs) -> bool:
