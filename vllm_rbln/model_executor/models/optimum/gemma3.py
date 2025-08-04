@@ -123,7 +123,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         self,
         sliding_window_table_ids: List[int],
         attention_masks: List[torch.Tensor],
-        position_ids: torch.Tensor,
+        cache_positions: torch.Tensor,
         padded_cache_lengths: List[int],
         request_nums: int,
         padded_batch_size: int,
@@ -133,7 +133,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             raise ValueError(
                 "attention_masks cannot be empty when request_nums > 0.")
 
-        position_id_dtype = position_ids.dtype
+        position_id_dtype = cache_positions.dtype
         seq_len = attention_masks[0].shape[1] if attention_masks else 0
 
         # Determine padding value for local_block_table_id
@@ -167,14 +167,17 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # cache_positions - the index including padding between text and image
         # padded_cache_lengths_tensor - the size of padding
         # position_ids - the index of the token to be decoded in the sequence.
-        cache_positions = torch.zeros(padded_batch_size,
+        padded_cache_positions = torch.zeros(padded_batch_size,
                                       1,
                                       dtype=position_id_dtype)
-        cache_positions[:request_nums] = position_ids[:request_nums]
+        position_ids = torch.zeros(padded_batch_size,
+                                      1,
+                                      dtype=position_id_dtype)
+        padded_cache_positions[:request_nums] = cache_positions[:request_nums]
         position_ids[:request_nums] = (
-            position_ids[:request_nums] -
+            padded_cache_positions[:request_nums] -
             padded_cache_lengths_tensor[:request_nums])
-
+        cache_positions = padded_cache_positions
         return (
             local_block_table_id,
             attention_mask,
@@ -271,10 +274,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # during the forward pass and stored in self.sliding_window_table.
         # [decode] `cache_position` and `position_ids` are distinguished
         # due to the padding space reserved for the sliding window.
-        if is_prompt:
-            cache_position = kwargs.pop("cache_position")
-        else:
-            position_ids = kwargs.pop("cache_position")
+        cache_position = kwargs.pop("cache_position")
         input_ids = kwargs.pop("input_ids")
         block_tables = kwargs.pop("block_tables")
 
@@ -329,7 +329,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             ) = self.pad_local_table_items(
                 sliding_window_table_ids,
                 attention_masks,
-                position_ids,
+                cache_position,
                 padded_cache_lengths,
                 request_nums,
                 padded_batch_size,
