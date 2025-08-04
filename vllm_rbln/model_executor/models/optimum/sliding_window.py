@@ -26,26 +26,23 @@ logger = init_logger(__name__)
 @dataclass
 class SlidingWindowEntry:
     local_table_id: int
-    padded_cache_length: int
-    attention_mask: torch.Tensor
+    padded_cache_length: Optional[int]
+    # It is optional for sliding window attention with image
+    attention_mask: Optional[torch.Tensor]
 
-class RBLNOptimumSlidingWindowAttentionForCausalLM(
-        RBLNOptimumForCausalLM,
+@dataclass
+class RBLNOptimumSlidingWindowAttentionMixin(
         RBLNOptimumDictTableMixin
     ):
     """
     It is for the model that supports Sliding Window Attention.
     """
-    def __init__(
-        self,
-        vllm_config: VllmConfig,
-    ) -> None:
-        super().__init__(vllm_config=vllm_config)
+    def __init__(self, vllm_config) -> None:
         # Check the sliding window configuration is set
         # if vllm_config.model_config.disable_sliding_window:
             # raise RuntimeError("Please set `disable_sliding_window`=False")
-        if self.model_config.hf_config.sliding_window and \
-            self.model_config.disable_sliding_window:
+        if vllm_config.model_config.hf_config.sliding_window and \
+            vllm_config.model_config.disable_sliding_window:
             raise RuntimeError(
                 "The model requires sliding window attention."
                 "Please set `disable_sliding_window`=False."
@@ -54,23 +51,26 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         # self.sliding_window_size = self.model_config.hf_config.sliding_window
         # if self.sliding_window_size:
         self.sliding_window_table: Dict[str, SlidingWindowEntry] = {}
+        self.padding_images = vllm_config.model_config._model_info.supports_multimodal
 
     def pad_local_table_items(
         self,
         sliding_window_table_ids: List[int],
-        # attention_masks: List[torch.Tensor],
-        position_ids: torch.Tensor,
-        padded_cache_lengths: List[int],
+        cache_positions: torch.Tensor,
         request_nums: int,
         padded_batch_size: int,
+        padded_cache_lengths: Optional[List[int]]= None,
+        attention_masks: Optional[List[torch.Tensor]] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Validate input
-        # if request_nums > 0:
-        #     raise ValueError(
-        #         "attention_masks cannot be empty when request_nums > 0.")
+        if self.padding_images:
+            assert padded_cache_lengths is not None
+            assert attention_masks is not None
+        else:
+            assert padded_cache_lengths is None
+            assert attention_masks is None
 
-        position_id_dtype = position_ids.dtype
-        # seq_len = attention_masks[0].shape[1] if attention_masks else 0
+        position_id_dtype = cache_positions.dtype
+        seq_len = attention_masks[0].shape[1] if attention_masks else 0
 
         # Determine padding value for local_block_table_id
         used_ids = set(sliding_window_table_ids)
@@ -85,62 +85,70 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         )
         local_block_table_id[:request_nums] = torch.tensor(
             sliding_window_table_ids, dtype=torch.int16).unsqueeze(1)
+        padded_cache_positions = torch.zeros(padded_batch_size,
+                                    1,
+                                    dtype=position_id_dtype)
+        padded_cache_positions[:request_nums] = cache_positions[:request_nums]
+        if self.padding_images:
+            padded_cache_lengths_tensor = torch.zeros(padded_batch_size,
+                                                    1,
+                                                    dtype=position_id_dtype)
+            padded_cache_lengths_tensor[:request_nums] = torch.tensor(
+                padded_cache_lengths, dtype=position_id_dtype).unsqueeze(1)
 
-        padded_cache_lengths_tensor = torch.zeros(padded_batch_size,
-                                                  1,
-                                                  dtype=position_id_dtype)
-        padded_cache_lengths_tensor[:request_nums] = torch.tensor(
-            padded_cache_lengths, dtype=position_id_dtype).unsqueeze(1)
+            attention_mask_dtype = (attention_masks[0].dtype
+                                    if attention_masks else torch.bool)
+            attention_mask = torch.zeros(padded_batch_size,
+                                        seq_len,
+                                        dtype=attention_mask_dtype)
+            if attention_masks:
+                attention_mask[:request_nums] = torch.cat(attention_masks)
 
-        # attention_mask_dtype = (attention_masks[0].dtype
-        #                         if attention_masks else torch.bool)
-        # attention_mask = torch.zeros(padded_batch_size,
-        #                              seq_len,
-        #                              dtype=attention_mask_dtype)
-        # if attention_masks:
-        #     attention_mask[:request_nums] = torch.cat(attention_masks)
+            # cache_positions - the index including padding between text and image
+            # padded_cache_lengths_tensor - the size of padding
+            # position_ids - the index of the token to be decoded in the sequence.
+            position_ids = torch.zeros(padded_batch_size,
+                                        1,
+                                        dtype=position_id_dtype)
 
-        # cache_positions - the index including padding between text and image
-        # padded_cache_lengths_tensor - the size of padding
-        # position_ids - the index of the token to be decoded in the sequence.
-        cache_positions = torch.zeros(padded_batch_size,
-                                      1,
-                                      dtype=position_id_dtype)
-        cache_positions[:request_nums] = position_ids[:request_nums]
-        position_ids[:request_nums] = (
-            position_ids[:request_nums] -
-            padded_cache_lengths_tensor[:request_nums])
-
+            position_ids[:request_nums] = (
+                padded_cache_positions[:request_nums] -
+                padded_cache_lengths_tensor[:request_nums])
+            cache_positions = padded_cache_positions
         return (
             local_block_table_id,
-            # attention_mask,
             cache_positions,
-            position_ids,
+            position_ids if self.padding_images else None,
+            attention_mask if self.padding_images else None,
         )
-
 
     def select_local_block_table_value(
         self,
         is_prompt: bool,
         input_ids: torch.Tensor,
+        decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
     ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
         get_extra_values_fn = None
         attention_mask = None
+        padded_cache_lengths = None
+        attention_masks = None
 
         if is_prompt:
-            attention_mask = torch.ones_like(input_ids).to(
-                torch.int64).squeeze(0)
+            if self.padding_images:
+                attention_mask = ((input_ids != self.pad_token_id).to(
+                    torch.int64).squeeze(0))
         else:
-            get_extra_values_fn = lambda entry: (
-                entry.padded_cache_length,
-                entry.attention_mask,
-            )
+            if self.padding_images:
+                get_extra_values_fn = lambda entry: (
+                    entry.padded_cache_length,
+                    entry.attention_mask,
+                )
 
         result = self.get_table_mapping_values(
             self.sliding_window_table,
-            self.decoder_batch_size,
+            decoder_batch_size,
             is_prompt,
             finished_requests_ids,
             running_requests_ids,
@@ -153,11 +161,30 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             table_ids = result
             return table_ids, [], [attention_mask]
         else:
-            result = cast(Tuple[list[int], list[int], list[torch.Tensor]],
-                          result)
-            table_ids, padded_cache_lengths, attention_masks = result
+            if self.padding_images:
+                result = cast(Tuple[list[int], list[int], list[torch.Tensor]],
+                            result)
+                table_ids, padded_cache_lengths, attention_masks = result
+                return table_ids, padded_cache_lengths, attention_masks
+            else:
+                result = cast(Tuple[list[int]], result)
+                table_ids = result
+        
             return table_ids, padded_cache_lengths, attention_masks
 
+    def clear_dict_table(self):
+        self.sliding_window_table.clear()
+
+
+class RBLNOptimumSlidingWindowAttentionForCausalLM(
+    RBLNOptimumSlidingWindowAttentionMixin,
+    RBLNOptimumForCausalLM,
+):
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+    ) -> None:
+        super().__init__(vllm_config=vllm_config)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -174,20 +201,32 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         # In prefill phase, the length of list must be 1
-        sliding_window_table_ids, padded_cache_lengths, attention_masks = (
-            self.select_local_block_table_value(
-                is_prompt,
-                input_ids,
-                running_requests_ids,
-                finished_requests_ids,
-            ))
-
+        if self.padding_images:
+            sliding_window_table_ids, padded_cache_lengths, attention_masks = (
+                self.select_local_block_table_value(
+                    is_prompt,
+                    input_ids,
+                    self.decoder_batch_size,
+                    running_requests_ids,
+                    finished_requests_ids,
+                ))
+        else:
+            sliding_window_table_ids, _, _ = (
+                self.select_local_block_table_value(
+                    is_prompt,
+                    input_ids,
+                    self.decoder_batch_size,
+                    running_requests_ids,
+                    finished_requests_ids,
+                ))
+    
         kwargs = self.preprocess_for_decoder(
             is_prompt,
             block_tables,
             input_ids,
             cache_position,
         )
+
         padded_batch_size = kwargs.pop("padded_batch_size",
                                        self.decoder_batch_size)
 
@@ -195,10 +234,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         # during the forward pass and stored in self.sliding_window_table.
         # [decode] `cache_position` and `position_ids` are distinguished
         # due to the padding space reserved for the sliding window.
-        if is_prompt:
-            cache_position = kwargs.pop("cache_position")
-        else:
-            position_ids = kwargs.pop("cache_position")
+        cache_position = kwargs.pop("cache_position")
         input_ids = kwargs.pop("input_ids")
         block_tables = kwargs.pop("block_tables")
 
@@ -207,7 +243,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             if self.model.prefill_decoder is None:
                 raise version_error
             prefill_batch_idx = sliding_window_table_ids[0]
-            attention_mask = attention_masks[0]
+            # attention_mask = attention_masks[0]
             local_block_table_id = torch.tensor([prefill_batch_idx],
                                                 dtype=torch.int16)
             # from fpdb import ForkedPdb; ForkedPdb().set_trace()
@@ -215,63 +251,49 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             output = self.model.prefill_decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
-                # attention_mask=attention_mask,
+                attention_mask=attention_masks[0] if self.padding_images else None,
                 local_block_tables=local_block_table_id,
                 # block_tables=block_tables,
                 # token_type_ids=token_type_ids,
             )
             logits = output.logits
             # FIXME
-            updated_attention_mask = attention_mask
-            updated_padded_cache_length = output.padded_cache_lengths
-
+            # updated_padded_cache_length = output.padded_cache_lengths
+            # print("updated_padded_cache_length", updated_padded_cache_length)
             assert len(running_requests_ids) == 1
             self.sliding_window_table[running_requests_ids[0]] = (
                 SlidingWindowEntry(
                     sliding_window_table_ids[0],
-                    updated_padded_cache_length,
-                    updated_attention_mask,
+                    output.padded_cache_lengths if self.padding_images else None,
+                    output.attention_mask if self.padding_images else None,
                 ))
         else:
             # from fpdb import ForkedPdb; ForkedPdb().set_trace()
             self.model.decoder = self.model.decoders[padded_batch_size]
             (
                 local_block_table_id,
-                # attention_mask,
                 cache_position,
                 position_ids,
+                attention_mask
             ) = self.pad_local_table_items(
                 sliding_window_table_ids,
-                # attention_masks,
-                position_ids,
-                padded_cache_lengths,
+                cache_position,
                 request_nums,
                 padded_batch_size,
+                padded_cache_lengths if self.padding_images else None,
+                attention_masks if self.padding_images else None,
             )
             # ForkedPdb().set_trace()
-            # rows = torch.arange(attention_mask.size(0))
-            # cols = cache_position.squeeze(1)
-
-            # attention_mask[rows, cols] = 1
-
+            # print("cache_position", cache_position)
             logits = self.model.decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
                 # block_tables=block_tables,
                 local_block_tables=local_block_table_id,
-                # attention_mask=attention_mask,
+                attention_mask=attention_mask if self.padding_images else None,
                 # position_ids=position_ids,
             ).logits
 
-            # Update attention mask of newly generated token
-            # for idx, request_id in enumerate(running_requests_ids):
-            #     self.sliding_window_table[
-            #         request_id].attention_mask = attention_mask[idx:idx + 1]
-
-            # logits = self.model.decoder(**kwargs).logits
         if not is_prompt:
             logits = logits[:request_nums]
         return logits
-
-    def clear_dict_table(self):
-        self.sliding_window_table.clear()
