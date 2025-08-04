@@ -168,7 +168,8 @@ class RBLNWorker(WorkerBase):
         # return self.cache_config.rbln_kvcache_space_bytes  # type: ignore
         from vllm.utils import GiB_bytes
 
-        return 4 * GiB_bytes
+        # TODO(jiwoo.park) calculate available memory
+        return 14 * GiB_bytes
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
