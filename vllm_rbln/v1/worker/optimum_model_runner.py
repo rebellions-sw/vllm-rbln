@@ -203,11 +203,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             prompt_logprobs_dict={},
         )
 
-    def mask_block_table(
-        self,
-        block_ids: torch.Tensor,
-        num_blocks: int
-    ) -> torch.Tensor:
+    def mask_block_table(self, block_ids: torch.Tensor,
+                         num_blocks: int) -> torch.Tensor:
         """This function serves as an interface to convert VLLM block tables
         to the format expected by Optimum-RBLN.
 
@@ -362,7 +359,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 "Prefill stage request cannot processed with other requests.")
 
         req_id = self.input_batch.req_ids[0]
-        num_blocks_per_req = self.input_batch.block_table.block_tables[0].num_blocks_per_row
+        num_blocks_per_req = self.input_batch.block_table.block_tables[
+            0].num_blocks_per_row
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
 
@@ -404,7 +402,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         running_request_ids = []
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
-        num_blocks_per_req = self.input_batch.block_table.block_tables[0].num_blocks_per_row
+        num_blocks_per_req = self.input_batch.block_table.block_tables[
+            0].num_blocks_per_row
 
         for req_id, scheduled in zip(self.input_batch.req_ids,
                                      scheduler_output.scheduled_cached_reqs):
