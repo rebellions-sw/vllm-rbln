@@ -481,7 +481,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             inputs_embeds: Optional[torch.Tensor] = None,
             selected_token_indices: Optional[torch.Tensor] = None,
         ) -> Union[torch.Tensor, IntermediateTensors]:
-            model_output = self.model(
+            model_output, selected_experts_list = self.model(
                 input_ids=input_ids,
                 positions=positions,
                 intermediate_tensors=intermediate_tensors,
@@ -494,7 +494,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 #     contrib_dynamic_take (tensor -> scalar)
                 model_output = model_output[:, selected_token_indices]
             logits = self.model.compute_logits(model_output, None)
-            return logits
+            return logits, selected_experts_list
 
         # NOTE - refer to pytorch 2.5 release notes
         # torch.compile regional compilation without recompilations
@@ -594,7 +594,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 model_input.attn_metadata.kv_caches = kv_caches
             for kv_cache in kv_caches:
                 self.compile_context.mark_static_address(kv_cache)
-            hidden_states = self.model_executable(
+            hidden_states, selected_experts_list = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
                 intermediate_tensors=intermediate_tensors,
@@ -626,6 +626,21 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         assert self.return_hidden_states is False, \
             "Rebel worker does not support return_hidden_states."
+
+        # To export moe metric, it works for only qwen3 model for now
+        # logger.info("[RBLN] MoE metric raw_data = %s", selected_experts_list)
+        import json
+        rawdata_list = []
+        for selected_experts in selected_experts_list:
+            temp = selected_experts.numpy().tolist()
+            rawdata_list.append(temp)
+        moe_metric_data = {
+                "selected_experts_list" : rawdata_list,
+                "num_hidden_layers" : len(selected_experts_list),
+                "selected_experts_shape" : selected_experts_list[0].shape,
+                }
+        with open("moe_metric.json", "w") as json_file:
+            json.dump(moe_metric_data, json_file)
 
         return [output]
 
