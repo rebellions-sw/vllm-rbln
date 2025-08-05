@@ -111,7 +111,7 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
             final_hidden_states = final_hidden_states + current_hidden_states
 
     assert final_hidden_states is not None
-    return final_hidden_states.reshape(orig_shape)
+    return final_hidden_states.reshape(orig_shape), selected_experts_array
 
 
 def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
@@ -128,7 +128,7 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
                                              cu_tokens_across_dp_cpu)
 
     # Matrix multiply.
-    final_hidden_states = self.quant_method.apply(
+    final_hidden_states, selected_experts = self.quant_method.apply(
         layer=self,
         x=hidden_states,
         router_logits=router_logits,
@@ -154,7 +154,7 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
         all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
         final_hidden_states = all_hidden_states[start:end, :]
 
-    return final_hidden_states
+    return final_hidden_states, selected_experts
 
 
 UnquantizedFusedMoEMethod.forward_oot = (
