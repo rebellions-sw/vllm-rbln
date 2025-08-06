@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import logging
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -218,6 +219,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         dummy_block = self.cache_config.num_gpu_blocks - 1
         block_ids[num_blocks:] = dummy_block
         return block_ids
+
+    def truncate_block_table(self, block_ids: torch.Tensor,
+                             num_blocks: int) -> torch.Tensor:
+        """This function truncates the dummy blocks and return
+        only valid blocks for logging.
+        """
+        block_ids = block_ids - 1
+        return block_ids[:num_blocks]
 
     def _prepare_inputs(
         self,
@@ -434,9 +443,21 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         The SamplingMetadata is updated and copied to the NPU if there is a
         new/resumed/paused/finished request in the batch.
         """
+        if logger.isEnabledFor(logging.DEBUG):
+            block_tables_cpu = self.input_batch.block_table.block_tables[
+                0].get_cpu_tensor()
+            num_blocks_per_req = self.input_batch.block_table.block_tables[
+                0].num_blocks_per_row
+            for req_id in scheduler_output.finished_req_ids:
+                req_index = self.input_batch.req_id_to_index[req_id]
+                num_blocks = num_blocks_per_req[req_index]
+                block_table = block_tables_cpu[req_index]
+                block_table = self.truncate_block_table(
+                    block_table, num_blocks)
+                logger.debug("Request %s is finished. Freed block(s): %s",
+                             req_id, block_table.tolist())
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
-            logger.debug("Request %s is finished.", req_id)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
