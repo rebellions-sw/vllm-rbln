@@ -444,8 +444,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         """
         for req_id in scheduler_output.finished_req_ids:
             logger.debug(
-                "Request %s is finished. Prompt tokens: %s | "
-                "Generated tokens: %s | Freed block(s): %s", req_id,
+                "Request %s is finished. Prompt tokens: %s, "
+                "Generated tokens: %s, Freed block(s): %s", req_id,
                 len(self.requests[req_id].prompt_token_ids),
                 len(self.requests[req_id].output_token_ids),
                 self.requests[req_id].block_ids[0])
