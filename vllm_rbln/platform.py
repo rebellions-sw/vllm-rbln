@@ -84,7 +84,7 @@ class RblnPlatform(Platform):
 
     # torch.compile() is currently disabled.
     # TODO: Replace with dynamic check via is_torch_compile_supported().
-    is_torch_compile: bool = False
+    is_torch_compile: bool = True
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
