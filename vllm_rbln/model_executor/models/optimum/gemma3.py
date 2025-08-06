@@ -32,7 +32,7 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 from .base import ModelInputForRBLN, version_error
 from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
                          RBLNOptimumModelBase)
-
+from .sliding_window import RBLNOptimumSlidingWindowAttentionMixin, SlidingWindowEntry
 logger = init_logger(__name__)
 
 
@@ -73,14 +73,6 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
         return output
 
-
-@dataclass
-class SlidingWindowEntry:
-    local_table_id: int
-    padded_cache_length: int
-    attention_mask: torch.Tensor
-
-
 @MULTIMODAL_REGISTRY.register_processor(
     RBLNGemma3MultiModalProcessor,
     info=Gemma3ProcessingInfo,
@@ -89,7 +81,7 @@ class SlidingWindowEntry:
 class RBLNOptimumGemma3ForConditionalGeneration(
         RBLNOptimumModelBase,
         RBLNOptimumDecoderMixin,
-        RBLNOptimumDictTableMixin,
+        RBLNOptimumSlidingWindowAttentionMixin,
         VllmModelForTextGeneration,
         SupportsMultiModal,
 ):
@@ -112,132 +104,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
         )
+        self.setup_sliding_window_attention_mixin(vllm_config=vllm_config, sliding_window=self.model.rbln_config.language_model.sliding_window)
 
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
         self.pad_token_id = tokenizer.pad_token_id
-
-        self.sliding_window_table: Dict[str, SlidingWindowEntry] = {}
-
-    def pad_local_table_items(
-        self,
-        sliding_window_table_ids: List[int],
-        attention_masks: List[torch.Tensor],
-        cache_positions: torch.Tensor,
-        padded_cache_lengths: List[int],
-        request_nums: int,
-        padded_batch_size: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Validate input
-        if request_nums > 0 and not attention_masks:
-            raise ValueError(
-                "attention_masks cannot be empty when request_nums > 0.")
-
-        position_id_dtype = cache_positions.dtype
-        seq_len = attention_masks[0].shape[1] if attention_masks else 0
-
-        # Determine padding value for local_block_table_id
-        used_ids = set(sliding_window_table_ids)
-        pad_value = next(
-            (i for i in range(self.decoder_batch_size) if i not in used_ids),
-            0)
-
-        local_block_table_id = torch.full(
-            (padded_batch_size, 1),
-            pad_value,
-            dtype=torch.int16,
-        )
-        local_block_table_id[:request_nums] = torch.tensor(
-            sliding_window_table_ids, dtype=torch.int16).unsqueeze(1)
-
-        padded_cache_lengths_tensor = torch.zeros(padded_batch_size,
-                                                  1,
-                                                  dtype=position_id_dtype)
-        padded_cache_lengths_tensor[:request_nums] = torch.tensor(
-            padded_cache_lengths, dtype=position_id_dtype).unsqueeze(1)
-
-        attention_mask_dtype = (attention_masks[0].dtype
-                                if attention_masks else torch.bool)
-        attention_mask = torch.zeros(padded_batch_size,
-                                     seq_len,
-                                     dtype=attention_mask_dtype)
-        if attention_masks:
-            attention_mask[:request_nums] = torch.cat(attention_masks)
-
-        # cache_positions - the index including padding between text and image
-        # padded_cache_lengths_tensor - the size of padding
-        # position_ids - the index of the token to be decoded in the sequence.
-        padded_cache_positions = torch.zeros(padded_batch_size,
-                                      1,
-                                      dtype=position_id_dtype)
-        position_ids = torch.zeros(padded_batch_size,
-                                      1,
-                                      dtype=position_id_dtype)
-        padded_cache_positions[:request_nums] = cache_positions[:request_nums]
-        position_ids[:request_nums] = (
-            padded_cache_positions[:request_nums] -
-            padded_cache_lengths_tensor[:request_nums])
-        cache_positions = padded_cache_positions
-        return (
-            local_block_table_id,
-            attention_mask,
-            cache_positions,
-            position_ids,
-        )
-
-    def select_local_block_table_value(
-        self,
-        is_prompt: bool,
-        input_ids: torch.Tensor,
-        running_requests_ids: list[str],
-        finished_requests_ids: list[str],
-    ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
-        get_extra_values_fn = None
-        attention_mask = None
-
-        if is_prompt:
-            attention_mask = ((input_ids != self.pad_token_id).to(
-                torch.int64).squeeze(0))
-        else:
-            get_extra_values_fn = lambda entry: (
-                entry.padded_cache_length,
-                entry.attention_mask,
-            )
-
-        result = self.get_table_mapping_values(
-            self.sliding_window_table,
-            self.decoder_batch_size,
-            is_prompt,
-            finished_requests_ids,
-            running_requests_ids,
-            get_entry_fn=lambda entry: entry.local_table_id,
-            get_extra_values_fn=get_extra_values_fn,
-        )
-
-        if is_prompt:
-            result = cast(list[int], result)
-            table_ids = result
-            return table_ids, [], [attention_mask]
-        else:
-            result = cast(Tuple[list[int], list[int], list[torch.Tensor]],
-                          result)
-            table_ids, padded_cache_lengths, attention_masks = result
-            return table_ids, padded_cache_lengths, attention_masks
-
-    def get_pixel_values(self, model_input: ModelInputForRBLN):
-        image_input = None
-
-        if model_input.multi_modal_kwargs:
-            image_input = self._parse_and_validate_image_input(
-                **model_input.multi_modal_kwargs)
-            if image_input is not None:
-                assert image_input["type"] == "pixel_values"
-                pixel_values = image_input["pixel_values"]
-
-        else:
-            pixel_values = None
-
-        return pixel_values
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -259,6 +130,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             self.select_local_block_table_value(
                 is_prompt,
                 input_ids,
+                self.decoder_batch_size,
                 running_requests_ids,
                 finished_requests_ids,
             ))
@@ -323,16 +195,16 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 self.model.language_model.decoders[padded_batch_size])
             (
                 local_block_table_id,
-                attention_mask,
                 cache_position,
                 position_ids,
+                attention_mask,
             ) = self.pad_local_table_items(
                 sliding_window_table_ids,
-                attention_masks,
                 cache_position,
-                padded_cache_lengths,
                 request_nums,
                 padded_batch_size,
+                padded_cache_lengths,
+                attention_masks,
             )
 
             rows = torch.arange(attention_mask.size(0))
@@ -357,6 +229,21 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         if not is_prompt:
             logits = logits[:request_nums]
         return logits
+
+    def get_pixel_values(self, model_input: ModelInputForRBLN):
+        image_input = None
+
+        if model_input.multi_modal_kwargs:
+            image_input = self._parse_and_validate_image_input(
+                **model_input.multi_modal_kwargs)
+            if image_input is not None:
+                assert image_input["type"] == "pixel_values"
+                pixel_values = image_input["pixel_values"]
+
+        else:
+            pixel_values = None
+
+        return pixel_values
 
     def _parse_and_validate_image_input(
             self, **kwargs: Any) -> Optional[Gemma3ImageInputs]:
@@ -403,6 +290,3 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             _validate_shape(d)
 
         return data
-
-    def clear_dict_table(self):
-        self.sliding_window_table.clear()
