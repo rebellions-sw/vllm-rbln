@@ -69,7 +69,6 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                 vllm_config.model_config.pooler_config.normalize = True
 
         ModelRunnerBase.__init__(self, vllm_config)
-        model_config = self.model_config
 
         self.device = self.device_config.device
         self.pin_memory = is_pin_memory_available()
