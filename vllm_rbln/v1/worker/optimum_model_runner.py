@@ -386,8 +386,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_blocks = num_blocks_per_req[req_index]
             block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table, num_blocks)
-            logger.debug("Request %s is now scheduled with block(s): %s",
-                         req_id, block_table.tolist())
+            logger.debug(
+                "Request %s is now scheduled. Prompt tokens: %s, "
+                "Already generated tokens: %s, Allocated block(s): %s", req_id,
+                len(self.requests[req_id].prompt_token_ids),
+                len(self.requests[req_id].output_token_ids),
+                block_table.tolist())
             running_request_ids.append(req_id)
 
         if self.is_multimodal_model:
