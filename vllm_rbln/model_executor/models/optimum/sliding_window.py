@@ -19,25 +19,25 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
-from .model_base import RBLNOptimumDictTableMixin
+from .model_base import RBLNOptimumDictTableMixin, RBLNOptimumModelBase, RBLNOptimumDecoderMixin
 from .decoder_only import RBLNOptimumForCausalLM
 logger = init_logger(__name__)
 
 @dataclass
 class SlidingWindowEntry:
     local_table_id: int
+    # padded_cache_length and attention mask are
+    # for sliding window attention with image.
     padded_cache_length: Optional[int]
-    # It is optional for sliding window attention with image
     attention_mask: Optional[torch.Tensor]
 
-@dataclass
 class RBLNOptimumSlidingWindowAttentionMixin(
         RBLNOptimumDictTableMixin
     ):
     """
     It is for the model that supports Sliding Window Attention.
     """
-    def __init__(self, vllm_config) -> None:
+    def setup_sliding_window_attention_mixin(self, vllm_config) -> None:
         # Check the sliding window configuration is set
         # if vllm_config.model_config.disable_sliding_window:
             # raise RuntimeError("Please set `disable_sliding_window`=False")
@@ -51,14 +51,14 @@ class RBLNOptimumSlidingWindowAttentionMixin(
         # self.sliding_window_size = self.model_config.hf_config.sliding_window
         # if self.sliding_window_size:
         self.sliding_window_table: Dict[str, SlidingWindowEntry] = {}
-        self.padding_images = vllm_config.model_config._model_info.supports_multimodal
+        self.padding_images = vllm_config.model_config.is_multimodal_model
 
     def pad_local_table_items(
         self,
         sliding_window_table_ids: List[int],
         cache_positions: torch.Tensor,
         request_nums: int,
-        padded_batch_size: int,
+        decoder_batch_size: int,
         padded_cache_lengths: Optional[List[int]]= None,
         attention_masks: Optional[List[torch.Tensor]] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -75,22 +75,22 @@ class RBLNOptimumSlidingWindowAttentionMixin(
         # Determine padding value for local_block_table_id
         used_ids = set(sliding_window_table_ids)
         pad_value = next(
-            (i for i in range(self.decoder_batch_size) if i not in used_ids),
+            (i for i in range(decoder_batch_size) if i not in used_ids),
             0)
 
         local_block_table_id = torch.full(
-            (padded_batch_size, 1),
+            (decoder_batch_size, 1),
             pad_value,
             dtype=torch.int16,
         )
         local_block_table_id[:request_nums] = torch.tensor(
             sliding_window_table_ids, dtype=torch.int16).unsqueeze(1)
-        padded_cache_positions = torch.zeros(padded_batch_size,
+        padded_cache_positions = torch.zeros(decoder_batch_size,
                                     1,
                                     dtype=position_id_dtype)
         padded_cache_positions[:request_nums] = cache_positions[:request_nums]
         if self.padding_images:
-            padded_cache_lengths_tensor = torch.zeros(padded_batch_size,
+            padded_cache_lengths_tensor = torch.zeros(decoder_batch_size,
                                                     1,
                                                     dtype=position_id_dtype)
             padded_cache_lengths_tensor[:request_nums] = torch.tensor(
@@ -98,7 +98,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(
 
             attention_mask_dtype = (attention_masks[0].dtype
                                     if attention_masks else torch.bool)
-            attention_mask = torch.zeros(padded_batch_size,
+            attention_mask = torch.zeros(decoder_batch_size,
                                         seq_len,
                                         dtype=attention_mask_dtype)
             if attention_masks:
@@ -107,7 +107,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(
             # cache_positions - the index including padding between text and image
             # padded_cache_lengths_tensor - the size of padding
             # position_ids - the index of the token to be decoded in the sequence.
-            position_ids = torch.zeros(padded_batch_size,
+            position_ids = torch.zeros(decoder_batch_size,
                                         1,
                                         dtype=position_id_dtype)
 
@@ -132,8 +132,6 @@ class RBLNOptimumSlidingWindowAttentionMixin(
     ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
         get_extra_values_fn = None
         attention_mask = None
-        padded_cache_lengths = None
-        attention_masks = None
 
         if is_prompt:
             if self.padding_images:
@@ -170,21 +168,31 @@ class RBLNOptimumSlidingWindowAttentionMixin(
                 result = cast(Tuple[list[int]], result)
                 table_ids = result
         
-            return table_ids, padded_cache_lengths, attention_masks
+            return table_ids, None, None
 
     def clear_dict_table(self):
         self.sliding_window_table.clear()
 
-
 class RBLNOptimumSlidingWindowAttentionForCausalLM(
+    RBLNOptimumModelBase,
+    RBLNOptimumDecoderMixin,
     RBLNOptimumSlidingWindowAttentionMixin,
-    RBLNOptimumForCausalLM,
 ):
     def __init__(
         self,
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__(vllm_config=vllm_config)
+        self.setup_decoder_mixin(
+            attn_impl=self.attn_impl,
+            padding_value=self.padding_value,
+            vocab_size=self.model_config.get_vocab_size,
+            use_multiple_decoder=getattr(self.model.rbln_config,
+                                         "use_multiple_decoder", False),
+            default_batch_size=self.scheduler_config.max_num_seqs,
+            decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
+        )
+        self.setup_sliding_window_attention_mixin(vllm_config=vllm_config)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
