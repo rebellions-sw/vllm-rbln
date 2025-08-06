@@ -219,14 +219,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_ids[num_blocks:] = dummy_block
         return block_ids
 
-    def truncate_block_table(self, block_ids: torch.Tensor,
-                             num_blocks: int) -> torch.Tensor:
-        """This function truncates the dummy blocks and return
-        only valid blocks for logging.
-        """
-        block_ids = block_ids - 1
-        return block_ids[:num_blocks]
-
     def _prepare_inputs(
         self,
         scheduler_output: "SchedulerOutput",
