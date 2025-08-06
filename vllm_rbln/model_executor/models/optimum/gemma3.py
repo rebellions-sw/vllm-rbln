@@ -11,8 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Optional
 
 import torch
 import vllm.envs as env
@@ -30,9 +29,10 @@ from vllm.model_executor.models.interfaces_base import (
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
-from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
-                         RBLNOptimumModelBase)
-from .sliding_window import RBLNOptimumSlidingWindowAttentionMixin, SlidingWindowEntry
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
+from .sliding_window import (RBLNOptimumSlidingWindowAttentionMixin,
+                             SlidingWindowEntry)
+
 logger = init_logger(__name__)
 
 
@@ -73,6 +73,7 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
         return output
 
+
 @MULTIMODAL_REGISTRY.register_processor(
     RBLNGemma3MultiModalProcessor,
     info=Gemma3ProcessingInfo,
@@ -104,7 +105,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
         )
-        self.setup_sliding_window_attention_mixin(vllm_config=vllm_config, sliding_window=self.model.rbln_config.language_model.sliding_window)
+        self.setup_sliding_window_attention_mixin(
+            vllm_config=vllm_config,
+            sliding_window=self.model.rbln_config.language_model.sliding_window
+        )
 
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
@@ -207,10 +211,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 attention_masks,
             )
 
-            rows = torch.arange(attention_mask.size(0))
-            cols = cache_position.squeeze(1)
-
-            attention_mask[rows, cols] = 1
+            attention_mask = self.mask_attention_mask(cache_position,
+                                                      attention_mask)
 
             logits = self.model.language_model.decoder(
                 input_ids=input_ids,

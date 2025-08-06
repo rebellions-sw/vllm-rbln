@@ -32,8 +32,10 @@ from .llava_next import (  # noqa: F401
 from .model_base import RBLNOptimumDictTableMixin
 from .qwen2_5_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration)
+from .sliding_window import (  # noqa: F401
+    RBLNOptimumSlidingWindowAttentionForCausalLM)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
-from .sliding_window import RBLNOptimumSlidingWindowAttentionForCausalLM # noqa: F401
+
 logger = init_logger(__name__)
 
 _RBLN_OPTIMUM_MULTIMODAL_MODELS = {
@@ -62,8 +64,10 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
         rbln_model = RBLNOptimumForEncoderModel(vllm_config)
     else:
         if vllm_config.model_config.get_sliding_window():
-            logger.info("The model is initialized with Sliding Window Attention.")
-            rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(vllm_config)
+            logger.info(
+                "The model is initialized with Sliding Window Attention.")
+            rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
+                vllm_config)
         else:
             rbln_model = RBLNOptimumForCausalLM(vllm_config)
     return rbln_model.eval()
