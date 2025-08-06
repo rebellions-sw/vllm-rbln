@@ -27,7 +27,7 @@ jobs:
   pre-commit:
     needs: check-skip-ci
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
-    uses: ./.pre-commit-config.yaml
+    uses: ./.github/workflows/pre-commit.yml
     
   check-team-member:
     needs: check-skip-ci
