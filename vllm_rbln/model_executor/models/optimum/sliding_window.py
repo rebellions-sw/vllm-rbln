@@ -64,18 +64,17 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
-        padded_cache_lengths: Optional[List[int]] = None,
+        padding_offsets: Optional[List[int]] = None,
         attention_masks: Optional[List[torch.Tensor]] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if self.padding_images:
-            assert padded_cache_lengths is not None
+            assert padding_offsets is not None
             assert attention_masks is not None
         else:
-            assert padded_cache_lengths is None
+            assert padding_offsets is None
             assert attention_masks is None
 
         position_id_dtype = cache_positions.dtype
-        seq_len = attention_masks[0].shape[1] if attention_masks else 0
 
         # Determine padding value for local_block_table_id
         used_ids = set(sliding_window_table_ids)
@@ -94,23 +93,22 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
                                              dtype=position_id_dtype)
         padded_cache_positions[:request_nums] = cache_positions[:request_nums]
         if self.padding_images:
-            padded_cache_lengths_tensor = torch.zeros(decoder_batch_size,
-                                                      1,
-                                                      dtype=position_id_dtype)
-            padded_cache_lengths_tensor[:request_nums] = torch.tensor(
-                padded_cache_lengths, dtype=position_id_dtype).unsqueeze(1)
+            attention_mask = attention_masks[0]
+            seq_len = attention_mask.shape[1]
+            padded_padding_offsets = torch.zeros(decoder_batch_size,
+                                                 1,
+                                                 dtype=position_id_dtype)
+            padded_padding_offsets[:request_nums] = torch.tensor(
+                padding_offsets, dtype=position_id_dtype).unsqueeze(1)
 
-            attention_mask_dtype = (attention_masks[0].dtype
-                                    if attention_masks else torch.bool)
-            attention_mask = torch.zeros(decoder_batch_size,
-                                         seq_len,
-                                         dtype=attention_mask_dtype)
-            if attention_masks:
-                attention_mask[:request_nums] = torch.cat(attention_masks)
+            padded_attention_mask = torch.zeros(decoder_batch_size,
+                                                seq_len,
+                                                dtype=attention_mask.dtype)
+            padded_attention_mask[:request_nums] = torch.cat(attention_masks)
 
             # cache_positions:
             #  the index including padding between text and image
-            # padded_cache_lengths_tensor:
+            # padding_offsets:
             #   the size of padding
             # position_ids:
             #   the index of the token to be decoded in the sequence.
@@ -120,8 +118,9 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
 
             position_ids[:request_nums] = (
                 padded_cache_positions[:request_nums] -
-                padded_cache_lengths_tensor[:request_nums])
+                padded_padding_offsets[:request_nums])
             cache_positions = padded_cache_positions
+            attention_mask = padded_attention_mask
         return (
             local_block_table_id,
             cache_positions,
