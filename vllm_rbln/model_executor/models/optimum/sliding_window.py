@@ -70,7 +70,6 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         if self.padding_images:
             assert padding_offsets is not None
             assert attention_masks is not None
-            attention_masks = cast(List[torch.Tensor], attention_masks)
         else:
             assert padding_offsets is None
             assert attention_masks is None
@@ -94,6 +93,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
                                              dtype=position_id_dtype)
         padded_cache_positions[:request_nums] = cache_positions[:request_nums]
         if self.padding_images:
+            attention_masks = cast(List[torch.Tensor], attention_masks)
             attention_mask = attention_masks[0]
             seq_len = attention_mask.shape[1]
             padded_padding_offsets = torch.zeros(decoder_batch_size,
@@ -136,7 +136,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
-    ) -> Tuple[list[int], list[int], list[torch.Tensor]]:
+    ) -> Union[Tuple[list[int], list[int], list[torch.Tensor]], Tuple[list[int], None, None]]:
         get_extra_values_fn = None
         attention_mask = None
 
@@ -172,8 +172,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
                 return table_ids, padded_cache_lengths, attention_masks
             else:
                 table_ids = cast(list[int], result)
-
-            return table_ids, None, None
+                return table_ids, None, None
 
     def update_attention_mask(self, attention_mask: torch.Tensor,
                               cache_position: torch.Tensor) -> torch.Tensor:
