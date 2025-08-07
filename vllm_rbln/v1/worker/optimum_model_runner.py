@@ -203,10 +203,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             prompt_logprobs_dict={},
         )
 
-    def mask_block_table(
-        self,
-        block_ids: torch.Tensor,
-    ) -> torch.Tensor:
+    def mask_block_table(self, block_ids: torch.Tensor,
+                         num_blocks: int) -> torch.Tensor:
         """This function serves as an interface to convert VLLM block tables
         to the format expected by Optimum-RBLN.
 
@@ -217,8 +215,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         and valid blocks start from 0.
         """
         block_ids = block_ids - 1
-        dummy_block = self.cache_config.num_gpu_blocks
-        block_ids[block_ids == -1] = dummy_block
+        dummy_block = self.cache_config.num_gpu_blocks - 1
+        block_ids[num_blocks:] = dummy_block
         return block_ids
 
     def _prepare_inputs(
@@ -361,6 +359,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 "Prefill stage request cannot processed with other requests.")
 
         req_id = self.input_batch.req_ids[0]
+        num_blocks_per_req = self.input_batch.block_table.block_tables[
+            0].num_blocks_per_row
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
 
@@ -375,10 +375,15 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 prompt_tokens = np.array(scheduled.prompt_token_ids)
             seq_len = len(prompt_tokens)
             input_positions = list(range(seq_len))
+            num_blocks = num_blocks_per_req[req_index]
             block_table = block_tables_cpu[req_index]
-            block_table = self.mask_block_table(block_table)
-            logger.debug("Request %s is now scheduled with block(s): %s",
-                         req_id, block_table.tolist())
+            block_table = self.mask_block_table(block_table, num_blocks)
+            logger.debug(
+                "Request %s is now scheduled. Prompt tokens: %s, "
+                "Already generated tokens: %s, Allocated block(s): %s", req_id,
+                len(self.requests[req_id].prompt_token_ids),
+                len(self.requests[req_id].output_token_ids),
+                block_table.tolist())
             running_request_ids.append(req_id)
 
         if self.is_multimodal_model:
@@ -401,6 +406,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         running_request_ids = []
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
+        num_blocks_per_req = self.input_batch.block_table.block_tables[
+            0].num_blocks_per_row
 
         for req_id, scheduled in zip(self.input_batch.req_ids,
                                      scheduler_output.scheduled_cached_reqs):
@@ -409,8 +416,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_tokens.append(
                 [self.input_batch.token_ids_cpu[req_index][input_position]])
             input_positions.append([input_position])
+            num_blocks = num_blocks_per_req[req_index]
             block_table = block_tables_cpu[req_index]
-            block_table = self.mask_block_table(block_table)
+            block_table = self.mask_block_table(block_table, num_blocks)
             block_tables_list.append(block_table)
             running_request_ids.append(req_id)
 
@@ -430,9 +438,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         The SamplingMetadata is updated and copied to the NPU if there is a
         new/resumed/paused/finished request in the batch.
         """
-        # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
-            logger.debug("Request %s is finished.", req_id)
+            logger.debug(
+                "Request %s is finished. Prompt tokens: %s, "
+                "Generated tokens: %s, Freed block(s): %s", req_id,
+                len(self.requests[req_id].prompt_token_ids),
+                len(self.requests[req_id].output_token_ids),
+                self.requests[req_id].block_ids[0])
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
