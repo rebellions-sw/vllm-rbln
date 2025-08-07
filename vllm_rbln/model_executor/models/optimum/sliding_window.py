@@ -70,6 +70,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         if self.padding_images:
             assert padding_offsets is not None
             assert attention_masks is not None
+            attention_masks = cast(List[torch.Tensor], attention_masks)
         else:
             assert padding_offsets is None
             assert attention_masks is None
@@ -161,8 +162,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         )
 
         if is_prompt:
-            result = cast(list[int], result)
-            table_ids = result
+            table_ids = cast(list[int], result)
             return table_ids, [], [attention_mask]
         else:
             if self.padding_images:
@@ -171,8 +171,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
                 table_ids, padded_cache_lengths, attention_masks = result
                 return table_ids, padded_cache_lengths, attention_masks
             else:
-                result = cast(Tuple[list[int]], result)
-                table_ids = result
+                table_ids = cast(list[int], result)
 
             return table_ids, None, None
 
