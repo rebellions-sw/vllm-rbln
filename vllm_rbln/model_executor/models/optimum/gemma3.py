@@ -30,8 +30,7 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from .sliding_window import (RBLNOptimumSlidingWindowAttentionMixin,
-                             SlidingWindowEntry)
+from .sliding_window import RBLNOptimumSlidingWindowAttentionMixin
 
 logger = init_logger(__name__)
 
@@ -105,14 +104,17 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
         )
-        self.setup_sliding_window_attention_mixin(
-            vllm_config=vllm_config,
-            sliding_window=self.model.rbln_config.language_model.sliding_window
-        )
 
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
-        self.pad_token_id = tokenizer.pad_token_id
+
+        self.setup_sliding_window_attention_mixin(
+            vllm_config=vllm_config,
+            sliding_window=self.model.rbln_config.language_model.
+            sliding_window,
+            padding_images=True,
+            pad_token_id=tokenizer.pad_token_id,
+        )
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -184,12 +186,12 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             updated_padded_cache_length = output.padded_cache_lengths
 
             assert len(running_requests_ids) == 1
-            self.sliding_window_table[running_requests_ids[0]] = (
-                SlidingWindowEntry(
-                    sliding_window_table_ids[0],
-                    updated_padded_cache_length,
-                    updated_attention_mask,
-                ))
+            self.add_sliding_window_table(
+                running_requests_id=running_requests_ids[0],
+                local_table_id=sliding_window_table_ids[0],
+                padded_cache_length=updated_padded_cache_length,
+                attention_mask=updated_attention_mask,
+            )
         else:
             if self.model.language_model.decoders is None:
                 raise ValueError("Decoders is None")
@@ -211,8 +213,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 attention_masks,
             )
 
-            attention_mask = self.mask_attention_mask(cache_position,
-                                                      attention_mask)
+            attention_mask = self.update_attention_mask(
+                attention_mask, cache_position)
+            self.update_sliding_window_table(running_requests_ids,
+                                             attention_mask)
 
             logits = self.model.language_model.decoder(
                 input_ids=input_ids,
@@ -222,11 +226,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 attention_mask=attention_mask,
                 position_ids=position_ids,
             ).logits
-
-            # Update attention mask of newly generated token
-            for idx, request_id in enumerate(running_requests_ids):
-                self.sliding_window_table[
-                    request_id].attention_mask = attention_mask[idx:idx + 1]
 
         if not is_prompt:
             logits = logits[:request_nums]

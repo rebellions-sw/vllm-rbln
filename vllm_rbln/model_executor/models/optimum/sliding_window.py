@@ -29,7 +29,7 @@ logger = init_logger(__name__)
 @dataclass
 class SlidingWindowEntry:
     local_table_id: int
-    # padded_cache_length and attention mask are
+    # `padded_cache_length` and `attention mask` are
     # for sliding window attention with image.
     padded_cache_length: Optional[int]
     attention_mask: Optional[torch.Tensor]
@@ -40,20 +40,23 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
     It is for the model that supports Sliding Window Attention.
     """
 
-    def setup_sliding_window_attention_mixin(self, vllm_config,
-                                             sliding_window) -> None:
-        # Check the sliding window configuration is set
-        # if vllm_config.model_config.disable_sliding_window:
-        # raise RuntimeError("Please set `disable_sliding_window`=False")
+    def setup_sliding_window_attention_mixin(
+            self,
+            vllm_config,
+            sliding_window,
+            padding_images: bool,
+            pad_token_id: Optional[str] = None) -> None:
         if sliding_window and \
             vllm_config.model_config.disable_sliding_window:
             raise RuntimeError("The model requires sliding window attention."
                                "Please set `disable_sliding_window`=False.")
+        if sliding_window is None:
+            raise RuntimeError(
+                "The model does not support sliding window attention.")
 
-        # self.sliding_window_size = self.model_config.hf_config.sliding_window
-        # if self.sliding_window_size:
         self.sliding_window_table: Dict[str, SlidingWindowEntry] = {}
-        self.padding_images = vllm_config.model_config.is_multimodal_model
+        self.padding_images = padding_images
+        self.pad_token_id = pad_token_id
 
     def pad_local_table_items(
         self,
@@ -174,8 +177,8 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
 
             return table_ids, None, None
 
-    def mask_attention_mask(attention_mask: torch.Tensor,
-                            cache_position: torch.Tensor) -> torch.Tensor:
+    def update_attention_mask(self, attention_mask: torch.Tensor,
+                              cache_position: torch.Tensor) -> torch.Tensor:
         """
         To enable attention for the newly generated tokens,
         set their corresponding `cache_position` values
@@ -190,6 +193,25 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
 
         attention_mask[rows, cols] = 1
         return attention_mask
+
+    def add_sliding_window_table(self, running_requests_id: str,
+                                 local_table_id: int,
+                                 padded_cache_length: torch.Tensor,
+                                 attention_mask: torch.Tensor):
+        self.sliding_window_table[running_requests_id] = (SlidingWindowEntry(
+            local_table_id=local_table_id,
+            padded_cache_length=padded_cache_length,
+            attention_mask=attention_mask,
+        ))
+
+    def update_sliding_window_table(self, running_requests_ids: list[str],
+                                    attention_mask: torch.Tensor):
+        """
+        Update the sliding window table with a new attention mask.
+        """
+        for idx, request_id in enumerate(running_requests_ids):
+            self.sliding_window_table[
+                request_id].attention_mask = attention_mask[idx:idx + 1]
 
     def clear_dict_table(self):
         self.sliding_window_table.clear()
@@ -215,7 +237,11 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
         )
-        self.setup_sliding_window_attention_mixin(vllm_config=vllm_config)
+        self.setup_sliding_window_attention_mixin(
+            vllm_config=vllm_config,
+            sliding_window=self.model.rbln_config.sliding_window,
+            padding_images=False,
+        )
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -232,24 +258,13 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         # In prefill phase, the length of list must be 1
-        if self.padding_images:
-            sliding_window_table_ids, padded_cache_lengths, attention_masks = (
-                self.select_local_block_table_value(
-                    is_prompt,
-                    input_ids,
-                    self.decoder_batch_size,
-                    running_requests_ids,
-                    finished_requests_ids,
-                ))
-        else:
-            sliding_window_table_ids, _, _ = (
-                self.select_local_block_table_value(
-                    is_prompt,
-                    input_ids,
-                    self.decoder_batch_size,
-                    running_requests_ids,
-                    finished_requests_ids,
-                ))
+        sliding_window_table_ids, _, _ = (self.select_local_block_table_value(
+            is_prompt,
+            input_ids,
+            self.decoder_batch_size,
+            running_requests_ids,
+            finished_requests_ids,
+        ))
 
         kwargs = self.preprocess_for_decoder(
             is_prompt,
@@ -273,53 +288,48 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             if self.model.prefill_decoder is None:
                 raise version_error
             prefill_batch_idx = sliding_window_table_ids[0]
-            # attention_mask = attention_masks[0]
             local_block_table_id = torch.tensor([prefill_batch_idx],
                                                 dtype=torch.int16)
-            # from fpdb import ForkedPdb; ForkedPdb().set_trace()
-            # return self.model.prefill_decoder(**kwargs).logits
             output = self.model.prefill_decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
-                attention_mask=attention_masks[0]
-                if self.padding_images else None,
                 local_block_tables=local_block_table_id,
-                # block_tables=block_tables,
-                # token_type_ids=token_type_ids,
+                # attention_mask=attention_masks[0]
+                # if self.padding_images else None,
+                # block_tables=block_tables if self.padding_images else None,
             )
             logits = output.logits
-            # FIXME
-            # updated_padded_cache_length = output.padded_cache_lengths
-            # print("updated_padded_cache_length", updated_padded_cache_length)
             assert len(running_requests_ids) == 1
-            self.sliding_window_table[running_requests_ids[0]] = (
-                SlidingWindowEntry(
-                    sliding_window_table_ids[0],
-                    output.padded_cache_lengths
-                    if self.padding_images else None,
-                    output.attention_mask if self.padding_images else None,
-                ))
+            self.add_sliding_window_table(
+                running_requests_id=running_requests_ids[0],
+                local_table_id=prefill_batch_idx,
+                # padded_cache_length=output.padded_cache_lengths
+                # if self.padding_images else None,
+                # attention_mask=output.attention_mask
+                # if self.padding_images else None,
+            )
         else:
-            # from fpdb import ForkedPdb; ForkedPdb().set_trace()
             self.model.decoder = self.model.decoders[padded_batch_size]
-            (local_block_table_id, cache_position, position_ids,
-             attention_mask) = self.pad_local_table_items(
-                 sliding_window_table_ids,
-                 cache_position,
-                 request_nums,
-                 padded_batch_size,
-                 padded_cache_lengths if self.padding_images else None,
-                 attention_masks if self.padding_images else None,
-             )
-            # ForkedPdb().set_trace()
-            # print("cache_position", cache_position)
+            (
+                local_block_table_id, cache_position, _, _
+            ) = self.pad_local_table_items(
+                sliding_window_table_ids,
+                cache_position,
+                request_nums,
+                padded_batch_size,
+                #  padded_cache_lengths if self.padding_images else None,
+                #  attention_masks if self.padding_images else None,
+            )
             logits = self.model.decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
-                # block_tables=block_tables,
                 local_block_tables=local_block_table_id,
-                attention_mask=attention_mask if self.padding_images else None,
-                # position_ids=position_ids,
+                # attention_mask=attention_mask
+                # if self.padding_images else None,
+                # block_tables=block_tables
+                # if self.padding_images else None,
+                # position_ids=position_ids
+                # if self.padding_images else None,
             ).logits
 
         if not is_prompt:
