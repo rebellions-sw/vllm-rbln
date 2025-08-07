@@ -194,10 +194,12 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         attention_mask[rows, cols] = 1
         return attention_mask
 
-    def add_sliding_window_table(self, running_requests_id: str,
-                                 local_table_id: int,
-                                 padded_cache_length: torch.Tensor,
-                                 attention_mask: torch.Tensor):
+    def add_sliding_window_table(
+            self,
+            running_requests_id: str,
+            local_table_id: int,
+            padded_cache_length: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None):
         self.sliding_window_table[running_requests_id] = (SlidingWindowEntry(
             local_table_id=local_table_id,
             padded_cache_length=padded_cache_length,
