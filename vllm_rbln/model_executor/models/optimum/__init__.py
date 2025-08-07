@@ -63,7 +63,9 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
     elif is_pooling_arch(model_config.hf_config):
         rbln_model = RBLNOptimumForEncoderModel(vllm_config)
     else:
-        if vllm_config.model_config.get_sliding_window():
+        if getattr(model_config.hf_config,
+                   "sliding_window", None) is not None and getattr(
+                       model_config.hf_config, "use_sliding_window", True):
             logger.info(
                 "The model is initialized with Sliding Window Attention.")
             rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
