@@ -93,8 +93,7 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
                                              dtype=position_id_dtype)
         padded_cache_positions[:request_nums] = cache_positions[:request_nums]
         if self.padding_images:
-            attention_masks = cast(List[torch.Tensor], attention_masks)
-            attention_mask = attention_masks[0]
+            attention_mask = attention_masks[0] if attention_masks is not None
             seq_len = attention_mask.shape[1]
             padded_padding_offsets = torch.zeros(decoder_batch_size,
                                                  1,
