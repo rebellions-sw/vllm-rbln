@@ -172,6 +172,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 input_ids, inputs_embeds, pixel_values)
             if self.model.language_model.prefill_decoder is None:
                 raise version_error
+            assert attention_masks is not None
             attention_mask = attention_masks[0]
             output = self.model.language_model.prefill_decoder(
                 inputs_embeds=inputs_embeds,
