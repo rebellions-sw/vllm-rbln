@@ -7,7 +7,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Dict, List, Optional, Tuple, Union, cast
 
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -136,7 +136,8 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
-    ) -> Union[Tuple[list[int], list[int], list[torch.Tensor]], Tuple[list[int], None, None]]:
+    ) -> Union[Tuple[list[int], list[int], list[torch.Tensor]], Tuple[
+            list[int], None, None]]:
         get_extra_values_fn = None
         attention_mask = None
 
