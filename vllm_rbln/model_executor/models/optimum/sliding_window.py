@@ -141,12 +141,11 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
         get_extra_values_fn = None
         attention_mask = None
 
-        if is_prompt:
-            if self.padding_images:
+        if self.padding_images:
+            if is_prompt:
                 attention_mask = ((input_ids != self.pad_token_id).to(
                     torch.int64).squeeze(0))
-        else:
-            if self.padding_images:
+            else:
                 get_extra_values_fn = lambda entry: (
                     entry.padded_cache_length,
                     entry.attention_mask,
@@ -161,19 +160,18 @@ class RBLNOptimumSlidingWindowAttentionMixin(RBLNOptimumDictTableMixin):
             get_entry_fn=lambda entry: entry.local_table_id,
             get_extra_values_fn=get_extra_values_fn,
         )
-
-        if is_prompt:
-            table_ids = cast(list[int], result)
-            return table_ids, [], [attention_mask]
-        else:
-            if self.padding_images:
+        if self.padding_images:
+            if is_prompt:
+                table_ids = cast(list[int], result)
+                return table_ids, [], [attention_mask]
+            else:
                 result = cast(Tuple[list[int], list[int], list[torch.Tensor]],
                               result)
                 table_ids, padded_cache_lengths, attention_masks = result
                 return table_ids, padded_cache_lengths, attention_masks
-            else:
-                table_ids = cast(list[int], result)
-                return table_ids, None, None
+        else:
+            table_ids = cast(list[int], result)
+            return table_ids, None, None
 
     def update_attention_mask(self, attention_mask: torch.Tensor,
                               cache_position: torch.Tensor) -> torch.Tensor:
