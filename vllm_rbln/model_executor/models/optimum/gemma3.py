@@ -30,7 +30,7 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from .sliding_window import RBLNOptimumSlidingWindowAttentionMixin
+from .sliding_window import HybridAttentionImageManager
 
 logger = init_logger(__name__)
 
@@ -81,7 +81,6 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 class RBLNOptimumGemma3ForConditionalGeneration(
         RBLNOptimumModelBase,
         RBLNOptimumDecoderMixin,
-        RBLNOptimumSlidingWindowAttentionMixin,
         VllmModelForTextGeneration,
         SupportsMultiModal,
 ):
@@ -108,13 +107,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
 
-        self.setup_sliding_window_attention_mixin(
-            vllm_config=vllm_config,
-            sliding_window=self.model.rbln_config.language_model.
-            sliding_window,
-            padding_images=True,
-            pad_token_id=tokenizer.pad_token_id,
-        )
+        self.attention_manager = HybridAttentionImageManager(
+            pad_token_id=tokenizer.pad_token_id)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -132,14 +126,14 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         request_nums = input_ids.shape[0]
 
         # In prefill phase, the length of list must be 1
-        sliding_window_table_ids, padded_cache_lengths, attention_masks = (
-            self.select_local_block_table_value(
+        sliding_window_table_ids, padded_cache_lengths, attention_masks = \
+        self.attention_manager.get(
                 is_prompt,
                 input_ids,
                 self.decoder_batch_size,
                 running_requests_ids,
                 finished_requests_ids,
-            ))
+            )
 
         kwargs = self.preprocess_for_decoder(
             is_prompt,
@@ -187,7 +181,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             updated_padded_cache_length = output.padded_cache_lengths
 
             assert len(running_requests_ids) == 1
-            self.add_sliding_window_table(
+            self.attention_manager.add(
                 running_requests_id=running_requests_ids[0],
                 local_table_id=sliding_window_table_ids[0],
                 padded_cache_length=updated_padded_cache_length,
@@ -205,7 +199,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 cache_position,
                 position_ids,
                 attention_mask,
-            ) = self.pad_local_table_items(
+            ) = self.attention_manager.preprocess_params(
                 sliding_window_table_ids,
                 cache_position,
                 request_nums,
@@ -214,10 +208,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 attention_masks,
             )
 
-            attention_mask = self.update_attention_mask(
+            attention_mask = self.attention_manager.update_attention_mask(
                 attention_mask, cache_position)
-            self.update_sliding_window_table(running_requests_ids,
-                                             attention_mask)
+            self.attention_manager.update_hybrid_attention_table(
+                running_requests_ids, attention_mask)
 
             logits = self.model.language_model.decoder(
                 input_ids=input_ids,
