@@ -55,7 +55,52 @@ class AttentionManager(RBLNOptimumDictTableMixin):
     #     num_values = min(total_size, original_values.shape[0])
     #     padded[:num_values] = original_values[:num_values].reshape(num_values, dim)
     #     return padded
-    pass
+    def pad_list22dtensor(
+        self,
+        original_list: list[int],
+        rows: int,
+        cols: int,
+        pad_value: int = 0,
+        dtype: torch.dtype = None,
+    ) -> torch.Tensor:
+        if dtype is None:
+            dtype = torch.int16
+        valid_nums = len(original_list)
+        padded = torch.full((rows, cols), pad_value, dtype=dtype)
+        original_tensor = torch.tensor(original_list, dtype=dtype).unsqueeze(1)
+        padded[:valid_nums] = original_tensor
+        return padded
+    
+    def pad_tensors2tensor(
+        self,
+        original_tensors: list[torch.Tensor],
+        rows: int,
+        cols: int,
+        pad_value: int = 0,
+        dtype: torch.dtype = None,
+    ) -> torch.Tensor:
+        if dtype is None:
+            dtype = original_tensors[0].dtype
+        valid_nums = len(original_tensors)
+        padded = torch.full((rows, cols), pad_value, dtype=dtype)
+        original_tensor = torch.cat(original_tensors)
+        padded[:valid_nums] = original_tensor
+        return padded
+
+    def pad_tensor2tensor(
+        self,
+        original_tensor: torch.Tensor,
+        rows: int,
+        cols: int,
+        pad_value: int = 0,
+        dtype: torch.dtype = None,
+    ) -> torch.Tensor:
+        if dtype is None:
+            dtype = original_tensor.dtype
+        valid_nums = original_tensor.shape[0]
+        padded = torch.full((rows, cols), pad_value, dtype=dtype)
+        padded[:valid_nums] = original_tensor
+        return padded
 
 class SlidingWindowAttentionManager(AttentionManager):
 
@@ -193,36 +238,20 @@ class HybridAttentionImageManager(AttentionManager):
         assert padding_offsets is not None
         assert attention_masks is not None
 
-        position_id_dtype = cache_positions.dtype
+        attention_mask = attention_masks[0]
+        seq_len = attention_mask.shape[1]
 
+        position_id_dtype = cache_positions.dtype
+        attention_mask_dtype = attention_mask.dtype
         # Determine padding value for local_block_table_id
         used_ids = set(sliding_window_table_ids)
         pad_value = next(
             (i for i in range(decoder_batch_size) if i not in used_ids), 0)
 
-        local_block_table_id = torch.full(
-            (decoder_batch_size, 1),
-            pad_value,
-            dtype=torch.int16,
-        )
-        local_block_table_id[:request_nums] = torch.tensor(
-            sliding_window_table_ids, dtype=torch.int16).unsqueeze(1)
-        padded_cache_positions = torch.zeros(decoder_batch_size,
-                                             1,
-                                             dtype=position_id_dtype)
-        padded_cache_positions[:request_nums] = cache_positions[:request_nums]
-        attention_mask = attention_masks[0]
-        seq_len = attention_mask.shape[1]
-        padded_padding_offsets = torch.zeros(decoder_batch_size,
-                                             1,
-                                             dtype=position_id_dtype)
-        padded_padding_offsets[:request_nums] = torch.tensor(
-            padding_offsets, dtype=position_id_dtype).unsqueeze(1)
-
-        padded_attention_mask = torch.zeros(decoder_batch_size,
-                                            seq_len,
-                                            dtype=attention_mask.dtype)
-        padded_attention_mask[:request_nums] = torch.cat(attention_masks)
+        local_block_table_id = self.pad_list22dtensor(sliding_window_table_ids, decoder_batch_size, 1, pad_value, torch.int16)
+        padded_padding_offsets = self.pad_list22dtensor(padding_offsets, decoder_batch_size, 1, 0)
+        padded_cache_positions = self.pad_tensor2tensor(cache_positions, decoder_batch_size, 1, 0)
+        padded_attention_mask = self.pad_tensors2tensor(attention_masks, decoder_batch_size, seq_len, 0)
 
         # cache_positions:
         #  the index including padding between text and image
@@ -234,15 +263,12 @@ class HybridAttentionImageManager(AttentionManager):
                                    1,
                                    dtype=position_id_dtype)
 
-        position_ids[:request_nums] = (padded_cache_positions[:request_nums] -
-                                       padded_padding_offsets[:request_nums])
-        cache_positions = padded_cache_positions
-        attention_mask = padded_attention_mask
+        position_ids = padded_cache_positions - padded_padding_offsets
         return (
             local_block_table_id,
-            cache_positions,
+            padded_cache_positions,
             position_ids,
-            attention_mask,
+            padded_attention_mask,
         )
 
     def update_hybrid_attention_table(self, running_requests_ids: list[str],
