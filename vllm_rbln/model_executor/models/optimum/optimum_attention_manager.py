@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Dict, List, Tuple, cast
 
 import torch
 from vllm.logger import init_logger
@@ -125,7 +125,7 @@ class SlidingWindowAttentionManager(AttentionManager):
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Determine padding value for local_block_table_id
         used_ids = set(sliding_window_table_ids)
         pad_value = next(
@@ -189,11 +189,8 @@ class HybridAttentionImageManager(AttentionManager):
             table_ids, padded_cache_lengths, attention_masks = result
             return table_ids, padded_cache_lengths, attention_masks
 
-    def add(self,
-            running_requests_id: str,
-            local_table_id: int,
-            padded_cache_length: Optional[torch.Tensor] = None,
-            attention_mask: Optional[torch.Tensor] = None):
+    def add(self, running_requests_id: str, local_table_id: int,
+            padded_cache_length: int, attention_mask: torch.Tensor):
         self.hybrid_attention_table[
             running_requests_id] = HybridAttentionImageEntry(
                 local_table_id=local_table_id,
