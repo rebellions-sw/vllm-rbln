@@ -11,8 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, cast
 
 import torch
 import vllm.envs as env
@@ -20,11 +18,12 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
-from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
-                         RBLNOptimumModelBase)
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 from .optimum_attention_manager import SlidingWindowAttentionManager
 
 logger = init_logger(__name__)
+
+
 class RBLNOptimumSlidingWindowAttentionForCausalLM(
         RBLNOptimumModelBase,
         RBLNOptimumDecoderMixin,
