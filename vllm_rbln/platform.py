@@ -117,6 +117,17 @@ class RblnPlatform(Platform):
     def pre_register_and_update(cls,
                                 parser: Optional[FlexibleArgumentParser] = None
                                 ) -> None:
+
+        if cls.is_torch_compile:
+            # patches
+            import vllm_rbln.attention.layer  # noqa
+            import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
+            import vllm_rbln.model_executor.layers.rotary_embedding  # noqa
+            import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
+            import vllm_rbln.models.deepseek_v2  # noqa
+            import vllm_rbln.models.qwen2_moe  # noqa
+            import vllm_rbln.models.qwen3_moe  # noqa
+
         if parser is None:
             return
 
