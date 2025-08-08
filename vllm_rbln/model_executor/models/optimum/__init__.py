@@ -32,6 +32,8 @@ from .llava_next import (  # noqa: F401
 from .model_base import RBLNOptimumDictTableMixin
 from .qwen2_5_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration)
+from .sliding_window import (  # noqa: F401
+    RBLNOptimumSlidingWindowAttentionForCausalLM)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
 
 logger = init_logger(__name__)
@@ -61,7 +63,15 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
     elif is_pooling_arch(model_config.hf_config):
         rbln_model = RBLNOptimumForEncoderModel(vllm_config)
     else:
-        rbln_model = RBLNOptimumForCausalLM(vllm_config)
+        if getattr(model_config.hf_config,
+                   "sliding_window", None) is not None and getattr(
+                       model_config.hf_config, "use_sliding_window", True):
+            logger.info(
+                "The model is initialized with Sliding Window Attention.")
+            rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
+                vllm_config)
+        else:
+            rbln_model = RBLNOptimumForCausalLM(vllm_config)
     return rbln_model.eval()
 
 
