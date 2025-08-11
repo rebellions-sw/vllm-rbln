@@ -203,9 +203,29 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             prompt_logprobs_dict={},
         )
 
-    def mask_block_table(self, block_ids: torch.Tensor,
-                         num_blocks: int) -> torch.Tensor:
-        block_ids[num_blocks:] = 0
+    def mask_block_table(
+        self,
+        block_ids: torch.Tensor,
+        num_blocks: int,
+        *,
+        pad_value: int = 0,
+    ) -> torch.Tensor:
+        """Mask (pad) unused block slots in-place.
+
+        Sets entries beyond ``num_blocks`` to ``pad_value``.
+        Use ``pad_value=0`` for v1 (dummy block id 0), or pass your own padding.
+        """
+        if num_blocks < 0:
+            raise ValueError("num_blocks must be >= 0")
+
+        if block_ids.dtype not in (torch.int32, torch.int64):
+            raise TypeError("block_ids must be int32 or int64")
+
+        max_blocks = block_ids.size(-1)
+        k = max(0, min(num_blocks, max_blocks))  # clamp to [0, max_blocks]
+        if k < max_blocks:
+            block_ids.narrow(-1, k, max_blocks - k).fill_(pad_value)
+
         return block_ids
 
     def _prepare_inputs(
