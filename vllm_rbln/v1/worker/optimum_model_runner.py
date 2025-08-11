@@ -156,11 +156,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
-        if self.lora_config and not self.model.model.rbln_config.use_lora:
+        use_lora = getattr(self.model.model.rbln_config, "use_lora", None)
+        if self.lora_config and not use_lora:
             raise RuntimeError(
                 "The compiled model is for LoRA."
                 "Please compile the model with `rbln_lora_config`")
-        if not self.lora_config and self.model.model.rbln_config.use_lora:
+        if not self.lora_config and use_lora:
             raise RuntimeError("The model is compiled for LoRA."
                                "Please set `enable_lora=True` in vLLM.")
 

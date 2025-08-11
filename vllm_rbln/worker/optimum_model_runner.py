@@ -18,6 +18,8 @@ import torch
 from vllm.config import VllmConfig
 from vllm.inputs import INPUT_REGISTRY
 from vllm.logger import init_logger
+from vllm.lora.layers import LoRAMapping
+from vllm.lora.request import LoRARequest
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.pooling_metadata import PoolingMetadata
@@ -83,9 +85,18 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
             .create_input_mapper(self.model_config)
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
+        self.enable_lora = self.vllm_config.lora_config is not None
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
+        use_lora = getattr(self.model.model.rbln_config, "use_lora", None)
+        if self.enable_lora and not use_lora:
+            raise RuntimeError(
+                "The compiled model is for LoRA."
+                "Please compile the model with `rbln_lora_config`")
+        if not self.enable_lora and use_lora:
+            raise RuntimeError("The model is compiled for LoRA."
+                               "Please set `enable_lora=True` in vLLM.")
 
     def get_model(self):
         return self.model
@@ -282,6 +293,18 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             generators=self.get_generators(finished_requests_ids)
         ) if seq_group_metadata_list[0].sampling_params is not None else None
 
+        lora_requests = None
+        lora_mapping = None
+        if self.enable_lora:
+            # LoRA data.
+            lora_requests = [
+                seq_group_metadata.lora_request
+                for seq_group_metadata in seq_group_metadata_list
+            ]
+            lora_mapping = LoRAMapping(is_prefill=is_prompt,
+                                       index_mapping=[],
+                                       prompt_mapping=[])
+
         return ModelInputForRBLN(input_tokens=input_tokens,
                                  input_positions=input_positions,
                                  sampling_metadata=sampling_metadata,
@@ -290,7 +313,9 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                  token_type_ids=type_token_ids,
                                  pooling_metadata=pooling_metadata,
                                  running_requests_ids=running_requests_ids,
-                                 finished_requests_ids=finished_requests_ids)
+                                 finished_requests_ids=finished_requests_ids,
+                                 lora_requests=lora_requests,
+                                 lora_mapping=lora_mapping)
 
     def _prepare_pooling(
         self,
@@ -325,6 +350,12 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         num_steps: int = 1,
     ) -> Optional[SamplerOutput]:
 
+        if self.lora_config:
+            assert model_input.lora_requests is not None
+            assert model_input.lora_mapping is not None
+            self.set_active_loras(model_input.lora_requests,
+                                  model_input.lora_mapping)
+
         hidden_states = self.model(model_input=model_input)
         if isinstance(self.model, RBLNOptimumForEncoderModel):
             return [
@@ -351,3 +382,16 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     @property
     def vocab_size(self) -> int:
         return self.model_config.get_vocab_size()
+
+    def set_active_loras(self, lora_requests: List[LoRARequest],
+                         lora_mapping: LoRAMapping) -> None:
+        is_prefill = lora_mapping.is_prefill
+        max_num_reqs = self.vllm_config.scheduler_config.max_num_seqs
+        num_reqs = len(lora_requests)
+        adapter_ids = [
+            lora_request.adapter_id for lora_request in lora_requests
+        ]
+        # Padding
+        if not is_prefill and num_reqs < max_num_reqs:
+            adapter_ids += [0] * (max_num_reqs - num_reqs)
+        self.model.model.set_lora_int_ids(adapter_ids)
