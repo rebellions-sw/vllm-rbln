@@ -157,11 +157,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
         if self.lora_config and not self.model.model.rbln_config.use_lora:
-            raise RuntimeError("The compiled model is for LoRA." 
-            "Please compile the model with `rbln_lora_config`")
+            raise RuntimeError(
+                "The compiled model is for LoRA."
+                "Please compile the model with `rbln_lora_config`")
         if not self.lora_config and self.model.model.rbln_config.use_lora:
             raise RuntimeError("The model is compiled for LoRA."
-            "Please set `enable_lora=True` in vLLM.")
+                               "Please set `enable_lora=True` in vLLM.")
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -287,7 +288,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         # Hot-Swap lora model
         if self.lora_config:
-            self.set_active_loras(self.input_batch)
+            self.set_active_loras(self.input_batch, is_prefill)
 
         # TODO interemediate_tensor should be set
         model_input = ModelInputForRBLN(
@@ -757,11 +758,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
             dummy_run_batches(config)
 
-
-    def set_active_loras(self, input_batch: InputBatch) -> None:
+    def set_active_loras(self, input_batch: InputBatch,
+                         is_prefill: bool) -> None:
         num_reqs = self.input_batch.num_reqs
-        req_lora_mapping_list = input_batch.request_lora_mapping[:num_reqs].tolist()
+        req_lora_mapping_list = input_batch.request_lora_mapping[:
+                                                                 num_reqs].tolist(
+                                                                 )
         # Padding
-        if num_reqs < self.max_num_reqs:
+        if not is_prefill and num_reqs < self.max_num_reqs:
             req_lora_mapping_list += [0] * (self.max_num_reqs - num_reqs)
         self.model.model.set_lora_int_ids(req_lora_mapping_list)

@@ -135,5 +135,6 @@ def entry_point(
              model_id=model_id))
     loop.close()
 
+
 if __name__ == "__main__":
     fire.Fire(entry_point)

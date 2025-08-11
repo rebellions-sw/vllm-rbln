@@ -104,5 +104,6 @@ def entry_point(
         ))
     loop.close()
 
+
 if __name__ == "__main__":
     fire.Fire(entry_point)
