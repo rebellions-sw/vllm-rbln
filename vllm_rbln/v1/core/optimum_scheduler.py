@@ -310,9 +310,17 @@ class RBLNOptimumScheduler(Scheduler):
                         # The request cannot be scheduled.
                         # Preempt the lowest-priority request.
                         preempted_req = self.running.pop()
+                        # Index 0 assumes a single KV cache group
+                        # is used for this request
+                        preempted_blocks = self.kv_cache_manager.get_block_ids(
+                            preempted_req.request_id)[0]
+                        preempted_blocks = [
+                            block_idx - 1 for block_idx in preempted_blocks
+                        ]
                         self.kv_cache_manager.free(preempted_req)
-                        logger.warning("Request %s is preempted.",
-                                       preempted_req.request_id)
+                        logger.warning(
+                            "Request %s is preempted. Freed block(s): %s",
+                            preempted_req.request_id, preempted_blocks)
                         preempted_req.status = RequestStatus.PREEMPTED
                         preempted_req.num_computed_tokens = 0
                         if self.log_stats:

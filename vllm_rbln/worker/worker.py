@@ -38,6 +38,7 @@ except ImportError:
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.worker.model_runner import RBLNModelRunner
+from vllm_rbln.worker.utils import get_maximum_num_blocks
 
 logger = init_logger(__name__)
 
@@ -287,9 +288,24 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # sequences that can be processed in a single batch. This is equivalent
         # to schedule without PagedAttention.
 
-        # NOTE(jiwoo.park):
-        # We reserve one shared cache block for padded batch sequences.
-        num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
+        block_size = self.cache_config.block_size
+
+        # This function comes from optimum-rbln.
+        # We must keep it updated as optimum is upgraded.
+        max_num_blocks = get_maximum_num_blocks(
+            config=self.model_config,
+            tensor_parallel_size=self.parallel_config.tensor_parallel_size,
+            kvcache_block_size=block_size,
+            # quantization : 4 (This is an ad-hoc value. Need to fix it)
+            nbits_per_param=16 if not self.model_config.quantization else 4,
+            n_model_params=sum(p.numel()
+                               for p in self.model_runner.model.parameters()),
+            # 1 : prefill
+            num_runtimes=1 + self.scheduler_config.max_num_seqs)
+        num_gpu_blocks = (max_num_blocks - 1)
+
+        if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
+            num_gpu_blocks = int(npu_num_blocks) - 1
 
         # Swap not yet supported with RBLN backend.
         num_cpu_blocks = 0
@@ -302,7 +318,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         # Different values are not tested.
         assert num_cpu_blocks == 0
-        assert num_gpu_blocks == self.scheduler_config.max_num_seqs + 1
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
