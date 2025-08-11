@@ -111,8 +111,25 @@ class RBLNOptimumModelBase(nn.Module):
         self.init_model()
         self.batch_size = self.scheduler_config.max_num_seqs
         self.kv_block_adapter = KVCacheBlockAdapter(
-            vllm_config, self.model.get_kvcache_num_blocks())
+            vllm_config, self._resolve_kvcache_num_blocks())
         self.padding_value = self.kv_block_adapter.get_padding_value()
+
+    def _resolve_kvcache_num_blocks(self) -> int:
+        """Prefer model-provided KV-cache block count; 
+           else fall back to config."""
+        value: Optional[Any] = None
+
+        getter = getattr(self.model, "get_kvcache_num_blocks", None)
+        if callable(getter):
+            value = getter()
+        elif hasattr(self.model, "kvcache_num_blocks"):
+            value = self.model.kvcache_num_blocks
+        else:
+            value = self.vllm_config.scheduler_config.max_num_seqs  # fallback
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return int(self.vllm_config.scheduler_config.max_num_seqs)
 
     def init_model(self) -> None:
         config = self.model_config.hf_config
