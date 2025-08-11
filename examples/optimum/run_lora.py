@@ -39,9 +39,6 @@ async def generate(engine: AsyncLLMEngine, conversation: list[dict],
         "request_id": str(request_id),
     }
 
-    # start the generation
-    # conversation = [{"role": "user", "content": f"{prompt}"}]
-
     tokenizer = AutoTokenizer.from_pretrained(model)
     chat = tokenizer.apply_chat_template(
         conversation,
