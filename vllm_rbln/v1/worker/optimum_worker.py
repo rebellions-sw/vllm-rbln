@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 from typing import Optional
 
 import torch
@@ -72,21 +71,9 @@ class RBLNOptimumWorker(WorkerBase):
         num_layers = len(kv_cache_spec)
         page_size = get_uniform_page_size(kv_cache_spec)
 
-        attn_impl = self.model_runner.model.model.get_attn_impl() if hasattr(
-            self.model_runner.model.model, "get_attn_impl") else None
-        # FIXME It requires more check.
-        if attn_impl is not None and attn_impl == "flash_attn":
-            # We use the last block as dummy block
-            num_gpu_blocks = (
-                self.model_runner.model.model.get_kvcache_num_blocks() + 1) \
-                if self.model_runner.model.model.rbln_config.batch_size == 1 \
-                else (self.model_runner.model.model.get_kvcache_num_blocks())
+        adapter = self.model_runner.model.kv_block_adapter
+        num_gpu_blocks = adapter.get_available_num_blocks()
 
-            if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
-                num_gpu_blocks = int(npu_num_blocks)
-
-        else:
-            num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
         return num_gpu_blocks * page_size * num_layers
 
     def execute_model(

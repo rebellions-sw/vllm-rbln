@@ -205,18 +205,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def mask_block_table(self, block_ids: torch.Tensor,
                          num_blocks: int) -> torch.Tensor:
-        """This function serves as an interface to convert VLLM block tables
-        to the format expected by Optimum-RBLN.
-
-        In V1, the block with block_id 0 is used as a dummy block
-        called null_block, so valid blocks start from 1.
-        
-        However, in Optimum-RBLN, the last block is used as the dummy block,
-        and valid blocks start from 0.
-        """
-        block_ids = block_ids - 1
-        dummy_block = self.cache_config.num_gpu_blocks - 1
-        block_ids[num_blocks:] = dummy_block
+        block_ids[num_blocks:] = 0
         return block_ids
 
     def _prepare_inputs(
