@@ -212,8 +212,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     ) -> torch.Tensor:
         """Mask (pad) unused block slots in-place.
 
-        Sets entries beyond ``num_blocks`` to ``pad_value``.
-        Use ``pad_value=0`` for v1 (dummy block id 0), or pass your own padding.
+        Sets entries beyond `num_blocks` to `pad_value`.
+        Use `pad_value=0` for v1 (dummy block id 0), or pass your own padding.
         """
         if num_blocks < 0:
             raise ValueError("num_blocks must be >= 0")
