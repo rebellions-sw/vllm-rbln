@@ -122,7 +122,7 @@ class RBLNOptimumModelBase(nn.Module):
         getter = getattr(self.model, "get_kvcache_num_blocks", None)
         if callable(getter):
             value = getter()
-        elif hasattr(self.model, "kvcache_num_blocks"):
+        elif hasattr(self.model.rbln_config, "kvcache_num_blocks"):
             value = self.model.rbln_config.kvcache_num_blocks
         else:
             value = self.scheduler_config.max_num_seqs  # fallback
