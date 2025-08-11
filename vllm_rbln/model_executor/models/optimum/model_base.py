@@ -54,10 +54,21 @@ class KVCacheBlockAdapter:
         self.estimated_kvcache_num_blocks = estimated_kvcache_num_blocks
         self.use_v1 = env.VLLM_USE_V1
 
+    @staticmethod
+    def _env_int(name: str, default: int) -> int:
+        raw = os.getenv(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+
     def _estimated_num_blocks(self) -> int:
-        """Estimated total KV-cache blocks (overridable via env)."""
-        num_blocks = self.estimated_kvcache_num_blocks
-        return os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS", num_blocks)
+        return self._env_int(
+            "VLLM_RBLN_NPU_NUM_BLOCKS",
+            int(self.estimated_kvcache_num_blocks),
+        )
 
     def get_padding_value(self) -> int:
         if self.use_v1:
