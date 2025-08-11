@@ -144,5 +144,6 @@ def entry_point(
             golden_json=golden_json,
         ))
 
+
 if __name__ == "__main__":
     fire.Fire(entry_point)
