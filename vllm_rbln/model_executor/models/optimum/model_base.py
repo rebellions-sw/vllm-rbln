@@ -125,11 +125,11 @@ class RBLNOptimumModelBase(nn.Module):
         elif hasattr(self.model, "kvcache_num_blocks"):
             value = self.model.kvcache_num_blocks
         else:
-            value = self.vllm_config.scheduler_config.max_num_seqs  # fallback
+            value = self.scheduler_config.max_num_seqs  # fallback
         try:
             return int(value)
         except (TypeError, ValueError):
-            return int(self.vllm_config.scheduler_config.max_num_seqs)
+            return int(self.scheduler_config.max_num_seqs)
 
     def init_model(self) -> None:
         config = self.model_config.hf_config
