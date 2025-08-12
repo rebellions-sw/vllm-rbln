@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A RBLN worker class."""
-import os
 from typing import List, Optional, Tuple
 
 import torch
@@ -73,26 +72,10 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
         Swapping is not yet supported, so always return num_cpu_blocks=0.
 
         """
-        attn_impl = self.model_runner.model.model.get_attn_impl() if hasattr(
-            self.model_runner.model.model, "get_attn_impl") else None
-
-        if attn_impl is not None and attn_impl == "flash_attn":
-            # We use the last block as dummy block
-            num_gpu_blocks = (
-                self.model_runner.model.model.get_kvcache_num_blocks() - 1) \
-                if self.model_runner.model.model.rbln_config.batch_size > 1 \
-                else (self.model_runner.model.model.get_kvcache_num_blocks())
-
-            if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
-                num_gpu_blocks = int(npu_num_blocks) - 1
-        else:
-            # Set the number of GPU blocks to be the same as the maximum
-            # number of sequences that can be processed in a single batch.
-            # This is equivalent to schedule without PagedAttention.
-            num_gpu_blocks = self.scheduler_config.max_num_seqs
+        adapter = self.model_runner.model.kv_block_adapter
+        num_gpu_blocks = adapter.get_available_num_blocks()
         # Swap not yet supported with RBLN backend.
         num_cpu_blocks = 0
-
         return num_gpu_blocks, num_cpu_blocks
 
     def initialize_cache(self, num_gpu_blocks: int,
