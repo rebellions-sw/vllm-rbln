@@ -130,8 +130,6 @@ class RblnPlatform(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
-        # FIXME(jiwoo.park)
-        cls.is_torch_compile = is_torch_compile_supported(vllm_config)
         if vllm_config.scheduler_config.is_multi_step:
             raise NotImplementedError(
                 "Multi-step execution is not supported for RBLN")
