@@ -172,6 +172,8 @@ class RblnPlatform(Platform):
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
                         "vllm_rbln.v1.worker.rbln_worker.RBLNWorker")
+                scheduler_config.scheduler_cls = (
+                    "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler")
             else:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
