@@ -25,12 +25,12 @@ EOS_TOKEN_ID = 50256
 def create_scheduler(
     model: str = "facebook/opt-125m",
     max_num_seqs: int = 4,
-    max_num_batched_tokens: int = 16384,
+    max_num_batched_tokens: int = 128, # For chunked prefill in RBLN
     long_prefill_token_threshold: int = 0,
     disable_chunked_mm_input: bool = False,
     use_kv_connector: bool = False,
-    num_blocks: int = 4, # default : 16384 // 4096
-    block_size: int = 4096,
+    num_blocks: int = 512, # default : 8192 // 16
+    block_size: int = 16,
     max_model_len: Optional[int] = None,
     num_speculative_tokens: Optional[int] = None,
     skip_tokenizer_init: bool = False,
@@ -124,7 +124,6 @@ def create_scheduler(
 def create_requests(
     num_requests: int,
     num_tokens: int = 10,
-    num_batch_per_requests: int = 1,
     mm_positions: Optional[list[PlaceholderRange]] = None,
     max_tokens: int = 16,
     stop_token_ids: Optional[list[int]] = None,
