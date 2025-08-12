@@ -38,9 +38,8 @@ def test_finish_request():
         scheduler.add_request(request)
 
     for i, request in enumerate(requests):
-        scheduler.finish_requests(
-            request.request_id, RequestStatus.FINISHED_ABORTED
-        )
+        scheduler.finish_requests(request.request_id,
+                                  RequestStatus.FINISHED_ABORTED)
         assert request.request_id not in scheduler.requests
         assert len(scheduler.waiting) == 9 - i
 
@@ -52,9 +51,8 @@ def test_get_num_unfinished_requests():
         scheduler.add_request(request)
 
     for i, request in enumerate(requests):
-        scheduler.finish_requests(
-            request.request_id, RequestStatus.FINISHED_STOPPED
-        )
+        scheduler.finish_requests(request.request_id,
+                                  RequestStatus.FINISHED_STOPPED)
         assert scheduler.get_num_unfinished_requests() == len(requests) - i - 1
 
 
@@ -64,18 +62,16 @@ def test_get_num_unfinished_requests():
         (None, None),
     ],
 )
-def test_schedule_single_seq(
-    enable_prefix_caching: Optional[bool], prompt_logprobs: Optional[int]
-):
+def test_schedule_single_seq(enable_prefix_caching: Optional[bool],
+                             prompt_logprobs: Optional[int]):
     """Test scheduling.
     Only one case: default APC/no prompt logprobs
     """
-    scheduler = create_scheduler(
-        enable_prefix_caching=enable_prefix_caching, max_num_seqs=1
-    )
-    requests = create_requests(
-        num_requests=8, num_tokens=16, prompt_logprobs=prompt_logprobs
-    )
+    scheduler = create_scheduler(enable_prefix_caching=enable_prefix_caching,
+                                 max_num_seqs=1)
+    requests = create_requests(num_requests=8,
+                               num_tokens=16,
+                               prompt_logprobs=prompt_logprobs)
 
     # Add to Waiting Queue
     for request in requests:
@@ -103,15 +99,13 @@ def test_schedule_single_seq(
         (None, None),
     ],
 )
-def test_schedule_multi_seq(
-    enable_prefix_caching: Optional[bool], prompt_logprobs: Optional[int]
-):
+def test_schedule_multi_seq(enable_prefix_caching: Optional[bool],
+                            prompt_logprobs: Optional[int]):
     """Test scheduling.
     Only one case: default APC/no prompt logprobs
     """
-    scheduler = create_scheduler(
-        enable_prefix_caching=enable_prefix_caching, max_num_seqs=2
-    )
+    scheduler = create_scheduler(enable_prefix_caching=enable_prefix_caching,
+                                 max_num_seqs=2)
     requests = create_requests(num_requests=2, prompt_logprobs=prompt_logprobs)
 
     # Add to Waiting Queue
@@ -130,9 +124,8 @@ def test_schedule_multi_seq(
         assert num_tokens == len(requests[int(req_id)].prompt_token_ids)
 
     # Verify requests moved from waiting to running
-    assert (
-        len(scheduler.waiting) == len(requests) - scheduler.max_num_running_reqs
-    )
+    assert (len(scheduler.waiting) == len(requests) -
+            scheduler.max_num_running_reqs)
     assert len(scheduler.running) == scheduler.max_num_running_reqs
 
     for i, running_request in enumerate(scheduler.running):
@@ -174,20 +167,16 @@ def test_schedule_alloc_block(
     scheduler.add_request(requests[0])
     scheduler_output0 = scheduler.schedule()
     assert len(scheduler_output0.scheduled_new_reqs) == 1
-    assert (
-        scheduler_output0.num_scheduled_tokens[requests[0].request_id]
-        == num_tokens_per_batch
-    )
+    assert (scheduler_output0.num_scheduled_tokens[requests[0].request_id] ==
+            num_tokens_per_batch)
     assert scheduler_output0.scheduled_new_reqs[0].block_ids[0] == [1, 2]
 
     # Schedule the second request.
     scheduler.add_request(requests[1])
     scheduler_output1 = scheduler.schedule()
     assert len(scheduler_output1.scheduled_new_reqs) == 1
-    assert (
-        scheduler_output1.num_scheduled_tokens[requests[1].request_id]
-        == num_tokens_per_batch
-    )
+    assert (scheduler_output1.num_scheduled_tokens[requests[1].request_id] ==
+            num_tokens_per_batch)
     assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == [3, 4]
 
     # Model output of the first request.
@@ -218,10 +207,9 @@ def test_schedule_alloc_block(
     # can be scheduled with decode phase.
     scheduler_output2 = scheduler.schedule()
     assert len(scheduler_output2.num_scheduled_tokens.keys()) == 2
-    assert (
-        scheduler_output2.num_scheduled_tokens[requests[0].request_id] == 1
-        and scheduler_output2.num_scheduled_tokens[requests[1].request_id] == 1
-    )
+    assert (scheduler_output2.num_scheduled_tokens[requests[0].request_id] == 1
+            and scheduler_output2.num_scheduled_tokens[requests[1].request_id]
+            == 1)
     assert scheduler_output2.scheduled_cached_reqs[0].new_block_ids[0] == [
         5
     ] and scheduler_output2.scheduled_cached_reqs[1].new_block_ids[0] == [6]
@@ -262,20 +250,16 @@ def test_schedule_preempted_block(
     scheduler.add_request(requests[0])
     scheduler_output0 = scheduler.schedule()
     assert len(scheduler_output0.scheduled_new_reqs) == 1
-    assert (
-        scheduler_output0.num_scheduled_tokens[requests[0].request_id]
-        == num_tokens_per_batch
-    )
+    assert (scheduler_output0.num_scheduled_tokens[requests[0].request_id] ==
+            num_tokens_per_batch)
     assert scheduler_output0.scheduled_new_reqs[0].block_ids[0] == [1, 2]
 
     # Schedule the second request.
     scheduler.add_request(requests[1])
     scheduler_output1 = scheduler.schedule()
     assert len(scheduler_output1.scheduled_new_reqs) == 1
-    assert (
-        scheduler_output1.num_scheduled_tokens[requests[1].request_id]
-        == num_tokens_per_batch
-    )
+    assert (scheduler_output1.num_scheduled_tokens[requests[1].request_id] ==
+            num_tokens_per_batch)
     assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == [3, 4]
 
     # Model output of the first request.

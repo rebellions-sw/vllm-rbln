@@ -79,11 +79,9 @@ def create_scheduler(
         skip_tokenizer_init=skip_tokenizer_init,
     )
     # Cache config, optionally force APC
-    kwargs_cache = (
-        {}
-        if enable_prefix_caching is None
-        else {"enable_prefix_caching": enable_prefix_caching}
-    )
+    kwargs_cache = ({} if enable_prefix_caching is None else {
+        "enable_prefix_caching": enable_prefix_caching
+    })
     cache_config = CacheConfig(
         block_size=block_size,
         gpu_memory_utilization=0.9,
@@ -91,22 +89,17 @@ def create_scheduler(
         cache_dtype="auto",
         **kwargs_cache,
     )
-    kv_transfer_config = (
-        KVTransferConfig(
-            kv_connector="SharedStorageConnector",
-            kv_role="kv_both",
-            kv_connector_extra_config={"shared_storage_path": "local_storage"},
-        )
-        if use_kv_connector
-        else None
-    )
+    kv_transfer_config = (KVTransferConfig(
+        kv_connector="SharedStorageConnector",
+        kv_role="kv_both",
+        kv_connector_extra_config={"shared_storage_path": "local_storage"},
+    ) if use_kv_connector else None)
 
     # Speculative decode related.
     speculative_config: Optional[SpeculativeConfig] = None
     if num_speculative_tokens is not None:
         speculative_config = SpeculativeConfig(
-            model="ngram", num_speculative_tokens=num_speculative_tokens
-        )
+            model="ngram", num_speculative_tokens=num_speculative_tokens)
 
     vllm_config = VllmConfig(
         scheduler_config=scheduler_config,
@@ -160,7 +153,8 @@ def create_requests(
         else:
             mm_position = None
             mm_inputs = None
-        prompt_token_ids = [0] * num_tokens if same_prompt else [i] * num_tokens
+        prompt_token_ids = [0] * num_tokens if same_prompt else [i
+                                                                 ] * num_tokens
         request = Request(
             request_id=f"{i}",
             prompt_token_ids=prompt_token_ids,
