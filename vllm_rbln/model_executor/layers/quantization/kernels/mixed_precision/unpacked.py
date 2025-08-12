@@ -21,36 +21,7 @@ from vllm.model_executor.parameter import BasevLLMParameter
 from vllm.scalar_type import scalar_types
 from vllm.model_executor.layers.quantization.kernels.mixed_precision.MPLinearKernel import (  # noqa: E501
     MPLinearKernel, MPLinearLayerConfig)
-
-
-def unpack_tensor(packed: torch.Tensor, bits: int, bias: int) -> torch.Tensor:
-    """
-    Given a a packed tensor (represented in int32) of format uint8b128 or uint4b8,
-    unpack the last dimension to int8.
-    """
-
-    pack_factor = 32 // bits
-    original_shape = packed.shape
-    new_shape = (*original_shape[:-1], original_shape[-1] * pack_factor)
-
-    # Reinterpret the tensor's bits as bytes
-    unpacked_uint8 = packed.view(torch.uint8)
-
-    if bits == 8:
-        # For uint8, just reshape the bytes to the target shape
-        unpacked_quantized = unpacked_uint8.reshape(new_shape)
-    elif bits == 4:
-        # For uint4, extract the two 4-bit nibbles from each byte
-        low_nibbles = unpacked_uint8 & 0x0F
-        high_nibbles = unpacked_uint8 >> 4
-        # Stack and reshape to interleave the nibbles into the target shape
-        unpacked_quantized = torch.stack((low_nibbles, high_nibbles), dim=-1).view(new_shape)
-    else:
-        raise ValueError(bits)
-
-    # Subtract the bias to dequantize and cast to the final int8 type
-    # A safe intermediate type (int16) is used for subtraction.
-    return (unpacked_quantized.to(torch.int16) - bias).to(torch.int8)
+from compressed_tensors.compressors.quantized_compressors import unpack_from_int32
 
 
 class RBLNInt8UnpackedLinearKernel(MPLinearKernel):
@@ -74,12 +45,13 @@ class RBLNInt8UnpackedLinearKernel(MPLinearKernel):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         bits = self.config.weight_type.mantissa
-        bias = self.config.weight_type.bias
 
         os.environ['RBLN_QUANT_BITS'] = str(bits)
 
         def transform_w_q(x: BasevLLMParameter):
-            x.data = unpack_tensor(x.data, bits, bias)
+            x.data = unpack_from_int32(
+                x.data, bits,
+                torch.Size((x.shape[0], x.shape[1] * (32 // bits))))
             return x
 
         self._transform_param(layer, self.w_q_name, transform_w_q)
