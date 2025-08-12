@@ -311,7 +311,7 @@ class RBLNFlashAttentionMetadataBuilder:
         suffix_kv_lens = None
         prefix_scheduler_metadata = None
 
-        seq_idx = self.runner.positions_cpu[:num_reqs]
+        seq_idx = self.runner.positions_cpu[:num_reqs].view(-1, 1)
         num_partition = self.max_seq_len // self.partition_len
         cs = seq_idx.repeat(1, num_partition)
         pidx = torch.arange(num_partition, dtype=torch.int32)
