@@ -162,6 +162,15 @@ class RBLNOptimumModelBase(nn.Module):
         self.attn_impl = model.get_attn_impl() if hasattr(
             model, "get_attn_impl") else None
 
+    # FIXME
+    @property
+    def sliding_window_layers(self):
+        return self.rbln_model_config.language_model.sliding_window_layers
+
+    @property
+    def sliding_window(self):
+        return self.rbln_model_config.language_model.sliding_window
+
 class RBLNOptimumDecoderMixin:
 
     def setup_decoder_mixin(
