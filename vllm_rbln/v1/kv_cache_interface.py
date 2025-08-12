@@ -1,12 +1,18 @@
 from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm.utils import cdiv
+from vllm.config import VllmConfig
+from dataclasses import dataclass
 
-@dataclass(frozen=True)
+@dataclass
 class RBLNSlidingWindowImageSpec(AttentionSpec):
     sliding_window: int
 
     def __post_init__(self):
         assert not self.use_mla, "MLA is not supported for sliding window"
+
+    @property
+    def type_id(self) -> str:
+        return f"rbln_sliding_window_image_{self.sliding_window}_{self.block_size}_{self.page_size_bytes}"  # noqa
 
     def max_memory_usage_bytes(self, vllm_config: VllmConfig) -> int:
         max_model_len = vllm_config.model_config.max_model_len
@@ -26,12 +32,17 @@ class RBLNSlidingWindowImageSpec(AttentionSpec):
         # window [CDEF] of 6 tokens.
         return (cdiv(max_model_len, self.block_size) + 1) * self.page_size_bytes
 
-
+@dataclass
 class RBLNSlidingWindowSpec(AttentionSpec):
     sliding_window: int
 
     def __post_init__(self):
         assert not self.use_mla, "MLA is not supported for sliding window"
+
+    @property
+    def type_id(self) -> str:
+        return f"rbln_sliding_window_{self.sliding_window}_{self.block_size}_{self.page_size_bytes}"  # noqa
+
 
     def max_memory_usage_bytes(self, vllm_config: VllmConfig) -> int:
         max_model_len = vllm_config.model_config.max_model_len

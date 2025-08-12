@@ -14,19 +14,145 @@
 
 import time
 from collections import deque
-
+from collections import defaultdict
+from vllm.distributed.kv_events import EventPublisherFactory, KVEventBatch
 from vllm.distributed.kv_events import KVEventBatch
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.v1.engine import EngineCoreEventType
 from vllm.v1.request import Request, RequestStatus
-
+from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.core.kv_cache_manager import RBLNKVCacheManager
+from vllm.v1.structured_output import StructuredOutputManager
+from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm.config import VllmConfig
+from typing import Any, Optional, Union
+from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
+                                                compute_encoder_budget)
 
 logger = init_logger(__name__)
 
 
 class RBLNOptimumScheduler(Scheduler):
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        kv_cache_config: KVCacheConfig,
+        structured_output_manager: StructuredOutputManager,
+        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
+        include_finished_set: bool = False,
+        log_stats: bool = False,
+    ) -> None:
+        self.vllm_config = vllm_config
+        self.scheduler_config = vllm_config.scheduler_config
+        self.cache_config = vllm_config.cache_config
+        self.lora_config = vllm_config.lora_config
+        self.kv_cache_config = kv_cache_config
+        self.kv_events_config = vllm_config.kv_events_config
+        self.log_stats = log_stats
+        self.structured_output_manager = structured_output_manager
+
+        # include_finished_set controls whether a separate set of finished
+        # request ids should be included in the EngineCoreOutputs returned
+        # by update_from_outputs(). This is currently used in the multi-engine
+        # case to track request lifetimes efficiently.
+        self.finished_req_ids_dict: Optional[dict[int, set[str]]] = (
+            defaultdict(set) if include_finished_set else None)
+
+        # Scheduling constraints.
+        self.max_num_running_reqs = self.scheduler_config.max_num_seqs
+        self.max_num_scheduled_tokens = \
+            self.scheduler_config.max_num_batched_tokens
+        self.max_model_len = self.scheduler_config.max_model_len
+        self.enable_kv_cache_events = (
+            self.kv_events_config is not None
+            and self.kv_events_config.enable_kv_cache_events)
+
+        # Create KVConnector for the Scheduler. Note that each Worker
+        # will have a corresponding KVConnector with Role=WORKER.
+        # KV Connector pushes/pull of remote KVs for P/D and offloading.
+        self.connector = None
+        if self.vllm_config.kv_transfer_config is not None:
+            assert len(self.kv_cache_config.kv_cache_groups) == 1, (
+                "Multiple KV cache groups are not currently supported "
+                "with KV connectors")
+            self.connector = KVConnectorFactory.create_connector_v1(
+                config=self.vllm_config, role=KVConnectorRole.SCHEDULER)
+
+        self.kv_event_publisher = EventPublisherFactory.create(
+            self.kv_events_config,
+            vllm_config.parallel_config.data_parallel_rank,
+        )
+
+        num_gpu_blocks = self.cache_config.num_gpu_blocks
+        assert num_gpu_blocks is not None and num_gpu_blocks > 0
+
+        self.block_size = self.cache_config.block_size
+
+        # req_id -> Request
+        self.requests: dict[str, Request] = {}
+        # Priority queues for requests.
+        self.waiting: deque[Request] = deque()
+        self.running: list[Request] = []
+
+        # The request IDs that are finished in between the previous and the
+        # current steps. This is used to notify the workers about the finished
+        # requests so that they can free the cached states for those requests.
+        # This is flushed at the end of each scheduling step.
+        self.finished_req_ids: set[str] = set()
+
+        # KV Connector: requests in process of async KV loading or recving
+        self.finished_recving_kv_req_ids: set[str] = set()
+
+        # OPTIMIZATION: Cache the CachedRequestData objects to avoid creating
+        # them at each scheduling step.
+        # Request id -> deque of CachedRequestData
+        self._cached_reqs_data: dict[
+            str, deque[CachedRequestData]] = defaultdict(deque)
+
+        # Encoder-related.
+        # Calculate encoder cache size if applicable
+        # NOTE: For now we use the same budget for both compute and space.
+        # This can be changed when we make encoder cache for embedding caching
+        # across requests.
+        encoder_compute_budget, encoder_cache_size = compute_encoder_budget(
+            model_config=vllm_config.model_config,
+            scheduler_config=vllm_config.scheduler_config,
+            mm_registry=mm_registry,
+        )
+
+        # NOTE(woosuk): Here, "encoder" includes the vision encoder (and
+        # projector if needed). Currently, we assume that the encoder also
+        # has the Transformer architecture (e.g., ViT).
+        self.max_num_encoder_input_tokens = encoder_compute_budget
+        # NOTE: For the models without encoder (e.g., text-only models),
+        # the encoder cache will not be initialized because cache size is 0
+        # for these models.
+        self.encoder_cache_manager = EncoderCacheManager(
+            cache_size=encoder_cache_size)
+
+        speculative_config = vllm_config.speculative_config
+
+        self.use_eagle = False
+        self.num_spec_tokens = self.num_lookahead_tokens = 0
+        if speculative_config:
+            self.num_spec_tokens = speculative_config.num_speculative_tokens
+            if speculative_config.use_eagle():
+                self.use_eagle = True
+                self.num_lookahead_tokens = self.num_spec_tokens
+
+        # Create the KV cache manager.
+        # ONLY DIFF
+        self.kv_cache_manager = RBLNKVCacheManager(
+            kv_cache_config=kv_cache_config,
+            max_model_len=self.max_model_len,
+            enable_caching=self.cache_config.enable_prefix_caching,
+            caching_hash_algo=self.cache_config.prefix_caching_hash_algo,
+            use_eagle=False,
+            log_stats=self.log_stats,
+            enable_kv_cache_events=self.enable_kv_cache_events,
+        )
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:

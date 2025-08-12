@@ -29,7 +29,7 @@ from vllm.v1.worker.worker_base import WorkerBase
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-
+from vllm_rbln.v1.kv_cache_interface import RBLNSlidingWindowImageSpec
 logger = init_logger(__name__)
 
 
@@ -73,7 +73,15 @@ class RBLNOptimumWorker(WorkerBase):
 
         adapter = self.model_runner.model.kv_block_adapter
         num_gpu_blocks = adapter.get_available_num_blocks()
+        uniform_kv_cache_spec = next(iter(kv_cache_spec.values()))
+        max_num_reqs = self.model_runner.max_num_reqs
 
+        # Add more blocks for sliding window
+        # FIXME RBLNSlidingWindowSpec requires less blocks?
+        # for layer_name, layer_spec in kv_cache_spec.items():
+        if isinstance(uniform_kv_cache_spec, RBLNSlidingWindowImageSpec):
+            num_gpu_blocks += max_num_reqs
+        
         return num_gpu_blocks * page_size * num_layers
 
     def execute_model(

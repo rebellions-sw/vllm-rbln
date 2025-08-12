@@ -41,7 +41,7 @@ from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
 from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
 from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
-from vlm_rbln.v1.kv_cache_interface import RBLNSlidingWindowImageSpec, RBLNSlidingWindowSpec
+from vllm_rbln.v1.kv_cache_interface import RBLNSlidingWindowImageSpec, RBLNSlidingWindowSpec
 logger = init_logger(__name__)
 
 
@@ -308,18 +308,20 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_size = self.vllm_config.cache_config.block_size
         sliding_window_layers = self.model.sliding_window_layers
         kv_cache_spec: dict[str, KVCacheSpec] = {}
-        sliding_window_cls = RBLNSlidingWindowImageSpec if self.model.is_multimodal_model else RBLNSlidingWindowSpec
-        for layer_idx in range(num_layers):
-            if layer_idx in sliding_window_layers:
-                kv_cache_spec[str(layer_idx)] = sliding_window_cls(
-                    block_size=block_size,
-                    num_kv_heads=num_kv_heads,
-                    head_size=head_size,
-                    dtype=self.kv_cache_dtype,
-                    sliding_window=self.model.sliding_window,
-                    use_mla=False,
-                )
-            else:
+
+        if self.model.sliding_window:
+            sliding_window_cls = RBLNSlidingWindowImageSpec if self.is_multimodal_model else RBLNSlidingWindowSpec
+            for layer_idx in range(num_layers):
+                    kv_cache_spec[str(layer_idx)] = sliding_window_cls(
+                        block_size=block_size,
+                        num_kv_heads=num_kv_heads,
+                        head_size=head_size,
+                        dtype=self.kv_cache_dtype,
+                        sliding_window=self.model.sliding_window,
+                        use_mla=False,
+                    )
+        else:
+            for layer_idx in range(num_layers):
                 kv_cache_spec[str(layer_idx)] = FullAttentionSpec(
                     block_size=block_size,
                     num_kv_heads=num_kv_heads,
