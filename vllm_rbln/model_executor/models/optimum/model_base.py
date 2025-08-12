@@ -162,7 +162,6 @@ class RBLNOptimumModelBase(nn.Module):
         self.attn_impl = model.get_attn_impl() if hasattr(
             model, "get_attn_impl") else None
 
-
 class RBLNOptimumDecoderMixin:
 
     def setup_decoder_mixin(
