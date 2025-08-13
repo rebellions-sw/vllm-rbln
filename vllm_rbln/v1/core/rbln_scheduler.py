@@ -218,7 +218,6 @@ class RBLNScheduler(Scheduler):
             while (num_running_prefill == 0 and self.waiting
                    and token_budget > 0):
                 waiting_submit += 1
-                print(f">>>> waiting_submit = {waiting_submit}")
                 if len(self.running) == self.max_num_running_reqs:
                     break
 
