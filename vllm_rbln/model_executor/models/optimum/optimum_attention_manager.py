@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, cast
+from typing import Dict, List, Tuple, Union, cast
 
 import torch
 from vllm.logger import init_logger
@@ -83,6 +83,40 @@ class AttentionManager(RBLNOptimumDictTableMixin):
         padded[:valid_nums] = original_tensor
         return padded
 
+    def pad_to_2d(
+        self,
+        original_values: Union[list[int], list[torch.Tensor], torch.Tensor],
+        rows: int,
+        cols: int,
+        pad_value: int = 0,
+        dtype: torch.dtype = None,
+    ) -> torch.Tensor:
+        if isinstance(original_values, list) and all(
+                isinstance(x, int) for x in original_values):
+            dtype = torch.int16 if dtype is None else dtype
+            valid_nums = len(original_values)
+            padded = torch.full((rows, cols), pad_value, dtype=dtype)
+            original_tensor = torch.tensor(original_values,
+                                           dtype=dtype).unsqueeze(1)
+
+        elif isinstance(original_values, list) and all(
+                isinstance(x, torch.Tensor) for x in original_values):
+            dtype = original_values[0].dtype if dtype is None else dtype
+            valid_nums = len(original_values)
+            padded = torch.full((rows, cols), pad_value, dtype=dtype)
+            original_tensor = torch.cat(original_values)
+
+        elif isinstance(original_values, torch.Tensor):
+            original_tensor = original_values
+            dtype = original_tensor.dtype
+            valid_nums = original_tensor.shape[0]
+            padded = torch.full((rows, cols), pad_value, dtype=dtype)
+        else:
+            raise RuntimeError("Invalid type of input.")
+
+        padded[:valid_nums] = original_tensor
+        return padded
+
 
 class SlidingWindowAttentionManager(AttentionManager):
 
@@ -121,24 +155,24 @@ class SlidingWindowAttentionManager(AttentionManager):
 
     def preprocess_params(
         self,
-        sliding_window_table_ids: List[int],
+        local_block_table_ids: List[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Determine padding value for local_block_table_id
-        used_ids = set(sliding_window_table_ids)
+        used_ids = set(local_block_table_ids)
         pad_value = next(
             (i for i in range(decoder_batch_size) if i not in used_ids), 0)
 
-        local_block_table_id = self.pad_list22dtensor(sliding_window_table_ids,
+        padded_local_block_table_ids = self.pad_to_2d(local_block_table_ids,
                                                       decoder_batch_size, 1,
                                                       pad_value, torch.int16)
-        padded_cache_positions = self.pad_tensor2tensor(
-            cache_positions, decoder_batch_size, 1, 0)
+        padded_cache_positions = self.pad_to_2d(cache_positions,
+                                                decoder_batch_size, 1, 0)
 
         return (
-            local_block_table_id,
+            padded_local_block_table_ids,
             padded_cache_positions,
         )
 
@@ -200,7 +234,7 @@ class HybridAttentionImageManager(AttentionManager):
 
     def preprocess_params(
         self,
-        sliding_window_table_ids: List[int],
+        local_block_table_ids: List[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
@@ -212,20 +246,20 @@ class HybridAttentionImageManager(AttentionManager):
 
         position_id_dtype = cache_positions.dtype
         # Determine padding value for local_block_table_id
-        used_ids = set(sliding_window_table_ids)
+        used_ids = set(local_block_table_ids)
         pad_value = next(
             (i for i in range(decoder_batch_size) if i not in used_ids), 0)
 
-        local_block_table_id = self.pad_list22dtensor(sliding_window_table_ids,
+        padded_local_block_table_ids = self.pad_to_2d(local_block_table_ids,
                                                       decoder_batch_size, 1,
                                                       pad_value, torch.int16)
-        padded_padding_offsets = self.pad_list22dtensor(
-            padding_offsets, decoder_batch_size, 1, 0)
-        padded_cache_positions = self.pad_tensor2tensor(
-            cache_positions, decoder_batch_size, 1, 0)
-        padded_attention_mask = self.pad_tensors2tensor(
-            attention_masks, decoder_batch_size, attention_masks[0].shape[1],
-            0)
+        padded_padding_offsets = self.pad_to_2d(padding_offsets,
+                                                decoder_batch_size, 1, 0)
+        padded_cache_positions = self.pad_to_2d(cache_positions,
+                                                decoder_batch_size, 1, 0)
+        padded_attention_mask = self.pad_to_2d(attention_masks,
+                                               decoder_batch_size,
+                                               attention_masks[0].shape[1], 0)
 
         # cache_positions:
         #  the index including padding between text and image
@@ -239,7 +273,7 @@ class HybridAttentionImageManager(AttentionManager):
 
         position_ids = padded_cache_positions - padded_padding_offsets
         return (
-            local_block_table_id,
+            padded_local_block_table_ids,
             padded_cache_positions,
             position_ids,
             padded_attention_mask,
