@@ -63,6 +63,7 @@ class RBLNCacheEngine:
         self.cache_config = cache_config
         self.model_config = model_config
         self.parallel_config = parallel_config
+        self.device_config = device_config
 
         self.head_size = model_config.get_head_size()
         self.num_layers = model_config.get_num_layers(parallel_config)
@@ -83,7 +84,12 @@ class RBLNCacheEngine:
         # default cache type is bf16 (half precision)
         # FIXME - force cache data type into fp32 for graph compilation
         if cache_config.cache_dtype == "auto":
-            self.dtype = STR_DTYPE_TO_TORCH_DTYPE["float"]
+            # NOTE(jiwoo.park) Currently, eager mode can support only FP16 dtype
+            # for the KV cache.
+            if self.device_config.device_type == "rbln":
+                self.dtype = torch.float16
+            else:
+                self.dtype = STR_DTYPE_TO_TORCH_DTYPE["float"]
         else:
             self.dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
 
@@ -126,7 +132,13 @@ class RBLNCacheEngine:
         # RBLN device tensor allocation
         for _ in range(self.num_layers):
             kv_cache.append(
-                torch.empty(kv_cache_shape, dtype=self.dtype, device="cpu"))
+                # torch.empty(kv_cache_shape,
+                #             dtype=self.dtype,
+                #             # device=self.device_config.device))
+                #             device="cpu"))
+                torch.empty(kv_cache_shape,
+                            dtype=self.dtype).to(self.device_config.device))
+            # device="cpu"))
         logger.info("[RBLN] allocate kv cache length = %d", len(kv_cache))
 
         return kv_cache

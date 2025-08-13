@@ -440,26 +440,23 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 cast(RBLNModelRunner, weakref.proxy(self)))
 
     def compile_model(self, model):
-        if envs.RBLN_COMPILE_MODEL:
-            options = {
-                "compile_context": self.compile_context,
-                "tensor_parallel_size": envs.RBLN_TP_SIZE,
-            }
-            if not envs.VLLM_DISABLE_COMPILE_CACHE:
-                logger.info("Once the model is compiled for the first time, "
-                            "the cached compiled binary will be reused.")
-                options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE
-                                        > 1 else "./cache_dir")
+        options = {
+            "compile_context": self.compile_context,
+            "tensor_parallel_size": envs.RBLN_TP_SIZE,
+        }
+        if not envs.VLLM_DISABLE_COMPILE_CACHE:
+            logger.info("Once the model is compiled for the first time, "
+                        "the cached compiled binary will be reused.")
+            options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
+                                    else "./cache_dir")
 
-            compiled_model = torch.compile(
-                model,
-                backend="rbln",
-                options=options,
-                dynamic=False,
-            )
-            return compiled_model
-        else:
-            return model
+        compiled_model = torch.compile(
+            model,
+            backend="rbln",
+            options=options,
+            dynamic=False,
+        )
+        return compiled_model
 
     # LLM attention block
     def attention_block(self, decoder_layer, hidden_states, residual,
@@ -528,19 +525,22 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 logits = model_output
             return logits
 
-        # NOTE - refer to pytorch 2.5 release notes
-        # torch.compile regional compilation without recompilations
-        # To prevent nn.modules parameters to be model input, set false
-        # if this flag is set, nn.modules parameters are treated as model input
-        torch._dynamo.config.inline_inbuilt_nn_modules = False
-        # RBLN compile context to mark static address for kv cache tensor
-        # if tensor is set to have static address,
-        # similar to RBLN kv cache binding
-        from rebel.compile_context import CompileContext
+        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            self.model_executable = model_wrapper
+        else:
+            # NOTE - refer to pytorch 2.5 release notes
+            # torch.compile regional compilation without recompilations
+            # To prevent nn.modules parameters to be model input, set false
+            # if this flag is set, nn.modules parameters are treated as model input
+            torch._dynamo.config.inline_inbuilt_nn_modules = False
+            # RBLN compile context to mark static address for kv cache tensor
+            # if tensor is set to have static address,
+            # similar to RBLN kv cache binding
+            from rebel.compile_context import CompileContext
 
-        self.compile_context = CompileContext(use_weight_sharing=True)
-        compiled_graph = self.compile_model(model_wrapper)
-        self.model_executable = compiled_graph
+            self.compile_context = CompileContext(use_weight_sharing=True)
+            compiled_graph = self.compile_model(model_wrapper)
+            self.model_executable = compiled_graph
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -631,7 +631,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # RBLN compile context is much similar to vLLM forward context
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
-
+            # for kv_cache in kv_caches:
+            #     self.compile_context.mark_static_address(kv_cache)
             hidden_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
