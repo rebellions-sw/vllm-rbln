@@ -69,6 +69,7 @@ class ModelInputForRebel(ModelRunnerInputBase):
     virtual_engine: Optional[int] = None
     seq_lens: Optional[List[int]] = None
     query_lens: Optional[List[int]] = None
+    request_ids: Optional[List[str]] = None
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
@@ -138,6 +139,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
             self.token_type_ids: Optional[List[List[int]]] = []
             self.seq_lens: List[int] = []
             self.query_lens: List[int] = []
+            self.request_ids: List[str] = []
             self.prefill_block_tables: List[List[int]] = []
             self.decode_block_tables: List[List[int]] = []
             self.max_decode_seq_len: int = 0
@@ -225,6 +227,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
             data.num_prefill_tokens += len(tokens)
             data.query_lens.append(len(tokens))
             data.seq_lens.append(seq_len)
+            data.request_ids.append(seq_group_metadata.request_id)
             for i, pos in enumerate(data.input_positions[0]):
                 block_number = block_table[pos // block_size]
                 block_offset = pos % block_size
@@ -256,6 +259,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         logger.info("\tinput_block_ids = %s", input_block_ids)
         logger.info("\tseq_lens = %s", data.seq_lens)
         logger.info("\tquery_lens = %s", data.query_lens)
+        logger.info("\trequest_ids = %s", data.request_ids)
         return (input_tokens, input_positions, input_block_ids)
 
     def _prepare_decode(
@@ -270,6 +274,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
+            data.request_ids.append(seq_group_metadata.request_id)
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 generation_token = seq_data.get_last_token_id()
@@ -352,6 +357,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
             token_type_ids=token_type_ids,
             seq_lens=input_data.seq_lens,
             query_lens=input_data.query_lens,
+            request_ids=input_data.request_ids,
             attn_metadata=attn_metadata,
         )
 
@@ -628,20 +634,40 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             "Rebel worker does not support return_hidden_states."
 
         # To export moe metric, it works for only qwen3 model for now
-        # logger.info("[RBLN] MoE metric raw_data = %s", selected_experts_list)
-        import json
-        rawdata_list = []
-        for selected_experts in selected_experts_list:
-            temp = selected_experts.numpy().tolist()
-            rawdata_list.append(temp)
-        moe_metric_data = {
-                "selected_experts_list" : rawdata_list,
-                "num_hidden_layers" : len(selected_experts_list),
-                "selected_experts_shape" : selected_experts_list[0].shape,
-                }
-        with open("moe_metric.json", "w") as json_file:
-            json.dump(moe_metric_data, json_file)
+        logger.info("[RBLN] MoE metric raw_data = %s", selected_experts_list)
 
+        if os.getenv("RBLN_DEVICES") == None:
+            _LOCAL_RANK = 0
+        else:
+            _LOCAL_RANK = int(os.getenv("RBLN_DEVICES"))
+        if _LOCAL_RANK == 0:
+            import json
+            fname = "moe_metric.json"
+            layers_selected_experts = []
+            seq_lens = model_input.seq_lens[0]
+            query_lens = model_input.query_lens[0]
+            token_id = seq_lens - query_lens
+            request_id = model_input.request_ids[0]
+
+            for layer, selected_experts in enumerate(selected_experts_list):
+                selected_experts_entry = {
+                        "layers" : layer,
+                        "activation experts" : selected_experts.numpy().tolist(),
+                        "experts shape" : selected_experts.shape
+                        }
+                layers_selected_experts.append(selected_experts_entry)
+            moe_metric_entry = {
+                    "req_id" : request_id,
+                    "token_id" : token_id,
+                    "activation_experts" : layers_selected_experts,
+                    }
+            moe_metric_entries = []
+            if os.path.isfile(fname) and token_id != 0:
+                with open(fname) as json_file:
+                    moe_metric_entries = json.load(json_file)
+            moe_metric_entries.append(moe_metric_entry)
+            with open(fname, "w") as json_file:
+                json.dump(moe_metric_entries, json_file, indent=4)
         return [output]
 
     def _prepare_model_input_tensors(
