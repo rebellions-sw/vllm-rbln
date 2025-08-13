@@ -42,7 +42,7 @@ def _make_model_runner_output(
             id="16bsize-32len"
         ),
         pytest.param(
-            4, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [],
+            2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [],
             id="8bsize-17len"
         )
     ],
@@ -98,4 +98,41 @@ def test_schedule_alloc_block(
     scheduled_cached_reqs = scheduler_output2.scheduled_cached_reqs
     assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached0_new
     assert scheduled_cached_reqs[1].new_block_ids[0] == exp_cached1_new
+
+
+@pytest.mark.parametrize(
+    "max_num_seqs, num_requests, num_blocks, exp_running_sz",
+    [
+        pytest.param(
+            5, 5, 6, [1, 2, 3, 4, 5],
+            id="normal"
+        ),
+        pytest.param(
+            2, 5, 5, [1, 2, 2, 2, 2],
+            id="limited-max_num_seqs"
+        ),
+        pytest.param(
+            3, 5, 4, [1, 2, 3, 3, 3],
+            id="limited-blocks"
+        ),
+    ],
+)
+def test_running_queue(
+    max_num_seqs: int,
+    num_requests: int,
+    num_blocks: int,
+    exp_running_sz: list[int],
+):
+    assert num_requests == len(exp_running_sz)
+    scheduler = create_scheduler(max_num_seqs=max_num_seqs, num_blocks=num_blocks, block_size=10, async_scheduling=True)
+    requests = create_requests(num_requests=5, max_tokens=5)
+
+    for req in requests:
+        scheduler.add_request(req)
+    
+    assert len(scheduler.running) == 0
+
+    for _, sz in zip(requests, exp_running_sz):
+        scheduler.schedule()
+        assert len(scheduler.running) == sz
 
