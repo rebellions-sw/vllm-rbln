@@ -226,7 +226,8 @@ class RblnPlatform(Platform):
 
             if not model_config.disable_cascade_attn:
                 logger.info(
-                    "The cascade attention is disabled because RBLN is not support"
+                    "The cascade attention is disabled"
+                    " because RBLN is not support"
                 )
                 model_config.disable_cascade_attn = True
 
@@ -242,9 +243,15 @@ class RblnPlatform(Platform):
         use_mla: bool,
     ) -> str:
         if envs.VLLM_USE_V1:
-            attn_backend_cls = "vllm_rbln.v1.attention.backends.flash_attention.RBLNAttentionBackend"
+            attn_backend_cls = (
+                "vllm_rbln.v1.attention.backends."
+                "flash_attention.RBLNAttentionBackend"
+            )
         else:
-            attn_backend_cls = "vllm_rbln.attention.backends.flash_attention.RBLNAttentionBackend"
+            attn_backend_cls = (
+                "vllm_rbln.attention.backends."
+                "flash_attention.RBLNAttentionBackend"
+            )
         logger.info("Using RBLN Attention Backend: %s", attn_backend_cls)
 
         return attn_backend_cls
