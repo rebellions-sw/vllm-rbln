@@ -121,7 +121,7 @@ def test_running_queue(
                                  num_blocks=num_blocks,
                                  block_size=10,
                                  async_scheduling=True)
-    requests = create_requests(num_requests=5, max_tokens=5)
+    requests = create_requests(num_requests=num_requests, max_tokens=5)
 
     for req in requests:
         scheduler.add_request(req)
