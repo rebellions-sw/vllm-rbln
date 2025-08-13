@@ -57,18 +57,16 @@ def test_get_num_unfinished_requests():
 
 
 @pytest.mark.parametrize(
-    "enable_prefix_caching, prompt_logprobs",
+    "prompt_logprobs",
     [
-        (None, None),
+        (None),
     ],
 )
-def test_schedule_single_seq(enable_prefix_caching: Optional[bool],
-                             prompt_logprobs: Optional[int]):
+def test_schedule_single_seq(prompt_logprobs: Optional[int]):
     """Test scheduling.
     Only one case: default APC/no prompt logprobs
     """
-    scheduler = create_scheduler(enable_prefix_caching=enable_prefix_caching,
-                                 max_num_seqs=1)
+    scheduler = create_scheduler(max_num_seqs=1)
     requests = create_requests(num_requests=8,
                                num_tokens=16,
                                prompt_logprobs=prompt_logprobs)
@@ -94,18 +92,16 @@ def test_schedule_single_seq(enable_prefix_caching: Optional[bool],
 
 
 @pytest.mark.parametrize(
-    "enable_prefix_caching, prompt_logprobs",
+    "prompt_logprobs",
     [
-        (None, None),
+        (None),
     ],
 )
-def test_schedule_multi_seq(enable_prefix_caching: Optional[bool],
-                            prompt_logprobs: Optional[int]):
+def test_schedule_multi_seq(prompt_logprobs: Optional[int]):
     """Test scheduling.
     Only one case: default APC/no prompt logprobs
     """
-    scheduler = create_scheduler(enable_prefix_caching=enable_prefix_caching,
-                                 max_num_seqs=2)
+    scheduler = create_scheduler(max_num_seqs=2)
     requests = create_requests(num_requests=2, prompt_logprobs=prompt_logprobs)
 
     # Add to Waiting Queue
@@ -133,14 +129,13 @@ def test_schedule_multi_seq(enable_prefix_caching: Optional[bool],
 
 
 @pytest.mark.parametrize(
-    "enable_prefix_caching, prompt_logprobs, max_num_seqs, block_size, \
-    max_num_batched_tokens, max_model_len, num_blocks, num_tokens_per_batch",
+    "prompt_logprobs, max_num_seqs, block_size, max_num_batched_tokens, \
+    max_model_len, num_blocks, num_tokens_per_batch",
     [
-        (False, None, 2, 16, 32, 64, 8, 32),
+        (None, 2, 16, 64, 64, 8, 32),
     ],
 )
 def test_schedule_alloc_block(
-    enable_prefix_caching: Optional[bool],
     prompt_logprobs: Optional[int],
     max_num_seqs: Optional[int],
     block_size: Optional[int],
@@ -150,7 +145,6 @@ def test_schedule_alloc_block(
     num_tokens_per_batch: Optional[int],
 ):
     scheduler = create_scheduler(
-        enable_prefix_caching=enable_prefix_caching,
         max_num_seqs=max_num_seqs,
         block_size=block_size,
         max_num_batched_tokens=max_num_batched_tokens,
@@ -216,14 +210,13 @@ def test_schedule_alloc_block(
 
 
 @pytest.mark.parametrize(
-    "enable_prefix_caching, prompt_logprobs, max_num_seqs, block_size, \
+    "prompt_logprobs, max_num_seqs, block_size, \
     max_num_batched_tokens, max_model_len, num_blocks, num_tokens_per_batch",
     [
-        (False, None, 2, 16, 32, 64, 5, 32),
+        (None, 2, 16, 64, 64, 5, 32),
     ],
 )
 def test_schedule_preempted_block(
-    enable_prefix_caching: Optional[bool],
     prompt_logprobs: Optional[int],
     max_num_seqs: Optional[int],
     block_size: Optional[int],
@@ -233,7 +226,6 @@ def test_schedule_preempted_block(
     num_tokens_per_batch: Optional[int],
 ):
     scheduler = create_scheduler(
-        enable_prefix_caching=enable_prefix_caching,
         max_num_seqs=max_num_seqs,
         block_size=block_size,
         max_num_batched_tokens=max_num_batched_tokens,
