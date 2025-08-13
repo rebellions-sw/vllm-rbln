@@ -267,11 +267,8 @@ class HybridAttentionImageManager(AttentionManager):
         #   the size of padding
         # position_ids:
         #   the index of the token to be decoded in the sequence.
-        position_ids = torch.zeros(decoder_batch_size,
-                                   1,
-                                   dtype=position_id_dtype)
-
         position_ids = padded_cache_positions - padded_padding_offsets
+
         return (
             padded_local_block_table_ids,
             padded_cache_positions,
