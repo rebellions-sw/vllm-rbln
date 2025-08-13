@@ -14,6 +14,7 @@
 from typing import Optional
 
 import pytest
+from vllm.v1.request import RequestStatus
 
 from .utils import (create_model_runner_output, create_requests,
                     create_scheduler)
@@ -115,3 +116,47 @@ def test_running_queue(
     for _, sz in zip(requests, exp_running_sz):
         scheduler.schedule()
         assert len(scheduler.running) == sz
+
+
+def test_preempt(
+    num_requests=10,
+    max_num_seqs=3,
+):
+    MAX_TOKENS = 5
+    NUM_TOKENS = 5
+    scheduler = create_scheduler(async_scheduling=True,
+                                 max_num_seqs=max_num_seqs,
+                                 num_blocks=MAX_TOKENS * max_num_seqs + 1,
+                                 block_size=MAX_TOKENS + NUM_TOKENS)
+    requests = create_requests(
+        num_requests=num_requests,
+        max_tokens=MAX_TOKENS,
+        num_tokens=NUM_TOKENS,
+    )
+
+    for req in requests:
+        scheduler.add_request(req)
+
+    abort_order = [requests[i].request_id for i in range(num_requests)]
+
+    # Mark `max_num_seqs` requests as RUNNING
+    for idx in range(max_num_seqs):
+        sched_output = scheduler.schedule()
+        model_runner_output = create_model_runner_output(sched_output)
+        scheduler.update_from_output(sched_output, model_runner_output)
+
+    # A request is preempted,
+    # and the WAITING request with the highest priority is scheduled.
+    for abort_idx, abort_req in enumerate(abort_order[:-max_num_seqs]):
+        scheduler.finish_requests(abort_req, RequestStatus.FINISHED_ABORTED)
+        next_req = scheduler.requests.get(abort_order[abort_idx +
+                                                      max_num_seqs])
+        assert requests[abort_idx].status == RequestStatus.FINISHED_ABORTED
+        assert next_req.status == RequestStatus.WAITING
+
+        sched_output = scheduler.schedule()
+        model_runner_output = create_model_runner_output(sched_output)
+        scheduler.update_from_output(sched_output, model_runner_output)
+        next_req = scheduler.requests.get(abort_order[abort_idx +
+                                                      max_num_seqs])
+        assert next_req.status == RequestStatus.RUNNING
