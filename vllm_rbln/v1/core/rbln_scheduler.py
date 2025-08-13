@@ -77,7 +77,7 @@ class RBLNScheduler(Scheduler):
              >= self.max_num_running_reqs) or
             (num_running_prefill > 0 or num_waiting_prefill == 0)):
             request = self.running[req_index]
-            # NOTE(jiwoo.park) Prioritize running prefill tasks above all others.
+            # NOTE(jiwoo.park)Prioritize running prefill tasks above all others.
             if num_running_prefill > 0 and not RBLNScheduler._is_prefill(
                     request):
                 req_index += 1
@@ -213,7 +213,8 @@ class RBLNScheduler(Scheduler):
         # Next, schedule the WAITING requests.
         waiting_submit = 0
         if not preempted_reqs:
-            # NOTE(jiwoo.park) Waiting requests can be scheduled only when there are no running prefills.
+            # NOTE(jiwoo.park) Waiting requests can be scheduled only
+            # when there are no running prefills.
             while (num_running_prefill == 0 and self.waiting
                    and token_budget > 0):
                 waiting_submit += 1

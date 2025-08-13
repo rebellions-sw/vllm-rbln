@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -40,10 +40,10 @@ def __custom_init__(
     head_size: int,
     scale: float,
     num_kv_heads: Optional[int] = None,
-    alibi_slopes: Optional[List[float]] = None,
+    alibi_slopes: Optional[list[float]] = None,
     cache_config: Optional[CacheConfig] = None,
     quant_config: Optional[QuantizationConfig] = None,
-    blocksparse_params: Optional[Dict[str, Any]] = None,
+    blocksparse_params: Optional[dict[str, Any]] = None,
     logits_soft_cap: Optional[float] = None,
     per_layer_sliding_window: Optional[int] = None,
     use_mla: bool = False,
