@@ -43,7 +43,6 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
         )
-        self.attention_manager = SlidingWindowAttentionManager()
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -58,15 +57,6 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
-
-        # In prefill phase, the length of list must be 1
-        sliding_window_table_ids = self.attention_manager.get(
-            is_prompt,
-            input_ids,
-            self.decoder_batch_size,
-            running_requests_ids,
-            finished_requests_ids,
-        )
 
         kwargs = self.preprocess_for_decoder(
             is_prompt,
@@ -89,33 +79,19 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         if is_prompt:
             if self.model.prefill_decoder is None:
                 raise version_error
-            prefill_batch_idx = sliding_window_table_ids[0]
-            local_block_table_id = torch.tensor([prefill_batch_idx],
-                                                dtype=torch.int16)
             output = self.model.prefill_decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
-                local_block_tables=local_block_table_id,
+                local_block_tables=block_tables,
             )
             logits = output.logits
             assert len(running_requests_ids) == 1
-            self.attention_manager.add(
-                running_requests_id=running_requests_ids[0],
-                local_table_id=prefill_batch_idx,
-            )
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]
-            local_block_table_id, cache_position = \
-                self.attention_manager.preprocess_params(
-                sliding_window_table_ids,
-                cache_position,
-                request_nums,
-                padded_batch_size,
-            )
             logits = self.model.decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
-                local_block_tables=local_block_table_id,
+                local_block_tables=block_tables,
             ).logits
 
         if not is_prompt:

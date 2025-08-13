@@ -165,11 +165,17 @@ class RBLNOptimumModelBase(nn.Module):
     # FIXME
     @property
     def sliding_window_layers(self):
-        return self.rbln_model_config.language_model.sliding_window_layers
+        attr = getattr(self.rbln_model_config, "sliding_window_layers", None)
+        if attr is None:
+            attr = getattr(self.rbln_model_config.langauge_model, "sliding_window_layers", None)
+        return attr
 
     @property
     def sliding_window(self):
-        return self.rbln_model_config.language_model.sliding_window
+        attr = getattr(self.rbln_model_config, "sliding_window", None)
+        if attr is None:
+            attr = getattr(self.rbln_model_config.langauge_model, "sliding_window", None)
+        return attr
 
 class RBLNOptimumDecoderMixin:
 
