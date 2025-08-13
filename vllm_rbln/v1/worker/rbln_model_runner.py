@@ -708,7 +708,8 @@ class RBLNModelRunner:
         assert self.intermediate_tensors is not None
 
         tp = self.vllm_config.parallel_config.tensor_parallel_size
-        enabled_sp = self.vllm_config.compilation_config.pass_config.enable_sequence_parallelism
+        enabled_sp = self.vllm_config.compilation_config.pass_config.\
+            enable_sequence_parallelism
         if enabled_sp:
             # When sequence parallelism is enabled, we always pad num_tokens
             # to be a multiple of tensor_parallel_size (tp) earlier
@@ -842,8 +843,8 @@ class RBLNModelRunner:
         ):
             self.maybe_setup_kv_connector(scheduler_output)
             if attn_metadata is not None:
-                for attn_metadata in attn_metadata.values():
-                    attn_metadata.kv_caches = self.kv_caches
+                for attn_metadatum in attn_metadata.values():
+                    attn_metadatum.kv_caches = self.kv_caches
             for kv_cache in self.kv_caches:
                 self.compile_context.mark_static_address(kv_cache)
 
@@ -1095,7 +1096,8 @@ class RBLNModelRunner:
         #                 dim=-1,
         #             )
         #         else:
-        #             target_hidden_states = hidden_states[:num_scheduled_tokens]
+        #             target_hidden_states = \
+        #               hidden_states[:num_scheduled_tokens]
         #         target_slot_mapping = eagle_attn_metadata.slot_mapping
         #         cu_num_tokens = eagle_attn_metadata.query_start_loc
         #     else:
