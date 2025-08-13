@@ -6,17 +6,19 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+from typing import Optional
+
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import pytest
-from typing import Optional
-from .utils import create_requests, create_scheduler
-from vllm.v1.outputs import ModelRunnerOutput
-from vllm.v1.request import RequestStatus
 from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.outputs import ModelRunnerOutput
+
+from .utils import create_requests, create_scheduler
+
 
 def _make_model_runner_output(
     scheduler_output: SchedulerOutput, ) -> ModelRunnerOutput:
@@ -33,18 +35,17 @@ def _make_model_runner_output(
         prompt_logprobs_dict={},
     )
 
+
 @pytest.mark.parametrize(
-    "max_num_seqs, block_size, max_model_len, num_blocks, num_tokens_per_batch, "
-    "exp_new_req0_blocks, exp_new_req1_blocks, exp_cached0_new, exp_cached1_new",
+    "max_num_seqs, block_size, max_model_len, "
+    "num_blocks, num_tokens_per_batch, "
+    "exp_new_req0_blocks, exp_new_req1_blocks, "
+    "exp_cached0_new, exp_cached1_new",
     [
         pytest.param(
-            2, 16, 64, 8, 32, [1, 2], [3, 4], [5], [6],
-            id="16bsize-32len"
-        ),
+            2, 16, 64, 8, 32, [1, 2], [3, 4], [5], [6], id="16bsize-32len"),
         pytest.param(
-            2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [],
-            id="8bsize-17len"
-        )
+            2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [], id="8bsize-17len")
     ],
 )
 def test_schedule_alloc_block(
@@ -75,12 +76,14 @@ def test_schedule_alloc_block(
     # Schedule the first request.
     scheduler.add_request(requests[0])
     scheduler_output0 = scheduler.schedule()
-    assert scheduler_output0.scheduled_new_reqs[0].block_ids[0] == exp_new_req0_blocks
+    assert scheduler_output0.scheduled_new_reqs[0].block_ids[
+        0] == exp_new_req0_blocks
 
     # Schedule the second request.
     scheduler.add_request(requests[1])
     scheduler_output1 = scheduler.schedule()
-    assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == exp_new_req1_blocks
+    assert scheduler_output1.scheduled_new_reqs[0].block_ids[
+        0] == exp_new_req1_blocks
 
     # Model output of the first request.
     model_runner_output = _make_model_runner_output(scheduler_output0)
@@ -103,18 +106,9 @@ def test_schedule_alloc_block(
 @pytest.mark.parametrize(
     "max_num_seqs, num_requests, num_blocks, exp_running_sz",
     [
-        pytest.param(
-            5, 5, 6, [1, 2, 3, 4, 5],
-            id="normal"
-        ),
-        pytest.param(
-            2, 5, 5, [1, 2, 2, 2, 2],
-            id="limited-max_num_seqs"
-        ),
-        pytest.param(
-            3, 5, 4, [1, 2, 3, 3, 3],
-            id="limited-blocks"
-        ),
+        pytest.param(5, 5, 6, [1, 2, 3, 4, 5], id="normal"),
+        pytest.param(2, 5, 5, [1, 2, 2, 2, 2], id="limited-max_num_seqs"),
+        pytest.param(3, 5, 4, [1, 2, 3, 3, 3], id="limited-blocks"),
     ],
 )
 def test_running_queue(
@@ -124,15 +118,17 @@ def test_running_queue(
     exp_running_sz: list[int],
 ):
     assert num_requests == len(exp_running_sz)
-    scheduler = create_scheduler(max_num_seqs=max_num_seqs, num_blocks=num_blocks, block_size=10, async_scheduling=True)
+    scheduler = create_scheduler(max_num_seqs=max_num_seqs,
+                                 num_blocks=num_blocks,
+                                 block_size=10,
+                                 async_scheduling=True)
     requests = create_requests(num_requests=5, max_tokens=5)
 
     for req in requests:
         scheduler.add_request(req)
-    
+
     assert len(scheduler.running) == 0
 
     for _, sz in zip(requests, exp_running_sz):
         scheduler.schedule()
         assert len(scheduler.running) == sz
-
