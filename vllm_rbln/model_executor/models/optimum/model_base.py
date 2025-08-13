@@ -37,12 +37,12 @@ logger = init_logger(__name__)
 class KVCacheBlockAdapter:
     """
      KV cache block allocation behavior (v1 vs v0).
-    +-------------------+-------------------+------------------+
-    | Condition         | v1                | v0               |
-    +-------------------+-------------------+------------------+
-    | is_full_block     | n() + 1; pad=0    | same; pad=last   |
-    | not is_full_block | same; pad=0       | n()-1; pad=last  |
-    +-------------------+-------------------+------------------+
+    +-------------------+---------------------+------------------+
+    | Condition         | v1                  | v0               |
+    +-------------------+---------------------+------------------+
+    | is_full_block     | n() + 1             | same             |
+    | not is_full_block | same                | n()-1            |
+    +-------------------+---------------------+------------------+
     """
 
     def __init__(
@@ -69,12 +69,6 @@ class KVCacheBlockAdapter:
             "VLLM_RBLN_NPU_NUM_BLOCKS",
             int(self.estimated_kvcache_num_blocks),
         )
-
-    def get_padding_value(self) -> int:
-        if self.use_v1:
-            return 0
-        # v0 uses last block index as pad; clamp at least 0
-        return max(0, self._estimated_num_blocks() - 1)
 
     def is_full_block_available(self) -> bool:
         """True if we can allocate a full batch worth of blocks."""
@@ -112,7 +106,6 @@ class RBLNOptimumModelBase(nn.Module):
         self.batch_size = self.scheduler_config.max_num_seqs
         self.kv_block_adapter = KVCacheBlockAdapter(
             vllm_config, self._resolve_kvcache_num_blocks())
-        self.padding_value = self.kv_block_adapter.get_padding_value()
 
     def _resolve_kvcache_num_blocks(self) -> int:
         """Prefer model-provided KV-cache block count; 
@@ -168,7 +161,6 @@ class RBLNOptimumDecoderMixin:
     def setup_decoder_mixin(
         self,
         attn_impl: str,
-        padding_value: int,
         vocab_size: int,
         use_multiple_decoder: bool,
         default_batch_size: int,
@@ -184,7 +176,6 @@ class RBLNOptimumDecoderMixin:
         self.logits_processor = LogitsProcessor(vocab_size,
                                                 logits_as_input=True)
         self.sampler = Sampler()
-        self.padding_value = padding_value
 
     def pad_decoder_items(
         self,
@@ -193,6 +184,7 @@ class RBLNOptimumDecoderMixin:
         block_tables: torch.Tensor,
         input_block_ids: Optional[torch.Tensor] = None,
         padded_batch_size: Optional[int] = None,
+        kv_adapter: Optional[KVCacheBlockAdapter] = None,
     ):
         assert input_ids.shape[1] == 1
         if input_block_ids is None and padded_batch_size is None:
@@ -216,35 +208,38 @@ class RBLNOptimumDecoderMixin:
                                           dtype=positions.dtype)
         padded_block_tables = torch.zeros(padded_batch_size,
                                           block_tables.shape[1],
-                                          dtype=block_tables.dtype).fill_(
-                                              self.padding_value)
+                                          dtype=block_tables.dtype).fill_(-1)
 
-        if self.attn_impl != "flash_attn":
-            available_blocks = torch.arange(0,
-                                            padded_batch_size,
-                                            dtype=block_tables.dtype)
-            mask = torch.ones(padded_batch_size, dtype=torch.bool)
-            unused_blocks = available_blocks[
-                ~torch.isin(available_blocks, block_tables.flatten())]
+        assert kv_adapter is not None, "kv_adapter should be given."
 
-            if input_block_ids is None:
-                padded_input_ids[:original_batch_size] = input_ids
-                padded_position_ids[:original_batch_size] = positions
-                padded_block_tables[:original_batch_size] = block_tables
-                mask[:original_batch_size] = False
-            else:
-                padded_input_ids[input_block_ids] = input_ids
-                padded_position_ids[input_block_ids] = positions
-                padded_block_tables[input_block_ids] = block_tables
-                mask[input_block_ids] = False
+        available_blocks = torch.arange(
+            0,
+            kv_adapter._estimated_num_blocks(),
+            dtype=block_tables.dtype,
+            device=block_tables.device,
+        )
+        unused_blocks = available_blocks[
+            ~torch.isin(available_blocks, block_tables.flatten())]
+        block_num = block_tables.size(1)
+        mask = torch.ones(
+            (padded_batch_size, block_num),
+            dtype=torch.bool,
+            device=block_tables.device,
+        )
 
-            if unused_blocks.numel() > 0:
-                padded_block_tables[mask] = unused_blocks[0]
-
-        else:
+        if input_block_ids is None:
             padded_input_ids[:original_batch_size] = input_ids
             padded_position_ids[:original_batch_size] = positions
             padded_block_tables[:original_batch_size] = block_tables
+            mask[:original_batch_size, :] = False
+        else:
+            padded_input_ids[input_block_ids] = input_ids
+            padded_position_ids[input_block_ids] = positions
+            padded_block_tables[input_block_ids] = block_tables
+            mask[input_block_ids, :] = False
+
+        if unused_blocks.numel() > 0:
+            padded_block_tables[mask] = unused_blocks[0]
 
         return padded_input_ids, padded_position_ids, padded_block_tables
 
@@ -255,6 +250,7 @@ class RBLNOptimumDecoderMixin:
         input_ids: Optional[torch.Tensor] = None,
         cache_position: Optional[torch.Tensor] = None,
         input_block_ids: Optional[list[int]] = None,
+        kv_adapter: Optional[KVCacheBlockAdapter] = None,
     ):
         padded_batch_size = None
         # 1. Set the type
@@ -284,7 +280,8 @@ class RBLNOptimumDecoderMixin:
                 cache_position,
                 block_tables,
                 input_block_ids=input_block_ids,
-                padded_batch_size=padded_batch_size)
+                padded_batch_size=padded_batch_size,
+                kv_adapter=kv_adapter)
 
         kwargs = {
             "block_tables": block_tables,

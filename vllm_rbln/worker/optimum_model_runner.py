@@ -159,13 +159,11 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                                pad=0,
                                                dtype=torch.long,
                                                device=self.device)
-        padding = self.model.padding_value
-
         block_tables = make_tensor_with_pad(
             block_tables,
             max_len=self.model_config.max_model_len //
             self.cache_config.block_size,
-            pad=padding,
+            pad=-1,
             dtype=torch.int32,
             device=self.device,
         ).to(torch.int16) if len(block_tables) > 0 else None
@@ -233,12 +231,11 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                                dtype=torch.long,
                                                device=self.device)
 
-        padding = self.model.padding_value
         block_tables = make_tensor_with_pad(
             block_tables,
             max_len=self.model_config.max_model_len //
             self.cache_config.block_size,
-            pad=padding,
+            pad=-1,
             dtype=torch.int32,
             device=self.device,
         ).to(torch.int16) if len(block_tables) > 0 else None

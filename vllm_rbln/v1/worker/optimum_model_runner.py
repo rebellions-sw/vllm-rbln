@@ -208,7 +208,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_ids: torch.Tensor,
         num_blocks: int,
         *,
-        pad_value: int = 0,
+        pad_value: int = -1,
     ) -> torch.Tensor:
         """Mask (pad) unused block slots in-place.
 

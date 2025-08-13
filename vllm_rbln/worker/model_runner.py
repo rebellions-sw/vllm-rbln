@@ -565,6 +565,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 model_input.attn_metadata.kv_caches = kv_caches
             for kv_cache in kv_caches:
                 self.compile_context.mark_static_address(kv_cache)
+
             hidden_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
