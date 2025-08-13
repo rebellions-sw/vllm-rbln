@@ -420,7 +420,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 cast(RBLNModelRunner, weakref.proxy(self)))
 
     def compile_model(self, model):
-        if envs.RBLN_COMPILE_MODEL:
+        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            return model
+        else:
             if envs.RBLN_TP_SIZE > 1:
                 compiled_model = torch.compile(
                     model,
@@ -444,8 +446,6 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 )
 
             return compiled_model
-        else:
-            return model
 
     # LLM attention block
     def attention_block(self, decoder_layer, hidden_states, residual,
