@@ -15,8 +15,7 @@
 from typing import Optional, Union
 
 import torch
-from vllm.config import (CacheConfig, KVTransferConfig, ModelConfig,
-                         SchedulerConfig, SpeculativeConfig, VllmConfig)
+from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
 from vllm.multimodal.inputs import MultiModalKwargs, PlaceholderRange
 from vllm.sampling_params import SamplingParams
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
@@ -31,18 +30,12 @@ EOS_TOKEN_ID = 50256
 
 
 def create_scheduler(
-    model: str = "facebook/opt-125m",
+    model: str = "meta-llama/Llama-3.2-3B-Instruct",
     max_num_seqs: int = 4,
     max_num_batched_tokens: int = 128,
-    long_prefill_token_threshold: int = 0,
-    disable_chunked_mm_input: bool = False,
-    use_kv_connector: bool = False,
     num_blocks: int = 8,
     block_size: int = 16,
     max_model_len: Optional[int] = None,
-    num_speculative_tokens: Optional[int] = None,
-    skip_tokenizer_init: bool = False,
-    enable_prefix_caching: Optional[bool] = None,
     async_scheduling: bool = False,
     is_torch_compile: bool = False,
 ) -> Union[RBLNOptimumScheduler, RBLNScheduler]:
@@ -52,9 +45,6 @@ def create_scheduler(
       model: model under test
       max_num_seqs: max sequences to schedule
       max_num_batch_tokens: max num tokens to batch
-      enable_prefix_caching: optionally force APC config
-                             (True/False) or use default
-                             (None)
 
     Returns:
       {class}`RBLNOptimumscheduler` instance
@@ -66,47 +56,25 @@ def create_scheduler(
         max_num_seqs=max_num_seqs,
         max_num_batched_tokens=max_num_batched_tokens,
         max_model_len=max_model_len,
-        long_prefill_token_threshold=long_prefill_token_threshold,
-        disable_chunked_mm_input=disable_chunked_mm_input,
-        enable_chunked_prefill=True,
         async_scheduling=async_scheduling,
     )
     model_config = ModelConfig(
         model=model,
         trust_remote_code=True,
-        dtype="float16",
+        dtype=torch.float,
         seed=42,
-        skip_tokenizer_init=skip_tokenizer_init,
     )
-    # Cache config, optionally force APC
-    kwargs_cache = ({} if enable_prefix_caching is None else {
-        "enable_prefix_caching": enable_prefix_caching
-    })
+    # Cache config
     cache_config = CacheConfig(
         block_size=block_size,
-        gpu_memory_utilization=0.9,
         swap_space=0,
         cache_dtype="auto",
-        **kwargs_cache,
     )
-    kv_transfer_config = (KVTransferConfig(
-        kv_connector="SharedStorageConnector",
-        kv_role="kv_both",
-        kv_connector_extra_config={"shared_storage_path": "local_storage"},
-    ) if use_kv_connector else None)
-
-    # Speculative decode related.
-    speculative_config: Optional[SpeculativeConfig] = None
-    if num_speculative_tokens is not None:
-        speculative_config = SpeculativeConfig(
-            model="ngram", num_speculative_tokens=num_speculative_tokens)
 
     vllm_config = VllmConfig(
         scheduler_config=scheduler_config,
         model_config=model_config,
         cache_config=cache_config,
-        kv_transfer_config=kv_transfer_config,
-        speculative_config=speculative_config,
     )
     kv_cache_config = KVCacheConfig(
         num_blocks=num_blocks,  # A large number of blocks to hold all requests
