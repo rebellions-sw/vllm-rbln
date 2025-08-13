@@ -240,9 +240,11 @@ class RBLNAttentionMetadataBuilder(
         # model max sequence length (cache_config.num_cpu_blocks)
         # default flash attention max sequence length = 16k
         # default flash attention partition size = 1024 = 1k
-        self.max_seq_len = 16 * 1024
+        self.max_seq_len = \
+            input_builder.runner.vllm_config.model_config.max_model_len
         # flash attention partition size (cache_config.block_size)
-        self.partition_len = 1024
+        self.partition_len = \
+            input_builder.runner.vllm_config.cache_config.block_size
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
