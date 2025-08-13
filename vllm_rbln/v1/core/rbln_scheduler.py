@@ -211,13 +211,11 @@ class RBLNScheduler(Scheduler):
         skipped_waiting_requests: deque[Request] = deque()
 
         # Next, schedule the WAITING requests.
-        waiting_submit = 0
         if not preempted_reqs:
             # NOTE(jiwoo.park) Waiting requests can be scheduled only
             # when there are no running prefills.
             while (num_running_prefill == 0 and self.waiting
                    and token_budget > 0):
-                waiting_submit += 1
                 if len(self.running) == self.max_num_running_reqs:
                     break
 
