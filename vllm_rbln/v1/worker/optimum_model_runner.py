@@ -221,7 +221,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if block_ids.dtype not in (torch.int32, torch.int64):
             raise TypeError("block_ids must be int32 or int64")
 
-        # In V1, block ID 0 is reserved as a dummy "null_block", so valid blocks start from 1.
+        # In V1, block ID 0 is reserved as a dummy "null_block",
+        # so valid blocks start from 1.
         # The compiler, however, expects valid blocks to start from 0.
         block_ids = block_ids - 1
         max_blocks = block_ids.size(-1)
