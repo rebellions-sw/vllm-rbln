@@ -407,6 +407,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 cast(RBLNModelRunner, weakref.proxy(self)))
 
     def compile_model(self, model):
+        dist_backend = self.parallel_config.distributed_executor_backend
+        vllm_config = None
+        if dist_backend == "ray":
+            vllm_config = self.vllm_config
         if _COMPILE_MODEL:
             if _TP_SIZE > 1:
                 compiled_model = torch.compile(
@@ -416,6 +420,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                         "compile_context": self.compile_context,
                         "cache_dir": "./rsd_cache_dir",
                         "tensor_parallel_size": _TP_SIZE,
+                        "vllm_config": vllm_config,
                     },
                     dynamic=False,
                 )
@@ -426,6 +431,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     options={
                         "compile_context": self.compile_context,
                         "cache_dir": "./cache_dir",
+                        "vllm_config": vllm_config,
                     },
                     dynamic=False,
                 )

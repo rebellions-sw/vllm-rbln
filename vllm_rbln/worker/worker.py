@@ -184,9 +184,12 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.local_rank = local_rank
         self.rank = rank
         self.parallel_config.rank = rank
+        self.parallel_config.local_rank = local_rank
 
         if self.parallel_config.distributed_executor_backend == "mp":
             logger.info("distributed executor backend mp enabled")
+            self.parallel_config.local_world_size = \
+                self.parallel_config.world_size
             self.set_device()
         elif self.parallel_config.distributed_executor_backend == "ray":
             logger.info("distributed executor backend ray enabled")
