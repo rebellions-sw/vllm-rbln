@@ -61,9 +61,9 @@ jobs:
         run: |
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           if [[ -n "${{ inputs.optimum_rbln_version }}" ]]; then
-            pip install --pre --extra-index-url $PYPI_URL optimum-rbln==0.8.3a0
+            pip install --pre --extra-index-url $PYPI_URL optimum-rbln==${{ inputs.optimum_rbln_version }}
           else
-            pip install --pre --extra-index-url $PYPI_URL optimum-rbln==0.8.3a0
+            pip install --pre --extra-index-url $PYPI_URL optimum-rbln
           fi
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
 
