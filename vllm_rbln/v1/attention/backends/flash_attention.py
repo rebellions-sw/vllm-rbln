@@ -15,7 +15,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
@@ -168,7 +168,7 @@ def _(cache: torch.Tensor, state: torch.Tensor,
 class RBLNAttentionBackend(AttentionBackend):
 
     @staticmethod
-    def get_supported_head_sizes() -> List[int]:
+    def get_supported_head_sizes() -> list[int]:
         return [32, 64, 96, 128, 160, 192, 224, 256]
 
     @staticmethod
@@ -176,15 +176,15 @@ class RBLNAttentionBackend(AttentionBackend):
         return "RBLN_ATTN"
 
     @staticmethod
-    def get_impl_cls() -> Type["RBLNFlashAttentionImpl"]:
+    def get_impl_cls() -> type["RBLNFlashAttentionImpl"]:
         return RBLNFlashAttentionImpl
 
     @staticmethod
-    def get_metadata_cls() -> Type["AttentionMetadata"]:
+    def get_metadata_cls() -> type["AttentionMetadata"]:
         return RBLNFlashAttentionMetadata
 
     @staticmethod
-    def get_builder_cls() -> Type["RBLNFlashAttentionMetadataBuilder"]:
+    def get_builder_cls() -> type["RBLNFlashAttentionMetadataBuilder"]:
         return RBLNFlashAttentionMetadataBuilder
 
     @staticmethod
@@ -193,7 +193,7 @@ class RBLNAttentionBackend(AttentionBackend):
         block_size: int,
         num_kv_heads: int,
         head_size: int,
-    ) -> Tuple[int, ...]:
+    ) -> tuple[int, ...]:
         """kv cache shape
         # B - num_blocks == num_partitions
         # S - block_size == partition_size
@@ -211,14 +211,14 @@ class RBLNAttentionBackend(AttentionBackend):
     def swap_blocks(
         src_kv_cache: torch.Tensor,
         dst_kv_cache: torch.Tensor,
-        src_to_dst: Dict[int, int],
+        src_to_dst: dict[int, int],
     ) -> None:
         raise RuntimeError("swap_blocks is not used for the RBLN backend.")
 
     @staticmethod
     def copy_blocks(
-        kv_caches: List[torch.Tensor],
-        src_to_dists: Dict[int, List[int]],
+        kv_caches: list[torch.Tensor],
+        src_to_dists: dict[int, list[int]],
     ) -> None:
         raise RuntimeError("swap_blocks is not used for the RBLN backend.")
 
@@ -249,7 +249,7 @@ class RBLNFlashAttentionMetadata:
 
     # For RBLN Attention
     attn_masks: Optional[torch.Tensor] = None
-    kv_caches: Optional[List[torch.Tensor]] = None
+    kv_caches: Optional[list[torch.Tensor]] = None
 
 
 class RBLNFlashAttentionMetadataBuilder:
@@ -423,10 +423,10 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         head_size: int,
         scale: float,
         num_kv_heads: int,
-        alibi_slopes: Optional[List[float]],
+        alibi_slopes: Optional[list[float]],
         sliding_window: Optional[int],
         kv_cache_dtype: str,
-        blocksparse_params: Optional[Dict[str, Any]] = None,
+        blocksparse_params: Optional[dict[str, Any]] = None,
         logits_soft_cap: Optional[float] = None,
         attn_type: str = AttentionType.DECODER,
         kv_sharing_target_layer_name: Optional[str] = None,
@@ -435,9 +435,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         if kv_sharing_target_layer_name is not None:
             raise NotImplementedError("KV sharing is not supported in RBLN.")
         if blocksparse_params is not None:
-            raise ValueError(
-                "RBLN Attention Backend does not support block-sparse attention."
-            )
+            raise ValueError("RBLN Attention Backend does not "
+                             "support block-sparse attention.")
         if logits_soft_cap is not None:
             logger.warning_once(
                 "RBLN Attention Backend does not support logits soft cap. "
