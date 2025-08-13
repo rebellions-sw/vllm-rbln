@@ -60,6 +60,7 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
     topk_weights = topk_weights.to(dtype)
 
+    org_selected_experts = selected_experts
     if expert_map is not None:
         selected_experts = expert_map[selected_experts]
 
@@ -111,7 +112,7 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
             final_hidden_states = final_hidden_states + current_hidden_states
 
     assert final_hidden_states is not None
-    return final_hidden_states.reshape(orig_shape), selected_experts_array
+    return final_hidden_states.reshape(orig_shape), org_selected_experts
 
 
 def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
