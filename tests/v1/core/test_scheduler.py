@@ -15,10 +15,10 @@
 from typing import Optional
 
 import pytest
-from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import RequestStatus
 
-from .utils import create_requests, create_scheduler
+from .utils import (create_model_runner_output, create_requests,
+                    create_scheduler)
 
 
 def test_add_requests():
@@ -56,20 +56,12 @@ def test_get_num_unfinished_requests():
         assert scheduler.get_num_unfinished_requests() == len(requests) - i - 1
 
 
-@pytest.mark.parametrize(
-    "prompt_logprobs",
-    [
-        (None),
-    ],
-)
-def test_schedule_single_seq(prompt_logprobs: Optional[int]):
+def test_schedule_single_seq():
     """Test scheduling.
-    Only one case: default APC/no prompt logprobs
+    Only one case: no prompt logprobs
     """
     scheduler = create_scheduler(max_num_seqs=1)
-    requests = create_requests(num_requests=8,
-                               num_tokens=16,
-                               prompt_logprobs=prompt_logprobs)
+    requests = create_requests(num_requests=8, num_tokens=16)
 
     # Add to Waiting Queue
     for request in requests:
@@ -91,18 +83,12 @@ def test_schedule_single_seq(prompt_logprobs: Optional[int]):
     assert requests[0] == scheduler.running[0]
 
 
-@pytest.mark.parametrize(
-    "prompt_logprobs",
-    [
-        (None),
-    ],
-)
-def test_schedule_multi_seq(prompt_logprobs: Optional[int]):
+def test_schedule_multi_seq():
     """Test scheduling.
-    Only one case: default APC/no prompt logprobs
+    Only one case: no prompt logprobs
     """
     scheduler = create_scheduler(max_num_seqs=2)
-    requests = create_requests(num_requests=2, prompt_logprobs=prompt_logprobs)
+    requests = create_requests(num_requests=2)
 
     # Add to Waiting Queue
     for request in requests:
@@ -129,14 +115,13 @@ def test_schedule_multi_seq(prompt_logprobs: Optional[int]):
 
 
 @pytest.mark.parametrize(
-    "prompt_logprobs, max_num_seqs, block_size, max_num_batched_tokens, \
+    "max_num_seqs, block_size, max_num_batched_tokens, \
     max_model_len, num_blocks, num_tokens_per_batch",
     [
-        (None, 2, 16, 64, 64, 8, 32),
+        (2, 16, 64, 64, 8, 32),
     ],
 )
 def test_schedule_alloc_block(
-    prompt_logprobs: Optional[int],
     max_num_seqs: Optional[int],
     block_size: Optional[int],
     max_num_batched_tokens: Optional[int],
@@ -154,7 +139,6 @@ def test_schedule_alloc_block(
     requests = create_requests(
         num_requests=max_num_seqs,
         num_tokens=num_tokens_per_batch,
-        prompt_logprobs=prompt_logprobs,
     )
 
     # Schedule the first request.
@@ -174,26 +158,12 @@ def test_schedule_alloc_block(
     assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == [3, 4]
 
     # Model output of the first request.
-    model_runner_output = ModelRunnerOutput(
-        req_ids=[requests[0].request_id],
-        req_id_to_index={requests[0].request_id: 0},
-        sampled_token_ids=[[0]],
-        spec_token_ids=None,
-        logprobs=None,
-        prompt_logprobs_dict={},
-    )
+    model_runner_output = create_model_runner_output(scheduler_output0)
     # first request status update
     scheduler.update_from_output(scheduler_output0, model_runner_output)
 
     # Model output of the second request.
-    model_runner_output = ModelRunnerOutput(
-        req_ids=[requests[1].request_id],
-        req_id_to_index={requests[1].request_id: 0},
-        sampled_token_ids=[[0]],
-        spec_token_ids=None,
-        logprobs=None,
-        prompt_logprobs_dict={},
-    )
+    model_runner_output = create_model_runner_output(scheduler_output1)
     # second request status update
     scheduler.update_from_output(scheduler_output1, model_runner_output)
 
@@ -210,14 +180,13 @@ def test_schedule_alloc_block(
 
 
 @pytest.mark.parametrize(
-    "prompt_logprobs, max_num_seqs, block_size, \
+    "max_num_seqs, block_size, \
     max_num_batched_tokens, max_model_len, num_blocks, num_tokens_per_batch",
     [
-        (None, 2, 16, 64, 64, 5, 32),
+        (2, 16, 64, 64, 5, 32),
     ],
 )
 def test_schedule_preempted_block(
-    prompt_logprobs: Optional[int],
     max_num_seqs: Optional[int],
     block_size: Optional[int],
     max_num_batched_tokens: Optional[int],
@@ -235,7 +204,6 @@ def test_schedule_preempted_block(
     requests = create_requests(
         num_requests=max_num_seqs,
         num_tokens=num_tokens_per_batch,
-        prompt_logprobs=prompt_logprobs,
     )
 
     # Schedule the first request.
@@ -255,26 +223,12 @@ def test_schedule_preempted_block(
     assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == [3, 4]
 
     # Model output of the first request.
-    model_runner_output = ModelRunnerOutput(
-        req_ids=[requests[0].request_id],
-        req_id_to_index={requests[0].request_id: 0},
-        sampled_token_ids=[[0]],
-        spec_token_ids=None,
-        logprobs=None,
-        prompt_logprobs_dict={},
-    )
+    model_runner_output = create_model_runner_output(scheduler_output0)
     # first request status update
     scheduler.update_from_output(scheduler_output0, model_runner_output)
 
     # Model output of the second request.
-    model_runner_output = ModelRunnerOutput(
-        req_ids=[requests[1].request_id],
-        req_id_to_index={requests[1].request_id: 0},
-        sampled_token_ids=[[0]],
-        spec_token_ids=None,
-        logprobs=None,
-        prompt_logprobs_dict={},
-    )
+    model_runner_output = create_model_runner_output(scheduler_output1)
     # second request status update
     scheduler.update_from_output(scheduler_output1, model_runner_output)
 

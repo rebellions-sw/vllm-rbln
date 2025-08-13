@@ -14,26 +14,9 @@
 from typing import Optional
 
 import pytest
-from vllm.v1.core.sched.output import SchedulerOutput
-from vllm.v1.outputs import ModelRunnerOutput
 
-from .utils import create_requests, create_scheduler
-
-
-def _make_model_runner_output(
-    scheduler_output: SchedulerOutput, ) -> ModelRunnerOutput:
-    req_ids = list(scheduler_output.num_scheduled_tokens.keys())
-    return ModelRunnerOutput(
-        req_ids=req_ids,
-        req_id_to_index={
-            req_id: i
-            for i, req_id in enumerate(req_ids)
-        },
-        sampled_token_ids=[[i] for i in range(len(req_ids))],
-        spec_token_ids=None,
-        logprobs=None,
-        prompt_logprobs_dict={},
-    )
+from .utils import (create_model_runner_output, create_requests,
+                    create_scheduler)
 
 
 @pytest.mark.parametrize(
@@ -43,7 +26,7 @@ def _make_model_runner_output(
     "exp_cached0_new, exp_cached1_new",
     [
         pytest.param(
-            2, 16, 64, 8, 32, [1, 2], [3, 4], [5], [6], id="16bsize-32len"),
+            2, 16, 64, 9, 32, [1, 2], [3, 4], [5], [6], id="16bsize-32len"),
         pytest.param(
             2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [], id="8bsize-17len")
     ],
@@ -86,12 +69,12 @@ def test_schedule_alloc_block(
         0] == exp_new_req1_blocks
 
     # Model output of the first request.
-    model_runner_output = _make_model_runner_output(scheduler_output0)
+    model_runner_output = create_model_runner_output(scheduler_output0)
     # first request status update
     scheduler.update_from_output(scheduler_output0, model_runner_output)
 
     # Model output of the second request.
-    model_runner_output = _make_model_runner_output(scheduler_output1)
+    model_runner_output = create_model_runner_output(scheduler_output1)
     # second request status update
     scheduler.update_from_output(scheduler_output1, model_runner_output)
 
