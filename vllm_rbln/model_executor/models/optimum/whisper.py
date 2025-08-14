@@ -20,6 +20,8 @@ from vllm.logger import init_logger
 from .base import ModelInputForRBLN
 from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
                          RBLNOptimumModelBase)
+from .optimum_attention_manager import AttentionManager
+from .optimum_attention_strategy import InnerAttentionStrategy
 
 logger = init_logger(__name__)
 
@@ -65,7 +67,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         table_ids = self.attention_manager.get(
             is_prompt,
             self.decoder_batch_size,
-            running_request_ids,
+            running_requests_ids,
             finished_requests_ids,
         )
         valid_block_ids = torch.tensor(table_ids)
@@ -97,9 +99,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             lm_logits[0][0][-1] = 1
-            # self.table_mapping[running_requests_ids[0]] = table_ids[0]
             self.attention_manager.add(
-                running_request_ids[0],
+                running_requests_ids[0],
                 table_ids[0],
             )
             self.dec_lengths[table_ids[0]] = 0
