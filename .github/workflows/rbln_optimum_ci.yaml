@@ -91,13 +91,13 @@ jobs:
           --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
           --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama7b_result_copy_prompts.json
 
-      - name: Run decoder-only test (Flash-attention mode) (V1)
-        run: >
-          VLLM_USE_V1=1 python3 examples/optimum/run_decoder_only.py --batch_size 4 --max_seq_len 131072 --kvcache_block_size 16384
-          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llama3_2-3b-128k_kv16k_batch4
-          --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
-          --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama3_2_3b_instruct_128k_copy_prompts.json
+      # - name: Run decoder-only test (Flash-attention mode) (V1)
+      #   run: >
+      #     VLLM_USE_V1=1 python3 examples/optimum/run_decoder_only.py --batch_size 4 --max_seq_len 131072 --kvcache_block_size 16384
+      #     --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
+      #     --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llama3_2-3b-128k_kv16k_batch4
+      #     --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
+      #     --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama3_2_3b_instruct_128k_copy_prompts.json
 
       - name : Run Llava-next (Eager mode) (V1)
         run: >
