@@ -17,7 +17,8 @@ import torch
 from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
-from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
+from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
+                                       SchedulerOutput)
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheTensor)
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -157,7 +158,6 @@ def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:
     num_block_of_req_state = len(req_state.block_ids[0])
     if num_block_of_runner != num_block_of_req_state:
         return False
-    num_block_of_runner = block_table.num_blocks_per_row[req_index]
     return (block_table.block_table_np[req_index, :num_block_of_runner] ==
             req_state.block_ids[0]).all()
 
@@ -165,7 +165,7 @@ def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:
 def test_update_states_new_request(model_runner):
     req_id = "req_0"
 
-    # add new request
+    # schedule new request
     scheduler_output = _schedule_new_request(req_id)
     metadata_before = model_runner.input_batch.sampling_metadata
     model_runner._update_states(scheduler_output)
@@ -178,7 +178,7 @@ def test_update_states_new_request(model_runner):
 def test_update_states_request_finished(model_runner):
     req_id = "req_0"
 
-    # add new request
+    # schedule new request
     scheduler_output = _schedule_new_request(req_id)
 
     model_runner._update_states(scheduler_output)
@@ -205,3 +205,63 @@ def test_update_states_request_finished(model_runner):
     assert _is_sampling_metadata_changed(model_runner, metadata_before)
     assert not _is_req_added(model_runner, req_id)
     assert not _is_req_scheduled(model_runner, req_id)
+
+
+def test_update_states_request_resumed(model_runner):
+    req_id = "req_0"
+
+    # schedule new request
+    scheduler_output = _schedule_new_request(req_id)
+
+    model_runner._update_states(scheduler_output)
+    assert _is_req_added(model_runner, req_id)
+    assert _is_req_scheduled(model_runner, req_id)
+
+    # unschedule request
+    scheduler_output = SchedulerOutput(
+        scheduled_new_reqs=[],
+        scheduled_cached_reqs=[],
+        num_scheduled_tokens={},
+        total_num_scheduled_tokens=0,
+        scheduled_spec_decode_tokens={},
+        scheduled_encoder_inputs={},
+        num_common_prefix_blocks=0,
+        finished_req_ids=set(),
+        free_encoder_input_ids=[],
+        structured_output_request_ids={},
+        grammar_bitmask=None,
+    )
+
+    model_runner._update_states(scheduler_output)
+    assert _is_req_added(model_runner, req_id)
+    assert not _is_req_scheduled(model_runner, req_id)
+
+    # resume request
+    cached_req_data = CachedRequestData(
+        req_id=req_id,
+        resumed_from_preemption=False,
+        new_token_ids=[],
+        new_block_ids=([0], ),
+        num_computed_tokens=0,
+    )
+
+    scheduler_output = SchedulerOutput(
+        scheduled_new_reqs=[],
+        scheduled_cached_reqs=[cached_req_data],
+        num_scheduled_tokens={req_id: 1},
+        total_num_scheduled_tokens=1,
+        scheduled_spec_decode_tokens={},
+        scheduled_encoder_inputs={},
+        num_common_prefix_blocks=0,
+        finished_req_ids=set(),
+        free_encoder_input_ids=[],
+        structured_output_request_ids={},
+        grammar_bitmask=None,
+    )
+
+    metadata_before = model_runner.input_batch.sampling_metadata
+    model_runner._update_states(scheduler_output)
+    assert _is_sampling_metadata_changed(model_runner, metadata_before)
+    assert _is_req_added(model_runner, req_id)
+    assert _is_req_scheduled(model_runner, req_id)
+    assert _is_req_state_block_table_match(model_runner, req_id)
