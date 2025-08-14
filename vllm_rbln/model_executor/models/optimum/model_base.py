@@ -13,10 +13,9 @@
 # limitations under the License.
 import bisect
 import os
-from abc import ABC, abstractmethod
 from functools import cache
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Optional
 
 import optimum.rbln
 import torch
@@ -238,65 +237,3 @@ class RBLNOptimumDecoderMixin:
                                         decoder_batch_sizes: tuple):
         index = bisect.bisect_left(decoder_batch_sizes, original_batch_size)
         return decoder_batch_sizes[index]
-
-
-class RBLNOptimumDictTableMixin(ABC):
-    """
-    Mixin for models using a request-ID keyed table implemented as a dictionary.
-    """
-
-    def get_table_mapping_values(
-        self,
-        table_mapping: Dict[str, Any],
-        decoder_batch_size: int,
-        is_prompt: bool,
-        finished_requests_ids: list[str],
-        running_requests_ids: list[str],
-        get_entry_fn: Optional[Callable[[Any], Any]] = None,
-        get_extra_values_fn: Optional[Callable[[Any],
-                                               Union[Any, Tuple[Any,
-                                                                ...]]]] = None,
-    ) -> Union[list[int], Tuple[list[int], ...]]:
-        if is_prompt:
-            if finished_requests_ids:
-                first_id = finished_requests_ids[0]
-                first_entry = table_mapping[first_id]
-                table_id = get_entry_fn(
-                    first_entry) if get_entry_fn else first_entry
-
-                for request_id in finished_requests_ids:
-                    table_mapping.pop(request_id)
-            else:
-                used_ids = {
-                    get_entry_fn(v) if get_entry_fn else v
-                    for v in table_mapping.values()
-                }
-                available_ids = set(range(decoder_batch_size)) - used_ids
-                assert available_ids, "No available table IDs"
-                table_id = min(available_ids)
-            return [table_id]
-
-        table_ids = []
-        extra_values = []
-
-        for request_id in running_requests_ids:
-            entry = table_mapping[request_id]
-            table_id = get_entry_fn(entry) if get_entry_fn else entry
-            table_ids.append(table_id)
-
-            if get_extra_values_fn:
-                result = get_extra_values_fn(entry)
-                if not isinstance(result, tuple):
-                    result = (result, )
-                extra_values.append(result)
-
-        if get_extra_values_fn:
-            extra_values_lists: list[list[Any]] = [
-                list(col) for col in zip(*extra_values)
-            ]
-            return (table_ids, *extra_values_lists)
-        return table_ids
-
-    @abstractmethod
-    def clear_dict_table(self):
-        pass

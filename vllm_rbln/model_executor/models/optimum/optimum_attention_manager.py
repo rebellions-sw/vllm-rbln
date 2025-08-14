@@ -11,22 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Generic, List, TypeVar
+from typing import List
 
 import torch
 from vllm.logger import init_logger
 
-from .optimum_attention_strategy import AttentionStrategy
+from .optimum_attention_strategy import (AttentionStrategy, EntryT, Result1T,
+                                         Result2T)
 
 logger = init_logger(__name__)
 
-ResultT = TypeVar("ResultT")
-Result2T = TypeVar("Result2T")
 
+class AttentionManager:
 
-class AttentionManager(Generic[ResultT, Result2T]):
-
-    def __init__(self, strategy: AttentionStrategy):
+    def __init__(self, strategy: AttentionStrategy[EntryT, Result1T,
+                                                   Result2T]):
         self._s = strategy
 
     def add(self, running_requests_id: str, local_table_id: int,
@@ -40,7 +39,7 @@ class AttentionManager(Generic[ResultT, Result2T]):
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
         **kwargs,
-    ) -> ResultT:
+    ) -> Result1T:
         return self._s.get(
             is_prompt,
             decoder_batch_size,

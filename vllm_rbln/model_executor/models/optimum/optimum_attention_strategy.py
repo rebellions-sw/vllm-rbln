@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import (Any, Callable, Dict, Generic, List, Optional, TypeVar,
                     Union, cast)
@@ -34,12 +35,41 @@ class HybridAttentionImageEntry(InnerAttentionEntry):
 
 
 EntryT = TypeVar("EntryT", bound=InnerAttentionEntry)
+Result1T = TypeVar("Result1T")
+Result2T = TypeVar("Result2T")
 
 
-class AttentionStrategy(Generic[EntryT]):
+class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
 
     def __init__(self):
         self.table: Dict[str, EntryT] = {}
+
+    @abstractmethod
+    def add(self, running_requests_id: str, local_table_id: int,
+            **kwargs) -> None:
+        ...
+
+    @abstractmethod
+    def get(
+        self,
+        is_prompt: bool,
+        decoder_batch_size: int,
+        running_requests_ids: list[str],
+        finished_requests_ids: list[str],
+        **kwargs,
+    ) -> Result1T:
+        ...
+
+    @abstractmethod
+    def preprocess(
+        self,
+        local_block_table_ids: List[int],
+        cache_positions: torch.Tensor,
+        request_nums: int,
+        decoder_batch_size: int,
+        **kwargs,
+    ) -> Result2T:
+        ...
 
     def clear(self):
         self.table.clear()
@@ -158,7 +188,7 @@ class AttentionStrategy(Generic[EntryT]):
             original_tensor = torch.tensor(original_values,
                                            dtype=dtype).unsqueeze(1)
 
-        elif isinstance(original_values, list) and all(
+        elif isinstance(original_values, list) and original_values and all(
                 isinstance(x, torch.Tensor) for x in original_values):
             dtype = original_values[0].dtype if dtype is None else dtype
             valid_nums = len(original_values)
@@ -177,7 +207,9 @@ class AttentionStrategy(Generic[EntryT]):
         return padded
 
 
-class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry]):
+class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, list[int],
+                                               tuple[torch.Tensor,
+                                                     torch.Tensor]]):
 
     def get(
         self,
@@ -233,8 +265,14 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry]):
         )
 
 
-class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry]
-                                   ):
+class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
+                                                     tuple[list[int],
+                                                           list[int],
+                                                           list[torch.Tensor]],
+                                                     tuple[torch.Tensor,
+                                                           torch.Tensor,
+                                                           torch.Tensor,
+                                                           torch.Tensor]]):
 
     def __init__(self, pad_token_id):
         super().__init__()

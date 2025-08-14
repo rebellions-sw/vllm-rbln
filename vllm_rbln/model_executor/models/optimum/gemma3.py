@@ -108,13 +108,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
 
-        ResultT = tuple[list[int], list[int], list[torch.Tensor]]
-        Result2T = tuple[torch.Tensor, torch.Tensor, torch.Tensor,
-                         torch.Tensor]
-
-        self.attention_manager: HybridAttentionImageManager[
-            ResultT, Result2T] = HybridAttentionImageManager(
-                HybridAttentionImageStrategy(tokenizer.pad_token_id))
+        self.strategy = HybridAttentionImageStrategy(tokenizer.pad_token_id)
+        self.attention_manager = HybridAttentionImageManager(self.strategy)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:

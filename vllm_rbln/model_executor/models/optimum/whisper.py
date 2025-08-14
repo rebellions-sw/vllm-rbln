@@ -18,8 +18,7 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
-from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
-                         RBLNOptimumModelBase)
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 from .optimum_attention_manager import AttentionManager
 from .optimum_attention_strategy import InnerAttentionStrategy
 
@@ -27,8 +26,7 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
-                                                 RBLNOptimumDecoderMixin,
-                                                 RBLNOptimumDictTableMixin):
+                                                 RBLNOptimumDecoderMixin):
     INVALID_TOKEN = 100
 
     def __init__(
@@ -47,12 +45,11 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         self.dec_max_seq_len = self.model_config.max_model_len
         self.dec_lengths = [0] * self.batch_size
         # self.table_mapping: Dict[str, int] = {}
-        ResultT = list[int]
-        Result2T = tuple[torch.Tensor, torch.Tensor]
+        # Result1T = list[int]
+        # Result2T = tuple[torch.Tensor, torch.Tensor]
 
-        self.attention_manager: AttentionManager[ResultT,
-                                                 Result2T] = AttentionManager(
-                                                     InnerAttentionStrategy())
+        self.strategy = InnerAttentionStrategy()
+        self.attention_manager = AttentionManager(self.strategy)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:

@@ -29,7 +29,6 @@ from .idefics3 import RBLNOptimumIdefics3ForConditionalGeneration  # noqa: F401
 from .llava import RBLNOptimumLlavaForConditionalGeneration  # noqa: F401
 from .llava_next import (  # noqa: F401
     RBLNOptimumLlavaNextForConditionalGeneration)
-from .model_base import RBLNOptimumDictTableMixin
 from .qwen2_5_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration)
 from .sliding_window import (  # noqa: F401
@@ -77,5 +76,5 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
 
 __all__ = [
     "load_model", "get_rbln_model_info", "ModelInputForRBLN",
-    "RBLNOptimumDictTableMixin", "RBLNOptimumForEncoderModel"
+    "RBLNOptimumForEncoderModel"
 ]

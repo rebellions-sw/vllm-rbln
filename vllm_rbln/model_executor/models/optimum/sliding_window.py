@@ -44,12 +44,9 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
         )
-        ResultT = list[int]
-        Result2T = tuple[torch.Tensor, torch.Tensor]
 
-        self.attention_manager: AttentionManager[ResultT,
-                                                 Result2T] = AttentionManager(
-                                                     InnerAttentionStrategy())
+        self.strategy = InnerAttentionStrategy()
+        self.attention_manager = AttentionManager(self.strategy)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
