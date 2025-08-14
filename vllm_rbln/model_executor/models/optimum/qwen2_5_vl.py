@@ -38,7 +38,6 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            padding_value=self.padding_value,
             vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=getattr(self.model.rbln_config,
                                          "use_multiple_decoder", False),
@@ -98,12 +97,11 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
                     self.rope_deltas.pop(request_id)
             self.rope_deltas[cur_request_id] = rope_deltas.item()
 
-        kwargs = self.preprocess_for_decoder(
-            is_prompt,
-            block_tables,
-            input_ids,
-            cache_position,
-        )
+        kwargs = self.preprocess_for_decoder(is_prompt,
+                                             block_tables,
+                                             input_ids,
+                                             cache_position,
+                                             kv_adapter=self.kv_block_adapter)
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
 
