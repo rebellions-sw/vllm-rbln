@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import logging
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -208,7 +209,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_ids: torch.Tensor,
         num_blocks: int,
         *,
-        pad_value: int = 0,
+        pad_value: int = -1,
     ) -> torch.Tensor:
         """Mask (pad) unused block slots in-place.
 
@@ -221,6 +222,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if block_ids.dtype not in (torch.int32, torch.int64):
             raise TypeError("block_ids must be int32 or int64")
 
+        # In V1, block ID 0 is reserved as a dummy "null_block",
+        # so valid blocks start from 1.
+        # The compiler, however, expects valid blocks to start from 0.
+        block_ids = block_ids - 1
         max_blocks = block_ids.size(-1)
         k = max(0, min(num_blocks, max_blocks))  # clamp to [0, max_blocks]
         if k < max_blocks:
@@ -448,12 +453,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         new/resumed/paused/finished request in the batch.
         """
         for req_id in scheduler_output.finished_req_ids:
-            logger.debug(
-                "Request %s is finished. Prompt tokens: %s, "
-                "Generated tokens: %s, Freed block(s): %s", req_id,
-                len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids),
-                self.requests[req_id].block_ids[0])
+            if logger.isEnabledFor(logging.DEBUG):
+                block_ids = [
+                    block_id - 1
+                    for block_id in self.requests[req_id].block_ids[0]
+                ]
+                logger.debug(
+                    "Request %s is finished. Prompt tokens: %s, "
+                    "Generated tokens: %s, Freed block(s): %s", req_id,
+                    len(self.requests[req_id].prompt_token_ids),
+                    len(self.requests[req_id].output_token_ids), block_ids)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.

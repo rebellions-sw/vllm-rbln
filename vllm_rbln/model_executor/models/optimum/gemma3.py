@@ -101,7 +101,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            padding_value=self.padding_value,
             vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=getattr(
                 self.model.rbln_config.language_model,
@@ -260,12 +259,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 finished_requests_ids,
             ))
 
-        kwargs = self.preprocess_for_decoder(
-            is_prompt,
-            block_tables,
-            input_ids,
-            position_ids,
-        )
+        kwargs = self.preprocess_for_decoder(is_prompt,
+                                             block_tables,
+                                             input_ids,
+                                             position_ids,
+                                             kv_adapter=self.kv_block_adapter)
 
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.

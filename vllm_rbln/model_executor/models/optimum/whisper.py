@@ -36,7 +36,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            padding_value=self.padding_value,
             vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=False,
             default_batch_size=self.scheduler_config.max_num_seqs,
@@ -89,7 +88,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
                                              block_tables,
                                              input_ids,
                                              cache_position,
-                                             input_block_ids=valid_block_ids)
+                                             input_block_ids=valid_block_ids,
+                                             kv_adapter=self.kv_block_adapter)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
