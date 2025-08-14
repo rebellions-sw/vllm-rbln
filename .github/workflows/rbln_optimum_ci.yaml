@@ -29,10 +29,10 @@ jobs:
   get-optimum-version:
     runs-on: runner-vllm-ci
     outputs:
-      optimum_version: ${{ steps.get-optimum.outputs.OPTIMUM_RBLN_VERSION }}
+      optimum_version: ${{ steps.get_target_optimum_version.outputs.OPTIMUM_RBLN_VERSION }}
     steps:
       - name: Get optimum version (including pre-releases)
-        id: get_targe_optimum_version
+        id: get_target_optimum_version
         run: |
           OPTIMUM_RBLN_VERSION=$(curl -s https://api.github.com/repos/rebellions-sw/optimum-rbln/releases | jq -r '.[0].tag_name')
           echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
