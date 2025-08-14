@@ -121,9 +121,10 @@ def test_schedule_multi_seq():
     "exp_new_req1_blocks, exp_cached1_new, ",
     [
         pytest.param(
-            3, 16, 64, 7, 32, [1, 2], [3], [4, 5], [6], id="kv16-len32-blk7"),
+            2, 16, 64, 7, 32, [1, 2], [3], [4, 5], [6], id="kv16-len32-blk7"),
         pytest.param(
-            2, 16, 64, 5, 32, [1, 2], [3], [4, 3], [2], id="kv16-len32-blk5"),
+            3, 16, 64, 5, 32, [1, 2], [3], [4, 3], [2],
+            id="kv16-len32-blk5"),  # FIXME (seinpark)
     ],
 )
 def test_schedule_alloc_block_policy(
