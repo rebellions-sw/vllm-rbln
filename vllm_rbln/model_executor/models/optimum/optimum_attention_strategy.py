@@ -180,20 +180,21 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         pad_value: int = 0,
         dtype: torch.dtype = None,
     ) -> torch.Tensor:
-        if isinstance(original_values, list) and all(
-                isinstance(x, int) for x in original_values):
-            dtype = torch.int16 if dtype is None else dtype
-            valid_nums = len(original_values)
-            padded = torch.full((rows, cols), pad_value, dtype=dtype)
-            original_tensor = torch.tensor(original_values,
-                                           dtype=dtype).unsqueeze(1)
-
-        elif isinstance(original_values, list) and original_values and all(
-                isinstance(x, torch.Tensor) for x in original_values):
-            dtype = original_values[0].dtype if dtype is None else dtype
-            valid_nums = len(original_values)
-            padded = torch.full((rows, cols), pad_value, dtype=dtype)
-            original_tensor = torch.cat(original_values)
+        if isinstance(original_values, list) and original_values:
+            original_value = original_values[0]
+            if isinstance(original_value, int):
+                dtype = torch.int16 if dtype is None else dtype
+                valid_nums = len(original_values)
+                padded = torch.full((rows, cols), pad_value, dtype=dtype)
+                original_tensor = torch.tensor(original_values,
+                                               dtype=dtype).unsqueeze(1)
+            elif isinstance(original_value, torch.Tensor):
+                dtype = original_value.dtype if dtype is None else dtype
+                valid_nums = len(original_values)
+                padded = torch.full((rows, cols), pad_value, dtype=dtype)
+                original_tensor = torch.cat(original_values)
+            else:
+                raise RuntimeError("Invalid type of input.")
 
         elif isinstance(original_values, torch.Tensor):
             original_tensor = original_values
