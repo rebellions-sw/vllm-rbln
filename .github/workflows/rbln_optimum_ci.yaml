@@ -26,9 +26,20 @@ jobs:
     uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
     secrets: inherit
 
+  get-optimum-version:
+    runs-on: runner-vllm-ci
+    outputs:
+      optimum_version: ${{ steps.get-optimum.outputs.OPTIMUM_RBLN_VERSION }}
+    steps:
+      - name: Get optimum version (including pre-releases)
+        id: get_targe_optimum_version
+        run: |
+          OPTIMUM_RBLN_VERSION=$(curl -s https://api.github.com/repos/rebellions-sw/optimum-rbln/releases | jq -r '.[0].tag_name')
+          echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
+
   test_vllm_rbln:
     runs-on: runner-vllm-ci
-    needs: get-compiler-version
+    needs: [get-compiler-version, get-optimum-version]
     env:
       NUM_INPUT_PROMPT: 1
       RBLN_VERBOSE: 6
@@ -57,16 +68,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      # - name: Install optimum-rbln and dependencies
-      #   run: |
-      #     PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-      #     if [[ -n "${{ inputs.optimum_rbln_version }}" ]]; then
-      #       pip install --pre --extra-index-url $PYPI_URL optimum-rbln==${{ inputs.optimum_rbln_version }}
-      #     else
-      #       pip install --pre --extra-index-url $PYPI_URL optimum-rbln
-      #     fi
-      #     pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
-
       - name: Uninstall existing vllm-rbln
         run: |
           python3 -m pip uninstall -y vllm-rbln || true
@@ -79,9 +80,8 @@ jobs:
       - name: Install local vllm-rbln package and dependencies
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
-          LATEST_OPTIMUM=$(curl -s https://api.github.com/repos/rebellions-sw/optimum-rbln/releases | jq -r '.[0].tag_name')
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$LATEST_OPTIMUM")
-          echo $LATEST_OPTIMUM
+          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ needs.get-optimum-latest.outputs.optimum_version }}")
+          echo "optimum-rbln ${{ needs.get-optimum-latest.outputs.optimum_version }}"
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
@@ -91,13 +91,13 @@ jobs:
           --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
           --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama7b_result_copy_prompts.json
 
-      # - name: Run decoder-only test (Flash-attention mode) (V1)
-      #   run: >
-      #     VLLM_USE_V1=1 python3 examples/optimum/run_decoder_only.py --batch_size 4 --max_seq_len 131072 --kvcache_block_size 16384
-      #     --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-      #     --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llama3_2-3b-128k_kv16k_batch4
-      #     --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
-      #     --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama3_2_3b_instruct_128k_copy_prompts.json
+      - name: Run decoder-only test (Flash-attention mode) (V1)
+        run: >
+          VLLM_USE_V1=1 python3 examples/optimum/run_decoder_only.py --batch_size 4 --max_seq_len 131072 --kvcache_block_size 16384
+          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
+          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llama3_2-3b-128k_kv16k_batch4
+          --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
+          --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama3_2_3b_instruct_128k_copy_prompts.json
 
       - name : Run Llava-next (Eager mode) (V1)
         run: >
