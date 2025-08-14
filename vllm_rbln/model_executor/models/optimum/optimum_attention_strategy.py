@@ -283,8 +283,8 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
     def add(self, running_requests_id: str, local_table_id: int,
             **kwargs) -> None:
 
-        pad_len: int = kwargs.get("pad_len")
-        attention_mask: torch.Tensor = kwargs.get("attention_mask")
+        pad_len: Optional[int] = kwargs.get("pad_len")
+        attention_mask: Optional[torch.Tensor] = kwargs.get("attention_mask")
         assert pad_len is not None
         assert attention_mask is not None
 
@@ -303,7 +303,7 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
         **kwargs,
     ) -> tuple[list[int], list[int], list[torch.Tensor]]:
         get_extra_values_fn = None
-        input_ids: torch.Tensor = kwargs.get("input_ids")
+        input_ids: Optional[torch.Tensor] = kwargs.get("input_ids")
         assert input_ids is not None
 
         if is_prompt:
@@ -341,8 +341,9 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
         decoder_batch_size: int,
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        pad_lens: list[int] = kwargs.get("pad_lens")
-        attention_masks: list[torch.Tensor] = kwargs.get("attention_masks")
+        pad_lens: Optional[list[int]] = kwargs.get("pad_lens")
+        attention_masks: Optional[list[torch.Tensor]] = kwargs.get(
+            "attention_masks")
 
         assert pad_lens is not None
         assert attention_masks is not None
