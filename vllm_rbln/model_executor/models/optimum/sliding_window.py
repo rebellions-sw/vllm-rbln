@@ -37,7 +37,6 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            padding_value=self.padding_value,
             vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=getattr(self.model.rbln_config,
                                          "use_multiple_decoder", False),

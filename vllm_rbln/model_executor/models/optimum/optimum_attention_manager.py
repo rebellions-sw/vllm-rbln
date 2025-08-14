@@ -17,16 +17,18 @@ import torch
 from vllm.logger import init_logger
 
 from .optimum_attention_strategy import (AttentionStrategy, EntryT,
-                                         HybridAttentionStrategy, Result1T,
-                                         Result2T)
+                                         HybridAttentionImageStrategy,
+                                         Result1T, Result2T)
 
 logger = init_logger(__name__)
 StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
-HybridStrategyT = TypeVar("HybridStrategyT",
-                          bound=HybridAttentionStrategy[Any, Any, Any])
+# HybridStrategyT = TypeVar(
+#     "HybridStrategyT",
+#     bound=HybridAttentionImageStrategy[HybridAttentionImageEntry, HybridR1,
+#                                        HybridR2])
 
 
-class AttentionManager(Generic[StrategyT]):
+class AttentionManager(Generic[StrategyT[EntryT, Result1T, Result2T]]):
 
     def __init__(self, strategy: StrategyT):
         self._s: StrategyT = strategy
@@ -36,13 +38,13 @@ class AttentionManager(Generic[StrategyT]):
         self._s.add(running_requests_id, local_table_id, **kwargs)
 
     def get(
-        self: "AttentionManager[AttentionStrategy[EntryT, Result1T, Result2T]]",
+        self: "AttentionManager[StrategyT]",
         is_prompt: bool,
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
         **kwargs,
-    ) -> Result1T:
+    ) -> Any:
         return self._s.get(
             is_prompt,
             decoder_batch_size,
@@ -52,13 +54,13 @@ class AttentionManager(Generic[StrategyT]):
         )
 
     def preprocess(
-        self: "AttentionManager[AttentionStrategy[EntryT, Result1T, Result2T]]",
+        self: "AttentionManager[StrategyT]",
         local_block_table_ids: List[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
         **kwargs,
-    ) -> Result2T:
+    ) -> Any:
         return self._s.preprocess(
             local_block_table_ids,
             cache_positions,
@@ -71,7 +73,8 @@ class AttentionManager(Generic[StrategyT]):
         self._s.clear()
 
 
-class HybridAttentionImageManager(AttentionManager[HybridStrategyT]):
+class HybridAttentionImageManager(
+        AttentionManager[HybridAttentionImageStrategy]):
 
     def update(
         self,

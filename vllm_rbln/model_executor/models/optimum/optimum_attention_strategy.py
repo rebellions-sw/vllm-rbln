@@ -208,9 +208,12 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         return padded
 
 
-class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, list[int],
-                                               tuple[torch.Tensor,
-                                                     torch.Tensor]]):
+InnerR1 = list[int]
+InnerR2 = tuple[torch.Tensor, torch.Tensor]
+
+
+class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, InnerR1,
+                                               InnerR2]):
 
     def add(
         self,
@@ -267,14 +270,12 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, list[int],
         )
 
 
+HybridR1 = tuple[list[int], list[int], list[torch.Tensor]]
+HybridR2 = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+
+
 class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
-                                                     tuple[list[int],
-                                                           list[int],
-                                                           list[torch.Tensor]],
-                                                     tuple[torch.Tensor,
-                                                           torch.Tensor,
-                                                           torch.Tensor,
-                                                           torch.Tensor]]):
+                                                     HybridR1, HybridR2]):
 
     def __init__(self, pad_token_id):
         super().__init__()
