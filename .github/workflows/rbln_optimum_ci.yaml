@@ -76,8 +76,9 @@ jobs:
           python -m pip install build
           python -m build --wheel
 
-      - name: Install local vllm-rbln package
+      - name: Install local vllm-rbln package and dependencies
         run: |
+          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
           LATEST_OPTIMUM=$(curl -s https://api.github.com/repos/rebellions-sw/optimum-rbln/releases | jq -r '.[0].tag_name')
           pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$LATEST_OPTIMUM")
           echo $LATEST_OPTIMUM
