@@ -642,12 +642,13 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             _LOCAL_RANK = int(os.getenv("RBLN_DEVICES"))
         if _LOCAL_RANK == 0:
             import json
-            fname = "moe_metric.json"
             layers_selected_experts = []
             seq_lens = model_input.seq_lens[0]
             query_lens = model_input.query_lens[0]
             token_id = seq_lens - query_lens
             request_id = model_input.request_ids[0]
+            #fname = "moe_metric.json"
+            fname = "moe_metric" + "_" + str(request_id) + "_" + str(token_id) + ".json"
 
             for layer, selected_experts in enumerate(selected_experts_list):
                 selected_experts_entry = {
