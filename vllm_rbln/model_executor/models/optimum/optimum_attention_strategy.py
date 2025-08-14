@@ -212,12 +212,24 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, list[int],
                                                tuple[torch.Tensor,
                                                      torch.Tensor]]):
 
+    def add(
+        self,
+        running_requests_id: str,
+        local_table_id: int,
+        **kwargs,
+    ) -> None:
+        self.table[running_requests_id] = \
+            InnerAttentionEntry(
+            local_table_id=local_table_id,
+        )
+
     def get(
         self,
         is_prompt: bool,
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
+        **kwargs,
     ) -> list[int]:
         result = self.get_table_mapping_values(
             decoder_batch_size,
@@ -229,17 +241,6 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, list[int],
 
         table_ids = cast(list[int], result)
         return table_ids
-
-    def add(
-        self,
-        running_requests_id: str,
-        local_table_id: int,
-        **kwargs,
-    ) -> None:
-        self.table[running_requests_id] = \
-            InnerAttentionEntry(
-            local_table_id=local_table_id,
-        )
 
     def preprocess(
         self,
@@ -279,16 +280,32 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
         super().__init__()
         self.pad_token_id = pad_token_id
 
+    def add(self, running_requests_id: str, local_table_id: int,
+            **kwargs) -> None:
+
+        pad_len: int = kwargs.get("pad_len")
+        attention_mask: torch.Tensor = kwargs.get("attention_mask")
+        assert pad_len is not None
+        assert attention_mask is not None
+
+        self.table[running_requests_id] = HybridAttentionImageEntry(
+            local_table_id=local_table_id,
+            pad_len=pad_len,
+            attention_mask=attention_mask,
+        )
+
     def get(
         self,
         is_prompt: bool,
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
-        *,
-        input_ids: torch.Tensor,
+        **kwargs,
     ) -> tuple[list[int], list[int], list[torch.Tensor]]:
         get_extra_values_fn = None
+        input_ids: torch.Tensor = kwargs.get("input_ids")
+        assert input_ids is not None
+
         if is_prompt:
             attention_mask = ((input_ids != self.pad_token_id).to(
                 torch.int64).squeeze(0))
@@ -316,24 +333,17 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
             table_ids, pad_lens, attention_masks = result
             return table_ids, pad_lens, attention_masks
 
-    def add(self, running_requests_id: str, local_table_id: int, *,
-            pad_len: int, attention_mask: torch.Tensor) -> None:
-        self.table[running_requests_id] = HybridAttentionImageEntry(
-            local_table_id=local_table_id,
-            pad_len=pad_len,
-            attention_mask=attention_mask,
-        )
-
     def preprocess(
         self,
-        local_block_table_ids: List[int],
+        local_block_table_ids: list[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
-        *,
-        pad_lens: List[int],
-        attention_masks: List[torch.Tensor],
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        pad_lens: list[int] = kwargs.get("pad_lens")
+        attention_masks: list[torch.Tensor] = kwargs.get("attention_masks")
+
         assert pad_lens is not None
         assert attention_masks is not None
 

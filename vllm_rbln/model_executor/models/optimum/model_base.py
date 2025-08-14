@@ -16,7 +16,7 @@ import math
 import os
 from functools import cache
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import optimum.rbln
 import torch

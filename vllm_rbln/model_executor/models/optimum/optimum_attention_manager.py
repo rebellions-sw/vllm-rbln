@@ -11,29 +11,32 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import List
+from typing import Any, Generic, List, TypeVar
 
 import torch
 from vllm.logger import init_logger
 
-from .optimum_attention_strategy import (AttentionStrategy, EntryT, Result1T,
+from .optimum_attention_strategy import (AttentionStrategy, EntryT,
+                                         HybridAttentionStrategy, Result1T,
                                          Result2T)
 
 logger = init_logger(__name__)
+StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
+HybridStrategyT = TypeVar("HybridStrategyT",
+                          bound=HybridAttentionStrategy[Any, Any, Any])
 
 
-class AttentionManager:
+class AttentionManager(Generic[StrategyT]):
 
-    def __init__(self, strategy: AttentionStrategy[EntryT, Result1T,
-                                                   Result2T]):
-        self._s = strategy
+    def __init__(self, strategy: StrategyT):
+        self._s: StrategyT = strategy
 
     def add(self, running_requests_id: str, local_table_id: int,
             **kwargs) -> None:
         self._s.add(running_requests_id, local_table_id, **kwargs)
 
     def get(
-        self,
+        self: "AttentionManager[AttentionStrategy[EntryT, Result1T, Result2T]]",
         is_prompt: bool,
         decoder_batch_size: int,
         running_requests_ids: list[str],
@@ -49,7 +52,7 @@ class AttentionManager:
         )
 
     def preprocess(
-        self,
+        self: "AttentionManager[AttentionStrategy[EntryT, Result1T, Result2T]]",
         local_block_table_ids: List[int],
         cache_positions: torch.Tensor,
         request_nums: int,
@@ -68,7 +71,7 @@ class AttentionManager:
         self._s.clear()
 
 
-class HybridAttentionImageManager(AttentionManager):
+class HybridAttentionImageManager(AttentionManager[HybridStrategyT]):
 
     def update(
         self,
