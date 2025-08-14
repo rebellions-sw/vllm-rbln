@@ -177,7 +177,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             if isinstance(self.model, RBLNOptimumDictTableMixin):
                 self.model.clear_dict_table()
             if getattr(self.model, "attention_manager", None):
-                self.model.attention_manager.clear_dict_table()
+                self.model.attention_manager.clear()
             # Return empty ModelRunnerOutput if there's no work to do.
             return EMPTY_MODEL_RUNNER_OUTPUT
         # Prepare the decoder inputs.

@@ -19,7 +19,8 @@ from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from .optimum_attention_manager import SlidingWindowAttentionManager
+from .optimum_attention_manager import AttentionManager
+from .optimum_attention_strategy import InnerAttentionStrategy
 
 logger = init_logger(__name__)
 
@@ -43,7 +44,12 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
         )
-        self.attention_manager = SlidingWindowAttentionManager()
+        ResultT = list[int]
+        Result2T = tuple[torch.Tensor, torch.Tensor]
+
+        self.attention_manager: AttentionManager[ResultT,
+                                                 Result2T] = AttentionManager(
+                                                     InnerAttentionStrategy())
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -106,7 +112,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]
             local_block_table_id, cache_position = \
-                self.attention_manager.preprocess_params(
+                self.attention_manager.preprocess(
                 sliding_window_table_ids,
                 cache_position,
                 request_nums,

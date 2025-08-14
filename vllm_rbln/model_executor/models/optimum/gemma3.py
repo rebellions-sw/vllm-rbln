@@ -31,6 +31,7 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 from .optimum_attention_manager import HybridAttentionImageManager
+from .optimum_attention_strategy import HybridAttentionImageStrategy
 
 logger = init_logger(__name__)
 
@@ -107,8 +108,13 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
 
-        self.attention_manager = HybridAttentionImageManager(
-            pad_token_id=tokenizer.pad_token_id)
+        ResultT = tuple[list[int], list[int], list[torch.Tensor]]
+        Result2T = tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+                         torch.Tensor]
+
+        self.attention_manager: HybridAttentionImageManager[
+            ResultT, Result2T] = HybridAttentionImageManager(
+                HybridAttentionImageStrategy(tokenizer.pad_token_id))
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -184,7 +190,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             self.attention_manager.add(
                 running_requests_id=running_requests_ids[0],
                 local_table_id=sliding_window_table_ids[0],
-                padded_cache_length=updated_padded_cache_length,
+                pad_len=updated_padded_cache_length,
                 attention_mask=updated_attention_mask,
             )
         else:
@@ -199,19 +205,20 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 cache_position,
                 position_ids,
                 attention_mask,
-            ) = self.attention_manager.preprocess_params(
+            ) = self.attention_manager.preprocess(
                 sliding_window_table_ids,
                 cache_position,
                 request_nums,
                 padded_batch_size,
-                padded_cache_lengths,
-                attention_masks,
+                pad_lens=padded_cache_lengths,
+                attention_masks=attention_masks,
             )
 
-            attention_mask = self.attention_manager.update_attention_mask(
-                attention_mask, cache_position)
-            self.attention_manager.update_hybrid_attention_table(
-                running_requests_ids, attention_mask)
+            attention_mask = self.attention_manager.update(
+                running_requests_ids,
+                attention_mask,
+                cache_position,
+            )
 
             logits = self.model.language_model.decoder(
                 input_ids=input_ids,
