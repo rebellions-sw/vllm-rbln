@@ -22,10 +22,6 @@ from .optimum_attention_strategy import (AttentionStrategy, EntryT,
 
 logger = init_logger(__name__)
 StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
-# HybridStrategyT = TypeVar(
-#     "HybridStrategyT",
-#     bound=HybridAttentionImageStrategy[HybridAttentionImageEntry, HybridR1,
-#                                        HybridR2])
 
 
 class AttentionManager(Generic[StrategyT[EntryT, Result1T, Result2T]]):
