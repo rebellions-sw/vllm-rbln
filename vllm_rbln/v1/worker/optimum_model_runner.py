@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import logging
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -452,12 +453,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         new/resumed/paused/finished request in the batch.
         """
         for req_id in scheduler_output.finished_req_ids:
-            logger.debug(
-                "Request %s is finished. Prompt tokens: %s, "
-                "Generated tokens: %s, Freed block(s): %s", req_id,
-                len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids),
-                self.requests[req_id].block_ids[0])
+            if logger.isEnabledFor(logging.DEBUG):
+                block_ids = [
+                    block_id - 1
+                    for block_id in self.requests[req_id].block_ids[0]
+                ]
+                logger.debug(
+                    "Request %s is finished. Prompt tokens: %s, "
+                    "Generated tokens: %s, Freed block(s): %s", req_id,
+                    len(self.requests[req_id].prompt_token_ids),
+                    len(self.requests[req_id].output_token_ids), block_ids)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
