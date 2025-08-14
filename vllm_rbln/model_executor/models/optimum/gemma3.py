@@ -135,10 +135,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         sliding_window_table_ids, padded_cache_lengths, attention_masks = \
         self.attention_manager.get(
                 is_prompt,
-                input_ids,
                 self.decoder_batch_size,
                 running_requests_ids,
                 finished_requests_ids,
+                input_ids=input_ids,
             )
 
         kwargs = self.preprocess_for_decoder(

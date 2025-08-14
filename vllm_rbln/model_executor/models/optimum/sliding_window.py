@@ -68,7 +68,6 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         # In prefill phase, the length of list must be 1
         sliding_window_table_ids = self.attention_manager.get(
             is_prompt,
-            input_ids,
             self.decoder_batch_size,
             running_requests_ids,
             finished_requests_ids,

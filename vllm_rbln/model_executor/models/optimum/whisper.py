@@ -44,22 +44,13 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         )
         self.dec_max_seq_len = self.model_config.max_model_len
         self.dec_lengths = [0] * self.batch_size
-        self.table_mapping: Dict[str, int] = {}
+        # self.table_mapping: Dict[str, int] = {}
+        ResultT = list[int]
+        Result2T = tuple[torch.Tensor, torch.Tensor]
 
-    def get_table_id(
-        self,
-        is_prompt: bool,
-        finished_requests_ids: list[str],
-        running_requests_ids: list[str],
-    ) -> list[int]:
-        table_ids = self.get_table_mapping_values(
-            self.table_mapping,
-            self.decoder_batch_size,
-            is_prompt,
-            finished_requests_ids,
-            running_requests_ids,
-        )
-        return cast(list[int], table_ids)
+        self.attention_manager: AttentionManager[ResultT,
+                                                 Result2T] = AttentionManager(
+                                                     InnerAttentionStrategy())
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -71,8 +62,12 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         running_requests_ids = model_input.running_requests_ids
         request_nums = input_ids.shape[0]
 
-        table_ids = self.get_table_id(is_prompt, finished_requests_ids,
-                                      running_requests_ids)
+        table_ids = self.attention_manager.get(
+            is_prompt,
+            self.decoder_batch_size,
+            running_request_ids,
+            finished_requests_ids,
+        )
         valid_block_ids = torch.tensor(table_ids)
 
         if is_prompt:
@@ -102,7 +97,11 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             lm_logits[0][0][-1] = 1
-            self.table_mapping[running_requests_ids[0]] = table_ids[0]
+            # self.table_mapping[running_requests_ids[0]] = table_ids[0]
+            self.attention_manager.add(
+                running_request_ids[0],
+                table_ids[0],
+            )
             self.dec_lengths[table_ids[0]] = 0
 
         else:

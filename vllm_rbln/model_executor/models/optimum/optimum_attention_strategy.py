@@ -182,7 +182,6 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry]):
     def get(
         self,
         is_prompt: bool,
-        input_ids: torch.Tensor,
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
@@ -244,10 +243,11 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry]
     def get(
         self,
         is_prompt: bool,
-        input_ids: torch.Tensor,
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
+        *,
+        input_ids: torch.Tensor,
     ) -> tuple[list[int], list[int], list[torch.Tensor]]:
         get_extra_values_fn = None
         if is_prompt:

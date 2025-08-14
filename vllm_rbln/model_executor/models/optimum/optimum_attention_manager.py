@@ -36,17 +36,17 @@ class AttentionManager(Generic[ResultT, Result2T]):
     def get(
         self,
         is_prompt: bool,
-        input_ids: torch.Tensor,
         decoder_batch_size: int,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
+        **kwargs,
     ) -> ResultT:
         return self._s.get(
             is_prompt,
-            input_ids,
             decoder_batch_size,
             running_requests_ids,
             finished_requests_ids,
+            **kwargs,
         )
 
     def preprocess(
