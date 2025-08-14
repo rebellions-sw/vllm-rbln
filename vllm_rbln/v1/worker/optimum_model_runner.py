@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import logging
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -202,20 +203,33 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             prompt_logprobs_dict={},
         )
 
-    def mask_block_table(self, block_ids: torch.Tensor,
-                         num_blocks: int) -> torch.Tensor:
-        """This function serves as an interface to convert VLLM block tables
-        to the format expected by Optimum-RBLN.
+    def mask_block_table(
+        self,
+        block_ids: torch.Tensor,
+        num_blocks: int,
+        *,
+        pad_value: int = -1,
+    ) -> torch.Tensor:
+        """Mask (pad) unused block slots in-place.
 
-        In V1, the block with block_id 0 is used as a dummy block
-        called null_block, so valid blocks start from 1.
-        
-        However, in Optimum-RBLN, the last block is used as the dummy block,
-        and valid blocks start from 0.
+        Sets entries beyond `num_blocks` to `pad_value`.
+        Use `pad_value=0` for v1 (dummy block id 0), or pass your own padding.
         """
+        if num_blocks < 0:
+            raise ValueError("num_blocks must be >= 0")
+
+        if block_ids.dtype not in (torch.int32, torch.int64):
+            raise TypeError("block_ids must be int32 or int64")
+
+        # In V1, block ID 0 is reserved as a dummy "null_block",
+        # so valid blocks start from 1.
+        # The compiler, however, expects valid blocks to start from 0.
         block_ids = block_ids - 1
-        dummy_block = self.cache_config.num_gpu_blocks - 1
-        block_ids[num_blocks:] = dummy_block
+        max_blocks = block_ids.size(-1)
+        k = max(0, min(num_blocks, max_blocks))  # clamp to [0, max_blocks]
+        if k < max_blocks:
+            block_ids.narrow(-1, k, max_blocks - k).fill_(pad_value)
+
         return block_ids
 
     def _prepare_inputs(
@@ -438,12 +452,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         new/resumed/paused/finished request in the batch.
         """
         for req_id in scheduler_output.finished_req_ids:
-            logger.debug(
-                "Request %s is finished. Prompt tokens: %s, "
-                "Generated tokens: %s, Freed block(s): %s", req_id,
-                len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids),
-                self.requests[req_id].block_ids[0])
+            if logger.isEnabledFor(logging.DEBUG):
+                block_ids = [
+                    block_id - 1
+                    for block_id in self.requests[req_id].block_ids[0]
+                ]
+                logger.debug(
+                    "Request %s is finished. Prompt tokens: %s, "
+                    "Generated tokens: %s, Freed block(s): %s", req_id,
+                    len(self.requests[req_id].prompt_token_ids),
+                    len(self.requests[req_id].output_token_ids), block_ids)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.

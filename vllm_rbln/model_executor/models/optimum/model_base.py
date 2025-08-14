@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import bisect
+import math
 import os
 from functools import cache
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import Optional
 import optimum.rbln
 import torch
 import torch.nn as nn
+import vllm.envs as env
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
@@ -31,6 +33,65 @@ from .base import get_rbln_model_info
 logger = init_logger(__name__)
 
 
+class KVCacheBlockAdapter:
+    """
+     KV cache block allocation behavior (v1 vs v0).
+    +-------------------+---------------------+------------------+
+    | Condition         | v1                  | v0               |
+    +-------------------+---------------------+------------------+
+    | is_full_block     | n() + 1             | n()              |
+    | not is_full_block | n()                 | max(0, n() - 1)  |
+    +-------------------+---------------------+------------------+
+    n = estimated_num_blocks()
+    
+    """
+
+    def __init__(
+        self,
+        vllm_config: VllmConfig,
+        estimated_kvcache_num_blocks: int,
+    ):
+        self.vllm_config = vllm_config
+        self.estimated_kvcache_num_blocks = estimated_kvcache_num_blocks
+        self.use_v1 = env.VLLM_USE_V1
+
+    @staticmethod
+    def _env_int(name: str, default: int) -> int:
+        raw = os.getenv(name)
+        if raw is None or raw.strip() == "":
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+
+    def _estimated_num_blocks(self) -> int:
+        return self._env_int(
+            "VLLM_RBLN_NPU_NUM_BLOCKS",
+            int(self.estimated_kvcache_num_blocks),
+        )
+
+    def is_full_block_available(self) -> bool:
+        """True if we can allocate a full batch worth of blocks."""
+        estimated = self._estimated_num_blocks()
+
+        block_size = self.vllm_config.cache_config.block_size
+        max_model_len = self.vllm_config.model_config.max_model_len
+        max_num_seqs = self.vllm_config.scheduler_config.max_num_seqs
+
+        blocks_per_seq = math.ceil(max_model_len / block_size)
+        ideal_total = max_num_seqs * blocks_per_seq
+        return estimated >= ideal_total
+
+    def get_available_num_blocks(self) -> int:
+        estimated = self._estimated_num_blocks()
+
+        if self.is_full_block_available():
+            return estimated + 1 if self.use_v1 else estimated
+
+        return estimated if self.use_v1 else max(0, estimated - 1)
+
+
 class RBLNOptimumModelBase(nn.Module):
 
     def __init__(
@@ -40,9 +101,29 @@ class RBLNOptimumModelBase(nn.Module):
         super().__init__()
         self.model_config = vllm_config.model_config
         self.scheduler_config = vllm_config.scheduler_config
+        self.cache_config = vllm_config.cache_config
+
         self.init_model()
-        self.padding_value = self.get_padding_value()
         self.batch_size = self.scheduler_config.max_num_seqs
+        self.kv_block_adapter = KVCacheBlockAdapter(
+            vllm_config, self._resolve_kvcache_num_blocks())
+
+    def _resolve_kvcache_num_blocks(self) -> int:
+        """Prefer model-provided KV-cache block count; 
+           else fall back to config."""
+        value: Optional[Any] = None
+
+        getter = getattr(self.model, "get_kvcache_num_blocks", None)
+        if callable(getter):
+            value = getter()
+        elif hasattr(self.model.rbln_config, "kvcache_num_blocks"):
+            value = self.model.rbln_config.kvcache_num_blocks
+        else:
+            value = self.scheduler_config.max_num_seqs  # fallback
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return int(self.scheduler_config.max_num_seqs)
 
     def init_model(self) -> None:
         config = self.model_config.hf_config
@@ -75,25 +156,12 @@ class RBLNOptimumModelBase(nn.Module):
         self.attn_impl = model.get_attn_impl() if hasattr(
             model, "get_attn_impl") else None
 
-    def get_padding_value(self):
-        attn_impl = self.attn_impl
-        padding = -1
-        if attn_impl is not None and attn_impl == "flash_attn":
-            # For flash attention, the last block is the dummy block
-            padding = self.model.get_kvcache_num_blocks() - 1
-
-            if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
-                padding = int(npu_num_blocks) - 1
-
-        return padding
-
 
 class RBLNOptimumDecoderMixin:
 
     def setup_decoder_mixin(
         self,
         attn_impl: str,
-        padding_value: int,
         vocab_size: int,
         use_multiple_decoder: bool,
         default_batch_size: int,
@@ -109,7 +177,6 @@ class RBLNOptimumDecoderMixin:
         self.logits_processor = LogitsProcessor(vocab_size,
                                                 logits_as_input=True)
         self.sampler = Sampler()
-        self.padding_value = padding_value
 
     def pad_decoder_items(
         self,
@@ -118,6 +185,7 @@ class RBLNOptimumDecoderMixin:
         block_tables: torch.Tensor,
         input_block_ids: Optional[torch.Tensor] = None,
         padded_batch_size: Optional[int] = None,
+        kv_adapter: Optional[KVCacheBlockAdapter] = None,
     ):
         assert input_ids.shape[1] == 1
         if input_block_ids is None and padded_batch_size is None:
@@ -141,35 +209,37 @@ class RBLNOptimumDecoderMixin:
                                           dtype=positions.dtype)
         padded_block_tables = torch.zeros(padded_batch_size,
                                           block_tables.shape[1],
-                                          dtype=block_tables.dtype).fill_(
-                                              self.padding_value)
+                                          dtype=block_tables.dtype).fill_(-1)
 
-        if self.attn_impl != "flash_attn":
-            available_blocks = torch.arange(0,
-                                            padded_batch_size,
-                                            dtype=block_tables.dtype)
-            mask = torch.ones(padded_batch_size, dtype=torch.bool)
-            unused_blocks = available_blocks[
-                ~torch.isin(available_blocks, block_tables.flatten())]
+        assert kv_adapter is not None, "kv_adapter should be given."
 
-            if input_block_ids is None:
-                padded_input_ids[:original_batch_size] = input_ids
-                padded_position_ids[:original_batch_size] = positions
-                padded_block_tables[:original_batch_size] = block_tables
-                mask[:original_batch_size] = False
-            else:
-                padded_input_ids[input_block_ids] = input_ids
-                padded_position_ids[input_block_ids] = positions
-                padded_block_tables[input_block_ids] = block_tables
-                mask[input_block_ids] = False
+        available_blocks = torch.arange(
+            0,
+            kv_adapter._estimated_num_blocks(),
+            dtype=block_tables.dtype,
+            device=block_tables.device,
+        )
+        unused_blocks = available_blocks[
+            ~torch.isin(available_blocks, block_tables.flatten())]
+        mask = torch.ones_like(
+            padded_block_tables,
+            dtype=torch.bool,
+            device=block_tables.device,
+        )
 
-            if unused_blocks.numel() > 0:
-                padded_block_tables[mask] = unused_blocks[0]
-
-        else:
+        if input_block_ids is None:
             padded_input_ids[:original_batch_size] = input_ids
             padded_position_ids[:original_batch_size] = positions
             padded_block_tables[:original_batch_size] = block_tables
+            mask[:original_batch_size, :] = False
+        else:
+            padded_input_ids[input_block_ids] = input_ids
+            padded_position_ids[input_block_ids] = positions
+            padded_block_tables[input_block_ids] = block_tables
+            mask[input_block_ids, :] = False
+
+        if unused_blocks.numel() > 0:
+            padded_block_tables[mask] = unused_blocks[0]
 
         return padded_input_ids, padded_position_ids, padded_block_tables
 
@@ -180,6 +250,7 @@ class RBLNOptimumDecoderMixin:
         input_ids: Optional[torch.Tensor] = None,
         cache_position: Optional[torch.Tensor] = None,
         input_block_ids: Optional[list[int]] = None,
+        kv_adapter: Optional[KVCacheBlockAdapter] = None,
     ):
         padded_batch_size = None
         # 1. Set the type
@@ -209,7 +280,8 @@ class RBLNOptimumDecoderMixin:
                 cache_position,
                 block_tables,
                 input_block_ids=input_block_ids,
-                padded_batch_size=padded_batch_size)
+                padded_batch_size=padded_batch_size,
+                kv_adapter=kv_adapter)
 
         kwargs = {
             "block_tables": block_tables,
