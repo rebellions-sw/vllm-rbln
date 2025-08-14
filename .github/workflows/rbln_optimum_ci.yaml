@@ -57,15 +57,15 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Install optimum-rbln and dependencies
-        run: |
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          if [[ -n "${{ inputs.optimum_rbln_version }}" ]]; then
-            pip install --pre --extra-index-url $PYPI_URL optimum-rbln==${{ inputs.optimum_rbln_version }}
-          else
-            pip install --pre --extra-index-url $PYPI_URL optimum-rbln
-          fi
-          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
+      # - name: Install optimum-rbln and dependencies
+      #   run: |
+      #     PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
+      #     if [[ -n "${{ inputs.optimum_rbln_version }}" ]]; then
+      #       pip install --pre --extra-index-url $PYPI_URL optimum-rbln==${{ inputs.optimum_rbln_version }}
+      #     else
+      #       pip install --pre --extra-index-url $PYPI_URL optimum-rbln
+      #     fi
+      #     pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
 
       - name: Uninstall existing vllm-rbln
         run: |
@@ -78,7 +78,9 @@ jobs:
 
       - name: Install local vllm-rbln package
         run: |
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl
+          LATEST_OPTIMUM=$(curl -s https://api.github.com/repos/rebellions-sw/optimum-rbln/releases | jq -r '.[0].tag_name')
+          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$LATEST_OPTIMUM")
+          echo $LATEST_OPTIMUM
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
