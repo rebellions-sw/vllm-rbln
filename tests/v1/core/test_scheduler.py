@@ -250,3 +250,38 @@ def test_schedule_preempted_block(  # FIXME does it need?
     assert scheduler_output2.scheduled_cached_reqs[0].new_block_ids[0] == [
         4
     ]  # preempted_block
+
+
+def test_prefill_schedule_max_prompt_len():
+    """
+    Test prompt longer than max_prompt_len is aborted.
+    """
+    pass  # TODO
+
+
+def test_prefill_schedule_token_budget():
+    """
+    Test token budget respected.
+    """
+    pass  # TODO
+
+
+def test_prefill_schedule_max_seqs():
+    """
+    Test max seq respected.
+    """
+    pass  # TODO
+
+
+def test_decode_schedule_preempted():
+    """
+    Test decodes cannot be scheduled and preempted.
+    """
+    pass  # TODO
+
+
+def test_schedule_decode_blocks_to_copy_update():
+    """
+    Verify blocks_to_copy is updated.
+    """
+    pass  # TODO
