@@ -40,9 +40,11 @@ class KVCacheBlockAdapter:
     +-------------------+---------------------+------------------+
     | Condition         | v1                  | v0               |
     +-------------------+---------------------+------------------+
-    | is_full_block     | n() + 1             | same             |
-    | not is_full_block | same                | n()-1            |
+    | is_full_block     | n() + 1             | n()              |
+    | not is_full_block | n()                 | max(0, n() - 1)  |
     +-------------------+---------------------+------------------+
+    n = estimated_num_blocks()
+    
     """
 
     def __init__(
