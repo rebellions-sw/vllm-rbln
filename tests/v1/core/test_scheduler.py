@@ -15,8 +15,10 @@
 from typing import Optional
 
 import pytest
-from utils import create_model_runner_output, create_requests, create_scheduler
 from vllm.v1.request import RequestStatus
+
+from .utils import (create_model_runner_output, create_requests,
+                    create_scheduler)
 
 
 def test_add_requests():
@@ -115,24 +117,24 @@ def test_schedule_multi_seq():
 @pytest.mark.parametrize(
     "max_num_seqs, block_size, max_model_len, "
     "num_blocks, num_tokens_per_batch, "
-    "exp_new_req0_blocks, exp_new_req1_blocks, "
-    "exp_cached0_new, exp_cached1_new",
+    "exp_new_req0_blocks, exp_cached0_new, "
+    "exp_new_req1_blocks, exp_cached1_new, ",
     [
         pytest.param(
-            2, 16, 64, 9, 32, [1, 2], [4, 5], [3], [6], id="16bsize-32len"),
-        # pytest.param(
-        #     2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [], id="8bsize-17len")
+            3, 16, 64, 7, 32, [1, 2], [3], [4, 5], [6], id="kv16-len32-blk7"),
+        pytest.param(
+            2, 16, 64, 5, 32, [1, 2], [3], [4, 3], [2], id="kv16-len32-blk5"),
     ],
 )
-def test_schedule_alloc_block(
+def test_schedule_alloc_block_policy(
     max_num_seqs: Optional[int],
     block_size: Optional[int],
     max_model_len: Optional[int],
     num_blocks: Optional[int],
     num_tokens_per_batch: Optional[int],
     exp_new_req0_blocks: list[int],
-    exp_new_req1_blocks: list[int],
     exp_cached0_new: list[int],
+    exp_new_req1_blocks: list[int],
     exp_cached1_new: list[int],
 ):
     scheduler = create_scheduler(
@@ -146,7 +148,7 @@ def test_schedule_alloc_block(
         num_tokens=num_tokens_per_batch,
     )
 
-    # Schedule the first request.
+    # [Prefill] Schedule the first request.
     scheduler.add_request(requests[0])
     scheduler_output0 = scheduler.schedule()
     assert scheduler_output0.scheduled_new_reqs[0].block_ids[
@@ -157,6 +159,7 @@ def test_schedule_alloc_block(
     # first request status update
     scheduler.update_from_output(scheduler_output0, model_runner_output)
 
+    # [Decode] Schedule again the first request.
     scheduler_output1 = scheduler.schedule()
     scheduled_cached_reqs = scheduler_output1.scheduled_cached_reqs
     assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached0_new
@@ -165,7 +168,7 @@ def test_schedule_alloc_block(
     scheduler.finish_requests(requests[0].request_id,
                               RequestStatus.FINISHED_STOPPED)
 
-    # Schedule the second request.
+    # [Prefill] Schedule the second request.
     scheduler.add_request(requests[1])
     scheduler_output2 = scheduler.schedule()
     assert scheduler_output2.scheduled_new_reqs[0].block_ids[
@@ -176,8 +179,7 @@ def test_schedule_alloc_block(
     # second request status update
     scheduler.update_from_output(scheduler_output2, model_runner_output)
 
-    # Schedule the next step again. The first request and second request
-    # can be scheduled with decode phase.
+    # [Decode] Schedule again the first request.
     scheduler_output3 = scheduler.schedule()
     scheduled_cached_reqs = scheduler_output3.scheduled_cached_reqs
     assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached1_new
