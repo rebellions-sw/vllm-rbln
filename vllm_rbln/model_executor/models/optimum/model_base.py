@@ -220,9 +220,8 @@ class RBLNOptimumDecoderMixin:
         )
         unused_blocks = available_blocks[
             ~torch.isin(available_blocks, block_tables.flatten())]
-        block_num = block_tables.size(1)
-        mask = torch.ones(
-            (padded_batch_size, block_num),
+        mask = torch.ones_like(
+            padded_block_tables,
             dtype=torch.bool,
             device=block_tables.device,
         )
