@@ -20,7 +20,9 @@ from vllm.logger import init_logger
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 from .optimum_attention_manager import AttentionManager
-from .optimum_attention_strategy import InnerAttentionStrategy
+from .optimum_attention_strategy import (InnerAttentionEntry,
+                                         InnerAttentionStrategy, InnerR1,
+                                         InnerR2)
 
 logger = init_logger(__name__)
 
@@ -48,7 +50,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         # Result2T = tuple[torch.Tensor, torch.Tensor]
 
         self.strategy = InnerAttentionStrategy()
-        self.attention_manager = AttentionManager(self.strategy)
+        self.attention_manager: AttentionManager[InnerAttentionStrategy,
+                                                 InnerAttentionEntry, InnerR1,
+                                                 InnerR2] = AttentionManager(
+                                                     self.strategy)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:

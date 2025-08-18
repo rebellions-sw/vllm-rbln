@@ -108,8 +108,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
 
         self.strategy = HybridAttentionImageStrategy(tokenizer.pad_token_id)
-        self.attention_manager: HybridAttentionImageManager = HybridAttentionImageManager(
-            self.strategy)
+        self.attention_manager: HybridAttentionImageManager \
+            = HybridAttentionImageManager(self.strategy)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
