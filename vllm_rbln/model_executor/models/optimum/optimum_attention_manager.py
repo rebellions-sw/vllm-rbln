@@ -16,9 +16,8 @@ from typing import Any, Generic, List, TypeVar
 import torch
 from vllm.logger import init_logger
 
-from .optimum_attention_strategy import (AttentionStrategy, EntryT,
-                                         HybridAttentionImageStrategy,
-                                         Result1T, Result2T)
+from .optimum_attention_strategy import (AttentionStrategy, EntryT, Result1T,
+                                         Result2T)
 
 logger = init_logger(__name__)
 StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
@@ -34,7 +33,7 @@ class AttentionManager(Generic[EntryT, Result1T, Result2T]):
         self._s.add(running_requests_id, local_table_id, **kwargs)
 
     def get(
-        self: "AttentionManager[StrategyT]",
+        self,
         is_prompt: bool,
         decoder_batch_size: int,
         running_requests_ids: list[str],
@@ -50,7 +49,7 @@ class AttentionManager(Generic[EntryT, Result1T, Result2T]):
         )
 
     def preprocess(
-        self: "AttentionManager[StrategyT]",
+        self,
         local_block_table_ids: List[int],
         cache_positions: torch.Tensor,
         request_nums: int,
@@ -69,8 +68,7 @@ class AttentionManager(Generic[EntryT, Result1T, Result2T]):
         self._s.clear()
 
 
-class HybridAttentionImageManager(
-        AttentionManager[HybridAttentionImageStrategy]):
+class HybridAttentionImageManager(AttentionManager):
 
     def update(
         self,
