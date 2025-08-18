@@ -16,14 +16,15 @@ from typing import Any, Generic, List, TypeVar
 import torch
 from vllm.logger import init_logger
 
-from .optimum_attention_strategy import (AttentionStrategy, EntryT, Result1T,
-                                         Result2T)
+from .optimum_attention_strategy import (AttentionStrategy, EntryT,
+                                         HybridAttentionImageStrategy,
+                                         Result1T, Result2T)
 
 logger = init_logger(__name__)
 StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
 
 
-class AttentionManager(Generic[EntryT, Result1T, Result2T]):
+class AttentionManager(Generic[[StrategyT, EntryT, Result1T, Result2T]]):
 
     def __init__(self, strategy: StrategyT):
         self._s: StrategyT = strategy
@@ -68,7 +69,9 @@ class AttentionManager(Generic[EntryT, Result1T, Result2T]):
         self._s.clear()
 
 
-class HybridAttentionImageManager(AttentionManager):
+class HybridAttentionImageManager(
+        AttentionManager[HybridAttentionImageStrategy, EntryT, Result1T,
+                         Result2T]):
 
     def update(
         self,
