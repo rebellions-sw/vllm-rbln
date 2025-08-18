@@ -24,7 +24,7 @@ logger = init_logger(__name__)
 StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
 
 
-class AttentionManager(Generic[[StrategyT, EntryT, Result1T, Result2T]]):
+class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
 
     def __init__(self, strategy: StrategyT):
         self._s: StrategyT = strategy
