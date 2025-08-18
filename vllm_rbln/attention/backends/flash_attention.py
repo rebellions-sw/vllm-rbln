@@ -306,6 +306,7 @@ class RBLNAttentionMetadataBuilder(
         self.input_builder = input_builder
 
         self.partition_len = input_builder.block_size
+        self.device = get_current_vllm_config().device_config.device
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
@@ -400,10 +401,10 @@ class RBLNAttentionMetadataBuilder(
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=placeholder_index_maps,
             enable_kv_scales_calculation=False,
-            seq_lens_tensor=seq_lens_tensor,
+            seq_lens_tensor=seq_lens_tensor.to(self.device),
             max_decode_seq_len=max_seq_len,
-            block_tables=block_tables,
-            attn_masks=attn_masks,
+            block_tables=block_tables.to(self.device),
+            attn_masks=attn_masks.to(self.device),
             kv_caches=None,
         )
         logger.info("RBLNAttentionMetadata = %s", attn_metadata)
@@ -432,9 +433,14 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         kv_sharing_target_layer_name: Optional[str] = None,
         use_irope: bool = False,
     ) -> None:
+        self.enforce_eager = (
+            get_current_vllm_config().model_config.enforce_eager
+        )
+        self.device = get_current_vllm_config().device_config.device
+
         self.num_heads = num_heads
         self.head_size = head_size
-        self.scale = torch.tensor(scale)
+        self.scale = torch.tensor(scale, device=self.device)
         self.num_kv_heads = num_kv_heads
         if alibi_slopes is not None:
             alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32)
@@ -457,9 +463,6 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                 "Torch SDPA backend does not support FP8 KV cache. "
                 "Please use xFormers backend instead.")
         self.attn_type = attn_type
-        self.enforce_eager = (
-            get_current_vllm_config().model_config.enforce_eager
-        )
 
     def split_kv_cache(
         self,

@@ -84,7 +84,8 @@ class RblnPlatform(Platform):
 
     # torch.compile() is currently disabled.
     # TODO: Replace with dynamic check via is_torch_compile_supported().
-    is_torch_compile: bool = False
+    #is_torch_compile: bool = False
+    is_torch_compile: bool = True
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
@@ -178,6 +179,14 @@ class RblnPlatform(Platform):
                         "vllm_rbln.worker.worker.RBLNWorker")
                 scheduler_config.scheduler_cls = (
                     "vllm_rbln.core.scheduler.RBLNScheduler")
+
+            # FIXME(jiwoo.park) This is a temporary workaround.
+            if model_config.enforce_eager:
+                RblnPlatform.device_type = "rbln"
+                vllm_config.device_config.device_type = RblnPlatform.device_type
+                vllm_config.device_config.device = (
+                    torch.device(RblnPlatform.device_type)
+                )
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":

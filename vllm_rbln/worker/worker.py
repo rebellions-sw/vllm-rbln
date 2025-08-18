@@ -62,6 +62,7 @@ class RBLNCacheEngine:
         self.cache_config = cache_config
         self.model_config = model_config
         self.parallel_config = parallel_config
+        self.device_config = device_config
 
         self.head_size = model_config.get_head_size()
         self.num_layers = model_config.get_num_layers(parallel_config)
@@ -119,7 +120,13 @@ class RBLNCacheEngine:
         # RBLN device tensor allocation
         for _ in range(self.num_layers):
             kv_cache.append(
-                torch.empty(kv_cache_shape, dtype=self.dtype, device="cpu"))
+                # torch.empty(kv_cache_shape,
+                #             dtype=self.dtype,
+                #             # device=self.device_config.device))
+                #             device="cpu"))
+                torch.empty(kv_cache_shape,
+                            dtype=self.dtype).to(self.device_config.device))
+            # device="cpu"))
         logger.info("[RBLN] allocate kv cache length = %d", len(kv_cache))
 
         return kv_cache
@@ -307,7 +314,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                                    self.scheduler_config.max_num_seqs //
                                    block_size)
 
-        num_gpu_blocks = min(max_num_blocks - 1, max_required_num_blocks)
+        num_gpu_blocks = min(
+            int(max_num_blocks * self.cache_config.gpu_memory_utilization) - 1,
+            max_required_num_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1
