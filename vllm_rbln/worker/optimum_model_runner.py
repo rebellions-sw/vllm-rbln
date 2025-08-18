@@ -390,7 +390,8 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         # FIXME If the request does not have lora_request?
         num_reqs = len(lora_requests)
         adapter_ids = [
-            lora_request.adapter_id for lora_request in lora_requests
+            0 if lora_request is None else lora_request.adapter_id
+            for lora_request in lora_requests
         ]
         # Padding
         if not is_prefill and num_reqs < max_num_reqs:
