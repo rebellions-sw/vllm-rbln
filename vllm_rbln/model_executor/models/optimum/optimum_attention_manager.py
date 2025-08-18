@@ -17,8 +17,10 @@ import torch
 from vllm.logger import init_logger
 
 from .optimum_attention_strategy import (AttentionStrategy, EntryT,
+                                         HybridAttentionImageEntry,
                                          HybridAttentionImageStrategy,
-                                         Result1T, Result2T)
+                                         HybridR1, HybridR2, Result1T,
+                                         Result2T)
 
 logger = init_logger(__name__)
 StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
@@ -70,8 +72,8 @@ class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
 
 
 class HybridAttentionImageManager(
-        AttentionManager[HybridAttentionImageStrategy, EntryT, Result1T,
-                         Result2T]):
+        AttentionManager[HybridAttentionImageStrategy,
+                         HybridAttentionImageEntry, HybridR1, HybridR2]):
 
     def update(
         self,
