@@ -1,7 +1,7 @@
 name: vllm-rbln / PR / Pytest
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       ref:
         description: "ref to checkout"
@@ -24,6 +24,18 @@ on:
         required: false
         type: boolean
         default: true
+  workflow_call:
+    inputs:
+      ref:
+        description: "ref to checkout"
+        required: false
+        default: "main"
+        type: string
+      fail_fast:
+        description: "Whether to fail fast when one matrix job fails"
+        required: false
+        type: boolean
+        default: true
 
 env:
   REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
@@ -34,10 +46,12 @@ env:
 
 jobs:
   get-compiler-version:
+    if: ${{ !inputs.rebel_compiler_version }}
     uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
     secrets: inherit
 
   get-optimum-version:
+    if: ${{ !inputs.optimum_rbln_version }}
     runs-on: runner-vllm-ci
     outputs:
       optimum_version: ${{ steps.get_target_optimum_version.outputs.OPTIMUM_RBLN_VERSION }}
