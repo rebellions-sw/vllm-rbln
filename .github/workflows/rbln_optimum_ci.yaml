@@ -74,13 +74,14 @@ jobs:
       - name: Build vllm-rbln wheel
         run: |
           python -m pip install build
-          sed -i 's|vllm==(.*)|git+http://github.com/vllm-project/vllm@v\1|' requirements.txt
           python -m build --wheel
 
       - name: Install local vllm-rbln package
         run: |
           export VLLM_TARGET_DEVICE=cpu PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
           pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl
+        env:
+          VERBOSE: 1
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
