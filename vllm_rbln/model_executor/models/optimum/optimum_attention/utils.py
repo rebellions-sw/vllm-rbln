@@ -1,5 +1,6 @@
 import torch
 
+
 def pad_tensor2tensor(
     original_tensor: torch.Tensor,
     rows: int,
@@ -13,6 +14,7 @@ def pad_tensor2tensor(
     padded = torch.full((rows, cols), pad_value, dtype=dtype)
     padded[:valid_nums] = original_tensor
     return padded
+
 
 def pad_tensors2tensor(
     original_tensors: list[torch.Tensor],

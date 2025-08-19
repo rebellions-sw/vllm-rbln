@@ -19,7 +19,6 @@ from typing import (Any, Callable, Dict, Generic, List, Optional, TypeVar,
 
 import torch
 from vllm.logger import init_logger
-from .utils import pad_tensor2tensor, pad_tensors2tensor, pad_list22dtensor
 
 logger = init_logger(__name__)
 
