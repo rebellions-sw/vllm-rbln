@@ -82,7 +82,7 @@ jobs:
       - name: Get wheel filename
         id: get_wheel_filename
         run: |
-          WHEEL_FILENAME=$(ls dist/vllm_rbln-*.whl)
+          WHEEL_FILENAME=$(ls dist/vllm_rbln-*.whl | xargs basename)
           echo "Found wheel file: ${WHEEL_FILENAME}"
           echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_OUTPUT
       
