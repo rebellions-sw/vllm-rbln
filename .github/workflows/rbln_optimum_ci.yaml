@@ -30,10 +30,12 @@ env:
 
 jobs:
   get-compiler-version:
+    if: ${{ !inputs.rebel_compiler_version }}
     uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
     secrets: inherit
 
   get-optimum-version:
+    if: ${{ !inputs.optimum_rbln_version }}
     runs-on: runner-vllm-ci
     outputs:
       optimum_version: ${{ steps.get_target_optimum_version.outputs.OPTIMUM_RBLN_VERSION }}
