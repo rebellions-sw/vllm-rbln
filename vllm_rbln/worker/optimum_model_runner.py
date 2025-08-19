@@ -387,7 +387,6 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                          lora_mapping: LoRAMapping) -> None:
         is_prefill = lora_mapping.is_prefill
         max_num_reqs = self.vllm_config.scheduler_config.max_num_seqs
-        # FIXME If the request does not have lora_request?
         num_reqs = len(lora_requests)
         adapter_ids = [
             0 if lora_request is None else lora_request.adapter_id
