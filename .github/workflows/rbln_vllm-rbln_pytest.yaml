@@ -73,16 +73,17 @@ jobs:
           python -m pip install build setuptools_scm
           python -m build --wheel
 
-      - name: Get package version
-        id: get_version
-        run: |
-          VERSION=$(python -m setuptools_scm)
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+      # - name: Get package version
+      #   id: get_version
+      #   run: |
+      #     VERSION=$(python -m setuptools_scm)
+      #     echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Get wheel filename
         id: get_wheel_filename
         run: |
-          WHEEL_FILENAME="dist/vllm_rbln-${{ steps.get_version.outputs.VERSION }}-*.whl"
+          WHEEL_FILENAME=$(ls dist/vllm_rbln-*.whl)
+          echo "Found wheel file: ${WHEEL_FILENAME}"
           echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_OUTPUT
       
       - name: Upload wheel artifact
