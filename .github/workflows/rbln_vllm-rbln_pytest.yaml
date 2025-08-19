@@ -29,7 +29,6 @@ on:
       ref:
         description: "ref to checkout"
         required: false
-        default: "main"
         type: string
       fail_fast:
         description: "Whether to fail fast when one matrix job fails"
@@ -174,7 +173,7 @@ jobs:
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
         env:
-          OPTIMUM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
+          VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
         run: |
           case "${{ matrix.test_type }}" in
             "core")
