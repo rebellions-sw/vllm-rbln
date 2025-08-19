@@ -223,7 +223,3 @@ class RblnPlatform(Platform):
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
         return not cls.is_torch_compile
-
-    @classmethod
-    def get_punica_wrapper(cls) -> str:
-        return "vllm_rbln.lora.punica_wrapper.punica_rbln.PunicaWrapperRBLN"
