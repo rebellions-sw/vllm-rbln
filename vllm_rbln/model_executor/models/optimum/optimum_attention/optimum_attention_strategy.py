@@ -19,6 +19,7 @@ from typing import (Any, Callable, Dict, Generic, List, Optional, TypeVar,
 
 import torch
 from vllm.logger import init_logger
+from .utils import pad_tensor2tensor, pad_tensors2tensor, pad_list22dtensor
 
 logger = init_logger(__name__)
 
@@ -138,37 +139,6 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         valid_nums = len(original_list)
         padded = torch.full((rows, cols), pad_value, dtype=dtype)
         original_tensor = torch.tensor(original_list, dtype=dtype).unsqueeze(1)
-        padded[:valid_nums] = original_tensor
-        return padded
-
-    def pad_tensors2tensor(
-        self,
-        original_tensors: list[torch.Tensor],
-        rows: int,
-        cols: int,
-        pad_value: int = 0,
-        dtype: torch.dtype = None,
-    ) -> torch.Tensor:
-        if dtype is None:
-            dtype = original_tensors[0].dtype
-        valid_nums = len(original_tensors)
-        padded = torch.full((rows, cols), pad_value, dtype=dtype)
-        original_tensor = torch.cat(original_tensors)
-        padded[:valid_nums] = original_tensor
-        return padded
-
-    def pad_tensor2tensor(
-        self,
-        original_tensor: torch.Tensor,
-        rows: int,
-        cols: int,
-        pad_value: int = 0,
-        dtype: torch.dtype = None,
-    ) -> torch.Tensor:
-        if dtype is None:
-            dtype = original_tensor.dtype
-        valid_nums = original_tensor.shape[0]
-        padded = torch.full((rows, cols), pad_value, dtype=dtype)
         padded[:valid_nums] = original_tensor
         return padded
 

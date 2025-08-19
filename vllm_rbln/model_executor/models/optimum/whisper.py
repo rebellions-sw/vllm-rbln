@@ -19,10 +19,8 @@ from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from .optimum_attention_manager import AttentionManager
-from .optimum_attention_strategy import (InnerAttentionEntry,
-                                         InnerAttentionStrategy, InnerR1,
-                                         InnerR2)
+from .optimum_attention import AttentionManager, InnerAttentionEntry, InnerAttentionStrategy, InnerR1, InnerR2
+
 
 logger = init_logger(__name__)
 

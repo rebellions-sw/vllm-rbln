@@ -30,8 +30,6 @@ from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from .optimum_attention_manager import HybridAttentionImageManager
-from .optimum_attention_strategy import HybridAttentionImageStrategy
 
 logger = init_logger(__name__)
 
