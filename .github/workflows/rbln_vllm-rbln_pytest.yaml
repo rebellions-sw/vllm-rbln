@@ -48,6 +48,7 @@ jobs:
   pytest:
     name: Pytest (${{ matrix.test_type }})
     runs-on: runner-vllm-ci
+    needs: get-optimum-version
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
