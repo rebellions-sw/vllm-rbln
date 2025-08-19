@@ -16,10 +16,12 @@
 import math
 from typing import Optional
 
+from vllm.config import ModelConfig, ParallelConfig
+
 
 def get_maximum_num_blocks(
-    config,
-    tensor_parallel_size: int,
+    model_config: ModelConfig,
+    parallel_config: ParallelConfig,
     kvcache_block_size: int,
     nbits_per_param: Optional[int] = None,
     n_model_params: Optional[int] = None,
@@ -63,11 +65,12 @@ def get_maximum_num_blocks(
     def align_2MB(x: int) -> int:
         return align(x, 2**21)
 
-    num_layers = config.hf_config.num_hidden_layers
-    head_dim = config.hf_config.head_dim
-    vocab_size = config.hf_config.vocab_size
-    hidden_size = config.hf_config.hidden_size
-    num_key_value_heads = config.hf_config.num_key_value_heads
+    num_layers = model_config.get_num_layers(parallel_config)
+    head_dim = model_config.get_head_size()
+    vocab_size = model_config.get_vocab_size()
+    hidden_size = model_config.get_hidden_size()
+    num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
+    tensor_parallel_size = parallel_config.tensor_parallel_size
 
     # TODO(jongho): Update if target npu is REBEL.
     ATOM_DRAM_NBYTES = 16 * 2**30

@@ -293,8 +293,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # This function comes from optimum-rbln.
         # We must keep it updated as optimum is upgraded.
         max_num_blocks = get_maximum_num_blocks(
-            config=self.model_config,
-            tensor_parallel_size=self.parallel_config.tensor_parallel_size,
+            model_config=self.model_config,
+            parallel_config=self.parallel_config,
             kvcache_block_size=block_size,
             # quantization : 4 (This is an ad-hoc value. Need to fix it)
             nbits_per_param=16 if not self.model_config.quantization else 4,
