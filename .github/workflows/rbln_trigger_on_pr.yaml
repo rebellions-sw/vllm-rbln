@@ -1,0 +1,39 @@
+
+name: vllm-rbln / PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
+  REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
+  REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
+  REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
+
+jobs:
+  check-skip-ci:
+    runs-on: runner-vllm-ci
+    outputs:
+      should_skip: ${{ contains(github.event.pull_request.head.commit.message, '[skip ci]') }}
+    steps:
+      - name: Check if [skip ci] is in commit message
+        run: |
+          if ${{ contains(github.event.pull_request.head.commit.message, '[skip ci]') }}; then
+            echo "Found [skip ci] in commit message, skipping CI"
+          else
+            echo "No [skip ci] found, continuing with CI"
+          fi
+
+  vllm-rbln-pytest:
+    needs: [check-skip-ci, check-code-quality]
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    uses: ./.github/workflows/rbln_vllm-rbln_pytest.yaml
+    secrets: inherit
+
+  vllm-rbln-optimum-ci:
+    needs: [check-skip-ci, check-code-quality, vllm-rbln-pytest]
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    uses: ./.github/workflows/rbln_optimum_ci.yaml
+    secrets: inherit
