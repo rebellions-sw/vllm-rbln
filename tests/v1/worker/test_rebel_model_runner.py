@@ -75,7 +75,7 @@ def get_vllm_config(async_scheduling=False):
         async_scheduling=async_scheduling,
     )
     model_config = ModelConfig(
-        model="meta-llama/Llama-3.2-3B-Instruct",
+        model="facebook/opt-125m",
         dtype=torch.float16,
         seed=42,
     )

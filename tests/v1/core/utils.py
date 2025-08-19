@@ -32,7 +32,7 @@ EOS_TOKEN_ID = 50256
 
 
 def create_scheduler(
-    model: str = "meta-llama/Llama-3.2-3B-Instruct",
+    model: str = "facebook/opt-125m",
     max_num_seqs: int = 4,
     max_num_batched_tokens: int = 128,
     num_blocks: int = 8,
