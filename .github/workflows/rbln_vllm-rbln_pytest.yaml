@@ -96,18 +96,18 @@ jobs:
         with:
           python-version: "3.9"
 
-      # - name: Get latest rebel_compiler version
-      #   if: ${{ !inputs.rebel_compiler_version }}
-      #   id: get_latest_rebel_compiler
-      #   run: |
-      #     echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
+      - name: Get latest rebel_compiler version
+        if: ${{ !inputs.rebel_compiler_version }}
+        id: get_latest_rebel_compiler
+        run: |
+          echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
 
-      # - name: Install rebel-compiler
-      #   run: |
-      #     python3 -m pip uninstall rebel-compiler -y
-      #     PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-      #     VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
-      #     python3 -m pip install --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
+      - name: Install rebel-compiler
+        run: |
+          python3 -m pip uninstall rebel-compiler -y
+          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
+          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
+          python3 -m pip install --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
 
       - name: Build vllm-rbln wheel
         run: |
