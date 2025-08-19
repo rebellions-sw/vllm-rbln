@@ -33,9 +33,24 @@ jobs:
     uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
     secrets: inherit
 
+  get-optimum-version:
+    runs-on: runner-vllm-ci
+    outputs:
+      optimum_version: ${{ steps.get_target_optimum_version.outputs.OPTIMUM_RBLN_VERSION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get optimum version from requirements.txt
+        id: get_target_optimum_version
+        run: |
+          OPTIMUM_RBLN_VERSION=$(grep '^optimum-rbln' requirements.txt | sed 's/optimum-rbln>=//')
+          echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
+          echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
+
   test_vllm_rbln:
     runs-on: runner-vllm-ci
-    needs: get-compiler-version
+    needs: [get-compiler-version, get-optimum-version]
     env:
       NUM_INPUT_PROMPT: 1
       RBLN_VERBOSE: 6
@@ -64,16 +79,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Install optimum-rbln and dependencies
-        run: |
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          if [[ -n "${{ inputs.optimum_rbln_version }}" ]]; then
-            pip install --pre --extra-index-url $PYPI_URL optimum-rbln==${{ inputs.optimum_rbln_version }}
-          else
-            pip install --pre --extra-index-url $PYPI_URL optimum-rbln
-          fi
-          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
-
       - name: Uninstall existing vllm-rbln
         run: |
           python3 -m pip uninstall -y vllm-rbln || true
@@ -83,9 +88,11 @@ jobs:
           python -m pip install build
           python -m build --wheel
 
-      - name: Install local vllm-rbln package
+      - name: Install local vllm-rbln package and dependencies
         run: |
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl
+          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
+          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ needs.get-optimum-version.outputs.optimum_version }}")
+          echo "optimum-rbln ${{ needs.get-optimum-version.outputs.optimum_version }}"
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
