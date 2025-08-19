@@ -60,7 +60,7 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
     topk_weights = topk_weights.to(dtype)
 
-    org_selected_experts = selected_experts
+    org_selected_experts = selected_experts.reshape(-1, 1, num_tokens,top_k)
     if expert_map is not None:
         selected_experts = expert_map[selected_experts]
 
