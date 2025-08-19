@@ -63,8 +63,9 @@ async def generate(engine: AsyncLLMEngine, conversation: list[dict],
     return final_output
 
 
-def get_abliterated_requests(num_input_prompt: int, lora_path: str,
-                             lora_int_id: int) -> list[str]:
+def get_abliterated_requests(
+        num_input_prompt: int, lora_path: str,
+        lora_int_id: int) -> tuple[list[str], list[LoRARequest]]:
     dataset = load_dataset("mlabonne/harmful_behaviors")["train"].shuffle(
         seed=42)
     prompts = dataset["text"][:num_input_prompt]
@@ -78,10 +79,14 @@ def get_abliterated_requests(num_input_prompt: int, lora_path: str,
     return conversation, lora_requests
 
 
-def get_secalign_requests(num_input_prompt: int, lora_path: str,
-                          lora_int_id: int) -> list[str]:
+def get_secalign_requests(
+        num_input_prompt: int, lora_path: str,
+        lora_int_id: int) -> tuple[list[str], list[LoRARequest]]:
     # referenced microsoft/llmail-inject-challenge
-    prompts = SEC_ALIGN_DATASET[:num_input_prompt]
+    prompts = [
+        SEC_ALIGN_DATASET[i % len(SEC_ALIGN_DATASET)]
+        for i in range(num_input_prompt)
+    ]
     conversation = [
         [
             {
