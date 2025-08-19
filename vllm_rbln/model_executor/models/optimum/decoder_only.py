@@ -31,7 +31,6 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            padding_value=self.padding_value,
             vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=getattr(self.model.rbln_config,
                                          "use_multiple_decoder", False),
@@ -51,12 +50,11 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
-        kwargs = self.preprocess_for_decoder(
-            is_prompt,
-            block_tables,
-            input_ids,
-            cache_position,
-        )
+        kwargs = self.preprocess_for_decoder(is_prompt,
+                                             block_tables,
+                                             input_ids,
+                                             cache_position,
+                                             kv_adapter=self.kv_block_adapter)
         padded_batch_size = kwargs.pop("padded_batch_size",
                                        self.decoder_batch_size)
 
