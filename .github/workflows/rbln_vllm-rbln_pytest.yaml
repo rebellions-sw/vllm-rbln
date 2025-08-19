@@ -90,7 +90,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vllm-wheel
-          path: ${{ steps.get_wheel_filename.outputs.WHEEL_FILENAME }}
+          path: dist/
+          # path: ${{ steps.get_wheel_filename.outputs.WHEEL_FILENAME }}
           retention-days: 7
 
   pytest:
