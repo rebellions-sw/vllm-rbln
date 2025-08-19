@@ -31,10 +31,14 @@ jobs:
     outputs:
       optimum_version: ${{ steps.get_target_optimum_version.outputs.OPTIMUM_RBLN_VERSION }}
     steps:
-      - name: Get optimum version (including pre-releases)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get optimum version from requirements.txt
         id: get_target_optimum_version
         run: |
-          OPTIMUM_RBLN_VERSION=$(curl -s https://api.github.com/repos/rebellions-sw/optimum-rbln/releases | jq -r '.[0].tag_name')
+          OPTIMUM_RBLN_VERSION=$(grep '^optimum-rbln' requirements.txt | sed 's/optimum-rbln>=//')
+          echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
           echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
 
   test_vllm_rbln:
