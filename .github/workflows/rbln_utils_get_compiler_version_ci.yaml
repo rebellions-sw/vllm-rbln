@@ -5,10 +5,10 @@ on:
     outputs:
       compiler_version:
         description: "compiler package version for vllm-rbln"
-        value: ${{ jobs.get-version.outputs.compiler_version }}
+        value: ${{ jobs.get-rebel-version.outputs.compiler_version }}
 
 jobs:
-  get-version:
+  get-rebel-version:
     runs-on: ubuntu-latest-rbln
     outputs:
       compiler_version: ${{ steps.get-compiler-version.outputs.COMPILER_VERSION }}

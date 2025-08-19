@@ -100,7 +100,9 @@ jobs:
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
         run: |
-          echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
+          echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}"
+        # run: |
+        #   echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
 
       - name: Install rebel-compiler
         run: |
