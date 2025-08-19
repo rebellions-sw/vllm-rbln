@@ -116,7 +116,7 @@ jobs:
 
       - name: Install local vllm-rbln package and dependencies
         run: |
-          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
+          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest
           pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ needs.get-optimum-version.outputs.optimum_version }}")
           echo "optimum-rbln ${{ needs.get-optimum-version.outputs.optimum_version }}"
 
