@@ -187,6 +187,8 @@ class RblnPlatform(Platform):
                 vllm_config.device_config.device = (
                     torch.device(RblnPlatform.device_type)
                 )
+                # NOTE - force dtype into fp16 for eager mode
+                model_config.dtype = torch.float16
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":

@@ -80,7 +80,12 @@ class RBLNCacheEngine:
         # default cache type is bf16 (half precision)
         # FIXME - force cache data type into fp32 for graph compilation
         if cache_config.cache_dtype == "auto":
-            self.dtype = STR_DTYPE_TO_TORCH_DTYPE["float"]
+            # NOTE(jiwoo.park) Currently, eager mode can support only FP16 dtype
+            # for the KV cache.
+            if self.device_config.device_type == "rbln":
+                self.dtype = torch.float16
+            else:
+                self.dtype = STR_DTYPE_TO_TORCH_DTYPE["float"]
         else:
             self.dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
 
