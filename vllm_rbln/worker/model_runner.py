@@ -406,6 +406,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         self.model: nn.Module  # initialize after load_model.
 
         self.sampler = get_sampler()
+        self.token_id = -1
 
         if hasattr(self, "_builder_cls"):
             # multi-step model runner does not have `_builder_cls`
@@ -417,6 +418,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         vllm_config = None
         if dist_backend == "ray":
             vllm_config = self.vllm_config
+        vllm_config = None
         if _COMPILE_MODEL:
             if _TP_SIZE > 1:
                 compiled_model = torch.compile(
@@ -640,12 +642,21 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             _LOCAL_RANK = 0
         else:
             _LOCAL_RANK = int(os.getenv("RBLN_DEVICES"))
-        if _LOCAL_RANK == 0:
+        # check if intermediate chunked prefill
+        if num_prefills > 0:
+            if len_token_indices == 1:
+                self.token_id = 0
+            else:
+                assert len_token_indices == 0
+                self.token_id = -1
+        else:
+            assert model_input.attn_metadata.num_decode_tokens == 1
+            self.token_id += model_input.attn_metadata.num_decode_tokens
+
+        if _LOCAL_RANK == 0 and self.token_id != -1:
             import json
             layers_selected_experts = []
-            seq_lens = model_input.seq_lens[0]
-            query_lens = model_input.query_lens[0]
-            token_id = seq_lens - query_lens
+            token_id = self.token_id
             request_id = model_input.request_ids[0]
             #fname = "moe_metric.json"
             fname = "moe_metric" + "_" + str(request_id) + "_" + str(token_id) + ".json"
@@ -662,13 +673,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     "token_id" : token_id,
                     "activation_experts" : layers_selected_experts,
                     }
-            moe_metric_entries = []
-            if os.path.isfile(fname) and token_id != 0:
-                with open(fname) as json_file:
-                    moe_metric_entries = json.load(json_file)
-            moe_metric_entries.append(moe_metric_entry)
             with open(fname, "w") as json_file:
-                json.dump(moe_metric_entries, json_file, indent=4)
+                json.dump(moe_metric_entry, json_file, indent=4)
         return [output]
 
     def _prepare_model_input_tensors(
