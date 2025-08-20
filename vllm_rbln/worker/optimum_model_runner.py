@@ -31,10 +31,9 @@ from vllm.worker.model_runner_base import ModelRunnerBase
 
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
-                                                     get_rbln_model_info,
-                                                     is_enc_dec_arch,
-                                                     is_pooling_arch)
+from vllm_rbln.model_executor.models.optimum import (
+    ModelInputForRBLN, RBLNOptimumForEncoderModel, get_rbln_model_info,
+    is_enc_dec_arch, is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -54,6 +53,20 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         if model_cls_name in ["RBLNT5EncoderModel"]:
             vllm_config.model_config.hf_config.__dict__[
                 "is_encoder_decoder"] = False
+        if model_cls_name in ["RBLNQwen3ForCausalLM"
+                              ] and vllm_config.model_config.task == "embed":
+            # NOTE The architecture of Qwen3-Embedding model in huggingface
+            # is `Qwen3ForCausalLM`. But it have to be mapped to `Qwen3Model`
+            # for optimum-rbln.
+            vllm_config.model_config.hf_config.__dict__["architectures"] = [
+                "Qwen3Model"
+            ]
+            # NOTE It is for cases
+            # where the pooling configuration files (modules.json, ...)
+            # do not exist in the compiled Qwen3 embedding model directory.
+            if vllm_config.model_config.pooler_config.pooling_type is None:
+                vllm_config.model_config.pooler_config.pooling_type = "LAST"
+                vllm_config.model_config.pooler_config.normalize = True
 
         ModelRunnerBase.__init__(self, vllm_config)
         model_config = self.model_config
@@ -72,8 +85,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         self.mm_registry.init_mm_limits_per_prompt(self.model_config)
 
     def load_model(self) -> None:
-        self.model = get_optimum_model(model_config=self.model_config,
-                                       scheduler_config=self.scheduler_config)
+        self.model = get_optimum_model(vllm_config=self.vllm_config)
 
     def get_model(self):
         return self.model
@@ -147,13 +159,11 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                                pad=0,
                                                dtype=torch.long,
                                                device=self.device)
-        padding = self.model.padding_value
-
         block_tables = make_tensor_with_pad(
             block_tables,
             max_len=self.model_config.max_model_len //
             self.cache_config.block_size,
-            pad=padding,
+            pad=-1,
             dtype=torch.int32,
             device=self.device,
         ).to(torch.int16) if len(block_tables) > 0 else None
@@ -221,12 +231,11 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                                dtype=torch.long,
                                                device=self.device)
 
-        padding = self.model.padding_value
         block_tables = make_tensor_with_pad(
             block_tables,
             max_len=self.model_config.max_model_len //
             self.cache_config.block_size,
-            pad=padding,
+            pad=-1,
             dtype=torch.int32,
             device=self.device,
         ).to(torch.int16) if len(block_tables) > 0 else None
@@ -317,7 +326,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     ) -> Optional[SamplerOutput]:
 
         hidden_states = self.model(model_input=model_input)
-        if is_pooling_arch(self.model_config.hf_config):
+        if isinstance(self.model, RBLNOptimumForEncoderModel):
             return [
                 self.model.pool(hidden_states, model_input.pooling_metadata)
             ]

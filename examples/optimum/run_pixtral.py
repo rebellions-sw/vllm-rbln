@@ -21,21 +21,10 @@ from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
 def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild",
+    dataset = load_dataset("HuggingFaceM4/ChartQA",
                            split="train").shuffle(seed=42)
     processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
     messages = [[
-        {
-            "role":
-            "system",
-            "content": [{
-                "type":
-                "text",
-                "text":
-                "You are a helpful assistant."
-                "Answer the each question based on the image.",
-            }],
-        },
         {
             "role":
             "user",
@@ -45,25 +34,26 @@ def generate_prompts(batch_size: int, model_id: str):
                 },
                 {
                     "type": "text",
-                    "text": dataset[i]["question"]
+                    "text": dataset[i]["query"],
                 },
             ],
         },
     ] for i in range(batch_size)]
     images = [[dataset[i]["image"]] for i in range(batch_size)]
-
     texts = processor.apply_chat_template(
         messages,
         add_generation_prompt=True,
         tokenize=False,
     )
 
-    return [{
+    inputs = [{
         "prompt": text,
         "multi_modal_data": {
             "image": image
         }
     } for text, image in zip(texts, images)]
+    labels = [dataset[i]["label"] for i in range(batch_size)]
+    return inputs, labels
 
 
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
@@ -73,7 +63,7 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
                        ignore_eos=False,
                        skip_special_tokens=True,
                        stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=200),
+                       max_tokens=500),
         str(request_id),
     )
 
@@ -99,7 +89,7 @@ async def main(
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    inputs = generate_prompts(num_input_prompt, model_id)
+    inputs, labels = generate_prompts(num_input_prompt, model_id)
 
     futures = []
     for request_id, request in enumerate(inputs):
@@ -108,31 +98,34 @@ async def main(
                 generate(engine, tokenizer, request_id, request)))
 
     results = await asyncio.gather(*futures)
-
-    for i, result in enumerate(results):
+    for i, (result, label) in enumerate(zip(results, labels)):
+        label_str = str(label)
         output = result.outputs[0].text
-        print(
-            f"===================== Output {i} ==============================")
+
+        print("=" * 80)
+        print(f"[{i}] Label:")
+        print(f"{label_str}\n")
+        print(f"[{i}] Model Output:")
         print(output)
-        print(
-            "===============================================================\n"
-        )
+        print("=" * 80 + "\n")
 
 
 def entry_point(
     batch_size: int = 4,
-    max_seq_len: int = 32768,
+    max_seq_len: int = 131072,
     kvcache_partition_len: int = 16384,
-    num_input_prompt: int = 10,
-    model_id: str = "/gemma3-4b-conditional-b4-flash",
+    num_input_prompt: int = 4,
+    model_id: str = "/pixtral-12b-b4",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
-        main(batch_size=batch_size,
-             max_seq_len=max_seq_len,
-             kvcache_partition_len=kvcache_partition_len,
-             num_input_prompt=num_input_prompt,
-             model_id=model_id))
+        main(
+            batch_size=batch_size,
+            max_seq_len=max_seq_len,
+            kvcache_partition_len=kvcache_partition_len,
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        ))
 
 
 if __name__ == "__main__":

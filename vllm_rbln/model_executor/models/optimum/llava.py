@@ -17,8 +17,10 @@ import torch
 import vllm.envs as env
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.llava_next import (LlavaNextImageInputs,
-                                                   LlavaNextImagePixelInputs)
+from vllm.model_executor.models.llava import (LlavaImageEmbeddingInputs,
+                                              LlavaImageInputs,
+                                              LlavaImagePixelInputs,
+                                              PixtralHFImagePixelInputs)
 from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN, version_error
@@ -27,8 +29,8 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
-                                                   RBLNOptimumDecoderMixin):
+class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
+                                               RBLNOptimumDecoderMixin):
 
     def __init__(
         self,
@@ -45,25 +47,6 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             decoder_batch_sizes,
         )
 
-    def merge_multimodal_embeddings(
-        self,
-        input_ids: torch.Tensor,
-        inputs_embeds: torch.Tensor,
-        multimodal_embeddings: torch.Tensor,
-        placeholder_token_id: int,
-    ) -> torch.Tensor:
-        mask = input_ids == placeholder_token_id
-        num_expected_tokens = mask.sum().item()
-
-        if multimodal_embeddings.shape[0] != num_expected_tokens:
-            raise ValueError(
-                f"Attempted to assign {inputs_embeds[mask].shape}"
-                f" = {multimodal_embeddings.shape} "
-                f"multimodal tokens to {num_expected_tokens} placeholders")
-
-        inputs_embeds[mask] = multimodal_embeddings
-        return inputs_embeds
-
     def _forward(
         self,
         is_prefill: bool,
@@ -78,28 +61,13 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                               torch.Tensor] = None,  # vllm keyword argument
         **kwargs,
     ):
-        if inputs_embeds is not None:
-            raise NotImplementedError(
-                "Specifying inputs_embeds is not supported.")
-
         if is_prefill:
-            # Get text_embeds
-            inputs_embeds = self.model.text_embedding(input_ids)
-
-            # If any images in the prompt, get image_embeds and merge with text
-            if pixel_values is not None and input_ids.shape[
-                    1] != 1 and pixel_values.size(0) > 0:
-                image_features, _ = self.model.image_embedding(
-                    image_sizes, pixel_values, vision_feature_layer,
-                    vision_feature_select_strategy)
-
-                inputs_embeds = self.merge_multimodal_embeddings(
-                    input_ids, inputs_embeds, image_features,
-                    self.model.config.image_token_index)
-        else:
-            inputs_embeds = self.model.text_embedding(input_ids=input_ids)
-
-        if is_prefill:
+            inputs_embeds = self.model._preprocess_prefill(
+                input_ids=input_ids,
+                inputs_embeds=inputs_embeds,
+                pixel_values=pixel_values,
+                image_sizes=image_sizes,
+            )
             if self.model.language_model.prefill_decoder is None:
                 raise version_error
 
@@ -113,7 +81,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 raise version_error
 
             logits = self.model.language_model.decoder(
-                inputs_embeds=inputs_embeds,
+                input_ids=input_ids,
                 cache_position=cache_position,
                 block_tables=block_tables,
             ).logits
@@ -132,14 +100,17 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         request_nums = input_ids.shape[0]
-
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
                 **model_input.multi_modal_kwargs)
             if image_input is not None:
-                assert image_input["type"] == "pixel_values"
-                pixel_values = image_input["pixel_values"]
-                image_sizes = image_input["image_sizes"]
+                if image_input["type"] == "pixel_values":
+                    pixel_values = image_input["pixel_values"]
+                    image_sizes = None
+                elif image_input["type"] == "pixel_values_pixtral":
+                    pixel_values = image_input["pixel_values"]
+                    image_sizes = torch.tensor(
+                        pixel_values.shape[-2:]).unsqueeze(0)
         else:
             pixel_values = None
             image_sizes = None
@@ -172,10 +143,9 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         return logits
 
     def _parse_and_validate_image_input(
-            self, **kwargs: Any) -> Optional[LlavaNextImageInputs]:
-        pixel_values = kwargs.get("pixel_values")
-        image_sizes = kwargs.get("image_sizes")
-        image_embeds = kwargs.get("image_embeds")
+            self, **kwargs: Any) -> Optional[LlavaImageInputs]:
+        pixel_values = kwargs.pop("pixel_values", None)
+        image_embeds = kwargs.pop("image_embeds", None)
 
         if pixel_values is None and image_embeds is None:
             return None
@@ -185,22 +155,29 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
-            if not isinstance(image_sizes, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of image sizes. "
-                                 f"Got type: {type(image_sizes)}")
+            # Pixtral
+            if hasattr(self.model.rbln_config.vision_tower, "max_image_size"):
+                return PixtralHFImagePixelInputs(
+                    type="pixel_values_pixtral",
+                    pixel_values=flatten_bn(pixel_values),
+                )
 
-            return LlavaNextImagePixelInputs(
+            return LlavaImagePixelInputs(
                 type="pixel_values",
-                pixel_values=flatten_bn(pixel_values),
-                image_sizes=flatten_bn(image_sizes),
+                pixel_values=flatten_bn(pixel_values, concat=True),
             )
 
         if image_embeds is not None:
-            if not isinstance(image_embeds, torch.Tensor):
-                raise ValueError("Incorrect type of image embeds. "
+            if not isinstance(image_embeds, (torch.Tensor, list)):
+                raise ValueError("Incorrect type of image embeddings. "
                                  f"Got type: {type(image_embeds)}")
 
-            raise NotImplementedError(
-                "Image embeds are not supported in this version for RBLN")
+            if self.config.vision_config.model_type == "pixtral":
+                raise ValueError("Pixtral-HF does not support image_embeds.")
+
+            return LlavaImageEmbeddingInputs(
+                type="image_embeds",
+                data=flatten_bn(image_embeds, concat=True),
+            )
 
         raise AssertionError("This line should be unreachable.")

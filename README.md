@@ -3,7 +3,7 @@
 <picture>
   <source srcset="assets/vllm-rbln-white.png" media="(prefers-color-scheme: dark)">
   <source srcset="assets/vllm-rbln-black.png" media="(prefers-color-scheme: light)">
-  <img src="assets/vllm-rbln-black.png" alt="main-logo" width=75%>
+  <img src="assets/vllm-rbln-black.png" alt="main-logo" width=90%>
 </picture>
 
 [![PyPI version](https://badge.fury.io/py/vllm-rbln.svg)](https://badge.fury.io/py/vllm-rbln)

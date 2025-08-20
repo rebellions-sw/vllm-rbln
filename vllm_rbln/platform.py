@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Optional
 import torch
 
 if TYPE_CHECKING:
-    from vllm.config import VllmConfig
+    from vllm.config import ModelConfig, VllmConfig
 else:
     VllmConfig = None
 import os
@@ -25,6 +25,7 @@ from pathlib import Path
 
 import rebel
 from torch._dynamo import register_backend
+from vllm import envs
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
@@ -81,6 +82,10 @@ class RblnPlatform(Platform):
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
 
+    # torch.compile() is currently disabled.
+    # TODO: Replace with dynamic check via is_torch_compile_supported().
+    is_torch_compile: bool = False
+
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
         return rebel.get_npu_name(device_id)
@@ -129,10 +134,26 @@ class RblnPlatform(Platform):
             raise NotImplementedError(
                 "Multi-step execution is not supported for RBLN")
 
-        # torch.compile() is currently disabled.
-        # TODO: Replace with dynamic check via is_torch_compile_supported().
-        is_torch_compile = False
         model_config = vllm_config.model_config
+        task = model_config.task
+        supported_tasks = set(model_config.supported_tasks)
+        pooling_tasks = {"embed", "classify", "reward", "score"}
+
+        if task == "auto":
+            is_pooling = bool(pooling_tasks & supported_tasks)
+            is_generate = "generate" in supported_tasks
+        else:
+            is_pooling = task in pooling_tasks
+            is_generate = task == "generate"
+
+        if is_pooling and envs.VLLM_USE_V1:
+            raise ValueError("Pooling models are only supported on v0.")
+
+        if is_generate and cls.supports_v1(
+                model_config
+        ) and not envs.VLLM_USE_V1 and not model_config.is_encoder_decoder:
+            logger.warning("V0 support for decoder models is deprecated.")
+
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
             logger.warning("bfloat16 is not supported on RBLN.")
@@ -143,15 +164,26 @@ class RblnPlatform(Platform):
         logger.info("RBLN model_config.dtype = %s", model_config.dtype)
 
         parallel_config = vllm_config.parallel_config
-        if parallel_config.worker_cls == "auto":
-            parallel_config.worker_cls = (
-                "vllm_rbln.worker.worker.RBLNWorker" if is_torch_compile else
-                "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker")
-
         scheduler_config = vllm_config.scheduler_config
-        scheduler_config.scheduler_cls = (
-            "vllm_rbln.core.scheduler.RBLNScheduler" if is_torch_compile else
-            "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler")
+        if cls.is_torch_compile:
+            if parallel_config.worker_cls == "auto":
+                parallel_config.worker_cls = \
+                    "vllm_rbln.worker.worker.RBLNWorker"
+            scheduler_config.scheduler_cls = \
+                "vllm_rbln.core.scheduler.RBLNScheduler"
+        else:
+            if envs.VLLM_USE_V1:
+                if parallel_config.worker_cls == "auto":
+                    parallel_config.worker_cls = \
+                        "vllm_rbln.v1.worker.optimum_worker.RBLNOptimumWorker"
+                scheduler_config.scheduler_cls = \
+                        "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler"
+            else:
+                if parallel_config.worker_cls == "auto":
+                    parallel_config.worker_cls = \
+                        "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
+                scheduler_config.scheduler_cls = \
+                    "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -170,6 +202,7 @@ class RblnPlatform(Platform):
         if cache_config:
             assert vllm_config.cache_config.block_size is not None, (
                 "block_size must be configured for RBLN backend")
+            cache_config.enable_prefix_caching = False
 
     @classmethod
     def get_attn_backend_cls(
@@ -188,3 +221,7 @@ class RblnPlatform(Platform):
         logger.info("Using RBLN Attention Backend: %s", attn_backend_cls)
 
         return attn_backend_cls
+
+    @classmethod
+    def supports_v1(cls, model_config: "ModelConfig") -> bool:
+        return not cls.is_torch_compile

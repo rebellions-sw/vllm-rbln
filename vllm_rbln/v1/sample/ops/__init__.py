@@ -11,11 +11,5 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import torch.nn as nn
-from vllm.config import VllmConfig
 
-from vllm_rbln.model_executor.models.optimum import load_model
-
-
-def get_optimum_model(vllm_config: VllmConfig, ) -> nn.Module:
-    return load_model(vllm_config)
+import vllm_rbln.v1.sample.ops.penalties  # noqa

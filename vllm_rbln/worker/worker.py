@@ -17,7 +17,6 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed
-import vllm.envs as envs
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, VllmConfig)
@@ -36,12 +35,12 @@ except ImportError:
     from vllm.worker.worker_base import (
         LoraNotSupportedWorkerBase as LoRANotSupportedWorkerBase, )
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.worker.model_runner import RBLNModelRunner
+from vllm_rbln.worker.utils import get_maximum_num_blocks
 
 logger = init_logger(__name__)
-
-_TP_SIZE = int(os.getenv("TP_SIZE", 1))
 
 
 class RBLNCacheEngine:
@@ -185,11 +184,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.rank = rank
         self.parallel_config.rank = rank
 
-        if self.parallel_config.distributed_executor_backend == "mp":
-            self.set_device()
-        else:
+        if self.parallel_config.distributed_executor_backend == "ray":
             logger.info(
                 "Running on Ray backend. Skipping device env var setup.")
+        else:
+            self.set_device()
 
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
@@ -242,7 +241,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         world_size = self.parallel_config.world_size
         env_var = current_platform.device_control_env_var
 
-        total_device_count = world_size * _TP_SIZE
+        total_device_count = world_size * envs.RBLN_TP_SIZE
 
         if env_var not in os.environ:
             device_ids = [str(i) for i in range(total_device_count)]
@@ -253,8 +252,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             raise RuntimeError(f"{env_var} has {len(device_ids)} devices"
                                " but required {total_device_count}")
 
-        start_idx = self.local_rank * _TP_SIZE
-        end_idx = start_idx + _TP_SIZE
+        start_idx = self.local_rank * envs.RBLN_TP_SIZE
+        end_idx = start_idx + envs.RBLN_TP_SIZE
         selected_devices = ",".join(device_ids[start_idx:end_idx])
 
         os.environ[env_var] = selected_devices
@@ -289,9 +288,24 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # sequences that can be processed in a single batch. This is equivalent
         # to schedule without PagedAttention.
 
-        # NOTE(jiwoo.park):
-        # We reserve one shared cache block for padded batch sequences.
-        num_gpu_blocks = self.scheduler_config.max_num_seqs + 1
+        block_size = self.cache_config.block_size
+
+        # This function comes from optimum-rbln.
+        # We must keep it updated as optimum is upgraded.
+        max_num_blocks = get_maximum_num_blocks(
+            model_config=self.model_config,
+            parallel_config=self.parallel_config,
+            kvcache_block_size=block_size,
+            # quantization : 4 (This is an ad-hoc value. Need to fix it)
+            nbits_per_param=16 if not self.model_config.quantization else 4,
+            n_model_params=sum(p.numel()
+                               for p in self.model_runner.model.parameters()),
+            # 1 : prefill
+            num_runtimes=1 + self.scheduler_config.max_num_seqs)
+        num_gpu_blocks = (max_num_blocks - 1)
+
+        if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
+            num_gpu_blocks = int(npu_num_blocks) - 1
 
         # Swap not yet supported with RBLN backend.
         num_cpu_blocks = 0
@@ -304,7 +318,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         # Different values are not tested.
         assert num_cpu_blocks == 0
-        assert num_gpu_blocks == self.scheduler_config.max_num_seqs + 1
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
