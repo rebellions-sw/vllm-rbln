@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 from vllm.config import VllmConfig
@@ -89,7 +89,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
-        use_lora = getattr(self.model.model.rbln_config, "use_lora", None)
+        use_lora = getattr(self.model.rbln_model_config, "use_lora", None)
         if self.enable_lora and not use_lora:
             raise RuntimeError(
                 "The compiled model is for LoRA."
@@ -396,3 +396,23 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         if not is_prefill and num_reqs < max_num_reqs:
             adapter_ids += [0] * (max_num_reqs - num_reqs)
         self.model.model.set_lora_int_ids(adapter_ids)
+
+    def add_lora(self, lora_request: LoRARequest) -> bool:
+        raise RuntimeError("It is not required in vLLM RBLN.")
+
+    def remove_lora(self, lora_id: int) -> bool:
+        raise RuntimeError("It is not required in vLLM RBLN.")
+
+    def pin_lora(self, lora_id: int) -> bool:
+        raise RuntimeError("It is not required in vLLM RBLN.")
+
+    def list_loras(self) -> Set[int]:
+        rbln_cfg = getattr(self.model, "rbln_model_config", None)
+        lora_cfg = getattr(rbln_cfg, "lora_config", None)
+        if lora_cfg is None:
+            raise ValueError("The model is not compiled with LoRA.")
+
+        lora_adapters = getattr(self.model.rbln_model_config.lora_config,
+                                "adapters", [])
+        adapter_ids = {a.lora_int_id for a in lora_adapters}
+        return adapter_ids
