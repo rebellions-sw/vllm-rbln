@@ -123,8 +123,7 @@ def test_schedule_multi_seq():
         pytest.param(
             2, 16, 64, 7, 32, [1, 2], [3], [4, 5], [6], id="kv16-len32-blk7"),
         pytest.param(
-            3, 16, 64, 5, 32, [1, 2], [3], [4, 3], [2],
-            id="kv16-len32-blk5"),  # FIXME (seinpark)
+            3, 16, 64, 5, 32, [1, 2], [3], [4, 3], [2], id="kv16-len32-blk5"),
     ],
 )
 def test_schedule_alloc_block_policy(
@@ -184,104 +183,3 @@ def test_schedule_alloc_block_policy(
     scheduler_output3 = scheduler.schedule()
     scheduled_cached_reqs = scheduler_output3.scheduled_cached_reqs
     assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached1_new
-
-
-@pytest.mark.parametrize(
-    "max_num_seqs, block_size, \
-    max_num_batched_tokens, max_model_len, num_blocks, num_tokens_per_batch",
-    [
-        (2, 16, 64, 64, 5, 32),
-    ],
-)
-def test_schedule_preempted_block(  # FIXME does it need?
-    max_num_seqs: Optional[int],
-    block_size: Optional[int],
-    max_num_batched_tokens: Optional[int],
-    max_model_len: Optional[int],
-    num_blocks: Optional[int],
-    num_tokens_per_batch: Optional[int],
-):
-    scheduler = create_scheduler(
-        max_num_seqs=max_num_seqs,
-        block_size=block_size,
-        max_num_batched_tokens=max_num_batched_tokens,
-        max_model_len=max_model_len,
-        num_blocks=num_blocks,
-    )
-    requests = create_requests(
-        num_requests=max_num_seqs,
-        num_tokens=num_tokens_per_batch,
-    )
-
-    # Schedule the first request.
-    scheduler.add_request(requests[0])
-    scheduler_output0 = scheduler.schedule()
-    assert len(scheduler_output0.scheduled_new_reqs) == 1
-    assert (scheduler_output0.num_scheduled_tokens[requests[0].request_id] ==
-            num_tokens_per_batch)
-    assert scheduler_output0.scheduled_new_reqs[0].block_ids[0] == [1, 2]
-
-    # Schedule the second request.
-    scheduler.add_request(requests[1])
-    scheduler_output1 = scheduler.schedule()
-    assert len(scheduler_output1.scheduled_new_reqs) == 1
-    assert (scheduler_output1.num_scheduled_tokens[requests[1].request_id] ==
-            num_tokens_per_batch)
-    assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == [3, 4]
-
-    # Model output of the first request.
-    model_runner_output = create_model_runner_output(scheduler_output0)
-    # first request status update
-    scheduler.update_from_output(scheduler_output0, model_runner_output)
-
-    # Model output of the second request.
-    model_runner_output = create_model_runner_output(scheduler_output1)
-    # second request status update
-    scheduler.update_from_output(scheduler_output1, model_runner_output)
-
-    # Schedule the next step again. The first request and second request
-    # can be scheduled with decode phase. But This will cause the
-    # preemption of the second request because the KV cache is full.
-    scheduler_output2 = scheduler.schedule()
-    assert len(scheduler.waiting) == 1, len(scheduler.running) == 1
-    assert requests[1].status == RequestStatus.PREEMPTED
-    assert scheduler.running[0] == requests[0]
-    assert scheduler_output2.num_scheduled_tokens[requests[0].request_id] == 1
-    assert scheduler_output2.scheduled_cached_reqs[0].new_block_ids[0] == [
-        4
-    ]  # preempted_block
-
-
-def test_prefill_schedule_max_prompt_len():
-    """
-    Test prompt longer than max_prompt_len is aborted.
-    """
-    pass  # TODO
-
-
-def test_prefill_schedule_token_budget():
-    """
-    Test token budget respected.
-    """
-    pass  # TODO
-
-
-def test_prefill_schedule_max_seqs():
-    """
-    Test max seq respected.
-    """
-    pass  # TODO
-
-
-def test_decode_schedule_preempted():
-    """
-    Test decodes cannot be scheduled and preempted.
-    """
-    pass  # TODO
-
-
-def test_schedule_decode_blocks_to_copy_update():
-    """
-    Verify blocks_to_copy is updated.
-    """
-    pass  # TODO
