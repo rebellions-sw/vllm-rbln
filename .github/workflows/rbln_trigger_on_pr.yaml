@@ -26,6 +26,11 @@ jobs:
             echo "No [skip ci] found, continuing with CI"
           fi
 
+  check-code-quality:
+    needs: check-skip-ci
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    uses: ./.github/workflows/pre-commit.yml
+
   vllm-rbln-pytest:
     needs: [check-skip-ci]
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
