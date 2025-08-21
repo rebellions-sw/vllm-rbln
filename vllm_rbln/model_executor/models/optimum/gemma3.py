@@ -136,11 +136,9 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 input_ids=input_ids,
             )
 
-        kwargs = self.preprocess_for_decoder(is_prompt,
-                                             block_tables,
-                                             input_ids,
-                                             position_ids,
-                                             kv_adapter=self.kv_block_adapter)
+        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
+                                             self.kv_block_adapter, input_ids,
+                                             position_ids)
 
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.

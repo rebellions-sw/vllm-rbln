@@ -144,11 +144,9 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             pixel_values = None
             image_sizes = None
 
-        kwargs = self.preprocess_for_decoder(is_prompt,
-                                             block_tables,
-                                             input_ids,
-                                             cache_position,
-                                             kv_adapter=self.kv_block_adapter)
+        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
+                                             self.kv_block_adapter, input_ids,
+                                             cache_position)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")

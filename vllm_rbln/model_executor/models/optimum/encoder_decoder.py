@@ -125,10 +125,10 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
 
         kwargs = self.preprocess_for_decoder(is_prompt,
                                              block_tables,
+                                             self.kv_block_adapter,
                                              input_ids,
                                              cache_position,
-                                             input_block_ids=valid_block_ids,
-                                             kv_adapter=self.kv_block_adapter)
+                                             input_block_ids=valid_block_ids)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")

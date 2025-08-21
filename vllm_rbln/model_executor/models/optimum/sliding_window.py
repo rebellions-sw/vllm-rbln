@@ -72,12 +72,9 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             finished_requests_ids,
         )
 
-        kwargs = self.preprocess_for_decoder(
-            is_prompt,
-            block_tables,
-            input_ids,
-            cache_position,
-        )
+        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
+                                             self.kv_block_adapter, input_ids,
+                                             cache_position)
 
         padded_batch_size = kwargs.pop("padded_batch_size",
                                        self.decoder_batch_size)

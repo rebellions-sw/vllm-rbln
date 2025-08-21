@@ -247,10 +247,10 @@ class RBLNOptimumDecoderMixin:
         self,
         is_prompt: bool,
         block_tables: torch.Tensor,
+        kv_adapter: KVCacheBlockAdapter,
         input_ids: Optional[torch.Tensor] = None,
         cache_position: Optional[torch.Tensor] = None,
         input_block_ids: Optional[list[int]] = None,
-        kv_adapter: Optional[KVCacheBlockAdapter] = None,
     ):
         padded_batch_size = None
         # 1. Set the type
