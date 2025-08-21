@@ -89,14 +89,18 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
-        use_lora = getattr(self.model.rbln_model_config, "use_lora", None)
-        if self.enable_lora and not use_lora:
+        self.use_optimum_lora = getattr(self.model.rbln_model_config, "use_lora", None)
+        if self.enable_lora and not self.use_optimum_lora:
             raise RuntimeError(
                 "The compiled model is for LoRA."
                 "Please compile the model with `rbln_lora_config`")
-        if not self.enable_lora and use_lora:
+        if not self.enable_lora and self.use_optimum_lora:
             raise RuntimeError("The model is compiled for LoRA."
                                "Please set `enable_lora=True` in vLLM.")
+
+        if self.use_optimum_lora:
+            self.valid_lora_ids = list(
+                range(len(self.model.rbln_model_config.lora_config.adapters)))
 
     def get_model(self):
         return self.model
@@ -121,6 +125,15 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             seq_ids = list(seq_group_metadata.seq_data.keys())
             assert len(seq_ids) == 1
             seq_id = seq_ids[0]
+
+            # Check lora_int_id is valid
+            if seq_group_metadata.lora_request and self.use_optimum_lora:
+                lora_int_id = seq_group_metadata.lora_request.lora_int_id
+                if lora_int_id >= len(self.valid_lora_ids):
+                    raise RuntimeError(
+                        f"Invalid `lora_int_id`: {lora_int_id}. "
+                        f"Valid `lora_int_ids` are {self.valid_lora_ids} "
+                        "(must be consistent with the compiled model).")
 
             seq_data = (seq_group_metadata.encoder_seq_data
                         if is_enc_dec_arch(self.model_config.hf_config) else

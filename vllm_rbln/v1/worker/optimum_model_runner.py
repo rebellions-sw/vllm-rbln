@@ -156,14 +156,18 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
-        use_lora = getattr(self.model.model.rbln_config, "use_lora", None)
-        if self.lora_config and not use_lora:
+        self.use_optimum_lora = getattr(self.model.model.rbln_config, "use_lora", None)
+        if self.lora_config and not self.use_optimum_lora:
             raise RuntimeError(
                 "The compiled model is for LoRA."
                 "Please compile the model with `rbln_lora_config`")
-        if not self.lora_config and use_lora:
+        if not self.lora_config and self.use_optimum_lora:
             raise RuntimeError("The model is compiled for LoRA."
                                "Please set `enable_lora=True` in vLLM.")
+
+        if self.use_optimum_lora:
+            self.valid_lora_ids = list(
+                range(len(self.model.rbln_model_config.lora_config.adapters)))
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -524,6 +528,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
+
+            # Check lora_int_id is valid
+            if new_req_data.lora_request and self.use_optimum_lora:
+                lora_int_id = new_req_data.lora_request.lora_int_id
+                if lora_int_id >= len(self.valid_lora_ids):
+                    raise RuntimeError(
+                        f"Invalid `lora_int_id`: {lora_int_id}. "
+                        f"Valid `lora_int_ids` are {self.valid_lora_ids} "
+                        "(must be consistent with the compiled model).")
+
             self.requests[req_id] = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
