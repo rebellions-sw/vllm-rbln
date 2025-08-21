@@ -26,19 +26,44 @@ jobs:
             echo "No [skip ci] found, continuing with CI"
           fi
 
+  check-team-member:
+    needs: check-skip-ci
+    runs-on: runner-vllm-ci
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    outputs:
+      is_team_member: ${{ steps.check_member.outputs.IS_TEAM_MEMBER }}
+    steps:
+      - name: Fetch team members
+        id: fetch_team
+        run: |
+          response=$(curl -s -H "Authorization: Bearer ${{ secrets.GIT_PAT }}" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"query { organization(login: \"rebellions-sw\") { team(slug: \"rebel-sw-team\") { members(first: 100) { nodes { login } } } } }"}' \
+            https://api.github.com/graphql)
+          echo "$response" | jq -r '.data.organization.team.members.nodes[].login' > team_members.txt
+      - name: Check if PR author is a team member
+        id: check_member
+        run: |
+          pr_author=${{ github.event.pull_request.user.login }}
+          if grep -qx "$pr_author" team_members.txt; then
+            echo "IS_TEAM_MEMBER=true" >> $GITHUB_OUTPUT
+          else
+            echo "IS_TEAM_MEMBER=false" >> $GITHUB_OUTPUT
+          fi
+
   check-code-quality:
     needs: check-skip-ci
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
     uses: ./.github/workflows/pre-commit.yml
 
   vllm-rbln-pytest:
-    needs: [check-skip-ci, check-code-quality]
-    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    needs: [check-skip-ci, check-team-member, check-code-quality]
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
     uses: ./.github/workflows/rbln_vllm-rbln_pytest.yaml
     secrets: inherit
 
   vllm-rbln-optimum-ci:
-    needs: [check-skip-ci, check-code-quality, vllm-rbln-pytest]
-    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    needs: [check-skip-ci, check-team-member, check-code-quality, vllm-rbln-pytest]
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
     uses: ./.github/workflows/rbln_optimum_ci.yaml
     secrets: inherit
