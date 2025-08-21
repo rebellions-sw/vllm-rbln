@@ -76,7 +76,7 @@ def get_vllm_config(async_scheduling=False):
     )
     model_config = ModelConfig(
         model="facebook/opt-125m",
-        dtype=torch.float16,
+        dtype=torch.float,
         seed=42,
     )
     cache_config = CacheConfig(

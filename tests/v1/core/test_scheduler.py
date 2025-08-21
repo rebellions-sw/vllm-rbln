@@ -63,7 +63,7 @@ def test_schedule_single_seq():
     scheduler = create_scheduler(max_num_seqs=1)
     requests = create_requests(num_requests=8, num_tokens=16)
 
-    # Add to Waiting Queue
+    # Add requests to the waiting queue
     for request in requests:
         scheduler.add_request(request)
 
@@ -90,7 +90,7 @@ def test_schedule_multi_seq():
     scheduler = create_scheduler(max_num_seqs=2)
     requests = create_requests(num_requests=2)
 
-    # Add to Waiting Queue
+    # Add requests to the waiting queue
     for request in requests:
         scheduler.add_request(request)
 
