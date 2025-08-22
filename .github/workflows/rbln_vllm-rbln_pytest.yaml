@@ -52,16 +52,6 @@ env:
   HF_AUTH_TOKEN: ${{ secrets.HF_AUTH_TOKEN }}
 
 jobs:
-  get-compiler-version:
-    if: ${{ !inputs.rebel_compiler_version }}
-    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
-    secrets: inherit
-
-  get-optimum-version:
-    if: ${{ !inputs.optimum_rbln_version }}
-    uses: ./.github/workflows/rbln_utils_get_optimum_version_ci.yaml
-    secrets: inherit
-
   build-vllm-rbln:
     name: Build vllm-rbln wheel
     runs-on: runner-vllm-ci
@@ -98,9 +88,10 @@ jobs:
           retention-days: 7
 
   pytest:
+    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type }})
     runs-on: runner-vllm-ci
-    needs: [get-compiler-version, get-optimum-version, build-vllm-rbln]
+    needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
@@ -164,7 +155,7 @@ jobs:
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
-          VERSION=${{ inputs.optimum_rbln_version || needs.get-optimum-version.outputs.OPTIMUM_RBLN_VERSION }}
+          VERSION=${{ inputs.optimum_rbln_version }}
           pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
           echo "optimum-rbln $VERSION"
 

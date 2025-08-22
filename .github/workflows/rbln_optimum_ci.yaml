@@ -29,19 +29,9 @@ env:
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
-  get-compiler-version:
-    if: ${{ !inputs.rebel_compiler_version }}
-    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
-    secrets: inherit
-
-  get-optimum-version:
-    if: ${{ !inputs.optimum_rbln_version }}
-    uses: ./.github/workflows/rbln_utils_get_optimum_version_ci.yaml
-    secrets: inherit
-
   test_vllm_rbln:
+    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     runs-on: runner-vllm-ci
-    needs: [get-compiler-version, get-optimum-version]
     env:
       NUM_INPUT_PROMPT: 1
       RBLN_VERBOSE: 6
@@ -82,7 +72,7 @@ jobs:
       - name: Install local vllm-rbln package and dependencies
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
-          VERSION=${{ inputs.optimum_rbln_version || needs.get-optimum-version.outputs.OPTIMUM_RBLN_VERSION }}
+          VERSION=${{ inputs.optimum_rbln_version }}
           pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
           echo "optimum-rbln $VERSION"
 
