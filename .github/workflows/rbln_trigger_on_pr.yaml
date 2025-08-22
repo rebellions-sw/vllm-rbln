@@ -56,14 +56,32 @@ jobs:
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
     uses: ./.github/workflows/pre-commit.yml
 
-  vllm-rbln-pytest:
+  get-compiler-version:
     needs: [check-skip-ci, check-team-member, check-code-quality]
+    if: ${{ !inputs.rebel_compiler_version }}
+    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+    secrets: inherit
+
+  get-optimum-version:
+    needs: [check-skip-ci, check-team-member, check-code-quality]
+    if: ${{ !inputs.optimum_rbln_version }}
+    uses: ./.github/workflows/rbln_utils_get_optimum_version_ci.yaml
+    secrets: inherit
+
+  vllm-rbln-pytest:
+    needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version]
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
     uses: ./.github/workflows/rbln_vllm-rbln_pytest.yaml
     secrets: inherit
+    with:
+      rebel_compiler_version: ${{ needs.get-compiler-version.outputs.compiler_version }}
+      optimum_rbln_version: ${{ needs.get-optimum-version.outputs.optimum_version }}
 
   vllm-rbln-optimum-ci:
-    needs: [check-skip-ci, check-team-member, check-code-quality, vllm-rbln-pytest]
+    needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version, vllm-rbln-pytest]
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
     uses: ./.github/workflows/rbln_optimum_ci.yaml
     secrets: inherit
+    with:
+      rebel_compiler_version: ${{ needs.get-compiler-version.outputs.compiler_version }}
+      optimum_rbln_version: ${{ needs.get-optimum-version.outputs.optimum_version }}
