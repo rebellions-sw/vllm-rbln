@@ -97,11 +97,9 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
                     self.rope_deltas.pop(request_id)
             self.rope_deltas[cur_request_id] = rope_deltas.item()
 
-        kwargs = self.preprocess_for_decoder(is_prompt,
-                                             block_tables,
-                                             input_ids,
-                                             cache_position,
-                                             kv_adapter=self.kv_block_adapter)
+        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
+                                             self.kv_block_adapter, input_ids,
+                                             cache_position)
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
 
