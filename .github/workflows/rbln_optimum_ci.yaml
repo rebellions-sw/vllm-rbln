@@ -82,8 +82,9 @@ jobs:
       - name: Install local vllm-rbln package and dependencies
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ needs.get-optimum-version.outputs.optimum_version }}")
-          echo "optimum-rbln ${{ needs.get-optimum-version.outputs.optimum_version }}"
+          VERSION=${{ inputs.optimum_rbln_version || needs.get-optimum-version.outputs.OPTIMUM_RBLN_VERSION }}
+          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
+          echo "optimum-rbln $VERSION"
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
