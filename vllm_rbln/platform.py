@@ -164,7 +164,7 @@ class RblnPlatform(Platform):
         logger.info("RBLN model_config.dtype = %s", model_config.dtype)
 
         # Override the max_model_len with a custom value
-        if model_config.max_model_len < model_config.original_max_model_len:
+        if model_config.max_model_len != model_config.original_max_model_len:
             model_config.max_model_len = model_config.original_max_model_len
 
         parallel_config = vllm_config.parallel_config
