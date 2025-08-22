@@ -23,17 +23,22 @@ from unittest.mock import MagicMock, patch
 NUM_LORAS = 5
 BLOCK_SIZE = 16
 NUM_BLOCKS = 8
+BATCH_SIZE = 4
+MAX_LORA_RANK = 8
+MAX_MODEL_LEN = 128
+MODEL_PATH = "meta-llama/Llama-2-7b-hf"
+
 
 def get_vllm_config(async_scheduling=False):
     model_config = ModelConfig(
-        "meta-llama/Llama-2-7b-hf",
-        dtype=torch.float32,
+        MODEL_PATH,
+        dtype=torch.float,
         seed=42,
     )
     scheduler_config = SchedulerConfig(
-        max_num_seqs=10,
-        max_num_batched_tokens=128,
-        max_model_len=128,
+        max_num_seqs=BATCH_SIZE,
+        max_num_batched_tokens=MAX_MODEL_LEN,
+        max_model_len=MAX_MODEL_LEN,
         async_scheduling=async_scheduling,
     )
     cache_config = CacheConfig(
@@ -41,7 +46,7 @@ def get_vllm_config(async_scheduling=False):
         swap_space=0,
         cache_dtype="auto",
     )
-    lora_config = LoRAConfig(max_lora_rank=8,
+    lora_config = LoRAConfig(max_lora_rank=MAX_LORA_RANK,
                             max_cpu_loras=NUM_LORAS,
                             max_loras=NUM_LORAS)
     vllm_config = VllmConfig(
@@ -52,33 +57,6 @@ def get_vllm_config(async_scheduling=False):
     )
     return vllm_config
 
-# def test_list_lora():
-
-
-# def test_worker_apply_lora():
-#     # lora_requests = [
-#     #     LoRARequest(str(i + 1), i + 1, "/path/adapter" + str(i + 1))
-#     #     for i in range(NUM_LORAS)
-#     # ]
-#     # lora_mapping = LoRAMapping(is_prefill=is_prompt,
-#     #                             index_mapping=[],
-#     #                             prompt_mapping=[])
-
-#     worker_cls = V1Worker if envs.VLLM_USE_V1 else Worker
-#     worker = worker_cls(
-#         vllm_config=vllm_config,
-#         local_rank=0,
-#         rank=0,
-#     )
-
-#     worker.init_device()
-#     worker.load_model()
-
-#     # 1. No LoRA Request
-#     # 2. 1 LoRA Request
-#     # 3. Multiple LoRA Requests
-#     # 4. .
-
 def get_lora_requests():
     lora_requests = [
         LoRARequest(str(i + 1), i + 1, "/path/adapter" + str(i + 1))
@@ -87,7 +65,7 @@ def get_lora_requests():
     return lora_requests
 
 
-def requests_processing_time(llm,
+async def requests_processing_time(llm,
                                    lora_requests: list[LoRARequest]) -> float:
 
     sampling_params = SamplingParams(n=1,
@@ -125,13 +103,13 @@ def fake_load_model(self):
 async def test_add_lora():
     engine_args = AsyncEngineArgs(
         # FIXME patch is required
-        model="llama3.1-8b-ab-sec-b4",
+        model=MODEL_PATH,
         enable_lora=True,
         max_loras=NUM_LORAS,
-        max_lora_rank=8,
-        max_model_len=128,
-        max_num_batched_tokens=128,
-        max_num_seqs=2,
+        max_lora_rank=MAX_LORA_RANK,
+        max_model_len=MAX_MODEL_LEN,
+        max_num_batched_tokens=MAX_MODEL_LEN,
+        max_num_seqs=BATCH_SIZE,
         block_size=BLOCK_SIZE,
     )
 
