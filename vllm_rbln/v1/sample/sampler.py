@@ -80,7 +80,7 @@ class Sampler(VLLMSampler):
         cumsum_probs = torch.cumsum(sorted_probs, dim=-1)
         # Create mask for tokens to keep (cumulative probability <= top_p)
         top_p_threshold = sampling_metadata.top_p.unsqueeze(-1)
-        mask = cumsum_probs <= top_p_threshold
+        mask = cumsum_probs <= 1 - top_p_threshold
 
         # Always keep at least the first token
         mask[..., -1] = False
