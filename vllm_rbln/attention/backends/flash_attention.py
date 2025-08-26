@@ -177,16 +177,18 @@ def _attention_prefill_eager_mode(
     s = seq_idx[0][0]
     e = s + seq_len
     block = block_tables[0]
-    k_state = (
-        kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
-    )
-    v_state = (
-        kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
-    )
+    k_state = (kv_cache[0][block].unsqueeze(0).slice_scatter(k,
+                                                             dim=3,
+                                                             start=s,
+                                                             end=e))
+    v_state = (kv_cache[1][block].unsqueeze(0).slice_scatter(v,
+                                                             dim=3,
+                                                             start=s,
+                                                             end=e))
     attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-    causal_mask = torch.where(
-        mask[:, :, :, :, :partition] > 0, 0.0, -float("inf")
-    )
+    causal_mask = torch.where(mask[:, :, :, :, :partition] > 0,
+                              torch.tensor(0.0, dtype=torch.float16),
+                              torch.tensor(-float("inf"), dtype=torch.float16))
     attn_weights = attn_weights + causal_mask
     attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
     attn_output = torch.matmul(attn_weights, v_state)
@@ -210,16 +212,18 @@ def _attention_decode_eager_mode(
     s = seq_idx[0][0]
     e = s + seq_len
     block = block_tables.flatten()[0]
-    k_state = (
-        kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
-    )
-    v_state = (
-        kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
-    )
+    k_state = (kv_cache[0][block].unsqueeze(0).slice_scatter(k,
+                                                             dim=3,
+                                                             start=s,
+                                                             end=e))
+    v_state = (kv_cache[1][block].unsqueeze(0).slice_scatter(v,
+                                                             dim=3,
+                                                             start=s,
+                                                             end=e))
     attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-    causal_mask = torch.where(
-        mask[:, :, :, :, :partition] > 0, 0.0, -float("inf")
-    )
+    causal_mask = torch.where(mask[:, :, :, :, :partition] > 0,
+                              torch.tensor(0.0, dtype=torch.float16),
+                              torch.tensor(-float("inf"), dtype=torch.float16))
     attn_weights = attn_weights + causal_mask
     attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
     attn_output = torch.matmul(attn_weights, v_state)
@@ -307,6 +311,8 @@ class RBLNAttentionMetadataBuilder(
 
         self.partition_len = input_builder.block_size
         self.device = get_current_vllm_config().device_config.device
+        self.enforce_eager = (
+            get_current_vllm_config().model_config.enforce_eager)
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
@@ -367,12 +373,13 @@ class RBLNAttentionMetadataBuilder(
             prefill_chunk_size = (
                 self.chunked_prefill_size if self.chunked_prefill else 1 <<
                 (math.ceil(math.log2(input_data.seq_lens[0]))))
-            chunked_attention_mask = torch.zeros(1,
-                                                 1,
-                                                 1,
-                                                 prefill_chunk_size,
-                                                 max_seq_len,
-                                                 dtype=torch.float32)
+            chunked_attention_mask = torch.zeros(
+                1,
+                1,
+                1,
+                prefill_chunk_size,
+                max_seq_len,
+                dtype=torch.float16 if self.enforce_eager else torch.float32)
             causal_mask = 1 - torch.triu(torch.ones(1, 1, prefill_chunk_size,
                                                     prefill_chunk_size),
                                          diagonal=1)
@@ -382,12 +389,13 @@ class RBLNAttentionMetadataBuilder(
                                    prefill_chunk_size] = causal_mask
             attn_masks = chunked_attention_mask
         else:
-            decode_attention_mask = torch.zeros(batch_size,
-                                                1,
-                                                1,
-                                                1,
-                                                max_seq_len,
-                                                dtype=torch.float32)
+            decode_attention_mask = torch.zeros(
+                batch_size,
+                1,
+                1,
+                1,
+                max_seq_len,
+                dtype=torch.float16 if self.enforce_eager else torch.float32)
             for batch_index, batch_step in enumerate(steps):
                 decode_attention_mask[batch_index, :, :, :, :batch_step[0] +
                                       1] = 1
@@ -434,8 +442,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         use_irope: bool = False,
     ) -> None:
         self.enforce_eager = (
-            get_current_vllm_config().model_config.enforce_eager
-        )
+            get_current_vllm_config().model_config.enforce_eager)
         self.device = get_current_vllm_config().device_config.device
 
         self.num_heads = num_heads
@@ -597,8 +604,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                         attn_metadata.seq_lens_tensor.to(torch.int16),
                         attn_metadata.block_tables.to(torch.int16),
                         self.scale,
-                    )
-                )
+                    ))
         else:
             if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
                 attn_output = _attention_prefill_eager_mode(
@@ -625,8 +631,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                         attn_metadata.seq_lens_tensor.to(torch.int16),
                         attn_metadata.block_tables.to(torch.int16),
                         self.scale,
-                    )
-                )
+                    ))
 
         # 2. attention output reshape for attention backend return
         # attn_output = [batch,H*4,L,D] -> [batch,L,H*4,D] -> [batch,L,H*4*D]

@@ -420,32 +420,29 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 cast(RBLNModelRunner, weakref.proxy(self)))
 
     def compile_model(self, model):
-        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
-            return model
+        if envs.RBLN_TP_SIZE > 1:
+            compiled_model = torch.compile(
+                model,
+                backend="rbln",
+                options={
+                    "compile_context": self.compile_context,
+                    "cache_dir": "./rsd_cache_dir",
+                    "tensor_parallel_size": envs.RBLN_TP_SIZE,
+                },
+                dynamic=False,
+            )
         else:
-            if envs.RBLN_TP_SIZE > 1:
-                compiled_model = torch.compile(
-                    model,
-                    backend="rbln",
-                    options={
-                        "compile_context": self.compile_context,
-                        "cache_dir": "./rsd_cache_dir",
-                        "tensor_parallel_size": envs.RBLN_TP_SIZE,
-                    },
-                    dynamic=False,
-                )
-            else:
-                compiled_model = torch.compile(
-                    model,
-                    backend="rbln",
-                    options={
-                        "compile_context": self.compile_context,
-                        "cache_dir": "./cache_dir",
-                    },
-                    dynamic=False,
-                )
+            compiled_model = torch.compile(
+                model,
+                backend="rbln",
+                options={
+                    "compile_context": self.compile_context,
+                    "cache_dir": "./cache_dir",
+                },
+                dynamic=False,
+            )
 
-            return compiled_model
+        return compiled_model
 
     # LLM attention block
     def attention_block(self, decoder_layer, hidden_states, residual,
@@ -481,19 +478,23 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         logger.info("[RBLN] model_config.num_layers = %d",
                     self.model_config.get_num_layers(self.parallel_config))
 
-        # NOTE - refer to pytorch 2.5 release notes
-        # torch.compile regional compilation without recompilations
-        # To prevent nn.modules parameters to be model input, set false
-        # if this flag is set, nn.modules parameters are treated as model input
-        torch._dynamo.config.inline_inbuilt_nn_modules = False
-        # RBLN compile context to mark static address for kv cache tensor
-        # if tensor is set to have static address,
-        # similar to RBLN kv cache binding
-        from rebel.compile_context import CompileContext
+        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            self.model_executable = self.model
+        else:
+            # NOTE - refer to pytorch 2.5 release notes
+            # torch.compile regional compilation without recompilations
+            # To prevent nn.modules parameters to be model input, set false
+            # if this flag is set,
+            # nn.modules parameters are treated as model input
+            torch._dynamo.config.inline_inbuilt_nn_modules = False
+            # RBLN compile context to mark static address for kv cache tensor
+            # if tensor is set to have static address,
+            # similar to RBLN kv cache binding
+            from rebel.compile_context import CompileContext
 
-        self.compile_context = CompileContext(use_weight_sharing=True)
-        compiled_graph = self.compile_model(self.model)
-        self.model_executable = compiled_graph
+            self.compile_context = CompileContext(use_weight_sharing=True)
+            compiled_graph = self.compile_model(self.model)
+            self.model_executable = compiled_graph
 
     def get_model(self) -> nn.Module:
         return self.model
