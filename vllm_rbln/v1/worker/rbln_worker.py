@@ -197,7 +197,6 @@ class RBLNWorker(WorkerBase):
         page_size = get_uniform_page_size(kv_cache_spec)
         return num_gpu_blocks * page_size * num_layers
 
-
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
 
