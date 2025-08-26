@@ -184,9 +184,8 @@ class RblnPlatform(Platform):
             if model_config.enforce_eager:
                 RblnPlatform.device_type = "rbln"
                 vllm_config.device_config.device_type = RblnPlatform.device_type
-                vllm_config.device_config.device = (
-                    torch.device(RblnPlatform.device_type)
-                )
+                vllm_config.device_config.device = (torch.device(
+                    RblnPlatform.device_type))
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
         else:
