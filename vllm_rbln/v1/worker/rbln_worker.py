@@ -28,6 +28,7 @@ from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
+from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.utils import report_usage_stats
@@ -36,6 +37,7 @@ from vllm.v1.worker.worker_base import WorkerBase
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
+from vllm_rbln.worker.utils import get_maximum_num_blocks
 
 logger = init_logger(__name__)
 
@@ -165,11 +167,36 @@ class RBLNWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        # return self.cache_config.rbln_kvcache_space_bytes  # type: ignore
-        from vllm.utils import GiB_bytes
+        block_size = self.cache_config.block_size
 
-        # TODO(jiwoo.park) calculate available memory
-        return 14 * GiB_bytes
+        # This function comes from optimum-rbln.
+        # We must keep it updated as optimum is upgraded.
+        max_num_blocks = get_maximum_num_blocks(
+            model_config=self.model_config,
+            parallel_config=self.parallel_config,
+            kvcache_block_size=block_size,
+            # quantization : 4 (This is an ad-hoc value. Need to fix it)
+            nbits_per_param=16 if not self.model_config.quantization else 4,
+            n_model_params=sum(p.numel()
+                               for p in self.model_runner.model.parameters()),
+            # 1 : prefill
+            num_runtimes=1 + self.scheduler_config.max_num_seqs)
+
+        # for partition skip, we need dummy block slot.
+        no_dummy_slots = 1
+        max_required_num_blocks = (self.model_config.max_model_len *
+                                   self.scheduler_config.max_num_seqs //
+                                   block_size) + no_dummy_slots
+        num_gpu_blocks = min(max_num_blocks, max_required_num_blocks)
+
+        if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
+            num_gpu_blocks = int(npu_num_blocks)
+
+        kv_cache_spec = self.model_runner.get_kv_cache_spec()
+        num_layers = len(kv_cache_spec)
+        page_size = get_uniform_page_size(kv_cache_spec)
+        return num_gpu_blocks * page_size * num_layers
+
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()

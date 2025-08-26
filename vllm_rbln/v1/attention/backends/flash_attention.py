@@ -277,9 +277,6 @@ class RBLNFlashAttentionMetadataBuilder:
                                 or runner.cache_config.enable_prefix_caching)
         self.chunked_prefill_size = (
             runner.scheduler_config.max_num_batched_tokens)
-        self.max_seq_len = model_config.max_model_len
-        # The length of the partition equals the block size.
-        self.partition_len = self.block_size
 
     def reorder_batch(self, input_batch: "InputBatch",
                       scheduler_output: "SchedulerOutput") -> bool:
@@ -293,7 +290,7 @@ class RBLNFlashAttentionMetadataBuilder:
         common_prefix_len: int,
         common_attn_metadata: CommonAttentionMetadata,
     ):
-        max_seq_len = int(self.runner.seq_lens_np[:num_reqs].max())
+        query_max_seq_len = int(self.runner.seq_lens_np[:num_reqs].max())
         query_start_loc = common_attn_metadata.query_start_loc
         seq_lens = common_attn_metadata.seq_lens
         block_table = self.block_table
@@ -312,12 +309,21 @@ class RBLNFlashAttentionMetadataBuilder:
         prefix_scheduler_metadata = None
 
         seq_idx = self.runner.positions_cpu[:num_reqs].view(-1, 1)
-        num_partition = self.max_seq_len // self.partition_len
+
+        # The length of the partition equals the block size.
+        partition_len = self.block_size
+        # no. of block(HW constraint) determines max sequence length.
+        # max_model_len(Model constraint) determines max sequence length.
+        # One of them is selected for max_seq_len.
+        block_length = self.runner.cache_config.num_gpu_blocks * partition_len
+        max_seq_len = min(self.runner.model_config.max_model_len, block_length)
+
+        num_partition = max_seq_len // partition_len
         cs = seq_idx.repeat(1, num_partition)
         pidx = torch.arange(num_partition, dtype=torch.int32)
         # RBLN - seq_lens tensor dtype SHOULD be int16
-        dyn_size_for_partitions = torch.clamp(cs - pidx * self.partition_len,
-                                              0, self.partition_len).to(
+        dyn_size_for_partitions = torch.clamp(cs - pidx * partition_len,
+                                              0, partition_len).to(
                                                   torch.int16)
         seq_lens_tensor = dyn_size_for_partitions
 
@@ -330,13 +336,13 @@ class RBLNFlashAttentionMetadataBuilder:
         if is_prefills[0]:
             prefill_chunk_size = (self.chunked_prefill_size
                                   if self.chunked_prefill else 1 <<
-                                  (math.ceil(math.log2(max_seq_len))))
+                                  (math.ceil(math.log2(query_max_seq_len))))
             chunked_attention_mask = torch.zeros(
                 1,
                 1,
                 1,
                 prefill_chunk_size,
-                self.max_seq_len,
+                max_seq_len,
                 dtype=torch.float32,
             )
             causal_mask = 1 - torch.triu(
@@ -372,7 +378,7 @@ class RBLNFlashAttentionMetadataBuilder:
                 1,
                 1,
                 1,
-                self.max_seq_len,
+                max_seq_len,
                 dtype=torch.float32,
             )
             for batch_index, batch_step in enumerate(seq_lens):
@@ -384,12 +390,12 @@ class RBLNFlashAttentionMetadataBuilder:
             num_actual_tokens=num_actual_tokens,
             max_query_len=max_query_len,
             query_start_loc=query_start_loc,
-            max_seq_len=max_seq_len,
+            max_seq_len=query_max_seq_len,
             seq_lens=seq_lens_tensor,
             # TODO(jiwoo.park) assume single batch, single partition
             # The block table should be fixed for multiple partitions.
             # block_table=block_table_tensor,
-            block_table=block_table_tensor[:, :1].flatten(),
+            block_table=block_table_tensor,
             slot_mapping=slot_mapping,
             use_cascade=False,
             common_prefix_len=common_prefix_len,
