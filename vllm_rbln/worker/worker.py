@@ -302,7 +302,12 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                                for p in self.model_runner.model.parameters()),
             # 1 : prefill
             num_runtimes=1 + self.scheduler_config.max_num_seqs)
-        num_gpu_blocks = (max_num_blocks - 1)
+
+        max_required_num_blocks = (self.model_config.max_model_len *
+                                   self.scheduler_config.max_num_seqs //
+                                   block_size)
+
+        num_gpu_blocks = min(max_num_blocks - 1, max_required_num_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1
