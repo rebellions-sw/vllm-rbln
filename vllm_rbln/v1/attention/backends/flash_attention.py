@@ -503,7 +503,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             kv_cache shape= [2, num_blocks,
                                 block_size * num_kv_heads * head_size]
 
-        TODO:
+        Shape that we expect:
             kv_cache  = [2][num_blocks, num_kv_heads, 1, block_size, head_size]
             key       = [1, num_kv_heads, 1, block_size, head_size]
             query     = [1, num_kv_heads, 4, query_len, head_size]
