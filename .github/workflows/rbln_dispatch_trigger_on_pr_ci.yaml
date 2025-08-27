@@ -1,0 +1,71 @@
+name: PRSync Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        description: "GitHub PR URL (e.g., https://github.com/ORG/REPO/pull/123)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-call:
+    runs-on: runner-vllm-ci
+    permissions:
+      contents: write
+    outputs:
+      sync_branch: ${{ steps.push.outputs.push.sync_branch }}
+    steps:
+      - name: Checkout (internal repo)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse PR URL to owner/repo/number
+        id: parse
+        run: |
+          set -euo pipefail
+          PR_URL="${{ inputs.pr_url }}"
+          if [[ "$PR_URL" =~ github\.com/([^/]+)/([^/]+)/pull/([0-9]+) ]]; then
+            EXT_OWNER="${BASH_REMATCH[1]}"
+            EXT_REPO="${BASH_REMATCH[2]}"
+            PR_NUMBER="${BASH_REMATCH[3]}"
+          else
+            echo "Bad PR URL: $PR_URL" >&2; exit 1
+          fi
+          echo "EXT_OWNER=$EXT_OWNER" >> $GITHUB_ENV
+          echo "EXT_REPO=$EXT_REPO" >> $GITHUB_ENV
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+
+      - name: Fetch PR head from external repo
+        run: |
+          set -euo pipefail
+          git remote add ext "https://github.com/${EXT_OWNER}/${EXT_REPO}.git"
+          git fetch --no-tags --depth=1 ext "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}"
+          git checkout "pr-${PR_NUMBER}"
+          echo "PR_HEAD_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+      - name: Create & push internal sync branch
+        id: push
+        run: |
+          set -euo pipefail
+          BRANCH="prsync/pr-${PR_NUMBER}-$(echo $PR_HEAD_SHA | cut -c1-7)"
+          git branch -f "$BRANCH" "$PR_HEAD_SHA"
+          git push -f origin "$BRANCH"
+          echo "SYNC_BRANCH=$BRANCH" >> $GITHUB_ENV
+          echo "sync_branch=$BRANCH" >> $GITHUB_OUTPUT
+
+  check_code_quaility:
+    needs: sync-and-call
+    uses: ./.github/workflows/pre-commit.yml
+    
+  check_device_run:
+    needs: sync-and-call
+    uses: ./.github/workflows/rbln_trigger_internal_test.yaml
+    with:
+      ref: ${{ needs.sync-and-call.outputs.sync_branch }}
+    secrets: inherit
+    environment: secure-ci 
