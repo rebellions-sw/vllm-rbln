@@ -25,6 +25,7 @@ import torch
 from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
+from vllm.distributed import (get_pp_group)
 from vllm.forward_context import set_forward_context
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
@@ -481,13 +482,18 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 intermediate_tensors=intermediate_tensors,
                 inputs_embeds=inputs_embeds)
 
-            if selected_token_indices is not None:
-                # aten::select -> adv_index -->
-                #     contrib_dynamic_take (tensor -> scalar)
-                # aten::index_select --> take -->
-                #     contrib_dynamic_take (tensor -> scalar)
-                model_output = model_output[:, selected_token_indices]
-            logits = self.model.compute_logits(model_output, None)
+            if get_pp_group().is_last_rank:
+                # last rank create real model output
+                if selected_token_indices is not None:
+                    # aten::select -> adv_index -->
+                    #     contrib_dynamic_take (tensor -> scalar)
+                    # aten::index_select --> take -->
+                    #     contrib_dynamic_take (tensor -> scalar)
+                    model_output = model_output[:, selected_token_indices]
+                logits = self.model.compute_logits(model_output, None)
+            else:
+                # non last rank create intermediate tensors, bypass it
+                logits = model_output
             return logits
 
         # NOTE - refer to pytorch 2.5 release notes
@@ -588,25 +594,32 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 model_input.attn_metadata.kv_caches = kv_caches
             for kv_cache in kv_caches:
                 self.compile_context.mark_static_address(kv_cache)
-            hidden_states = self.model_executable(
+            hidden_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
                 intermediate_tensors=intermediate_tensors,
                 selected_token_indices=token_indices,
                 **execute_model_kwargs,
             )
-            # Gather logits for TP
-            hidden_states = self.model.logits_processor._gather_logits(
-                hidden_states)
+            # Gather logits for TP (compute_logits)
+            if get_pp_group().is_last_rank:
+                hidden_states = self.model.logits_processor._gather_logits(
+                    hidden_or_intermediate_states)
 
-            hidden_states = hidden_states.view(-1, hidden_states.size(-1))
-            assert hidden_states.dim() == 2
+                hidden_states = hidden_states.view(-1, hidden_states.size(-1))
+                assert hidden_states.dim() == 2
+            else:
+                return hidden_or_intermediate_states
 
-        # Compute the logits. -> moved to model executable
-        if num_prefills > 0 and len_token_indices != 0:
-            logits = hidden_states
+        # Compute the logits. -> moved to model executable (compute_logits)
+        if get_pp_group().is_last_rank:
+            if num_prefills > 0 and len_token_indices != 0:
+                logits = hidden_states
+            else:
+                logits = hidden_states[selected_token_indices]
         else:
-            logits = hidden_states[selected_token_indices]
+            # non last rank DOES NOTHING
+            logits = self.model.compute_logits(hidden_states, model_input.sampling_metadata)
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:

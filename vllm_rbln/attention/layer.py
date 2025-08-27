@@ -21,6 +21,7 @@ from vllm.attention import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import backend_name_to_enum, get_attn_backend
 from vllm.config import CacheConfig, get_current_vllm_config
+from vllm.distributed.utils import get_pp_indices
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.model_executor.layers.linear import UnquantizedLinearMethod
 from vllm.model_executor.layers.quantization.base_config import (
@@ -166,6 +167,13 @@ def __custom_init__(
     # FIXME(jiwoo.park)
     self.layer_index = extract_layer_index(self.layer_name)
 
+    # NOTE - consider PP
+    vllm_config = get_current_vllm_config()
+    parallel_config = vllm_config.parallel_config
+    model_config = vllm_config.model_config
+    start, end = model_config.get_layers_start_end_indices(parallel_config)
+    assert self.layer_index >= start and self.layer_index < end
+    self.layer_index -= start
 
 def custom_attention_forward(
     self,
