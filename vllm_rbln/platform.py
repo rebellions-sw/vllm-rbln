@@ -226,7 +226,7 @@ class RblnPlatform(Platform):
 
             if not model_config.disable_cascade_attn:
                 logger.info("The cascade attention is disabled"
-                            " because RBLN is not support")
+                            " because RBLN does not support it")
                 model_config.disable_cascade_attn = True
 
     @classmethod
@@ -252,5 +252,4 @@ class RblnPlatform(Platform):
 
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
-        # return not cls.is_torch_compile
         return True

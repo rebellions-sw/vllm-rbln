@@ -676,7 +676,7 @@ class RBLNModelRunner:
                     backend="rbln",
                     options={
                         "compile_context": self.compile_context,
-                        # "cache_dir": "./rsd_cache_dir",
+                        "cache_dir": "./rsd_cache_dir",
                         "tensor_parallel_size": envs.TP_SIZE,
                     },
                     dynamic=False,
@@ -687,7 +687,7 @@ class RBLNModelRunner:
                     backend="rbln",
                     options={
                         "compile_context": self.compile_context,
-                        # "cache_dir": "./cache_dir",
+                        "cache_dir": "./cache_dir",
                     },
                     dynamic=False,
                 )
