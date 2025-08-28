@@ -1,4 +1,4 @@
-name: CI / PR / vllm-rbln with optimum
+name: CI / Trigger internal test
 
 on:
   workflow_call:
