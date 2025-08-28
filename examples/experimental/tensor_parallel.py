@@ -17,7 +17,7 @@ if __name__ == '__main__':
     sampling_params = SamplingParams(temperature=0.0)
 
     hf_overrides = {
-        "num_hidden_layers": 2,
+        "num_hidden_layers": 16,
     }
     
     # Create an LLM.
@@ -26,7 +26,8 @@ if __name__ == '__main__':
             max_model_len=128*1024,
             tensor_parallel_size=2,
             block_size=1024,
-            distributed_executor_backend="mp",
+            # distributed_executor_backend="mp",
+            distributed_executor_backend="external_launcher",
             seed=0,)
 
     # Generate texts from the prompts. The output is a list of RequestOutput objects

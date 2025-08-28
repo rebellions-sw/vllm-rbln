@@ -193,8 +193,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
-        if self.is_driver_worker:
-            assert self.rank == 0, "The driver worker must have rank 0."
+        # if self.is_driver_worker:
+        #     assert self.rank == 0, "The driver worker must have rank 0."
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -371,7 +371,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             rank=self.rank,
             local_rank=self.local_rank,
             distributed_init_method=self.distributed_init_method,
-            backend="rbln",
+            backend="gloo",
         )
 
         # warm up test for torch.distributed
