@@ -8,6 +8,7 @@ on:
         required: false
         type: string
 
+jobs:
   get-compiler-version:
     uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
     secrets: inherit
