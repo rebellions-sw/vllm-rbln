@@ -77,8 +77,11 @@ def parse_lora_int_ids(running_requests_ids):
         lora_ids.append(int(running_request.split("-")[1]))
     return lora_ids
 
-async def add_lora_request(llm, lora_requests: list[LoRARequest]):
-
+async def add_lora_request(llm, lora_int_ids):
+    lora_requests = [
+        LoRARequest(str(lora_int_id), lora_int_id, "/path/adapter" + str(lora_int_id))
+        for lora_int_id in lora_int_ids
+    ]
     sampling_params = SamplingParams(n=1,
                                      temperature=0.0,
                                      top_p=1.0,
@@ -87,14 +90,14 @@ async def add_lora_request(llm, lora_requests: list[LoRARequest]):
 
     generators = []
 
-    for lora_request in lora_requests:
+    for i, lora_request in enumerate(lora_requests):
         lora_int_id = lora_request.lora_int_id
         generator = llm.generate(
             prompt=TextPrompt(prompt=f"hello {lora_int_id}",
                               multi_modal_data=None),  # type: ignore 
             sampling_params=sampling_params,
             lora_request=lora_request,
-            request_id=f"LORA-{lora_int_id}")
+            request_id=f"REQ{i}:LORA-{lora_int_id}")
         generators.append(generator)
 
     all_gens = merge_async_iterators(*generators)
@@ -104,7 +107,6 @@ async def add_lora_request(llm, lora_requests: list[LoRARequest]):
 class MockModelWrapper(nn.Module):
     class MockModel:
         def set_lora_int_ids(self, lora_int_ids):
-            print("lora_int_ids", lora_int_ids)
             self.lora_int_ids = lora_int_ids
 
     def __init__(self):
@@ -142,11 +144,12 @@ class MockModelWrapper(nn.Module):
 
 def fake_load_model(self):
     self.model = MockModelWrapper()
+    self.use_optimum_lora = True
+    self.valid_lora_ids = list(range(NUM_LORAS + 1))
     self.model.kv_block_adapter = KVCacheBlockAdapter(
         vllm_config=get_vllm_config(),
         estimated_kvcache_num_blocks=NUM_BLOCKS + 1,
     )
-    self.use_lora = True
     self.valid_lora_ids = list(range(NUM_LORAS + 1))
 
 
@@ -163,11 +166,8 @@ async def test_add_lora():
         max_num_seqs=BATCH_SIZE,
         block_size=BLOCK_SIZE,
     )
-
-    lora_requests = get_lora_requests()
+    lora_int_ids = [1, 2, 3, 0, 1, 2]
     load_model_path = V1_PATH if envs.VLLM_USE_V1 else V0_PATH
     with patch(load_model_path, fake_load_model):
         async with build_async_engine_client_from_engine_args(engine_args, disable_frontend_multiprocessing=True) as llm:
-            await add_lora_request(llm, lora_requests)
-
-    assert False == True
+            await add_lora_request(llm, lora_int_ids)
