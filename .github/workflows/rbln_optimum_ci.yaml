@@ -3,6 +3,10 @@ name: CI / PR / vllm-rbln with optimum
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: "ref to checkout"
+        required: false
+        type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
         required: false
@@ -13,6 +17,10 @@ on:
         type: string
   workflow_call:
     inputs:
+      ref:
+        description: "ref to checkout"
+        required: false
+        type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
         required: false
@@ -58,7 +66,9 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Uninstall existing vllm-rbln
         run: |
