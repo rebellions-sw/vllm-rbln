@@ -13,12 +13,31 @@
 # limitations under the License.
 
 import math
-from typing import List
+from typing import List, Optional
 
 from vllm.core.block.block_table import BlockTable
+from vllm.core.block.common import BlockList
+from vllm.core.block.interfaces import Block, DeviceAwareBlockAllocator
 
 
 class RBLNOptimumBlockTable(BlockTable):
+
+    def __init__(
+        self,
+        block_size: int,
+        block_allocator: DeviceAwareBlockAllocator,
+        _blocks: Optional[List[Block]] = None,
+        max_block_sliding_window: Optional[int] = None,
+    ):
+        self._block_size = block_size
+        self._allocator = block_allocator
+        if _blocks is None:
+            _blocks = []
+        self._blocks: BlockList = BlockList(_blocks)
+        # NOTE We manage sliding window attention
+        # outside of the core block table.
+        self._max_block_sliding_window = None
+        self._num_full_slots = self._get_num_token_ids()
 
     def get_num_blocks_touched_by_append_slots(
             self, token_ids: List[int], num_lookahead_slots: int) -> int:
