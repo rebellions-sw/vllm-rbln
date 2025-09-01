@@ -1,4 +1,4 @@
-name: PRSync Orchestrator
+name: CI / Dispatch / Check pr 
 
 on:
   workflow_dispatch:
@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write
 
 jobs:
   sync-and-call:
