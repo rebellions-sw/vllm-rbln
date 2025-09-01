@@ -56,8 +56,10 @@ jobs:
           BRANCH="prsync/pr-${PR_NUMBER}-$(echo $PR_HEAD_SHA | cut -c1-7)"
           git branch -f "$BRANCH" "$PR_HEAD_SHA"
           git push -f origin "$BRANCH"
+          git remote set-url origin "https://x-access-token:${{ secrets.GIT_PAT }}@github.com/${{ github.repository }}.git"
+          git push -f origin "$BRANCH"
           echo "SYNC_BRANCH=$BRANCH" >> $GITHUB_ENV
-          echo "sync_branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "sync_branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
   check_code_quaility:
     needs: sync-and-call
