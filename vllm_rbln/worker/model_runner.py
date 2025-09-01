@@ -402,6 +402,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         self.sampler = get_sampler()
 
+        # Lazy initialization
+        self.compute_logits_model : nn.Module
+
         if hasattr(self, "_builder_cls"):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(
@@ -465,6 +468,11 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
     def load_model(self) -> None:
         self.model = get_model(vllm_config=self.vllm_config).eval()
 
+        self.compute_logits_model = self.model
+        if self.model_config.is_multimodal_model:
+            if hasattr(self.model.get_language_model(), "logits_processor"):
+                self.compute_logits_model = self.model.get_language_model()
+
         logger.info("[RBLN] load_model = %s", self.model)
         logger.info("[RBLN] model_config.num_layers = %d",
                     self.model_config.get_num_layers(self.parallel_config))
@@ -490,7 +498,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     # aten::index_select --> take -->
                     #     contrib_dynamic_take (tensor -> scalar)
                     model_output = model_output[:, selected_token_indices]
-                logits = self.model.compute_logits(model_output, None)
+                logits = self.compute_logits_model.compute_logits(model_output, None)
             else:
                 # non last rank create intermediate tensors, bypass it
                 logits = model_output
@@ -603,8 +611,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             )
             # Gather logits for TP (compute_logits)
             if get_pp_group().is_last_rank:
-                hidden_states = self.model.logits_processor._gather_logits(
-                    hidden_or_intermediate_states)
+                hidden_states = self.compute_logits_model.logits_processor._gather_logits(
+                hidden_or_intermediate_states)
 
                 hidden_states = hidden_states.view(-1, hidden_states.size(-1))
                 assert hidden_states.dim() == 2
@@ -619,7 +627,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 logits = hidden_states[selected_token_indices]
         else:
             # non last rank DOES NOTHING
-            logits = self.model.compute_logits(hidden_states, model_input.sampling_metadata)
+            logits = self.compute_logits_model.compute_logits(hidden_states, model_input.sampling_metadata)
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:

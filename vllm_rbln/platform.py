@@ -40,6 +40,8 @@ _RBLN_TORCH_COMPILE_SUPPORTED = [
     "Qwen2MoeForCausalLM",
     "DeepseekV2ForCausalLM",
     "DeepseekV3ForCausalLM",
+    # llama4 maverick
+    "Llama4ForConditionalGeneration",
 ]
 
 
@@ -57,6 +59,8 @@ def is_torch_compile_supported(vllm_config: VllmConfig) -> bool:
     # Check if the architecture supports torch.compile
     architectures = getattr(vllm_config.model_config.hf_config,
                             "architectures", [])
+    if architectures is None:
+        return True
     return any(arch in _RBLN_TORCH_COMPILE_SUPPORTED for arch in architectures)
 
 

@@ -10,6 +10,7 @@ prompts = [
 ]
 llama_1b_model_id = "meta-llama/Llama-3.2-1B"
 llama_8b_model_id = "meta-llama/Meta-Llama-3-8B"
+llama4_maverick_model_id = "meta-llama/Llama-4-Maverick-17B-128E"
 
 deepseek_v2_lite_model_id = "deepseek-ai/DeepSeek-V2-Lite"
 
