@@ -86,6 +86,25 @@ class RBLNUnitaryKVCacheCoordinator(UnitaryKVCacheCoordinator)
         num_new_computed_blocks = len(inner_hit_blocks)
         return hit_blocks, num_new_computed_blocks * PREFIX_CACHING_BLOCK_SIZE
 
+    def allocate_new_blocks(self, request_id: str,
+                            num_tokens: int) -> tuple[list[KVCacheBlock], ...]:
+        """
+        Allocate new blocks for the request to give it at least `num_tokens` 
+        token slots.
+
+        Args:
+            request_id: The request ID.
+            num_tokens: The total number of tokens that need a slot (including 
+                tokens that are already allocated).
+
+        Returns:
+            The new allocated blocks.
+        """
+        return tuple(
+            manager.allocate_new_blocks(request_id, num_tokens)
+            for manager in self.single_type_managers)
+
+        self.prefix_cache_manager.allocate_new_blocks(request_id, num_tokens)
 
     def cache_blocks(self, request: Request, num_computed_tokens: int) -> None:
         """
@@ -114,9 +133,43 @@ class RBLNUnitaryKVCacheCoordinator(UnitaryKVCacheCoordinator)
         
         self.prefix_cache_manager.free(request_id)
     
-    
+    def get_num_common_prefix_blocks(self, request_id: str,
+                                     num_running_requests: int) -> list[int]:
+        """
+        Get the number of common prefix blocks for a request.
 
-        
+        Args:
+            request_id: The request ID.
+            block_hashes: The block hashes of the request.
+
+        Returns:
+            The number of common prefix blocks.
+        """
+
+        # NOTE(eunji): It is for cascade attention
+        # that is not supported in vLLM RBLN
+        # num_blocks_per_group = [
+        #     manager.get_num_common_prefix_blocks(request_id,
+        #                                          num_running_requests)
+        #     for manager in self.single_type_managers
+        # ]
+        # return num_blocks_per_group
+        return 0
+
+    def remove_skipped_blocks(self, request_id: str,
+                              num_computed_tokens: int) -> None:
+        """
+        Remove the blocks that are no longer needed from `blocks` and replace 
+        the removed blocks with null_block.
+
+        Args:
+            request_id: The request ID.
+            num_computed_tokens: The number of tokens that have been computed.
+        """
+        for manager in self.single_type_managers:
+            manager.remove_skipped_blocks(request_id, num_computed_tokens)
+
+        self.prefix_cache_manager.remove_skipped_blocks(request_id, num_computed_tokens)
 
 def get_kv_cache_coordinator(
         kv_cache_config: KVCacheConfig, max_model_len: int, use_eagle: bool,
