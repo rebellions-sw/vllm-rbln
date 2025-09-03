@@ -1,4 +1,4 @@
-name: PRSync Orchestrator
+name: CI / Dispatch / Check pr 
 
 on:
   workflow_dispatch:
@@ -19,10 +19,11 @@ jobs:
     outputs:
       sync_branch: ${{ steps.push.outputs.push.sync_branch }}
     steps:
-      - name: Checkout (internal repo)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Parse PR URL to owner/repo/number
         id: parse
@@ -54,9 +55,18 @@ jobs:
           set -euo pipefail
           BRANCH="prsync/pr-${PR_NUMBER}-$(echo $PR_HEAD_SHA | cut -c1-7)"
           git branch -f "$BRANCH" "$PR_HEAD_SHA"
+
+          git config --unset-all http.https://github.com/.extraheader || true
+          git remote set-url origin "https://x-access-token:${{ secrets.GIT_PAT }}@github.com/${{ github.repository }}.git"
+
+          git remote -v
+          git config -l | grep -E '^http\.https://github\.com/\.extraheader' || echo "no extraheader"
+
+          git push -f origin "$BRANCH"
+          git remote set-url origin "https://x-access-token:${{ secrets.GIT_PAT }}@github.com/${{ github.repository }}.git"
           git push -f origin "$BRANCH"
           echo "SYNC_BRANCH=$BRANCH" >> $GITHUB_ENV
-          echo "sync_branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "sync_branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
   check_code_quaility:
     needs: sync-and-call
