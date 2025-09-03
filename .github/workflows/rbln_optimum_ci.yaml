@@ -82,9 +82,17 @@ jobs:
       - name: Install local vllm-rbln package and dependencies
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
-          VERSION=${{ inputs.optimum_rbln_version }}
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
+
+          pip install \
+            --force-reinstall \
+            --no-cache-dir \
+            --constraint <(echo "optimum-rbln==$VERSION") \
+                dist/vllm_rbln*.whl
           echo "optimum-rbln $VERSION"
+        env:
+          VERSION: ${{ inputs.optimum_rbln_version }}
+          VLLM_TARGET_DEVICE: cpu
+          PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
