@@ -31,6 +31,7 @@ from vllm_rbln.worker.model_runner import ModelInputForRebelBuilder
 
 logger = init_logger(__name__)
 
+_FLASH_CAUSAL_ATTN = os.getenv("FLASH_CAUSAL_ATTN", "True").lower() in ("true", "1")
 
 # RBLN custom op (flash attention naive prefill/decode)
 @torch.library.custom_op("rbln_custom_ops::flash_attention_naive_prefill",
@@ -137,6 +138,108 @@ def _(
     v: torch.Tensor,
     kv_cache: torch.Tensor,
     mask: torch.Tensor,
+    scale: torch.Tensor,
+    seq_idx: torch.Tensor,
+    block_tables: torch.Tensor,
+    slot_mapping: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+
+# RBLN custom op (flash causal attention naive prefill/decode w/o attention mask)
+@torch.library.custom_op("rbln_custom_ops::flash_causal_attention_naive_prefill",
+                         mutates_args=())
+def flash_causal_attention_naive_prefill_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
+    scale: torch.Tensor,
+    seq_idx: torch.Tensor,
+    block_tables: torch.Tensor,
+    slot_mapping: torch.Tensor,
+) -> torch.Tensor:
+    if not _COMPILE_MODEL:
+        # attn_weights = MM(q,kt) * scale
+        # attn_weights = causal masked softmax(attn_weights)
+        # MM(attn_weights, v)
+        partition = kv_cache.size(-2)
+        seq_len = q.size(-2)
+        s = seq_idx[0][0]
+        e = s + seq_len
+        block = block_tables[0]
+        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
+                                                                dim=3,
+                                                                start=s,
+                                                                end=e)
+        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
+                                                                dim=3,
+                                                                start=s,
+                                                                end=e)
+        attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
+        # TODO - how to build causal mask?
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+        attn_output = torch.matmul(attn_weights, v_state)
+        return attn_output
+    else:
+        return torch.empty_like(q)
+
+
+@torch.library.register_fake("rbln_custom_ops::flash_causal_attention_naive_prefill")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
+    scale: torch.Tensor,
+    seq_idx: torch.Tensor,
+    block_tables: torch.Tensor,
+    slot_mapping: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.custom_op("rbln_custom_ops::flash_causal_attention_naive_decode",
+                         mutates_args=())
+def flash_causal_attention_naive_decode_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
+    scale: torch.Tensor,
+    seq_idx: torch.Tensor,
+    block_tables: torch.Tensor,
+    slot_mapping: torch.Tensor,
+) -> torch.Tensor:
+    if not _COMPILE_MODEL:
+        # NOTE - multiple decode kernel implementation is necessary
+        assert q.size(0) == 1
+        partition = kv_cache.size(-2)
+        seq_len = q.size(-2)
+        s = seq_idx[0][0]
+        e = s + seq_len
+        block = block_tables[0]
+        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
+                                                                dim=3,
+                                                                start=s,
+                                                                end=e)
+        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
+                                                                dim=3,
+                                                                start=s,
+                                                                end=e)
+        attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+        attn_output = torch.matmul(attn_weights, v_state)
+        return attn_output
+    else:
+        return torch.empty_like(q)
+
+
+@torch.library.register_fake("rbln_custom_ops::flash_causal_attention_naive_decode")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
     scale: torch.Tensor,
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
@@ -501,7 +604,8 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
             kv_cache[1][block] = v_state.squeeze(0)
 
         if q_len == 1:
-            attn_output = (
+            if not _FLASH_CAUSAL_ATTN:
+                attn_output = (
                 torch.ops.rbln_custom_ops.flash_attention_naive_decode(
                     query,
                     key,
@@ -513,15 +617,40 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                     attn_metadata.block_tables.to(torch.int16),
                     self.scale,
                 ))
+            else:
+                attn_output = (
+                torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode(
+                    query,
+                    key,
+                    value,
+                    kv_cache,
+                    self.scale,
+                    attn_metadata.seq_lens_tensor.to(torch.int16),
+                    attn_metadata.block_tables.to(torch.int16),
+                    self.scale,
+                ))
         else:
             # actually non-flash paged attention DOES NOT use slot_mapping
-            attn_output = (
+            if not _FLASH_CAUSAL_ATTN:
+                attn_output = (
                 torch.ops.rbln_custom_ops.flash_attention_naive_prefill(
                     query,
                     key,
                     value,
                     kv_cache,
                     attn_metadata.attn_masks,
+                    self.scale,
+                    attn_metadata.seq_lens_tensor.to(torch.int16),
+                    attn_metadata.block_tables.to(torch.int16),
+                    self.scale,
+                ))
+            else:
+                attn_output = (
+                torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill(
+                    query,
+                    key,
+                    value,
+                    kv_cache,
                     self.scale,
                     attn_metadata.seq_lens_tensor.to(torch.int16),
                     attn_metadata.block_tables.to(torch.int16),
