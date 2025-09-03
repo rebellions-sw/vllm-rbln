@@ -1,4 +1,5 @@
 from vllm import LLM, SamplingParams
+from vllm.transformers_utils.config import get_hf_text_config
 
 prompts = [
     #"Hello, my name is",
@@ -10,6 +11,7 @@ prompts = [
 ]
 llama_1b_model_id = "meta-llama/Llama-3.2-1B"
 llama_8b_model_id = "meta-llama/Meta-Llama-3-8B"
+llama4_maverick_model_id = "meta-llama/Llama-4-Maverick-17B-128E"
 
 deepseek_v2_lite_model_id = "deepseek-ai/DeepSeek-V2-Lite"
 
@@ -23,15 +25,26 @@ qwen3_32_model_id = "Qwen/Qwen3-32B"
 qwen3_30_moe_model_id = "Qwen/Qwen3-30B-A3B"
 qwen3_235_moe_model_id = "Qwen/Qwen3-235B-A22B"
 
-hf_overrides = {
-    "num_hidden_layers": 1,
+hf_overrides_kw = {
+    "num_hidden_layers": 2,
 }
+
+# update config of multi-modal language model num_hidden_layers
+def custom_hf_overrides_kw(hf_config):
+    if hasattr(hf_config, "text_config"):
+        hf_text_config = get_hf_text_config(hf_config)
+        hf_text_config.update(hf_overrides_kw)
+    else:
+        hf_config.update(hf_overrides_kw)
+    return hf_config
+
 
 #model_id = llama_1b_model_id
 #model_id = qwen3_1_7_model_id
+model_id = llama4_maverick_model_id
 
 #model_id = llama_8b_model_id
-model_id = qwen1_5_moe_model_id
+#model_id = qwen1_5_moe_model_id
 #model_id = qwen3_30_moe_model_id
 #model_id = qwen3_235_moe_model_id
 #model_id = deepseek_v2_lite_model_id
@@ -46,7 +59,8 @@ sampling_params = SamplingParams(temperature=0.0)
 warmup_sampling_params = SamplingParams(temperature=0.0, max_tokens=2)
 llm = LLM(
     model=model_id,
-    # hf_overrides=hf_overrides,
+    #hf_overrides=hf_overrides_kw,
+    hf_overrides=custom_hf_overrides_kw,
     # max_model_len=40 * 1024,
     max_model_len=8 * 1024,
     block_size=1024,
@@ -54,7 +68,7 @@ llm = LLM(
     max_num_batched_tokens=128,
     max_num_seqs=1,
     trust_remote_code=True,
-    tensor_parallel_size=4,
+    tensor_parallel_size=8,
     enable_expert_parallel=True,
 )
 
