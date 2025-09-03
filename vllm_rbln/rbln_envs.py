@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     RBLN_TP_SIZE: int = 1
     RBLN_SAMPLER: bool = False
     RBLN_ENABLE_WARM_UP: bool = False
+    RBLN_USE_VLLM_MODEL: bool = False
 
 # extended environments
 environment_variables = {
@@ -40,6 +41,9 @@ environment_variables = {
     # Enable warmup
     "RBLN_ENABLE_WARM_UP":
     (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in
+     ("true", "1")),
+    "RBLN_USE_VLLM_MODEL":
+    (lambda: os.environ.get("USE_VLLM_MODEL", "False").lower() in
      ("true", "1")),
 }
 
