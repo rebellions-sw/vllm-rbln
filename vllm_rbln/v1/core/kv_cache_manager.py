@@ -1,8 +1,23 @@
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from vllm.v1.core.kv_cache_manager import KVCacheManager
+
 from vllm_rbln.v1.core.kv_cache_coordinator import get_kv_cache_coordinator
 
-
 PREFIX_CACHING_BLOCK_SIZE = 128
+
 
 class RBLNKVCacheManager(KVCacheManager):
 
@@ -41,6 +56,7 @@ class RBLNKVCacheManager(KVCacheManager):
         )
         self.num_kv_cache_groups = len(kv_cache_config.kv_cache_groups)
         self.block_pool = self.coordinator.block_pool
+        self.prefix_caching_block_pool = self.coordinator.prefix_caching_block_pool
         self.kv_cache_config = kv_cache_config
 
         # Mapping from request ID to kv block hashes.
@@ -74,7 +90,8 @@ class RBLNKVCacheManager(KVCacheManager):
         if not block_hashes:
             # NOTE(eunji) MODIFIED
             block_hashes = hash_request_tokens(self.caching_hash_fn,
-                                               PREFIX_CACHING_BLOCK_SIZE, request)
+                                               PREFIX_CACHING_BLOCK_SIZE,
+                                               request)
             self.req_to_block_hashes[request.request_id] = block_hashes
 
         if self.log_stats:
@@ -98,5 +115,3 @@ class RBLNKVCacheManager(KVCacheManager):
             self.prefix_cache_stats.hits += num_new_computed_tokens
 
         return KVCacheBlocks(computed_blocks), num_new_computed_tokens
-
-
