@@ -56,7 +56,6 @@ class RBLNKVCacheManager(KVCacheManager):
         )
         self.num_kv_cache_groups = len(kv_cache_config.kv_cache_groups)
         self.block_pool = self.coordinator.block_pool
-        self.prefix_caching_block_pool = self.coordinator.prefix_caching_block_pool
         self.kv_cache_config = kv_cache_config
 
         # Mapping from request ID to kv block hashes.
