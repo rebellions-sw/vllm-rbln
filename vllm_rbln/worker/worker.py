@@ -399,6 +399,10 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         )
 
     def init_distributed_environment(self):
+        # Set envs for RCCL
+        os.environ['LOCAL_RANK'] = str(self.local_rank)
+        os.environ['WORLD_SIZE'] = str(self.parallel_config.world_size)
+
         init_distributed_environment(
             world_size=self.parallel_config.world_size,
             rank=self.rank,
