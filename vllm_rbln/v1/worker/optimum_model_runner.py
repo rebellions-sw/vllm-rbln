@@ -152,6 +152,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # None in the first PP rank. The rest are set after load_model.
         # TODO(eunji) It will be implemented for PP
         self.intermediate_tensors: Optional[IntermediateTensors] = None
+        self.enable_caching = cache_config.enable_caching
+        if self.enable_caching:
+            self.prefix_cache_manager = PrefixKVCacheManager(
+                vllm_config=vllm_config,
+                num_blocks=self.model.kv_block_adapter.get_available_num_blocks()
+            )
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
@@ -414,6 +420,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 len(self.requests[req_id].prompt_token_ids),
                 len(self.requests[req_id].output_token_ids),
                 block_table.tolist())
+                
             running_request_ids.append(req_id)
 
         if self.is_multimodal_model:
