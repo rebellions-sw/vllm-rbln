@@ -369,7 +369,7 @@ class RBLNFlashAttentionMetadataBuilder:
                 block_table_tensor,
                 torch.full(
                     (batch_padding_size, block_table_tensor.shape[-1]),
-                    block_table_tensor.numel() - 1,
+                    0,
                 ),
             ])
             decode_attention_mask = torch.zeros(

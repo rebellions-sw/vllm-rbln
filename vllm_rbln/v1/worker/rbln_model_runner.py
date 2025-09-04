@@ -1581,10 +1581,6 @@ class RBLNModelRunner:
         self.initialize_attn_backend(kv_cache_config)
         kv_caches = self.initialize_kv_cache_tensors(kv_cache_config)
 
-        # for partition skip, we need dummy block slot.
-        no_dummy_slots = 1
-        kv_cache_config.num_blocks -= no_dummy_slots
-
         if self.speculative_config and self.speculative_config.use_eagle():
             assert isinstance(self.drafter, EagleProposer)
             # validate all draft model layers belong to the same kv cache
