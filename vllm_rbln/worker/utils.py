@@ -78,6 +78,10 @@ def get_maximum_num_blocks(
     available_dram = tensor_parallel_size * (ATOM_DRAM_NBYTES -
                                              ATOM_SYS_DRAM_NBYTES)
 
+    def check_oom(available_dram: int) -> None:
+        if available_dram <= 0:
+            raise MemoryError("Insufficient DRAM during block calculation.")
+
     if kernel_size is None:
         if n_model_params is None:
             raise ValueError("`n_model_params` should be specified \
@@ -105,6 +109,8 @@ def get_maximum_num_blocks(
         buffer_per_core = buffer_per_runtime_per_core * num_runtimes
         buffer = buffer_per_core * tensor_parallel_size
     available_dram -= buffer
+
+    check_oom(available_dram)
 
     b = kvcache_block_size * align(head_dim, 64) * math.ceil(
         num_key_value_heads / tensor_parallel_size) * 2
