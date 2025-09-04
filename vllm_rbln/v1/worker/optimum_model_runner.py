@@ -37,8 +37,7 @@ import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm_rbln.model_executor.models.optimum import (ModelInputForRBLN,
-                                                     RBLNOptimumDictTableMixin)
+from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
 from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
@@ -188,8 +187,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # `finished_request_ids` is provided separately
             # from new requests.
             # It is a temporary solution.
-            if isinstance(self.model, RBLNOptimumDictTableMixin):
-                self.model.clear_dict_table()
+            if getattr(self.model, "attention_manager", None):
+                self.model.attention_manager.clear()
             # Return empty ModelRunnerOutput if there's no work to do.
             return EMPTY_MODEL_RUNNER_OUTPUT
         # Prepare the decoder inputs.

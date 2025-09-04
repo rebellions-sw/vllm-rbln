@@ -1,11 +1,26 @@
 name: CI / PR / vllm-rbln with optimum
 
 on:
-  pull_request:
-    branches:
-      - '*'
   workflow_dispatch:
     inputs:
+      ref:
+        description: "ref to checkout"
+        required: false
+        type: string
+      rebel_compiler_version:
+        description: "Version of rebel-compiler to use (optional)"
+        required: false
+        type: string
+      optimum_rbln_version:
+        description: "Version of optimum-rbln to use (optional)"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      ref:
+        description: "ref to checkout"
+        required: false
+        type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
         required: false
@@ -22,28 +37,9 @@ env:
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
-  get-compiler-version:
-    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
-    secrets: inherit
-
-  get-optimum-version:
-    runs-on: runner-vllm-ci
-    outputs:
-      optimum_version: ${{ steps.get_target_optimum_version.outputs.OPTIMUM_RBLN_VERSION }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Get optimum version from requirements.txt
-        id: get_target_optimum_version
-        run: |
-          OPTIMUM_RBLN_VERSION=$(grep '^optimum-rbln' requirements.txt | sed 's/optimum-rbln>=//')
-          echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
-          echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
-
   test_vllm_rbln:
+    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     runs-on: runner-vllm-ci
-    needs: [get-compiler-version, get-optimum-version]
     env:
       NUM_INPUT_PROMPT: 1
       RBLN_VERBOSE: 6
@@ -70,7 +66,9 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Uninstall existing vllm-rbln
         run: |
@@ -84,8 +82,9 @@ jobs:
       - name: Install local vllm-rbln package and dependencies
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ needs.get-optimum-version.outputs.optimum_version }}")
-          echo "optimum-rbln ${{ needs.get-optimum-version.outputs.optimum_version }}"
+          VERSION=${{ inputs.optimum_rbln_version }}
+          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
+          echo "optimum-rbln $VERSION"
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >

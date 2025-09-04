@@ -11,22 +11,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Dict, Optional, cast
+from typing import Any, Optional
 
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
-from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
-                         RBLNOptimumModelBase)
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
+from .optimum_attention import (AttentionManager, InnerAttentionEntry,
+                                InnerAttentionStrategy, InnerR1, InnerR2)
 
 logger = init_logger(__name__)
 
 
 class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
-                                                 RBLNOptimumDecoderMixin,
-                                                 RBLNOptimumDictTableMixin):
+                                                 RBLNOptimumDecoderMixin):
     INVALID_TOKEN = 100
 
     def __init__(
@@ -43,22 +43,15 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         )
         self.dec_max_seq_len = self.model_config.max_model_len
         self.dec_lengths = [0] * self.batch_size
-        self.table_mapping: Dict[str, int] = {}
+        # self.table_mapping: Dict[str, int] = {}
+        # Result1T = list[int]
+        # Result2T = tuple[torch.Tensor, torch.Tensor]
 
-    def get_table_id(
-        self,
-        is_prompt: bool,
-        finished_requests_ids: list[str],
-        running_requests_ids: list[str],
-    ) -> list[int]:
-        table_ids = self.get_table_mapping_values(
-            self.table_mapping,
-            self.decoder_batch_size,
-            is_prompt,
-            finished_requests_ids,
-            running_requests_ids,
-        )
-        return cast(list[int], table_ids)
+        self.strategy = InnerAttentionStrategy()
+        self.attention_manager: AttentionManager[InnerAttentionStrategy,
+                                                 InnerAttentionEntry, InnerR1,
+                                                 InnerR2] = AttentionManager(
+                                                     self.strategy)
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -70,8 +63,12 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         running_requests_ids = model_input.running_requests_ids
         request_nums = input_ids.shape[0]
 
-        table_ids = self.get_table_id(is_prompt, finished_requests_ids,
-                                      running_requests_ids)
+        table_ids = self.attention_manager.get(
+            is_prompt,
+            self.decoder_batch_size,
+            running_requests_ids,
+            finished_requests_ids,
+        )
         valid_block_ids = torch.tensor(table_ids)
 
         if is_prompt:
@@ -86,10 +83,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
         kwargs = self.preprocess_for_decoder(is_prompt,
                                              block_tables,
+                                             self.kv_block_adapter,
                                              input_ids,
                                              cache_position,
-                                             input_block_ids=valid_block_ids,
-                                             kv_adapter=self.kv_block_adapter)
+                                             input_block_ids=valid_block_ids)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
@@ -102,7 +99,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             lm_logits[0][0][-1] = 1
-            self.table_mapping[running_requests_ids[0]] = table_ids[0]
+            self.attention_manager.add(
+                running_requests_ids[0],
+                table_ids[0],
+            )
             self.dec_lengths[table_ids[0]] = 0
 
         else:
