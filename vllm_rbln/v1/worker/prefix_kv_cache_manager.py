@@ -1,32 +1,22 @@
 from collections import deque
 import torch
 
-class RBLNPrefixBlock:
-    block_id: int
-    ref_cnt: int = 0
-
-    def incr_ref(self):
-        self.ref_cnt += 1
-    
-    def decr_ref(self):
-        self.ref_cnt -= 1
-
 class RBLNPrefixBlockQueue:
     def __init__(self, num_blocks):
         self.num_free_blocks = num_blocks
-        self.blocks = deque([RBLNPrefixBlock(block_id=i) for i in range(self.num_free_blocks)])
+        self.blocks = deque([i for i in range(self.num_free_blocks)])
 
     def popleft(self) -> int:
         return self.blocks.popleft()
 
-    def append(self, block) -> None:
-        self.blocks.append(block)
-        
+    def append(self, block_id: int) -> None:
+        self.blocks.append(block_id)
 
 class PrefixKVCacheManager:
     def __init__(self, vllm_config, num_blocks):
         self.req_to_outer_blocks: dict[str, list[int]]
-        self.inner_to_outer_blocks: dict[int, int]
+        self.inner_to_request_id: dict[int, str] # inner block의 outdated 체크 목적 
+        self.inner_to_outer_block: dict[int, int]
 
         self.outer_blk_size = vllm_config.additional_config.attn_block_size
         self.inner_blk_size = vllm_config.cache_config.block_size
@@ -37,62 +27,69 @@ class PrefixKVCacheManager:
         
         self.free_block_queue = RBLNPrefixBlockQueue(self.outer_num_blks)
 
-
-    def allocate_blocks(self, request_id:str, new_inner_blocks: list[int]) -> None:
-        """
-        Allocate outer_blocks following new_inner_blocks
-        """
-        num_new_outer_blocks = (len(new_inner_blocks) + self.blk_ratio - 1) // self.blk_ratio
-        idx = 0
-        while idx < num_new_outer_blocks:
-            # inner_block = new_inner_blocks
-            curr_block = self.free_block_queue.popleft()
-            self.req_to_outer_blocks[request_id].append(curr_block.block_id)
-            start_pos = idx * self.blk_ratio
-            end_pos = (idx + 1) * self.blk_ratio
-            for idx2 in range(start_pos, end_pos):
-                curr_inner_block = new_inner_blocks[idx2]
-                self.inner_to_outer_blocks[curr_inner_block] = curr_block
-            idx += 1
-
-    def allocate_prefill_blocks(self, request_id:str, new_inner_blocks: list[int]) -> None:
-        """
-        Allocate outer_blocks following new_inner_blocks
-        """
+    def get_cached_origin_blocks(self, cached_len, inner_blocks: list[int]) -> list[int]:
         cached_outer_blocks = []
-        num_cached_inner_blocks = 0
-        # 1. Find prefix-cached blocks
-        for new_inner_block in new_inner_blocks:
-            if new_inner_block in self.inner_to_outer_blocks.keys():
-                num_cached_inner_blocks += 1
-                cached_outer_block = self.inner_to_outer_blocks[new_inner_block]
-                if cached_outer_block == cached_outer_blocks[-1]:
-                    pass
-                else:
-                    cached_outer_blocks.append(cached_outer_block)
-                    new_block = self.free_block_queue.popleft()
-                    self.req_to_outer_blocks[request_id].append(new_block)
-            else:
-                break
-        new_inner_blocks = new_inner_blocks[num_cached_inner_blocks:]
+        last_cached_outer_block = None
 
-        # 2. Allocate new blocks that are not prefix cached.
+        num_cached_ib = cached_len // self.inner_blk_size
+        target_ibs = inner_blocks[:num_cached_ib]
+
+        for ib_idx in target_ibs:
+            ib_id = inner_blocks[ib_idx]
+            ob_id = self.inner_to_outer_block[ib_id]
+            cached_outer_blocks.append(ob_id)
+            last_cached_outer_block = ob_id
+        return cached_outer_blocks
+
+    def free_blocks_of_finished_requests(self, cached_len, inner_blocks: list[int]):
+        # 해당 inner block은 그 사이에 free되고 새로 할당되었다
+        # 이에 맞추어 outer block도 해제
+        num_cached_ib = cached_len // self.inner_blk_size
+        target_ibs = inner_blocks[num_cached_ib:]
+        for ib_idx in target_ibs:
+            ib_id = inner_blocks[ib_idx]
+            if ib_id in self.inner_to_request_id:
+                request_id = self.inner_to_request_id.pop(ib_id)
+                if request_id in self.req_to_outer_blocks:
+                    self.free_blocks(request_id)
+        
+    def allocate_blocks(self, request_id:str, cached_len: int, new_inner_blocks: list[int] = []) -> None:
+        """
+        Allocate outer_blocks following new_inner_blocks
+        """
+        if request_id not in self.req_to_outer_blocks:
+            self.req_to_outer_blocks[request_id] = []
+        
+        # Lazy update - Remove the already finished requests
+        # mark the inner block of the requests
+        free_blocks_of_finished_requests(cached_len, new_inner_blocks)
+        
+        # Allocate the outer blocks that are cached.
+        num_cached_outer_blocks = cached_len // self.outer_blk_size 
+        for _ in num_cached_outer_blocks:
+            new_ob = self.free_block_queue.popleft()
+            self.req_to_outer_blocks[request_id].append(new_ob)
+
+        # Allocate the inner blocks that are not cached yet.
+        num_cached_inner_blocks = cached_len * self.inner_blk_size
+        new_inner_blocks = new_inner_blocks[num_cached_inner_blocks:]
+        
         num_new_outer_blocks = (len(new_inner_blocks) + self.blk_ratio - 1) // self.blk_ratio
-        idx = 0
-        while idx < num_new_outer_blocks:
-            # inner_block = new_inner_blocks
-            curr_block = self.free_block_queue.popleft()
-            self.req_to_outer_blocks[request_id].append(curr_block.block_id)
-            start_pos = idx * self.blk_ratio
-            end_pos = (idx + 1) * self.blk_ratio
-            for idx2 in range(start_pos, end_pos):
-                curr_inner_block = new_inner_blocks[idx2]
-                self.inner_to_outer_blocks[curr_inner_block] = curr_block
-            idx += 1
-        return cached_outer_blocks, new_outer_blocks
+        ob_idx = 0
+        while ob_idx < num_new_outer_blocks:
+            new_ob = self.free_block_queue.popleft()
+            self.req_to_outer_blocks[request_id].append(new_ob)
+            start_pos = ob_idx * self.blk_ratio
+            end_pos = min((ob_idx + 1) * self.blk_ratio, len(new_inner_blocks))
+            for ib_idx in range(start_pos, end_pos):
+                new_ib_id = new_inner_blocks[ib_idx]
+                self.inner_to_outer_block[new_ib_id] = new_ob.block_id
+            ob_idx += 1
 
     def get_blocks(self, request_id: str) -> torch.Tensor:
         return torch.tensor(self.req_to_outer_blocks[request_id])
 
     def free_blocks(self, request_id: str) -> None:
-        self.req_to_outer_blocks.pop(request_id)
+        outer_blocks = self.req_to_outer_blocks.pop(request_id)
+        for ob in outer_blocks:
+            self.free_block_queue.append(ob)

@@ -457,7 +457,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             block_table = block_tables_cpu[req_index]
             block_table = self.mask_block_table(block_table, num_blocks)
             # TODO
-            if len(scheduled.new_block_ids) > 0:
+            if self.enable_caching and len(scheduled.new_block_ids) > 0:
                 self.prefix_cache_manager.allocate_blocks(req_id, scheduled.new_block_ids)
             block_table = self.prefix_cache_manager.get_blocks(req_id)
             block_tables_list.append(block_table)
