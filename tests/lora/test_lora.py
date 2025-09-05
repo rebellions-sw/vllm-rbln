@@ -30,7 +30,7 @@ NUM_BLOCKS = 8
 BATCH_SIZE = 4
 MAX_LORA_RANK = 8
 MAX_MODEL_LEN = 128
-MODEL_PATH = "meta-llama/Llama-2-7b-hf"
+MODEL_PATH = "facebook/opt-125m"
 VOCAB_SIZE = 32000
 
 V0_PATH = "vllm_rbln.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"

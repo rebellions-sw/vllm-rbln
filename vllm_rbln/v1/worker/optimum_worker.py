@@ -133,13 +133,12 @@ class RBLNOptimumWorker(WorkerBase):
         raise RuntimeError("It is not required in vLLM RBLN.")
 
     def list_loras(self) -> set[int]:
-        rbln_cfg = getattr(self.model, "rbln_model_config", None)
+        rbln_cfg = getattr(self.model_runner.model.model, "rbln_config", None)
         lora_cfg = getattr(rbln_cfg, "lora_config", None)
         if lora_cfg is None:
             raise ValueError("The model is not compiled with LoRA.")
 
-        lora_adapters = getattr(self.model.rbln_model_config.lora_config,
-                                "adapters", [])
+        lora_adapters = getattr(lora_cfg, "adapters", [])
 
         adapter_ids = {a.lora_int_id for a in lora_adapters}
         return adapter_ids
