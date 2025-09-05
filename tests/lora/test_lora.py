@@ -36,6 +36,9 @@ VOCAB_SIZE = 32000
 V0_PATH = "vllm_rbln.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"
 V1_PATH = "vllm_rbln.v1.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"
 
+result = []
+golden = []
+
 def get_vllm_config(async_scheduling=False):
     model_config = ModelConfig(
         MODEL_PATH,
@@ -124,8 +127,8 @@ class MockModelWrapper(nn.Module):
 
         running_requests_ids = model_input.running_requests_ids
         parsed_lora_int_ids = parse_lora_int_ids(running_requests_ids)
-        for i, lora_int_id in enumerate(parsed_lora_int_ids):
-            assert lora_int_id == self.model.lora_int_ids[i]
+        result.append(parsed_lora_int_ids)
+        golden.append(self.model.lora_int_ids)
 
         return fake_logits
     
@@ -154,7 +157,8 @@ def fake_load_model(self):
 
 
 @pytest.mark.asyncio
-async def test_add_lora():
+@pytest.mark.parametrize("load_model_path", [V0_PATH, V1_PATH])
+async def test_add_lora(load_model_path):
     engine_args = AsyncEngineArgs(
         # FIXME patch is required
         model=MODEL_PATH,
@@ -167,7 +171,10 @@ async def test_add_lora():
         block_size=BLOCK_SIZE,
     )
     lora_int_ids = [1, 2, 3, 0, 1, 2]
-    load_model_path = V1_PATH if envs.VLLM_USE_V1 else V0_PATH
     with patch(load_model_path, fake_load_model):
         async with build_async_engine_client_from_engine_args(engine_args, disable_frontend_multiprocessing=True) as llm:
             await add_lora_request(llm, lora_int_ids)
+
+    for r, g in zip(result, golden):
+        for i in range(len(r)):
+            assert g[i] == r[i]
