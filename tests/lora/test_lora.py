@@ -1,28 +1,36 @@
-from vllm.lora.request import LoRARequest
-from vllm.lora.models import LoRAMapping
+# Copyright 2025 Rebellions Inc. All rights reserved.
 
-from vllm_rbln.v1.worker.optimum_worker import RBLNOptimumWorker as Worker
-from vllm_rbln.worker.optimum_worker import RBLNOptimumWorker as V1Worker
-from vllm.entrypoints.openai.api_server import (
-    build_async_engine_client_from_engine_args)
-from vllm.utils import merge_async_iterators
-from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-from vllm_rbln.worker.optimum_model_runner import RBLNOptimumModelRunner
-from vllm_rbln.model_executor.models.optimum import RBLNOptimumForCausalLM, ModelInputForRBLN
-from vllm_rbln.model_executor.models.optimum.model_base import KVCacheBlockAdapter
-from vllm import SamplingParams, TextPrompt
-from vllm.config import ModelConfig, SchedulerConfig, CacheConfig, LoRAConfig, VllmConfig
-from vllm.model_executor.layers.logits_processor import LogitsProcessor
-from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 from typing import Optional
+
 import pytest
-import asyncio
 import torch
 import torch.nn as nn
-from unittest.mock import MagicMock, patch
-from vllm import envs
+from vllm import SamplingParams, TextPrompt
+from vllm.config import (CacheConfig, LoRAConfig, ModelConfig, SchedulerConfig,
+                         VllmConfig)
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.entrypoints.openai.api_server import (
+    build_async_engine_client_from_engine_args)
+from vllm.lora.request import LoRARequest
+from vllm.model_executor.layers.logits_processor import LogitsProcessor
+from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
+from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.utils import merge_async_iterators
+
+from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
+from vllm_rbln.model_executor.models.optimum.model_base import (
+    KVCacheBlockAdapter)
 
 NUM_LORAS = 5
 BLOCK_SIZE = 16
@@ -33,11 +41,12 @@ MAX_MODEL_LEN = 128
 MODEL_PATH = "facebook/opt-125m"
 VOCAB_SIZE = 32000
 
-V0_PATH = "vllm_rbln.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"
-V1_PATH = "vllm_rbln.v1.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"
+V0_PATH = "vllm_rbln.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"  # noqa
+V1_PATH = "vllm_rbln.v1.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"  # noqa
 
 result = []
 golden = []
+
 
 def get_vllm_config(async_scheduling=False):
     model_config = ModelConfig(
@@ -57,8 +66,8 @@ def get_vllm_config(async_scheduling=False):
         cache_dtype="auto",
     )
     lora_config = LoRAConfig(max_lora_rank=MAX_LORA_RANK,
-                            max_cpu_loras=NUM_LORAS,
-                            max_loras=NUM_LORAS)
+                             max_cpu_loras=NUM_LORAS,
+                             max_loras=NUM_LORAS)
     vllm_config = VllmConfig(
         model_config=model_config,
         scheduler_config=scheduler_config,
@@ -67,6 +76,7 @@ def get_vllm_config(async_scheduling=False):
     )
     return vllm_config
 
+
 def get_lora_requests():
     lora_requests = [
         LoRARequest(str(i + 1), i + 1, "/path/adapter" + str(i + 1))
@@ -74,15 +84,18 @@ def get_lora_requests():
     ]
     return lora_requests
 
+
 def parse_lora_int_ids(running_requests_ids):
     lora_ids = []
     for running_request in running_requests_ids:
         lora_ids.append(int(running_request.split("-")[1]))
     return lora_ids
 
+
 async def add_lora_request(llm, lora_int_ids):
     lora_requests = [
-        LoRARequest(str(lora_int_id), lora_int_id, "/path/adapter" + str(lora_int_id))
+        LoRARequest(str(lora_int_id), lora_int_id,
+                    "/path/adapter" + str(lora_int_id))
         for lora_int_id in lora_int_ids
     ]
     sampling_params = SamplingParams(n=1,
@@ -107,8 +120,11 @@ async def add_lora_request(llm, lora_int_ids):
     async for i, res in all_gens:
         pass
 
+
 class MockModelWrapper(nn.Module):
+
     class MockModel:
+
         def set_lora_int_ids(self, lora_int_ids):
             self.lora_int_ids = lora_int_ids
 
@@ -131,7 +147,7 @@ class MockModelWrapper(nn.Module):
         golden.append(self.model.lora_int_ids)
 
         return fake_logits
-    
+
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         return self.logits_processor(None, hidden_states, sampling_metadata)
@@ -156,11 +172,19 @@ def fake_load_model(self):
     self.valid_lora_ids = list(range(NUM_LORAS + 1))
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("load_model_path", [V0_PATH, V1_PATH])
-async def test_add_lora(load_model_path):
+def clear_global_vars():
+    golden.clear()
+    result.clear()
+
+
+def validate_vars():
+    for r, g in zip(result, golden):
+        for i in range(len(r)):
+            assert g[i] == r[i]
+
+
+async def add_lora():
     engine_args = AsyncEngineArgs(
-        # FIXME patch is required
         model=MODEL_PATH,
         enable_lora=True,
         max_loras=NUM_LORAS,
@@ -171,10 +195,24 @@ async def test_add_lora(load_model_path):
         block_size=BLOCK_SIZE,
     )
     lora_int_ids = [1, 2, 3, 0, 1, 2]
-    with patch(load_model_path, fake_load_model):
-        async with build_async_engine_client_from_engine_args(engine_args, disable_frontend_multiprocessing=True) as llm:
-            await add_lora_request(llm, lora_int_ids)
+    async with build_async_engine_client_from_engine_args(
+            engine_args, disable_frontend_multiprocessing=True) as llm:
+        await add_lora_request(llm, lora_int_ids)
 
-    for r, g in zip(result, golden):
-        for i in range(len(r)):
-            assert g[i] == r[i]
+
+@pytest.mark.asyncio
+async def test_add_lora_v0(monkeypatch):
+    clear_global_vars()
+    monkeypatch.setattr(V0_PATH, fake_load_model)
+    await add_lora()
+    validate_vars()
+
+
+@pytest.mark.asyncio
+async def test_add_lora_v1(monkeypatch):
+    clear_global_vars()
+    monkeypatch.setenv("VLLM_USE_V1", "1")
+    monkeypatch.setattr(V1_PATH, fake_load_model)
+
+    await add_lora()
+    validate_vars()
