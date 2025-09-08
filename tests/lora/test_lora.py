@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from types import SimpleNamespace
 from typing import Optional
 
 import pytest
@@ -108,12 +109,11 @@ async def add_lora_request(llm, lora_int_ids):
 
     for i, lora_request in enumerate(lora_requests):
         lora_int_id = lora_request.lora_int_id
-        generator = llm.generate(
-            prompt=TextPrompt(prompt=f"hello {lora_int_id}",
-                              multi_modal_data=None),  # type: ignore 
-            sampling_params=sampling_params,
-            lora_request=lora_request,
-            request_id=f"REQ{i}:LORA-{lora_int_id}")
+        generator = llm.generate(prompt=TextPrompt(
+            prompt=f"hello {lora_int_id}", multi_modal_data=None),
+                                 sampling_params=sampling_params,
+                                 lora_request=lora_request,
+                                 request_id=f"REQ{i}:LORA-{lora_int_id}")
         generators.append(generator)
 
     all_gens = merge_async_iterators(*generators)
@@ -124,6 +124,13 @@ async def add_lora_request(llm, lora_int_ids):
 class MockModelWrapper(nn.Module):
 
     class MockModel:
+
+        def __init__(self):
+            self.rbln_config = SimpleNamespace(lora_config=SimpleNamespace(
+                adapters=[
+                    type("RBLNLoRAAdapterConfig", (), {"lora_int_id": i + 1})()
+                    for i in range(NUM_LORAS)
+                ]))
 
         def set_lora_int_ids(self, lora_int_ids):
             self.lora_int_ids = lora_int_ids
@@ -200,6 +207,25 @@ async def add_lora():
         await add_lora_request(llm, lora_int_ids)
 
 
+async def list_loras():
+    engine_args = AsyncEngineArgs(
+        model=MODEL_PATH,
+        enable_lora=True,
+        max_loras=NUM_LORAS,
+        max_lora_rank=MAX_LORA_RANK,
+        max_model_len=MAX_MODEL_LEN,
+        max_num_batched_tokens=MAX_MODEL_LEN,
+        max_num_seqs=BATCH_SIZE,
+        block_size=BLOCK_SIZE,
+    )
+
+    async with build_async_engine_client_from_engine_args(
+            engine_args, disable_frontend_multiprocessing=True) as llm:
+        lora_ids = await llm.list_loras()
+
+    return lora_ids
+
+
 @pytest.mark.asyncio
 async def test_add_lora_v0(monkeypatch):
     clear_global_vars()
@@ -216,3 +242,13 @@ async def test_add_lora_v1(monkeypatch):
 
     await add_lora()
     validate_vars()
+
+
+@pytest.mark.asyncio
+async def test_list_lora_v1(monkeypatch):
+    clear_global_vars()
+    monkeypatch.setenv("VLLM_USE_V1", "1")
+    monkeypatch.setattr(V1_PATH, fake_load_model)
+
+    lora_ids = await list_loras()
+    assert set(lora_ids) == {1, 2, 3, 4, 5}

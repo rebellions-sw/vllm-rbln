@@ -140,7 +140,7 @@ class RBLNOptimumWorker(WorkerBase):
 
         lora_adapters = getattr(lora_cfg, "adapters", [])
 
-        adapter_ids = {a.lora_int_id for a in lora_adapters}
+        adapter_ids = set(a.lora_int_id for a in lora_adapters)
         return adapter_ids
 
     def pin_lora(self, lora_id: int) -> bool:
