@@ -41,7 +41,7 @@ from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
 from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
-from vllm_rbln.v1.worker.prefix_cache_manager import PrefixKVCacheManager
+from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
 
 logger = init_logger(__name__)
 
@@ -155,10 +155,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.intermediate_tensors: Optional[IntermediateTensors] = None
         self.enable_caching = cache_config.enable_caching
         if self.enable_caching:
-            self.prefix_cache_manager = PrefixKVCacheManager(
-                vllm_config=vllm_config,
-                num_blocks=self.model.kv_block_adapter.
-                get_available_num_blocks())
+            self.prefix_cache_manager = RBLNPrefixKVCacheManager(
+                ob_size=vllm_config.additional_config.attn_block_size,
+                ib_size=vllm_config.cache_config.block_size,
+                num_ob=self.model.kv_block_adapter.get_available_num_blocks())
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
