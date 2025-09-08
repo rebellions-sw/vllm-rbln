@@ -123,7 +123,7 @@ class RBLNPrefixKVCacheManager:
         for ib_id in cached_ib:
             ob_id = self.inner_to_outer_block[ib_id]
             if ob_id != last_cached_outer_block:
-                cached_outer_blocks.append(ob_id)   
+                cached_outer_blocks.append(ob_id)
                 last_cached_outer_block = ob_id
         if cached_outer_blocks:
             return torch.tensor(cached_outer_blocks, dtype=torch.int32)
@@ -135,6 +135,7 @@ class RBLNPrefixKVCacheManager:
         Get all the outer blocks allocated to the given request.
         """
         self.pooled_tensor.fill_(-1)
-        value =  torch.tensor(self.req_to_outer_blocks[request_id], dtype=torch.int16)
+        value = torch.tensor(self.req_to_outer_blocks[request_id],
+                             dtype=torch.int16)
         self.pooled_tensor[0, :len(value)].copy_(value)
         return self.pooled_tensor

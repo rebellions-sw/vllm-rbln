@@ -443,7 +443,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_tokens = torch.tensor(prompt_tokens).unsqueeze(0)
         input_positions = torch.tensor(input_positions).unsqueeze(0)
         block_table = block_table.unsqueeze(0)
-        cached_block_table = cached_block_table.unsqueeze(0) if cached_block_table is not None else None    
+        cached_block_table = cached_block_table.unsqueeze(
+            0) if cached_block_table is not None else None
 
         return input_tokens, input_positions, block_table, cached_block_table, \
             batched_mm_inputs, running_request_ids

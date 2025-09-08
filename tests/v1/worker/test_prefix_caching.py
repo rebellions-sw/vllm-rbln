@@ -6,34 +6,36 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+from types import SimpleNamespace
+from typing import Optional
+
+import pytest
+import torch
+import torch.nn as nn
+from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
+from vllm.multimodal.inputs import MultiModalKwargs
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from vllm.platforms import current_platform
-from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
+from vllm.sampling_params import SamplingParams
+from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
+from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
+from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
+                                        KVCacheGroupSpec)
+from vllm.v1.worker.gpu_input_batch import InputBatch
+
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
-import pytest
-import torch
-import torch.nn as nn
-from typing import Optional
-from types import SimpleNamespace
-from vllm.utils import sha256
-from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
-                                        KVCacheGroupSpec, KVCacheTensor)
-from vllm.v1.core.sched.output import CachedRequestData, SchedulerOutput
-from vllm.v1.worker.gpu_input_batch import InputBatch
-from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
-from vllm.sampling_params import SamplingParams
-from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
-                                       SchedulerOutput)
+
 MAX_SEQ_LEN = 64
 OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_SEQ_LEN // OB_SIZE
 DEVICE = current_platform.device_type
+
 
 def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
     return KVCacheConfig(
@@ -46,6 +48,7 @@ def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
             )
         ],
     )
+
 
 def make_request(request_id,
                  prompt_token_ids,
@@ -72,20 +75,10 @@ def make_request(request_id,
     )
 
 
-
 def initialize_kv_cache(runner: RBLNOptimumModelRunner):
     """
     Only perform necessary steps in RBLNOptimumModelRunner.initialize_kv_cache()
     """
-    attn_spec = FullAttentionSpec(
-        block_size=OB_SIZE,
-        num_kv_heads=runner.model_config.get_num_kv_heads(
-            runner.parallel_config),
-        head_size=runner.model_config.get_head_size(),
-        dtype=runner.kv_cache_dtype,
-        use_mla=False,
-    )
-    tensor_size = attn_spec.page_size_bytes * NUM_BLOCKS
     kv_cache_config = make_kv_cache_config(
         block_size=IB_SIZE,
         num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
@@ -102,6 +95,7 @@ def initialize_kv_cache(runner: RBLNOptimumModelRunner):
             kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
         ],
     )
+
 
 def get_vllm_config(async_scheduling=False):
     scheduler_config = SchedulerConfig(
@@ -132,8 +126,11 @@ def get_vllm_config(async_scheduling=False):
     )
     return vllm_config
 
+
 class MockModelWrapper(nn.Module):
+
     class MockModel:
+
         def __init__(self):
             self.kv_block_adapter = SimpleNamespace(
                 get_available_num_blocks=lambda: NUM_BLOCKS)
@@ -144,6 +141,7 @@ class MockModelWrapper(nn.Module):
         # self.logits_processor = LogitsProcessor(VOCAB_SIZE,
         #                                         logits_as_input=True)
         # self.sampler = Sampler()
+
 
 @pytest.fixture
 def model_runner():
@@ -161,7 +159,12 @@ def model_runner():
     return runner
 
 
-def _schedule_new_request(req_ids: str, token_ids: list[int], block_ids: tuple[list[int], ...], new_computed_tokens: int, ) -> SchedulerOutput:
+def _schedule_new_request(
+    req_ids: str,
+    token_ids: list[int],
+    block_ids: tuple[list[int], ...],
+    new_computed_tokens: int,
+) -> SchedulerOutput:
     new_reqs = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
@@ -195,8 +198,8 @@ def _schedule_new_request(req_ids: str, token_ids: list[int], block_ids: tuple[l
         grammar_bitmask=None,
     )
 
-@pytest.mark.parametrize("hash_algo", ["builtin"])
-def test_prefill(model_runner, hash_algo):
+
+def test_prefill(model_runner):
     manager = KVCacheManager(
         make_kv_cache_config(
             block_size=IB_SIZE,
@@ -205,9 +208,6 @@ def test_prefill(model_runner, hash_algo):
         max_model_len=MAX_SEQ_LEN,
         enable_caching=True,
     )
-    # choose the hash function according to the parameter
-    hash_fn = (sha256_cbor_64bit if hash_algo == "sha256_cbor_64bit" else
-               sha256 if hash_algo == "sha256" else hash)
 
     # Complete 8 inner blocks (32 tokens)
     common_token_ids = [i for i in range(32)]
@@ -225,14 +225,16 @@ def test_prefill(model_runner, hash_algo):
                                     computed_blocks)
     assert blocks.get_block_ids() == ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], )
     # Check sub block allocation in vLLM RBLN
-    scheduler_output = _schedule_new_request(req_id, all_token_ids, blocks.get_block_ids(), num_computed_tokens)
+    scheduler_output = _schedule_new_request(req_id, all_token_ids,
+                                             blocks.get_block_ids(),
+                                             num_computed_tokens)
     print(scheduler_output)
     model_runner._update_states(scheduler_output)
     inputs = model_runner._prepare_inputs(scheduler_output)
-    # golden_tensor = torch.zeros(1, MAX_SEQ_LEN // OB_SIZE, dtype=torch.int32).fill_(-1)
-    # golden_tensor[0, :11].copy_(torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))
+
     print(inputs.block_tables[0])
-    assert torch.allclose(inputs.block_tables[0], torch.tensor([0, 1, 2, -1], dtype=torch.int32))
+    assert torch.allclose(inputs.block_tables[0],
+                          torch.tensor([0, 1, 2, -1], dtype=torch.int32))
     assert inputs.cached_block_tables is None
 
     # Generate partially cached request
@@ -243,5 +245,3 @@ def test_prefill(model_runner, hash_algo):
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
     assert len(computed_blocks.blocks[0]) == 8
     assert num_computed_tokens == 32
-
-
