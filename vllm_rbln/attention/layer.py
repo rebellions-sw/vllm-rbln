@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib.util
 from typing import Any, Dict, List, Optional
 
-import importlib.util
 import torch
 import torch.nn as nn
 import vllm.envs as envs
@@ -22,7 +22,6 @@ from vllm.attention import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import backend_name_to_enum, get_attn_backend
 from vllm.config import CacheConfig, get_current_vllm_config
-from vllm.distributed.utils import get_pp_indices
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.model_executor.layers.linear import UnquantizedLinearMethod
 from vllm.model_executor.layers.quantization.base_config import (
@@ -171,8 +170,10 @@ def __custom_init__(
             raise NotImplementedError(
                 "Cross-layer KV sharing is not supported in V0.")
 
-        if importlib.util.find_spec("vllm.v1.attention.backends.utils") is not None:
-            from vllm.v1.attention.backends.utils import validate_kv_sharing_target
+        if importlib.util.find_spec(
+                "vllm.v1.attention.backends.utils") is not None:
+            from vllm.v1.attention.backends.utils import (
+                validate_kv_sharing_target)
             validate_kv_sharing_target(
                 prefix,
                 kv_sharing_target_layer_name,
@@ -202,6 +203,7 @@ def __custom_init__(
     start, end = model_config.get_layers_start_end_indices(parallel_config)
     assert self.layer_index >= start and self.layer_index < end
     self.layer_index -= start
+
 
 def custom_attention_forward(
     self,

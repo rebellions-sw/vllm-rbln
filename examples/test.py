@@ -30,6 +30,7 @@ hf_overrides_kw = {
     "num_hidden_layers": 1,
 }
 
+
 # update config of multi-modal language model num_hidden_layers
 def custom_hf_overrides_kw(hf_config):
     if hasattr(hf_config, "text_config"):
@@ -51,6 +52,7 @@ model_id = qwen1_5_moe_model_id
 #model_id = deepseek_v2_lite_model_id
 
 import os
+
 ## The profile results can be visualized using https://ui.perfetto.dev/
 profile_dir = './profile/' + model_id.replace('/', '_')
 os.environ['VLLM_TORCH_PROFILER_DIR'] = profile_dir
@@ -61,7 +63,7 @@ warmup_sampling_params = SamplingParams(temperature=0.0, max_tokens=2)
 llm = LLM(
     model=model_id,
     hf_overrides=hf_overrides_kw,
-#hf_overrides=custom_hf_overrides_kw,
+    #hf_overrides=custom_hf_overrides_kw,
     # max_model_len=40 * 1024,
     max_model_len=8 * 1024,
     block_size=1024,
