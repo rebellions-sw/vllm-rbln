@@ -174,6 +174,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=self.vllm_config.additional_config["attn_block_size"],
                 ib_size=self.vllm_config.cache_config.block_size,
+                max_model_len=self.max_model_len,
                 num_ob=self.model.kv_block_adapter.get_available_num_blocks())
 
     def get_model(self) -> nn.Module:
@@ -421,6 +422,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     req_id, scheduled.num_computed_tokens,
                     scheduled.block_ids[0])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
+                print("scheduled", scheduled)
                 cached_block_table = \
                     self.prefix_cache_manager.get_cached_origin_blocks(
                         scheduled.num_computed_tokens, scheduled.block_ids[0]

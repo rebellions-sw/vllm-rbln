@@ -29,11 +29,11 @@ from vllm.v1.worker.gpu_input_batch import InputBatch
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
-
-MAX_SEQ_LEN = 64
+MAX_NUM_SEQ = 2
+MAX_MODEL_LEN = 64
 OB_SIZE = 16
 IB_SIZE = 4
-NUM_BLOCKS = MAX_SEQ_LEN // OB_SIZE
+NUM_BLOCKS = 6
 DEVICE = current_platform.device_type
 
 
@@ -99,9 +99,9 @@ def initialize_kv_cache(runner: RBLNOptimumModelRunner):
 
 def get_vllm_config(async_scheduling=False):
     scheduler_config = SchedulerConfig(
-        max_num_seqs=10,
-        max_num_batched_tokens=MAX_SEQ_LEN,
-        max_model_len=MAX_SEQ_LEN,
+        max_num_seqs=MAX_NUM_SEQ,
+        max_num_batched_tokens=MAX_MODEL_LEN,
+        max_model_len=MAX_MODEL_LEN,
         async_scheduling=async_scheduling,
     )
     model_config = ModelConfig(
@@ -153,6 +153,7 @@ def model_runner():
     runner.prefix_cache_manager = RBLNPrefixKVCacheManager(
         ob_size=OB_SIZE,
         ib_size=IB_SIZE,
+        max_model_len=MAX_MODEL_LEN,
         num_ob=runner.model.model.kv_block_adapter.get_available_num_blocks(),
     )
     initialize_kv_cache(runner)
@@ -205,7 +206,7 @@ def test_prefill(model_runner):
             block_size=IB_SIZE,
             num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
         ),
-        max_model_len=MAX_SEQ_LEN,
+        max_model_len=MAX_MODEL_LEN,
         enable_caching=True,
     )
 
@@ -228,11 +229,8 @@ def test_prefill(model_runner):
     scheduler_output = _schedule_new_request(req_id, all_token_ids,
                                              blocks.get_block_ids(),
                                              num_computed_tokens)
-    print(scheduler_output)
     model_runner._update_states(scheduler_output)
     inputs = model_runner._prepare_inputs(scheduler_output)
-
-    print(inputs.block_tables[0])
     assert torch.allclose(inputs.block_tables[0],
                           torch.tensor([0, 1, 2, -1], dtype=torch.int32))
     assert inputs.cached_block_tables is None
@@ -245,3 +243,22 @@ def test_prefill(model_runner):
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
     assert len(computed_blocks.blocks[0]) == 8
     assert num_computed_tokens == 32
+    blocks = manager.allocate_slots(req1, len(unique_token_ids),
+                                    len(computed_blocks.blocks[0]) * IB_SIZE,
+                                    computed_blocks)
+    # [1, 2, 3, 4, 5, 6, 7, 8] are cached
+    # Allocate [12, 13, 14] for new 3 inner blocks
+    assert blocks.get_block_ids() == ([12, 13, 14], )
+    total_allocated_blocks = manager.get_block_ids(req1.request_id)
+    assert total_allocated_blocks == ([1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14], )
+    scheduler_output = _schedule_new_request(req_id, all_token_ids,
+                                             total_allocated_blocks,
+                                             num_computed_tokens)
+    model_runner._update_states(scheduler_output)
+    inputs = model_runner._prepare_inputs(scheduler_output)
+
+    assert torch.allclose(inputs.block_tables[0],
+                          torch.tensor([3, 4, 5, -1], dtype=torch.int32))
+    assert torch.allclose(inputs.cached_block_tables, 
+                          torch.tensor([[0, 1]], dtype=torch.int32))
+    # Finish req0

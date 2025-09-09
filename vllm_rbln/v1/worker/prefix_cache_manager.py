@@ -34,9 +34,9 @@ class RBLNPrefixBlockQueue:
 
 class RBLNPrefixKVCacheManager:
 
-    def __init__(self, ob_size, ib_size, num_ob):
+    def __init__(self, ob_size: int, ib_size: int, max_model_len: int, num_ob: int):
         self.req_to_outer_blocks: dict[str, list[int]] = {}
-        self.pooled_tensor = torch.zeros(1, num_ob, dtype=torch.int32)
+        self.pooled_tensor = torch.zeros(1, max_model_len // ob_size, dtype=torch.int32)
         # Check the inner block is oudated or not
         self.inner_to_request_id: dict[int, str] = {}
         self.inner_to_outer_block: dict[int, int] = {}
@@ -110,7 +110,7 @@ class RBLNPrefixKVCacheManager:
                     self.free_blocks(request_id)
 
     def get_cached_origin_blocks(self, cached_len,
-                                 inner_blocks: list[int]) -> torch.Tensor:
+                                 inner_blocks: torch.Tensor) -> torch.Tensor:
         """
         Get the outer blocks that are already cached.
         """
