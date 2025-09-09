@@ -11,25 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from types import SimpleNamespace
 from typing import Optional
 
 import pytest
 import torch
-import torch.nn as nn
-from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
-from vllm.multimodal.inputs import MultiModalKwargs
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
-from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
+from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
-from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
-                                        KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
-from vllm.v1.worker.gpu_input_batch import InputBatch
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
+
+from .utils import (MockModelWrapper, get_vllm_config, initialize_kv_cache,
+                    make_kv_cache_config, make_request)
 
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
@@ -37,109 +33,6 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1
 DEVICE = current_platform.device_type
-
-
-def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
-    return KVCacheConfig(
-        num_blocks=num_blocks,
-        kv_cache_tensors=[],
-        kv_cache_groups=[
-            KVCacheGroupSpec(
-                ["layer"],
-                FullAttentionSpec(block_size, 1, 1, torch.float32, False),
-            )
-        ],
-    )
-
-
-def make_request(request_id,
-                 prompt_token_ids,
-                 mm_positions=None,
-                 mm_hashes=None,
-                 prompt_logprobs: Optional[int] = None,
-                 cache_salt: Optional[str] = None):
-    if mm_positions is None:
-        multi_modal_inputs = None
-    else:
-        multi_modal_inputs = [MultiModalKwargs({})] * len(mm_positions)
-
-    return Request(
-        request_id=request_id,
-        prompt_token_ids=prompt_token_ids,
-        multi_modal_inputs=multi_modal_inputs,
-        multi_modal_hashes=mm_hashes,
-        multi_modal_placeholders=mm_positions,
-        sampling_params=SamplingParams(max_tokens=17,
-                                       prompt_logprobs=prompt_logprobs),
-        eos_token_id=100,
-        lora_request=None,
-        cache_salt=cache_salt,
-    )
-
-
-def initialize_kv_cache(runner: RBLNOptimumModelRunner):
-    """
-    Only perform necessary steps in RBLNOptimumModelRunner.initialize_kv_cache()
-    """
-    kv_cache_config = make_kv_cache_config(
-        block_size=IB_SIZE,
-        num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
-    )
-    runner.kv_cache_config = kv_cache_config
-    runner.input_batch = InputBatch(
-        max_num_reqs=runner.max_num_reqs,
-        max_model_len=runner.max_model_len,
-        max_num_batched_tokens=runner.max_num_tokens,
-        device=runner.device,
-        pin_memory=runner.pin_memory,
-        vocab_size=runner.model_config.get_vocab_size(),
-        block_sizes=[
-            kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
-        ],
-    )
-
-
-def get_vllm_config(async_scheduling=False):
-    scheduler_config = SchedulerConfig(
-        max_num_seqs=MAX_NUM_SEQ,
-        max_num_batched_tokens=MAX_MODEL_LEN,
-        max_model_len=MAX_MODEL_LEN,
-        async_scheduling=async_scheduling,
-    )
-    model_config = ModelConfig(
-        model="facebook/opt-125m",
-        dtype=torch.float,
-        seed=42,
-    )
-    cache_config = CacheConfig(
-        block_size=IB_SIZE,
-        swap_space=0,
-        cache_dtype="auto",
-        enable_prefix_caching=True,
-    )
-    additional_config = {
-        "attn_block_size": OB_SIZE,
-    }
-    vllm_config = VllmConfig(
-        cache_config=cache_config,
-        model_config=model_config,
-        scheduler_config=scheduler_config,
-        additional_config=additional_config,
-    )
-    return vllm_config
-
-
-class MockModelWrapper(nn.Module):
-
-    class MockModel:
-
-        def __init__(self):
-            self.kv_block_adapter = SimpleNamespace(
-                get_available_num_blocks=lambda: NUM_BLOCKS)
-
-    def __init__(self):
-        super().__init__()
-        self.model = self.MockModel()
 
 
 @pytest.fixture
@@ -415,3 +308,42 @@ def test_block_ref_cnt(model_runner):
         req0.request_id]) == 2
     assert model_runner.prefix_cache_manager.get_ref_cnt(0) == 2
     assert model_runner.prefix_cache_manager.get_ref_cnt(1) == 1
+
+
+def test_decode_no_alloc(model_runner):
+    """
+    Check the prefix caching works as expected during decode.
+    """
+
+    manager = KVCacheManager(
+        make_kv_cache_config(
+            block_size=IB_SIZE,
+            num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
+        ),
+        max_model_len=MAX_MODEL_LEN,
+        enable_caching=True,
+    )
+
+    # 1. Generate req0: 6 tokens -> 2 inner blocks
+    common_token_ids = [i for i in range(4)]
+    unique_token_ids = [3] * 2
+
+    all_token_ids = common_token_ids + unique_token_ids
+    req_id = "0"
+    req0 = make_request(req_id, all_token_ids)
+    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
+    assert not computed_blocks.blocks[0]
+    assert num_computed_tokens == 0
+    blocks = manager.allocate_slots(req0, len(all_token_ids),
+                                    len(computed_blocks.blocks[0]) * IB_SIZE,
+                                    computed_blocks)
+    scheduler_output = _schedule_new_request(req_id, all_token_ids,
+                                             blocks.get_block_ids(),
+                                             num_computed_tokens)
+    model_runner._update_states(scheduler_output)
+    inputs = model_runner._prepare_inputs(scheduler_output)
+    assert torch.allclose(inputs.block_tables[0],
+                          torch.tensor([0, -1, -1, -1], dtype=torch.int32))
+    assert inputs.cached_block_tables is None
+
+    # 2. Decode req0: 4 tokens -> no new inner block allocation
