@@ -512,6 +512,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     "Generated tokens: %s, Freed block(s): %s", req_id,
                     len(self.requests[req_id].prompt_token_ids),
                     len(self.requests[req_id].output_token_ids), block_ids)
+            self.prefix_cache_manager.free_blocks(req_id)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.

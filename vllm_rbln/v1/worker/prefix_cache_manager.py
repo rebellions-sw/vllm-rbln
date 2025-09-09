@@ -21,22 +21,38 @@ class RBLNPrefixBlockQueue:
     def __init__(self, num_blocks):
         self.num_free_blocks = num_blocks
         self.blocks = deque([i for i in range(self.num_free_blocks)])
+        self.ref_cnt_per_outer_block = [0] * num_blocks
 
     def popleft(self) -> int:
         if len(self.blocks) == 0:
             raise RuntimeError("No free outer blocks available: "
                                "prefix cache block management exhausted.")
-        return self.blocks.popleft()
+        block_id = self.blocks.popleft()
+        self.ref_cnt_per_outer_block[block_id] = 1  # set ref count to 1
+        return block_id
 
     def append(self, block_id: int) -> None:
+        self.ref_cnt_per_outer_block[block_id] += 1  # increase ref count
         self.blocks.append(block_id)
+
+    def get_ref_cnt(self, block_id: int) -> int:
+        return self.ref_cnt_per_outer_block[block_id]
+
+    def reset_ref_cnt(self, block_id: int) -> None:
+        self.ref_cnt_per_outer_block[block_id] = 0
+
+    def inc_ref_cnt(self, block_id: int) -> None:
+        self.ref_cnt_per_outer_block[block_id] += 1
 
 
 class RBLNPrefixKVCacheManager:
 
-    def __init__(self, ob_size: int, ib_size: int, max_model_len: int, num_ob: int):
+    def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
+                 num_ob: int):
         self.req_to_outer_blocks: dict[str, list[int]] = {}
-        self.pooled_tensor = torch.zeros(1, max_model_len // ob_size, dtype=torch.int32)
+        self.pooled_tensor = torch.zeros(1,
+                                         max_model_len // ob_size,
+                                         dtype=torch.int32)
         # Check the inner block is oudated or not
         self.inner_to_request_id: dict[int, str] = {}
         self.inner_to_outer_block: dict[int, int] = {}
@@ -63,7 +79,7 @@ class RBLNPrefixKVCacheManager:
             self.req_to_outer_blocks[request_id] = []
 
         # Lazy cleanup: finished requests whose inner blocks got reused
-        self.free_blocks_of_finished_requests(cached_len, inner_blocks)
+        # self.free_blocks_of_finished_requests(cached_len, inner_blocks)
 
         # Allocate the outer blocks that are cached.
         num_cached_outer_blocks = self._num_cached_outer_blocks(cached_len)
@@ -89,30 +105,32 @@ class RBLNPrefixKVCacheManager:
             ob_idx += 1
 
     def free_blocks(self, request_id: str) -> None:
-        finished_obs = self.req_to_outer_blocks.pop(request_id)
-        for ob in finished_obs:
-            self.free_block_queue.append(ob)
-
-    def free_blocks_of_finished_requests(self, cached_len,
-                                         inner_blocks: list[int]):
-        # 해당 inner block은 그 사이에 free되고 새로 할당되었다
-        # 이에 맞추어 outer block도 해제
         """
-        Free the outer blocks of finished requests.
+        Free the outer blocks allocated to the given request.
+        It only frees the outer blocks whose reference count is 0.
         """
-        num_cached_ib = self._num_cached_inner_blocks(cached_len)
-        uncached_ib = inner_blocks[num_cached_ib:]
-
-        for ib_id in uncached_ib:
-            if ib_id in self.inner_to_request_id:
-                request_id = self.inner_to_request_id.pop(ib_id)
-                if request_id in self.req_to_outer_blocks:
-                    self.free_blocks(request_id)
+        obs = self.req_to_outer_blocks.get(request_id)
+        num_freed_obs = 0
+        # To sync with the order of block pool
+        for ob in reversed(obs):
+            if self.get_ref_cnt(ob) == 1:
+                self.reset_ref_cnt(ob)
+                self.free_block_queue.append(ob)
+                num_freed_obs += 1
+        if num_freed_obs == len(obs):
+            del self.req_to_outer_blocks[request_id]
+        else:
+            # .remove() is expensive, so we create a new list
+            self.req_to_outer_blocks[request_id] = [
+                ob for ob in obs if self.get_ref_cnt(ob) > 0
+            ]
 
     def get_cached_origin_blocks(self, cached_len,
                                  inner_blocks: torch.Tensor) -> torch.Tensor:
         """
         Get the outer blocks that are already cached.
+        It must be called after allocate_blocks()
+        that calls free_blocks_of_finished_requests().
         """
         cached_outer_blocks = []
         last_cached_outer_block = None
@@ -123,6 +141,9 @@ class RBLNPrefixKVCacheManager:
         for ib_id in cached_ib:
             ob_id = self.inner_to_outer_block[ib_id]
             if ob_id != last_cached_outer_block:
+                self.inc_ref_cnt(ob_id)
+                print("inc ref cnt of block", ob_id, "to",
+                      self.get_ref_cnt(ob_id))
                 cached_outer_blocks.append(ob_id)
                 last_cached_outer_block = ob_id
         if cached_outer_blocks:
@@ -139,3 +160,12 @@ class RBLNPrefixKVCacheManager:
                              dtype=torch.int16)
         self.pooled_tensor[0, :len(value)].copy_(value)
         return self.pooled_tensor
+
+    def get_ref_cnt(self, block_id: int) -> int:
+        return self.free_block_queue.get_ref_cnt(block_id)
+
+    def reset_ref_cnt(self, block_id: int) -> None:
+        self.free_block_queue.reset_ref_cnt(block_id)
+
+    def inc_ref_cnt(self, block_id: int) -> None:
+        self.free_block_queue.inc_ref_cnt(block_id)
