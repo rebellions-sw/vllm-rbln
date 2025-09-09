@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ruff: noqa
-
 import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
@@ -147,7 +145,7 @@ def _(
     return torch.empty_like(q)
 
 
-# RBLN custom op (flash causal attention naive prefill/decode w/o attention mask)
+# RBLN custom op (flash causal attention naive prefill/decode w/o attn mask)
 @torch.library.custom_op(
     "rbln_custom_ops::flash_causal_attention_naive_prefill", mutates_args=())
 def flash_causal_attention_naive_prefill_impl(
@@ -164,7 +162,6 @@ def flash_causal_attention_naive_prefill_impl(
         # attn_weights = MM(q,kt) * scale
         # attn_weights = causal masked softmax(attn_weights)
         # MM(attn_weights, v)
-        partition = kv_cache.size(-2)
         seq_len = q.size(-2)
         s = seq_idx[0][0]
         e = s + seq_len
@@ -216,7 +213,6 @@ def flash_causal_attention_naive_decode_impl(
     if not envs.RBLN_COMPILE_MODEL:
         # NOTE - multiple decode kernel implementation is necessary
         assert q.size(0) == 1
-        partition = kv_cache.size(-2)
         seq_len = q.size(-2)
         s = seq_idx[0][0]
         e = s + seq_len

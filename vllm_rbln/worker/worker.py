@@ -11,8 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-# ruff: noqa
 """A RBLN worker class."""
 import os
 from typing import Dict, List, Optional, Tuple
@@ -188,10 +186,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.rank = rank
         self.parallel_config.rank = rank
 
-        if self.parallel_config.distributed_executor_backend == "mp":
+        distributed_backend = self.parallel_config.distributed_executor_backend
+        if distributed_backend == "mp":
             logger.info("distributed executor backend mp enabled")
             self.set_device()
-        elif self.parallel_config.distributed_executor_backend == "ray":
+        elif distributed_backend == "ray":
             logger.info("distributed executor backend ray enabled")
             self.set_device()
         else:
@@ -200,9 +199,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
-        # FIXME - invalid condition for PP
-        #        if self.is_driver_worker:
-        #            assert self.rank == 0, "The driver worker must have rank 0."
+
+        if distributed_backend == "mp" and self.is_driver_worker:
+            assert self.rank == 0, "The driver worker must have rank 0."
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -260,10 +259,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # This check is only valid for single node mp backends, invalid for ray
         # ex) node#0 : RBLN_DEVICES=0,1
         #     node#1 : RBLN_DEVICES=2,3
-        if self.parallel_config.distributed_executor_backend == "mp":
-            if len(device_ids) < total_device_count:
-                raise RuntimeError(f"{env_var} has devices {device_ids}"
-                                   f" but required {total_device_count}")
+        distributed_backend = self.parallel_config.distributed_executor_backend
+        if distributed_backend == "mp" and len(
+                device_ids) < total_device_count:
+            raise RuntimeError(f"{env_var} has devices {device_ids}"
+                               f" but required {total_device_count}")
 
         start_idx = self.local_rank * envs.RBLN_TP_SIZE
         end_idx = start_idx + envs.RBLN_TP_SIZE

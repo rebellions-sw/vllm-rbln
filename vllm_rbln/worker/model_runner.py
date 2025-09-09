@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ruff: noqa
-
 import dataclasses
 import math
 import weakref
@@ -478,9 +476,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         self.model = get_model(vllm_config=self.vllm_config).eval()
 
         self.compute_logits_model = self.model
-        if self.model_config.is_multimodal_model:
-            if hasattr(self.model.get_language_model(), "logits_processor"):
-                self.compute_logits_model = self.model.get_language_model()
+        if self.model_config.is_multimodal_model and hasattr(
+                self.model.get_language_model(), "logits_processor"):
+            self.compute_logits_model = self.model.get_language_model()
 
         logger.info("[RBLN] load_model = %s", self.model)
         logger.info("[RBLN] model_config.num_layers = %d",
@@ -621,9 +619,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             )
             # Gather logits for TP (compute_logits)
             if get_pp_group().is_last_rank:
-                hidden_states = self.compute_logits_model.logits_processor._gather_logits(
+                logits_processor = self.compute_logits_model.logits_processor
+                hidden_states = logits_processor._gather_logits(
                     hidden_or_intermediate_states)
-
                 hidden_states = hidden_states.view(-1, hidden_states.size(-1))
                 assert hidden_states.dim() == 2
             else:
