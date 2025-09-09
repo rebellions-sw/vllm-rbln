@@ -44,8 +44,17 @@ class RBLNPrefixBlockQueue:
     def inc_ref_cnt(self, block_id: int) -> None:
         self.ref_cnt_per_outer_block[block_id] += 1
 
+    def dec_ref_cnt(self, block_id: int) -> None:
+        self.ref_cnt_per_outer_block[block_id] -= 1
+
 
 class RBLNPrefixKVCacheManager:
+    """
+    Compared to the original prefix caching in vLLM, this implementation:
+    1. Operates on outer blocks rather than inner blocks.
+    2. Copies cached blocks into new blocks instead of reusing them directly.
+    3. Does not account for eviction.
+    """
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
                  num_ob: int):
@@ -110,20 +119,21 @@ class RBLNPrefixKVCacheManager:
         It only frees the outer blocks whose reference count is 0.
         """
         obs = self.req_to_outer_blocks.get(request_id)
-        num_freed_obs = 0
+        freed_obs = []
         # To sync with the order of block pool
         for ob in reversed(obs):
             if self.get_ref_cnt(ob) == 1:
                 self.reset_ref_cnt(ob)
                 self.free_block_queue.append(ob)
-                num_freed_obs += 1
-        if num_freed_obs == len(obs):
+                freed_obs.append(ob)
+            else:
+                self.dec_ref_cnt(ob)
+
+        if len(freed_obs) == len(obs):
             del self.req_to_outer_blocks[request_id]
         else:
             # .remove() is expensive, so we create a new list
-            self.req_to_outer_blocks[request_id] = [
-                ob for ob in obs if self.get_ref_cnt(ob) > 0
-            ]
+            self.req_to_outer_blocks[request_id] = set(obs) - set(freed_obs)
 
     def get_cached_origin_blocks(self, cached_len,
                                  inner_blocks: torch.Tensor) -> torch.Tensor:
@@ -142,8 +152,6 @@ class RBLNPrefixKVCacheManager:
             ob_id = self.inner_to_outer_block[ib_id]
             if ob_id != last_cached_outer_block:
                 self.inc_ref_cnt(ob_id)
-                print("inc ref cnt of block", ob_id, "to",
-                      self.get_ref_cnt(ob_id))
                 cached_outer_blocks.append(ob_id)
                 last_cached_outer_block = ob_id
         if cached_outer_blocks:
@@ -169,3 +177,6 @@ class RBLNPrefixKVCacheManager:
 
     def inc_ref_cnt(self, block_id: int) -> None:
         self.free_block_queue.inc_ref_cnt(block_id)
+
+    def dec_ref_cnt(self, block_id: int) -> None:
+        self.free_block_queue.dec_ref_cnt(block_id)
