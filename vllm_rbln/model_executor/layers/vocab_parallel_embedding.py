@@ -19,7 +19,7 @@ from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               tensor_model_parallel_all_reduce)
 from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
+    QuantizationConfig, method_has_implemented_embedding)
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, UnquantizedEmbeddingMethod,
     VocabParallelEmbedding, get_masked_input_and_mask, pad_vocab_size)
@@ -78,7 +78,7 @@ def __vocab_parallel_embedding__init__(
             f"The class {type(quant_method).__name__} must implement "
             "the 'embedding' method, see UnquantizedEmbeddingMethod.")
 
-    self.quant_method: QuantizeMethodBase = quant_method
+    self.quant_method = quant_method
 
     if params_dtype is None:
         params_dtype = torch.get_default_dtype()
