@@ -1,3 +1,6 @@
+# Copyright 2025 Rebellions Inc. All rights reserved.
+# ruff: noqa
+
 from vllm import LLM, SamplingParams
 from vllm.transformers_utils.config import get_hf_text_config
 

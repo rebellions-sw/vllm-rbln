@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ruff: noqa
+
 import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
@@ -450,7 +452,7 @@ class RBLNAttentionMetadataBuilder(
         logger.info("RBLNAttentionMetadata = %s", attn_metadata)
         logger.info("\tslot_mapping size = %s", slot_mapping.size())
         logger.info("\tblock_tables size = %s", block_tables.size())
-        if not envs.RBLN_FLASH_CAUSAL_ATTN:
+        if not envs.RBLN_FLASH_CAUSAL_ATTN and attn_masks is not None:
             logger.info("\tattn_masks size = %s", attn_masks.size())
             logger.info("\tattn_masks = %s", attn_masks[:, :, :, :, :32])
         else:
