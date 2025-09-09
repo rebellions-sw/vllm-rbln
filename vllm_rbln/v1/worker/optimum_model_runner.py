@@ -296,6 +296,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             multi_modal_kwargs, running_request_ids \
                 = self._prepare_prefill(scheduler_output)
         else:
+            cached_block_tables = None
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
 
@@ -476,7 +477,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             if self.enable_prefix_caching:
                 if len(scheduled.new_block_ids) > 0:
                     self.prefix_cache_manager.allocate_blocks(
-                        req_id, scheduled.new_computed_tokens,
+                        req_id, scheduled.num_computed_tokens,
                         scheduled.new_block_ids[0])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
             else:

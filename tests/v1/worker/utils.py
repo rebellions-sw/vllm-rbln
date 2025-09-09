@@ -22,7 +22,6 @@ from vllm.multimodal.inputs import MultiModalKwargs
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
-from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
@@ -30,7 +29,8 @@ from vllm.v1.worker.gpu_input_batch import InputBatch
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
-
+from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
+                                       SchedulerOutput)
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
 OB_SIZE = 16
@@ -74,7 +74,6 @@ def make_request(request_id,
         lora_request=None,
         cache_salt=cache_salt,
     )
-
 
 def initialize_kv_cache(runner: RBLNOptimumModelRunner):
     """
@@ -139,3 +138,82 @@ class MockModelWrapper(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = self.MockModel()
+
+
+def _schedule_new_request(
+    *req_ids: str,
+    token_ids: list[int],
+    block_ids: tuple[list[int], ...],
+    new_computed_tokens: int,
+    finished_req_ids: Optional[list[str]] = None,
+) -> SchedulerOutput:
+    new_reqs = []
+    num_scheduled_tokens = {}
+    total_num_scheduled_tokens = 0
+    for req_id in req_ids:
+        new_reqs.append(
+            NewRequestData(
+                req_id=req_id,
+                prompt_token_ids=token_ids,
+                mm_inputs=[],
+                mm_hashes=[],
+                mm_positions=[],
+                sampling_params=SamplingParams(),
+                block_ids=block_ids,
+                num_computed_tokens=new_computed_tokens,
+                lora_request=None,
+            ))
+        num_scheduled_tokens[req_id] = len(token_ids)
+        total_num_scheduled_tokens += num_scheduled_tokens[req_id]
+
+    return SchedulerOutput(
+        scheduled_new_reqs=new_reqs,
+        scheduled_cached_reqs=[],
+        num_scheduled_tokens=num_scheduled_tokens,
+        total_num_scheduled_tokens=total_num_scheduled_tokens,
+        scheduled_spec_decode_tokens={},
+        scheduled_encoder_inputs={},
+        num_common_prefix_blocks=0,
+        finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
+        free_encoder_input_ids=[],
+        structured_output_request_ids={},
+        grammar_bitmask=None,
+    )
+
+def _schedule_cached_reqs(
+    reqs: list[Request],
+    new_block_ids: list[tuple[list[int], ...]],
+    finished_req_ids: Optional[list[str]] = None,
+    resumed_from_preemption: bool = False,
+) -> SchedulerOutput:
+    cached_reqs = []
+    num_scheduled_tokens = {}
+    total_num_scheduled_tokens = 0
+    for req in reqs:
+        num_computed_tokens = req.num_computed_tokens
+        new_token_ids = req.all_token_ids[num_computed_tokens:]
+        cached_reqs.append(
+            CachedRequestData(
+                req_id=req.request_id,
+                resumed_from_preemption=resumed_from_preemption,
+                new_token_ids=new_token_ids,
+                new_block_ids=new_block_ids[0],
+                num_computed_tokens=num_computed_tokens,
+            )
+        )
+        num_scheduled_tokens[req.request_id] = len(new_token_ids)
+        total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
+
+    return SchedulerOutput(
+        scheduled_new_reqs=[],
+        scheduled_cached_reqs=cached_reqs,
+        num_scheduled_tokens=num_scheduled_tokens,
+        total_num_scheduled_tokens=total_num_scheduled_tokens,
+        scheduled_spec_decode_tokens={},
+        scheduled_encoder_inputs={},
+        num_common_prefix_blocks=0,
+        finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
+        free_encoder_input_ids=[],
+        structured_output_request_ids={},
+        grammar_bitmask=None,
+    )
