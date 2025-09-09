@@ -31,8 +31,6 @@ from vllm_rbln.worker.model_runner import ModelInputForRebelBuilder
 
 logger = init_logger(__name__)
 
-_FLASH_CAUSAL_ATTN = os.getenv("FLASH_CAUSAL_ATTN", "True").lower() in ("true", "1")
-
 # RBLN custom op (flash attention naive prefill/decode)
 @torch.library.custom_op("rbln_custom_ops::flash_attention_naive_prefill",
                          mutates_args=())
@@ -159,7 +157,7 @@ def flash_causal_attention_naive_prefill_impl(
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
 ) -> torch.Tensor:
-    if not _COMPILE_MODEL:
+    if not envs.RBLN_COMPILE_MODEL:
         # attn_weights = MM(q,kt) * scale
         # attn_weights = causal masked softmax(attn_weights)
         # MM(attn_weights, v)
@@ -210,7 +208,7 @@ def flash_causal_attention_naive_decode_impl(
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
 ) -> torch.Tensor:
-    if not _COMPILE_MODEL:
+    if not envs.RBLN_COMPILE_MODEL:
         # NOTE - multiple decode kernel implementation is necessary
         assert q.size(0) == 1
         partition = kv_cache.size(-2)
@@ -398,7 +396,7 @@ class RBLNAttentionMetadataBuilder(
         # RBLN attention mask
         # prefill attention mask vs decode attention mask
         attn_masks = None
-        if not _FLASH_CAUSAL_ATTN:
+        if not envs.RBLN_FLASH_CAUSAL_ATTN:
             if input_data.num_prefills:
                 step = steps[0][0]
                 assert input_data.num_prefills == 1
@@ -448,7 +446,7 @@ class RBLNAttentionMetadataBuilder(
         logger.info("RBLNAttentionMetadata = %s", attn_metadata)
         logger.info("\tslot_mapping size = %s", slot_mapping.size())
         logger.info("\tblock_tables size = %s", block_tables.size())
-        if not _FLASH_CAUSAL_ATTN:
+        if not envs.RBLN_FLASH_CAUSAL_ATTN:
             logger.info("\tattn_masks size = %s", attn_masks.size())
             logger.info("\tattn_masks = %s", attn_masks[:, :, :, :, :32])
         else:
@@ -609,7 +607,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
             kv_cache[1][block] = v_state.squeeze(0)
 
         if q_len == 1:
-            if not _FLASH_CAUSAL_ATTN:
+            if not envs.RBLN_FLASH_CAUSAL_ATTN:
                 attn_output = (
                 torch.ops.rbln_custom_ops.flash_attention_naive_decode(
                     query,
@@ -636,7 +634,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                 ))
         else:
             # actually non-flash paged attention DOES NOT use slot_mapping
-            if not _FLASH_CAUSAL_ATTN:
+            if not envs.RBLN_FLASH_CAUSAL_ATTN:
                 attn_output = (
                 torch.ops.rbln_custom_ops.flash_attention_naive_prefill(
                     query,

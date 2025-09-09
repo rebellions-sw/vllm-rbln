@@ -40,12 +40,12 @@ def custom_hf_overrides_kw(hf_config):
     return hf_config
 
 
-model_id = llama_1b_model_id
+#model_id = llama_1b_model_id
 #model_id = qwen3_1_7_model_id
 #model_id = llama4_maverick_model_id
 
 #model_id = llama_8b_model_id
-#model_id = qwen1_5_moe_model_id
+model_id = qwen1_5_moe_model_id
 #model_id = qwen3_30_moe_model_id
 #model_id = qwen3_235_moe_model_id
 #model_id = deepseek_v2_lite_model_id
@@ -60,7 +60,7 @@ sampling_params = SamplingParams(temperature=0.0)
 warmup_sampling_params = SamplingParams(temperature=0.0, max_tokens=2)
 llm = LLM(
     model=model_id,
-#hf_overrides=hf_overrides_kw,
+    hf_overrides=hf_overrides_kw,
 #hf_overrides=custom_hf_overrides_kw,
     # max_model_len=40 * 1024,
     max_model_len=8 * 1024,
@@ -69,21 +69,21 @@ llm = LLM(
     max_num_batched_tokens=128,
     max_num_seqs=1,
     trust_remote_code=True,
-#tensor_parallel_size=8,
-#enable_expert_parallel=True,
+    tensor_parallel_size=4,
+    enable_expert_parallel=True,
 )
 
 # 1. warmup -  The first run initializes the compiled models.
 # warmup will remove compilation time from profile results.
-#llm.generate(".", warmup_sampling_params)
+llm.generate(".", warmup_sampling_params)
 
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.
 
 # 2. vllm torch profiler will capture model inference time into profile directory
-#llm.start_profile()
+llm.start_profile()
 outputs = llm.generate(prompts, sampling_params)
-#llm.stop_profile()
+llm.stop_profile()
 # Print the outputs.
 for output in outputs:
     prompt = output.prompt
