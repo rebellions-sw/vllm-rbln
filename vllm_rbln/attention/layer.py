@@ -29,7 +29,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
-from vllm.v1.attention.backends.utils import validate_kv_sharing_target
+#from vllm.v1.attention.backends.utils import validate_kv_sharing_target
 
 # @FIXME(RBLN): We hope to remove the Custom Attention forward.
 # The original vLLM forward function will be used in the future.
@@ -171,11 +171,11 @@ def __custom_init__(
             raise NotImplementedError(
                 "Cross-layer KV sharing is not supported in V0.")
 
-        validate_kv_sharing_target(
-            prefix,
-            kv_sharing_target_layer_name,
-            compilation_config.static_forward_context,
-        )
+#        validate_kv_sharing_target(
+#            prefix,
+#            kv_sharing_target_layer_name,
+#            compilation_config.static_forward_context,
+#        )
     self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
 
     # use a placeholder kv cache tensor during init, which will be replaced
