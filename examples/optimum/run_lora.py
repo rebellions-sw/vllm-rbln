@@ -121,7 +121,6 @@ async def main(batch_size: int, max_seq_len: int, kvcache_block_size: int,
                                   max_loras=2)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
-    # prompts = get_input_prompts(num_input_prompt)
     assert len(lora_names) == len(lora_paths) and len(lora_paths) == len(
         lora_int_ids)
     conversations = []
@@ -169,7 +168,7 @@ def entry_point(
     max_seq_len: int = 8192,
     kvcache_block_size: int = 8192,
     num_input_prompt: int = 3,
-    model_id: str = "llama3.1-8b-ab-sec-b4",
+    model_id: str = "./llama3.1-8b-ab-sec-b4",
     lora_paths: list[str] = None,
     lora_names: list[str] = None,
     lora_int_ids: list[int] = None,
