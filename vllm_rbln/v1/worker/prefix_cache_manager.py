@@ -16,7 +16,7 @@ from collections import deque
 import torch
 
 
-class RBLNPrefixBlockQueue:
+class RBLNBlockManager:
 
     def __init__(self, num_blocks):
         self.num_free_blocks = num_blocks
@@ -67,7 +67,7 @@ class RBLNPrefixKVCacheManager:
         assert ob_size % ib_size == 0, "ob_size must be a multiple of ib_size"
         self.blk_ratio = self.ob_size // self.ib_size
 
-        self.free_block_queue = RBLNPrefixBlockQueue(self.num_ob)
+        self.outer_block_manager = RBLNBlockManager(self.num_ob)
 
     def _num_cached_outer_blocks(self, cached_len_tokens: int) -> int:
         return cached_len_tokens // self.ob_size
@@ -75,12 +75,20 @@ class RBLNPrefixKVCacheManager:
     def _num_cached_inner_blocks(self, cached_len_tokens: int) -> int:
         return cached_len_tokens // self.ib_size
 
-    def allocate_new_ob(self) -> int:
-        new_ob = self.free_block_queue.popleft()
-        self.inc_ref_cnt(new_ob)
+    def _save_cached_blocks(self, request_id: str,
+                            origin_obs: list[int]) -> None:
+        if request_id not in self.req_to_origin_outer_blocks:
+            self.req_to_origin_outer_blocks[request_id] = []
+        assert len(origin_obs) > 0
+        self.req_to_origin_outer_blocks[request_id] = origin_obs
+
+    def _allocate_new_ob(self) -> int:
+        new_ob = self.outer_block_manager.popleft()
+        self.outer_block_manager.inc_ref_cnt(new_ob)
         return new_ob
 
-    def allocate_ibs_per_ob(self, new_ob: int, ob_idx: int, uncached_ib: list[int]) -> None:
+    def _allocate_ibs_per_ob(self, new_ob: int, ob_idx: int,
+                             uncached_ib: list[int]) -> None:
         start_pos = ob_idx * self.blk_ratio
         end_pos = min((ob_idx + 1) * self.blk_ratio, len(uncached_ib))
         for ib_idx in range(start_pos, end_pos):
@@ -98,7 +106,7 @@ class RBLNPrefixKVCacheManager:
         # Allocate the outer blocks that are cached.
         num_cached_outer_blocks = self._num_cached_outer_blocks(cached_len)
         for _ in range(num_cached_outer_blocks):
-            new_ob = self.allocate_new_ob()
+            new_ob = self._allocate_new_ob()
             self.req_to_outer_blocks[request_id].append(new_ob)
 
         # Allocate the outer blocks that are not cached yet.
@@ -109,9 +117,9 @@ class RBLNPrefixKVCacheManager:
         num_new_ob = (len(uncached_ib) + self.blk_ratio - 1) // self.blk_ratio
         ob_idx = 0
         while ob_idx < num_new_ob:
-            new_ob = self.allocate_new_ob()
+            new_ob = self._allocate_new_ob()
             self.req_to_outer_blocks[request_id].append(new_ob)
-            self.allocate_ibs_per_ob(new_ob, ob_idx, uncached_ib)
+            self._allocate_ibs_per_ob(new_ob, ob_idx, uncached_ib)
             ob_idx += 1
 
     def free_blocks(self, request_id: str) -> None:
@@ -125,9 +133,9 @@ class RBLNPrefixKVCacheManager:
             return
         # To sync with the order of block pool
         for ob in reversed(obs):
-            self.dec_ref_cnt(ob)
-            if self.get_ref_cnt(ob) == 0:
-                self.free_block_queue.append(ob)
+            self.outer_block_manager.dec_ref_cnt(ob)
+            if self.outer_block_manager.get_ref_cnt(ob) == 0:
+                self.outer_block_manager.append(ob)
                 freed_obs.append(ob)
 
         if len(freed_obs) == len(obs):
@@ -141,7 +149,7 @@ class RBLNPrefixKVCacheManager:
         # Decrement the reference count of the origin outer blocks
         origin_obs = self.req_to_origin_outer_blocks.get(request_id, [])
         for ob in origin_obs:
-            self.dec_ref_cnt(ob)
+            self.outer_block_manager.dec_ref_cnt(ob)
 
         # Clean up the origin outer blocks mapping
         if request_id in self.req_to_origin_outer_blocks:
@@ -166,22 +174,14 @@ class RBLNPrefixKVCacheManager:
                 raise RuntimeError(
                     f"Inner block {ib_id} is not mapped to any outer block.")
             if ob_id != last_cached_outer_block:
-                self.inc_ref_cnt(ob_id)
+                self.outer_block_manager.inc_ref_cnt(ob_id)
                 cached_outer_blocks.append(ob_id)
                 last_cached_outer_block = ob_id
 
         if cached_outer_blocks:
-            self.note_origin_blocks_for_request(request_id,
-                                                cached_outer_blocks)
+            self._save_cached_blocks(request_id, cached_outer_blocks)
             return torch.tensor(cached_outer_blocks, dtype=torch.int32)
         return None
-
-    def note_origin_blocks_for_request(self, request_id: str,
-                                       origin_obs: list[int]) -> None:
-        if request_id not in self.req_to_origin_outer_blocks:
-            self.req_to_origin_outer_blocks[request_id] = []
-        assert len(origin_obs) > 0
-        self.req_to_origin_outer_blocks[request_id] = origin_obs
 
     def get_blocks(self, request_id: str) -> torch.Tensor:
         """
@@ -192,12 +192,3 @@ class RBLNPrefixKVCacheManager:
                              dtype=torch.int32)
         self.pooled_tensor[0, :len(value)].copy_(value)
         return self.pooled_tensor
-
-    def get_ref_cnt(self, block_id: int) -> int:
-        return self.free_block_queue.get_ref_cnt(block_id)
-
-    def inc_ref_cnt(self, block_id: int) -> None:
-        self.free_block_queue.inc_ref_cnt(block_id)
-
-    def dec_ref_cnt(self, block_id: int) -> None:
-        self.free_block_queue.dec_ref_cnt(block_id)

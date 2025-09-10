@@ -14,7 +14,6 @@
 from types import SimpleNamespace
 from typing import Optional
 
-import pytest
 import torch
 import torch.nn as nn
 from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
@@ -22,15 +21,15 @@ from vllm.multimodal.inputs import MultiModalKwargs
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
+from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
+                                       SchedulerOutput)
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
 from vllm.v1.worker.gpu_input_batch import InputBatch
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
-from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
-                                       SchedulerOutput)
+
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
 OB_SIZE = 16
@@ -50,6 +49,7 @@ def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
             )
         ],
     )
+
 
 def make_request(request_id,
                  prompt_token_ids,
@@ -74,6 +74,13 @@ def make_request(request_id,
         lora_request=None,
         cache_salt=cache_salt,
     )
+
+
+def finish_request(manager: KVCacheManager, request: Request):
+    request.status = RequestStatus.FINISHED_ABORTED
+    manager.free(request)
+    manager.free_block_hashes(request)
+
 
 def initialize_kv_cache(runner: RBLNOptimumModelRunner):
     """
@@ -180,6 +187,7 @@ def _schedule_new_request(
         grammar_bitmask=None,
     )
 
+
 def _schedule_cached_reqs(
     reqs: list[Request],
     new_block_ids: list[tuple[list[int], ...]],
@@ -199,8 +207,7 @@ def _schedule_cached_reqs(
                 new_token_ids=new_token_ids,
                 new_block_ids=new_block_ids[0],
                 num_computed_tokens=num_computed_tokens,
-            )
-        )
+            ))
         num_scheduled_tokens[req.request_id] = len(new_token_ids)
         total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
 

@@ -16,14 +16,13 @@ import pytest
 import torch
 from vllm.platforms import current_platform
 from vllm.v1.core.kv_cache_manager import KVCacheManager
-from vllm.v1.request import RequestStatus
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
 
 from .utils import (MockModelWrapper, _schedule_cached_reqs,
-                    _schedule_new_request, get_vllm_config,
-                    initialize_kv_cache, make_kv_cache_config, make_request, finish_request)
+                    _schedule_new_request, finish_request, get_vllm_config,
+                    initialize_kv_cache, make_kv_cache_config, make_request)
 
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
@@ -31,6 +30,7 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1
 DEVICE = current_platform.device_type
+
 
 @pytest.fixture
 def model_runner():
@@ -161,7 +161,9 @@ def test_prefill(model_runner):
     assert torch.allclose(inputs.cached_block_tables,
                           torch.tensor([[0, 1]], dtype=torch.int32))
 
-@pytest.mark.parametrize("finished_req_id, remaining_blocks",
+
+@pytest.mark.parametrize(
+    "finished_req_id, remaining_blocks",
     [
         pytest.param(0, [0, 1], id="finish req0, remain only cached blocks"),
         pytest.param(1, [0, 1, 2], id="finish req1, remain all blocks"),
@@ -285,8 +287,11 @@ def test_block_ref_cnt(model_runner, finished_req_id, remaining_blocks):
     # Check the allocated outer blocks of finished req0 are still cached
     assert model_runner.prefix_cache_manager.req_to_outer_blocks[
         req0.request_id] == remaining_blocks
-    assert model_runner.prefix_cache_manager.get_ref_cnt(0) == 2
-    assert model_runner.prefix_cache_manager.get_ref_cnt(1) == 1
+    assert model_runner.prefix_cache_manager.outer_block_manager.get_ref_cnt(
+        0) == 2
+    assert model_runner.prefix_cache_manager.outer_block_manager.get_ref_cnt(
+        1) == 1
+
 
 @pytest.mark.parametrize(
     "num_generated_token_ids, new_inner_blocks, outer_blocks_allocated",
