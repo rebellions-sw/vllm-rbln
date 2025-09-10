@@ -132,13 +132,8 @@ class RBLNCacheEngine:
         # RBLN device tensor allocation
         for _ in range(self.num_layers):
             kv_cache.append(
-                # torch.empty(kv_cache_shape,
-                #             dtype=self.dtype,
-                #             # device=self.device_config.device))
-                #             device="cpu"))
                 torch.empty(kv_cache_shape,
                             dtype=self.dtype).to(self.device_config.device))
-            # device="cpu"))
         logger.info("[RBLN] allocate kv cache length = %d", len(kv_cache))
 
         return kv_cache

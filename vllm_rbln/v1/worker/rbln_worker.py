@@ -64,7 +64,7 @@ class RBLNWorker(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
         assert "rbln" in current_platform.get_device_name().lower()
-        self.device = torch.device(current_platform.device_name)
+        self.device = torch.device(current_platform.device_type)
 
         if self.parallel_config.distributed_executor_backend == "ray":
             logger.info(
@@ -187,7 +187,9 @@ class RBLNWorker(WorkerBase):
         max_required_num_blocks = (self.model_config.max_model_len *
                                    self.scheduler_config.max_num_seqs //
                                    block_size) + no_dummy_slots
-        num_gpu_blocks = min(max_num_blocks, max_required_num_blocks)
+        num_gpu_blocks = min(
+            max_num_blocks * self.cache_config.gpu_memory_utilization,
+            max_required_num_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks)
