@@ -57,6 +57,7 @@ class RBLNCacheEngine:
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
         device_config: DeviceConfig,
+        cpu_cache: Optional[list[torch.Tensor]] = None,
     ) -> None:
         assert "rbln" in current_platform.get_device_name().lower()
         self.cache_config = cache_config
@@ -74,7 +75,10 @@ class RBLNCacheEngine:
         # Note: In CacheConfig, num_gpu_blocks actual is num_cpu_blocks
         # for CPU backend, because we want to reuse KV cache management
         # in the scheduler.
-        self.num_cpu_blocks = cache_config.num_gpu_blocks
+        num_blocks = cache_config.num_gpu_blocks
+        self.num_cpu_blocks = num_blocks
+        if self.num_cpu_blocks:
+            self.num_cpu_blocks //= parallel_config.pipeline_parallel_size
 
         # default cache type is bf16 (half precision)
         # FIXME - force cache data type into fp32 for graph compilation
@@ -95,15 +99,16 @@ class RBLNCacheEngine:
         logger.info("[RBLN] initialize cache engine")
         # Initialize the cache.
         # TODO : cpu_cache will be replaced with dev_cache
-        self.cpu_cache = self._allocate_kv_cache()
+        self.cpu_cache = self._allocate_kv_cache(
+            num_blocks) if cpu_cache is None else cpu_cache
 
-    def _allocate_kv_cache(self, ) -> List[torch.Tensor]:
+    def _allocate_kv_cache(
+        self,
+        num_blocks: int,
+    ) -> List[torch.Tensor]:
         """Allocates KV cache on RBLN."""
-
-        # One extra block is reserved for padding.
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
-            self.num_cpu_blocks + 1, self.block_size, self.num_heads,
-            self.head_size)
+            num_blocks, self.block_size, self.num_heads, self.head_size)
         kv_cache: List[torch.Tensor] = []
         logger.info("[RBLN] attention backend get_kv_cache_shape = %s",
                     kv_cache_shape)
@@ -200,9 +205,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
 
-        if distributed_backend == "mp" and self.is_driver_worker:
-            assert self.rank == 0, "The driver worker must have rank 0."
-
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
@@ -297,37 +299,43 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         We configure num_gpu_blocks to be equal to max_num_seqs.
         """
-        # Set the number of GPU blocks to be the same as the maximum number of
-        # sequences that can be processed in a single batch. This is equivalent
-        # to schedule without PagedAttention.
-
+        ve_cnt = self.parallel_config.pipeline_parallel_size
+        max_model_len = self.model_config.max_model_len
         block_size = self.cache_config.block_size
-
-        # This function comes from optimum-rbln.
-        # We must keep it updated as optimum is upgraded.
-        max_num_blocks = get_maximum_num_blocks(
-            model_config=self.model_config,
-            parallel_config=self.parallel_config,
-            kvcache_block_size=block_size,
-            # quantization : 4 (This is an ad-hoc value. Need to fix it)
-            nbits_per_param=16 if not self.model_config.quantization else 4,
-            n_model_params=sum(p.numel()
-                               for p in self.model_runner.model.parameters()),
-            # 1 : prefill
-            num_runtimes=1 + self.scheduler_config.max_num_seqs)
-
-        max_required_num_blocks = (
-            self.model_config.max_model_len *
-            self.scheduler_config.max_num_seqs //
-            block_size) + self.scheduler_config.max_num_seqs + 1
+        num_blocks_per_seq = max_model_len // block_size
 
         # We always allocate this number of blocks, but the last one is
         # reserved for padding. As a result, the vLLM system should treat
         # it as if there is one fewer usable block than the number
         # actually allocated.
-        num_gpu_blocks = min(max_num_blocks, max_required_num_blocks) - 1
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1
+        else:
+
+            # This function comes from optimum-rbln.
+            # We must keep it updated as optimum is upgraded.
+            max_num_blocks = get_maximum_num_blocks(
+                model_config=self.model_config,
+                parallel_config=self.parallel_config,
+                kvcache_block_size=block_size,
+                # quantization : 4 (This is an ad-hoc value. Need to fix it)
+                nbits_per_param=16
+                if not self.model_config.quantization else 4,
+                n_model_params=sum(
+                    p.numel() for p in self.model_runner.model.parameters()),
+                # 1 : prefill
+                num_runtimes=1 + self.scheduler_config.max_num_seqs) - 1
+
+            max_required_num_blocks = (num_blocks_per_seq *
+                                       self.scheduler_config.max_num_seqs) + 1
+            max_required_num_blocks = max_required_num_blocks * ve_cnt
+
+            num_gpu_blocks = min(max_num_blocks, max_required_num_blocks)
+
+        num_blocks_per_ve = num_gpu_blocks // ve_cnt
+        assert num_blocks_per_seq <= num_blocks_per_ve, \
+            "There must be at least enough blocks to handle one request." \
+            "You may need to adjust max_model_len."
 
         # Swap not yet supported with RBLN backend.
         num_cpu_blocks = 0
@@ -349,21 +357,35 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
+        # All cache engines share the same cpu_cache
         self.cache_engine = [
             RBLNCacheEngine(
                 self.cache_config,
                 self.model_config,
                 self.parallel_config,
                 self.device_config,
-            ) for _ in range(self.parallel_config.pipeline_parallel_size)
+            )
         ]
+        cpu_cache = self.cache_engine[0].cpu_cache
+        self.cache_engine.extend([
+            RBLNCacheEngine(
+                self.cache_config,
+                self.model_config,
+                self.parallel_config,
+                self.device_config,
+                cpu_cache=cpu_cache,
+            ) for _ in range(1, self.parallel_config.pipeline_parallel_size)
+        ])
         self.cpu_cache = [
             self.cache_engine[ve].cpu_cache
             for ve in range(self.parallel_config.pipeline_parallel_size)
         ]
+
         bind_kv_cache(self.compilation_config.static_forward_context,
                       self.cpu_cache)
-        self.model_runner.block_size = self.cache_engine[0].block_size
+
+        for kv_cache in cpu_cache:
+            self.model_runner.compile_context.mark_static_address(kv_cache)
 
     @property
     def do_metadata_broadcast(self) -> bool:
@@ -394,7 +416,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
     def get_cache_block_size_bytes(self) -> int:
         """Get the size of the KV cache block size in bytes."""
         return RBLNCacheEngine.get_cache_block_size(
-            self.model_runner.block_size,
+            self.cache_config.block_size,
             self.cache_config.cache_dtype,
             self.model_config,
             self.parallel_config,
