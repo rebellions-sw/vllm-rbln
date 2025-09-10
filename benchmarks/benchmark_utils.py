@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import argparse
-import atexit
 import dataclasses
 import json
 import math
 import os
-import shutil
 import time
 from types import TracebackType
 from typing import Any, Optional, Union
@@ -17,53 +15,12 @@ from vllm_rbln.rbln_envs import RBLN_USE_VLLM_MODEL
 
 
 def get_llm_instance(engine_args: EngineArgs) -> LLM:
-    if RBLN_USE_VLLM_MODEL:  # torch.compile path
-        return LLM(**dataclasses.asdict(engine_args))
+    if not RBLN_USE_VLLM_MODEL:
+        compiled_model_path = engine_args.model
+        if not os.path.exists(compiled_model_path):
+            raise ValueError(
+                f"Compiled model path does not exist: {compiled_model_path}")
 
-    # optimum-rbln path
-    from optimum.rbln import RBLNAutoModelForCausalLM
-
-    attn_impl = os.getenv("OPTIMUM_RBLN_ATTN_IMPL", "flash_attn")
-
-    # NOTE: Cache usage and rebuild policy (needs verification)
-    # We currently rebuild Optimum-RBLN artifacts on every benchmark run and
-    # remove the cache at exit.
-    # It is not yet confirmed which EngineArgs changes require a rebuild.
-    # Do NOT enable cache reuse until this is verified.
-    # If/when enabling, compute a cache key from the confirmed build-affecting
-    # params (e.g., a hash) and a separate cache directory per key.
-    cache_path = os.path.join(os.path.dirname(__file__), ".optimum-rbln-cache")
-    model = RBLNAutoModelForCausalLM.from_pretrained(
-        engine_args.model,
-        export=True,
-        rbln_create_runtimes=False,
-        rbln_batch_size=engine_args.max_num_seqs,
-        rbln_tensor_parallel_size=engine_args.tensor_parallel_size,
-        rbln_max_seq_len=engine_args.max_model_len,
-        rbln_kvcache_partition_len=engine_args.block_size
-        if attn_impl == "flash_attn" else None,
-        rbln_kvcache_block_size=engine_args.block_size,
-        rbln_prefill_chunk_size=engine_args.max_num_batched_tokens
-        if engine_args.enable_chunked_prefill else None,
-        rbln_attn_impl=attn_impl,
-    )
-    model.save_pretrained(cache_path)
-
-    def _shutdown_handler():
-        done = {"x": False}
-
-        def _run_once():
-            if done["x"]:
-                return
-            done["x"] = True
-
-            if os.path.exists(cache_path):
-                shutil.rmtree(cache_path)
-
-        atexit.register(_run_once)
-
-    _shutdown_handler()
-    engine_args.model = cache_path
     return LLM(**dataclasses.asdict(engine_args))
 
 
