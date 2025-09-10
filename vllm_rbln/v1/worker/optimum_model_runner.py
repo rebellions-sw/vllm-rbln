@@ -425,6 +425,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
                 cached_block_table = \
                     self.prefix_cache_manager.get_cached_origin_blocks(
+                        req_id,
                         scheduled.num_computed_tokens, scheduled.block_ids[0]
                     )
             else:
