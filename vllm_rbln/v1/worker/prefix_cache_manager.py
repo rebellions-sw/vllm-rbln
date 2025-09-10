@@ -80,6 +80,13 @@ class RBLNPrefixKVCacheManager:
         self.inc_ref_cnt(new_ob)
         return new_ob
 
+    def allocate_ibs_per_ob(self, new_ob: int, ob_idx: int, uncached_ib: list[int]) -> None:
+        start_pos = ob_idx * self.blk_ratio
+        end_pos = min((ob_idx + 1) * self.blk_ratio, len(uncached_ib))
+        for ib_idx in range(start_pos, end_pos):
+            new_ib_id = uncached_ib[ib_idx]
+            self.inner_to_outer_block[new_ib_id] = new_ob
+
     def allocate_blocks(self, request_id: str, cached_len: int,
                         inner_blocks: list[int]) -> None:
         """
@@ -94,20 +101,17 @@ class RBLNPrefixKVCacheManager:
             new_ob = self.allocate_new_ob()
             self.req_to_outer_blocks[request_id].append(new_ob)
 
-        # Allocate the inner blocks that are not cached yet.
+        # Allocate the outer blocks that are not cached yet.
         num_cached_ib = self._num_cached_inner_blocks(cached_len)
         uncached_ib = inner_blocks[num_cached_ib:]
 
+        # Map the inner blocks to the new outer blocks.
         num_new_ob = (len(uncached_ib) + self.blk_ratio - 1) // self.blk_ratio
         ob_idx = 0
         while ob_idx < num_new_ob:
             new_ob = self.allocate_new_ob()
             self.req_to_outer_blocks[request_id].append(new_ob)
-            start_pos = ob_idx * self.blk_ratio
-            end_pos = min((ob_idx + 1) * self.blk_ratio, len(uncached_ib))
-            for ib_idx in range(start_pos, end_pos):
-                new_ib_id = uncached_ib[ib_idx]
-                self.inner_to_outer_block[new_ib_id] = new_ob
+            self.allocate_ibs_per_ob(new_ob, ob_idx, uncached_ib)
             ob_idx += 1
 
     def free_blocks(self, request_id: str) -> None:
