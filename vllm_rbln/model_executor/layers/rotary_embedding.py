@@ -16,18 +16,23 @@ from typing import Optional, Tuple
 
 import torch
 from vllm.model_executor.layers.rotary_embedding import (
-    DeepseekScalingRotaryEmbedding, RotaryEmbedding, _apply_rotary_emb,
-    _rotate_gptj, _rotate_neox)
+    DeepseekScalingRotaryEmbedding, RotaryEmbedding, _rotate_gptj,
+    _rotate_neox)
 
 
 def rope_forward_oot(
-    self,
+    self: RotaryEmbedding,
     positions: torch.Tensor,
     query: torch.Tensor,
     key: torch.Tensor,
     offsets: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """A PyTorch-native implementation of forward()."""
+    # NOTE(RBLN): For best compatibility with rbln,
+    # tensors are reshaped/transposed as follows:
+    # - cos, sin: (1, 1, num_tokens, rotary_dim)
+    # - query, key: (1, num_heads, num_tokens, head_size)
+
     if offsets is not None:
         positions = positions + offsets
     positions = positions.flatten()
@@ -35,29 +40,43 @@ def rope_forward_oot(
     cos_sin = self.cos_sin_cache.index_select(0, positions)
     cos, sin = cos_sin.chunk(2, dim=-1)
 
+    if self.is_neox_style:
+        cos = cos.repeat(1, 2)
+        sin = sin.repeat(1, 2)
+        rotate_fn = _rotate_neox
+    else:
+        cos = torch.stack([cos, cos], dim=-1).reshape(cos_sin.shape)
+        sin = torch.stack([sin, sin], dim=-1).reshape(cos_sin.shape)
+        rotate_fn = _rotate_gptj
+    cos = cos[None, None, :, :]
+    sin = sin[None, None, :, :]
+
     query_shape = query.shape
     query = query.view(num_tokens, -1, self.head_size)
     query_rot = query[..., :self.rotary_dim]
+    query_rot = query_rot.unsqueeze(0).transpose(1, 2)
+    query_rot = query_rot * cos + rotate_fn(query_rot) * sin
+    query_rot = query_rot.transpose(1, 2).squeeze(0)
     # FIXME(RBLN) - if slice size is zero, DO NOT slice
     if self.head_size == self.rotary_dim:
-        query_rot = _apply_rotary_emb(query_rot, cos, sin, self.is_neox_style)
         query = query_rot.reshape(query_shape)
     else:
         query_pass = query[..., self.rotary_dim:]
-        query_rot = _apply_rotary_emb(query_rot, cos, sin, self.is_neox_style)
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
     key_shape = key.shape
     key = key.view(num_tokens, -1, self.head_size)
     key_rot = key[..., :self.rotary_dim]
+    key_rot = key_rot.unsqueeze(0).transpose(1, 2)
+    key_rot = key_rot * cos + rotate_fn(key_rot) * sin
+    key_rot = key_rot.transpose(1, 2).squeeze(0)
     # FIXME(RBLN) - if slice size is zero, DO NOT slice
     if self.head_size == self.rotary_dim:
-        key_rot = _apply_rotary_emb(key_rot, cos, sin, self.is_neox_style)
         key = key_rot.reshape(key_shape)
     else:
         key_pass = key[..., self.rotary_dim:]
-        key_rot = _apply_rotary_emb(key_rot, cos, sin, self.is_neox_style)
         key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
+
     return query, key
 
 
