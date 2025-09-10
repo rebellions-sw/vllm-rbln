@@ -167,6 +167,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         self.block_size = self.runner.cache_config.block_size
         self.device = self.runner.device
         self.max_model_len = self.runner.scheduler_config.max_model_len
+        self.num_partition = self.max_model_len // self.block_size
 
         if self.runner.attn_backend is not None:
             # spec decode (e.g. Medusa) does not have atten backend
@@ -191,11 +192,16 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         self,
         data: ModelInputData,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        virtual_engine: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert len(seq_group_metadata_list) > 0
         list_input_block_ids: List[List[int]] = []
 
         block_size = self.runner.block_size
+        num_blocks = self.runner.cache_config.num_gpu_blocks
+        num_blocks_per_ve = num_blocks // \
+            self.runner.parallel_config.pipeline_parallel_size
+        ve_offset = num_blocks_per_ve * virtual_engine
         assert (
             len(seq_group_metadata_list) == 1), f"seq_group_metadata_list: \
             len({len(seq_group_metadata_list)}) - {seq_group_metadata_list}"
@@ -215,6 +221,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
 
             assert seq_group_metadata.block_tables is not None
             block_table = seq_group_metadata.block_tables[seq_id]
+            block_table = list(map(lambda v: v + ve_offset, block_table))
             assert len(block_table) == math.ceil(seq_data.get_len() /
                                                  block_size)
             list_input_block_ids.append(block_table)
@@ -233,12 +240,11 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         max_seq_len = max(data.seq_lens)
         assert max_seq_len > 0
 
-        num_partition = self.max_model_len // block_size
-        dummy = self.runner.cache_config.num_gpu_blocks
+        dummy = num_blocks
         # make_tensor_with_pad takes List[List[]] as input
         # To make it work, input_block_ids is expanded
         input_block_ids = make_tensor_with_pad(list_input_block_ids,
-                                               max_len=num_partition,
+                                               max_len=self.num_partition,
                                                pad=dummy,
                                                dtype=torch.long,
                                                device=self.device)
@@ -273,11 +279,16 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         self,
         data: ModelInputData,
         seq_group_metadata_list: List[SequenceGroupMetadata],
+        virtual_engine: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert len(seq_group_metadata_list) > 0
 
         list_input_block_ids: List[List[int]] = []
         block_size = self.block_size
+        num_blocks = self.runner.cache_config.num_gpu_blocks
+        num_blocks_per_ve = num_blocks // \
+            self.runner.parallel_config.pipeline_parallel_size
+        ve_offset = num_blocks_per_ve * virtual_engine
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
@@ -290,6 +301,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
 
                 assert seq_group_metadata.block_tables is not None
                 block_table = seq_group_metadata.block_tables[seq_id]
+                block_table = list(map(lambda v: v + ve_offset, block_table))
                 assert len(block_table) >= 1
 
                 list_input_block_ids.append(block_table)
@@ -305,15 +317,14 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                 data.slot_mapping.append(block_offset)
 
         # batch padding
-        dummy = self.runner.cache_config.num_gpu_blocks
+        dummy = num_blocks
         batch_padding_size = self.max_num_seqs - len(data.input_tokens)
         data.input_tokens.extend([[0]] * batch_padding_size)
         data.input_positions.extend([[0]] * batch_padding_size)
         list_input_block_ids.extend([[dummy]] * batch_padding_size)
 
-        num_partition = self.max_model_len // block_size
         input_block_ids = make_tensor_with_pad(list_input_block_ids,
-                                               max_len=num_partition,
+                                               max_len=self.num_partition,
                                                pad=dummy,
                                                dtype=torch.long,
                                                device=self.device)
@@ -342,7 +353,10 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
 
         return (input_tokens, input_positions, input_block_ids)
 
-    def build(self) -> ModelInputForRebel:
+    def build(
+        self,
+        virtual_engine: int = 0,
+    ) -> ModelInputForRebel:
         assert self.seq_group_metadata_list is not None
         seq_group_metadata_list = self.seq_group_metadata_list
         is_prompt = seq_group_metadata_list[0].is_prompt
@@ -352,11 +366,13 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         if is_prompt:
             (input_tokens, input_positions,
              input_block_ids) = self._prepare_prompt(input_data,
-                                                     seq_group_metadata_list)
+                                                     seq_group_metadata_list,
+                                                     virtual_engine)
         else:
             (input_tokens, input_positions,
              input_block_ids) = self._prepare_decode(input_data,
-                                                     seq_group_metadata_list)
+                                                     seq_group_metadata_list,
+                                                     virtual_engine)
 
         attn_metadata = self.attn_metadata_builder.build(
             input_data.seq_lens, input_data.query_lens, input_block_ids, -1)
@@ -547,18 +563,22 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         finished_requests_ids: Optional[List[str]] = None,
     ) -> ModelInputForRebelWithSamplingMetadata:
         model_input = self._prepare_model_input_tensors(
-            seq_group_metadata_list, finished_requests_ids)
-        # Sampling metadata is only required for the final pp group
-        generators = self.get_generators(finished_requests_ids)
-        pin_memory = self.pin_memory
-        sampling_metadata = SamplingMetadata.prepare(
-            seq_group_metadata_list,
-            model_input.seq_lens,
-            model_input.query_lens,
-            self.device,
-            pin_memory=pin_memory,
-            generators=generators,
-        )
+            seq_group_metadata_list, finished_requests_ids, virtual_engine)
+
+        if get_pp_group().is_last_rank:
+            # Sampling metadata is only required for the final pp group
+            generators = self.get_generators(finished_requests_ids)
+            pin_memory = self.pin_memory
+            sampling_metadata = SamplingMetadata.prepare(
+                seq_group_metadata_list,
+                model_input.seq_lens,
+                model_input.query_lens,
+                self.device,
+                pin_memory=pin_memory,
+                generators=generators,
+            )
+        else:
+            sampling_metadata = None
 
         is_prompt = seq_group_metadata_list[
             0].is_prompt if seq_group_metadata_list else None
@@ -590,53 +610,52 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 {"previous_hidden_states": previous_hidden_states})
 
         assert model_input.attn_metadata is not None
-        num_prefills = model_input.attn_metadata.num_prefills
-        selected_token_indices = \
-            model_input.sampling_metadata.selected_token_indices
-        len_token_indices = len(selected_token_indices)
         token_indices = None
-        if num_prefills > 0:
-            assert len_token_indices == 0 or len_token_indices == 1
-            num_prefill_tokens = model_input.attn_metadata.num_prefill_tokens
-            token_indices = torch.tensor([num_prefill_tokens - 1],
-                                         dtype=selected_token_indices.dtype)
-            if len_token_indices == 1:
-                assert torch.equal(selected_token_indices, token_indices)
+        if get_pp_group().is_last_rank:
+            num_prefills = model_input.attn_metadata.num_prefills
+            selected_token_indices = \
+                model_input.sampling_metadata.selected_token_indices
+            len_token_indices = len(selected_token_indices)
+            if num_prefills > 0:
+                assert len_token_indices == 0 or len_token_indices == 1
+                num_prefill_tokens = \
+                    model_input.attn_metadata.num_prefill_tokens
+                token_indices = torch.tensor(
+                    [num_prefill_tokens - 1],
+                    dtype=selected_token_indices.dtype)
+                if len_token_indices == 1:
+                    assert torch.equal(selected_token_indices, token_indices)
 
         with set_forward_context(model_input.attn_metadata, self.vllm_config,
                                  model_input.virtual_engine):
             # RBLN compile context is much similar to vLLM forward context
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
-            for kv_cache in kv_caches:
-                self.compile_context.mark_static_address(kv_cache)
-            hidden_or_intermediate_states = self.model_executable(
+
+            hidden_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
                 intermediate_tensors=intermediate_tensors,
                 selected_token_indices=token_indices,
                 **execute_model_kwargs,
             )
-            # Gather logits for TP (compute_logits)
-            if get_pp_group().is_last_rank:
-                logits_processor = self.compute_logits_model.logits_processor
-                hidden_states = logits_processor._gather_logits(
-                    hidden_or_intermediate_states)
-                hidden_states = hidden_states.view(-1, hidden_states.size(-1))
-                assert hidden_states.dim() == 2
-            else:
-                return hidden_or_intermediate_states
 
-        # Compute the logits. -> moved to model executable (compute_logits)
-        if get_pp_group().is_last_rank:
-            if num_prefills > 0 and len_token_indices != 0:
-                logits = hidden_states
-            else:
-                logits = hidden_states[selected_token_indices]
+            if get_pp_group().is_last_rank:
+                # Gather logits for TP
+                logits_processor = self.compute_logits_model.logits_processor
+                hidden_states = logits_processor._gather_logits(hidden_states)
+                hidden_states = hidden_states.view(-1, hidden_states.size(-1))
+
+        if not get_pp_group().is_last_rank:
+            intermediate_states = hidden_states
+            assert isinstance(intermediate_states, IntermediateTensors)
+            return intermediate_states
+
+        # Compute the logits. -> moved to model executable
+        if num_prefills > 0 and len_token_indices != 0:
+            logits = hidden_states
         else:
-            # non last rank DOES NOTHING
-            logits = self.compute_logits_model.compute_logits(
-                hidden_states, model_input.sampling_metadata)
+            logits = hidden_states[selected_token_indices]
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
@@ -656,12 +675,13 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
     def _prepare_model_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-        finished_requests_ids: Optional[List[str]] = None
+        finished_requests_ids: Optional[List[str]] = None,
+        virtual_engine: int = 0,
     ) -> ModelInputForRebelWithSamplingMetadata:
         self.builder.prepare(finished_requests_ids)
         self.builder.set_seq_group_list(seq_group_metadata_list)
 
-        return self.builder.build()  # type: ignore
+        return self.builder.build(virtual_engine)  # type: ignore
 
     @property
     def vocab_size(self) -> int:

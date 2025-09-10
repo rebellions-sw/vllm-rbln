@@ -343,6 +343,7 @@ class RBLNAttentionMetadataBuilder(
         self.input_builder = input_builder
 
         self.partition_len = input_builder.block_size
+        self.max_seq_len = input_builder.max_model_len
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
@@ -367,12 +368,7 @@ class RBLNAttentionMetadataBuilder(
                  for input_positions in input_data.input_positions]
         seq_idx = torch.tensor(steps, dtype=torch.int32)
         partition_len = self.partition_len
-        # no. of block(HW constraint) determines max sequence length.
-        # max_model_len(Model constraint) determines max sequence length.
-        # One of them is selected for max_seq_len.
-        block_length = self.input_builder.runner.cache_config.num_gpu_blocks * \
-                                            partition_len
-        max_seq_len = min(self.input_builder.max_model_len, block_length)
+        max_seq_len = self.max_seq_len
         num_partition = max_seq_len // partition_len
 
         batch_size = 1 if input_data.num_prefills else len(steps)
@@ -409,7 +405,7 @@ class RBLNAttentionMetadataBuilder(
                                                      1,
                                                      1,
                                                      prefill_chunk_size,
-                                                     self.max_seq_len,
+                                                     max_seq_len,
                                                      dtype=torch.float32)
                 causal_mask = 1 - torch.triu(torch.ones(
                     1, 1, prefill_chunk_size, prefill_chunk_size),
@@ -424,7 +420,7 @@ class RBLNAttentionMetadataBuilder(
                                                     1,
                                                     1,
                                                     1,
-                                                    self.max_seq_len,
+                                                    max_seq_len,
                                                     dtype=torch.float32)
                 for batch_index, batch_step in enumerate(steps):
                     decode_attention_mask[
