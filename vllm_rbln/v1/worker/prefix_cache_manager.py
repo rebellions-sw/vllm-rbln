@@ -51,6 +51,13 @@ class RBLNPrefixKVCacheManager:
         - Frees outer blocks when the inner blocks mapped to them are newly allocated to other requests.
     - req_to_outer_blocks
         - Frees outer blocks when the request is finished.
+
+
+    Note
+    - We do not care about the eviction. We just follow the eviction policy of vLLM.
+    - Life cycle of inner block and request are different.
+    If a block is cached to other requests, it is not freed even though the initial request is finished.
+    - So we just follow the life cycle of inner blocks.
     """
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
