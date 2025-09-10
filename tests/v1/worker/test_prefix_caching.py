@@ -23,7 +23,7 @@ from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
 
 from .utils import (MockModelWrapper, _schedule_cached_reqs,
                     _schedule_new_request, get_vllm_config,
-                    initialize_kv_cache, make_kv_cache_config, make_request)
+                    initialize_kv_cache, make_kv_cache_config, make_request, finish_request)
 
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
@@ -31,7 +31,6 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1
 DEVICE = current_platform.device_type
-
 
 @pytest.fixture
 def model_runner():
@@ -125,11 +124,10 @@ def test_prefill(model_runner):
     assert torch.allclose(inputs.cached_block_tables,
                           torch.tensor([[0, 1]], dtype=torch.int32))
     # 3. Finish req1 and schedule req2
-    req1.status = RequestStatus.FINISHED_ABORTED
-    manager.free(req1)
-    manager.free_block_hashes(req1)
+    finished_req = req1
+    finish_request(manager, finished_req)
 
-    # Allocate 13 inner blocks (50 tokens)
+    # Allocate 13 inner blocks (50 tokens) for req2
     req_id = "2"
     common_token_ids = [i for i in range(20)]
     unique_token_ids = [2] * 30
@@ -153,7 +151,7 @@ def test_prefill(model_runner):
         token_ids=all_token_ids,
         block_ids=total_allocated_blocks,
         new_computed_tokens=num_computed_tokens,
-        finished_req_ids=[req1.request_id])
+        finished_req_ids=[finished_req.request_id])
     model_runner._update_states(scheduler_output)
     inputs = model_runner._prepare_inputs(scheduler_output)
 
@@ -163,16 +161,24 @@ def test_prefill(model_runner):
     assert torch.allclose(inputs.cached_block_tables,
                           torch.tensor([[0, 1]], dtype=torch.int32))
 
-
-def test_block_ref_cnt(model_runner):
+@pytest.mark.parametrize("finished_req_id, remaining_blocks",
+    [
+        pytest.param(0, [0, 1], id="finish req0, remain only cached blocks"),
+        pytest.param(1, [0, 1, 2], id="finish req1, remain all blocks"),
+    ],
+)
+def test_block_ref_cnt(model_runner, finished_req_id, remaining_blocks):
     """
-    Check the prefix cached blocks remain even though the request is finished.
+    Check the reference count of prefix cached blocks
+    remains correct in case of
+    - The request(req0) that have the cached blocks is finished.
+    - The request(req1) that use the cached blocks is finished.
 
     req0: 42 tokens -> 11 inner blocks -> 3 outer blocks allocated
     req1: 42 (32 + 10) tokens
         -> 8 cached + 3 new inner blocks allocated
         -> 3 outer blocks allocated
-    req0 finished and freed
+    A request (req0 or req1) finished and freed
     req2: 46 (16 + 30) tokens
         -> 4 cached + 8 new inner blocks allocated
         -> 12 outer blocks allocated
@@ -199,6 +205,7 @@ def test_block_ref_cnt(model_runner):
                                     len(computed_blocks.blocks[0]) * IB_SIZE,
                                     computed_blocks)
     assert blocks.get_block_ids() == ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], )
+
     # Check the allocated blocks
     scheduler_output = _schedule_new_request(
         req_id,
@@ -239,10 +246,13 @@ def test_block_ref_cnt(model_runner):
                           torch.tensor([3, 4, 5, -1], dtype=torch.int32))
     assert torch.allclose(inputs.cached_block_tables,
                           torch.tensor([[0, 1]], dtype=torch.int32))
-    # 3. Finish req0 and schedule req2
-    req0.status = RequestStatus.FINISHED_ABORTED
-    manager.free(req0)
-    manager.free_block_hashes(req0)
+
+    # 3. Finish the request and schedule req2
+    if finished_req_id == 0:
+        finished_req = req0
+    elif finished_req_id == 1:
+        finished_req = req1
+    finish_request(manager, finished_req)
 
     req_id = "2"
     common_token_ids = [i for i in range(16)]
@@ -268,16 +278,15 @@ def test_block_ref_cnt(model_runner):
         token_ids=all_token_ids,
         block_ids=total_allocated_blocks,
         new_computed_tokens=num_computed_tokens,
-        finished_req_ids=[req0.request_id])
+        finished_req_ids=[finished_req.request_id])
     model_runner._update_states(scheduler_output)
     inputs = model_runner._prepare_inputs(scheduler_output)
 
     # Check the allocated outer blocks of finished req0 are still cached
-    assert len(model_runner.prefix_cache_manager.req_to_outer_blocks[
-        req0.request_id]) == 2
+    assert model_runner.prefix_cache_manager.req_to_outer_blocks[
+        req0.request_id] == remaining_blocks
     assert model_runner.prefix_cache_manager.get_ref_cnt(0) == 2
     assert model_runner.prefix_cache_manager.get_ref_cnt(1) == 1
-
 
 @pytest.mark.parametrize(
     "num_generated_token_ids, new_inner_blocks, outer_blocks_allocated",

@@ -27,8 +27,7 @@ class RBLNPrefixBlockQueue:
         if len(self.blocks) == 0:
             raise RuntimeError("No free outer blocks available: "
                                "prefix cache block management exhausted.")
-        block_id = self.blocks.popleft()
-        return block_id
+        return self.blocks.popleft()
 
     def append(self, block_id: int) -> None:
         assert self.ref_cnt_per_outer_block[block_id] == 0
@@ -76,6 +75,11 @@ class RBLNPrefixKVCacheManager:
     def _num_cached_inner_blocks(self, cached_len_tokens: int) -> int:
         return cached_len_tokens // self.ib_size
 
+    def allocate_new_ob(self) -> int:
+        new_ob = self.free_block_queue.popleft()
+        self.inc_ref_cnt(new_ob)
+        return new_ob
+
     def allocate_blocks(self, request_id: str, cached_len: int,
                         inner_blocks: list[int]) -> None:
         """
@@ -84,14 +88,10 @@ class RBLNPrefixKVCacheManager:
         if request_id not in self.req_to_outer_blocks:
             self.req_to_outer_blocks[request_id] = []
 
-        # Lazy cleanup: finished requests whose inner blocks got reused
-        # self.free_blocks_of_finished_requests(cached_len, inner_blocks)
-
         # Allocate the outer blocks that are cached.
         num_cached_outer_blocks = self._num_cached_outer_blocks(cached_len)
         for _ in range(num_cached_outer_blocks):
-            new_ob = self.free_block_queue.popleft()
-            self.inc_ref_cnt(new_ob)
+            new_ob = self.allocate_new_ob()
             self.req_to_outer_blocks[request_id].append(new_ob)
 
         # Allocate the inner blocks that are not cached yet.
@@ -101,8 +101,7 @@ class RBLNPrefixKVCacheManager:
         num_new_ob = (len(uncached_ib) + self.blk_ratio - 1) // self.blk_ratio
         ob_idx = 0
         while ob_idx < num_new_ob:
-            new_ob = self.free_block_queue.popleft()
-            self.inc_ref_cnt(new_ob)
+            new_ob = self.allocate_new_ob()
             self.req_to_outer_blocks[request_id].append(new_ob)
             start_pos = ob_idx * self.blk_ratio
             end_pos = min((ob_idx + 1) * self.blk_ratio, len(uncached_ib))
