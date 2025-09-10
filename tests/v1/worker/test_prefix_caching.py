@@ -269,7 +269,15 @@ def test_block_ref_cnt(model_runner):
     assert model_runner.prefix_cache_manager.get_ref_cnt(1) == 1
 
 
-def test_decode_no_alloc(model_runner):
+
+@pytest.mark.parametrize(
+    "num_generated_token_ids, new_inner_blocks, outer_blocks_allocated",
+    [
+        pytest.param(4, [3], [0, -1, -1, -1], id="without-new-outer-block-allocated"),
+        pytest.param(30, [3, 4, 5, 6, 7, 8, 9], [0, 1, 2, -1], id="with-new-outer-block-allocated"),
+    ],
+)
+def test_decode(model_runner, num_generated_token_ids, new_inner_blocks, outer_blocks_allocated):
     """
     Check the prefix caching works as expected during decode.
     """
@@ -306,23 +314,21 @@ def test_decode_no_alloc(model_runner):
                           torch.tensor([0, -1, -1, -1], dtype=torch.int32))
     assert inputs.cached_block_tables is None
 
-    # 2. Decode req0: 4 tokens -> no new inner block allocation
-    # generated_token_ids = [1]
-    # req0.append_output_token_ids(generated_token_ids)
-    # blocks = manager.allocate_slots(req0, len(generated_token_ids))
-    # assert blocks.get_block_ids() == ([], )
-    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
-    num_generated_token_ids = 4
+    # 2. Decode req0: `num_generated_token_ids` tokens
     req0.num_computed_tokens = len(all_token_ids)
     for _ in range(num_generated_token_ids):
         req0.append_output_token_ids(1)
 
-    # FIXME the token count logic is wrong
     blocks = manager.allocate_slots(req0, num_generated_token_ids)
-    assert blocks.get_block_ids() == ([3], )
+    assert blocks.get_block_ids() == (new_inner_blocks, )
     scheduler_output = _schedule_cached_reqs(
         [req0],
         [blocks.get_block_ids()],
     )
     model_runner._update_states(scheduler_output)
     inputs = model_runner._prepare_inputs(scheduler_output)
+    assert torch.allclose(inputs.block_tables[0],
+                          torch.tensor(outer_blocks_allocated, dtype=torch.int32))
+    assert inputs.cached_block_tables is None
+
+# def test_block_reuse(model_runner):

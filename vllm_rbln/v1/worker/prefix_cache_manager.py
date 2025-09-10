@@ -59,12 +59,10 @@ class RBLNPrefixKVCacheManager:
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
                  num_ob: int):
         self.req_to_outer_blocks: dict[str, list[int]] = {}
+        self.inner_to_outer_block: dict[int, int] = {}
         self.pooled_tensor = torch.zeros(1,
                                          max_model_len // ob_size,
                                          dtype=torch.int32)
-        # Check the inner block is oudated or not
-        self.inner_to_request_id: dict[int, str] = {}
-        self.inner_to_outer_block: dict[int, int] = {}
 
         self.ob_size = ob_size
         self.ib_size = ib_size
@@ -110,7 +108,6 @@ class RBLNPrefixKVCacheManager:
             for ib_idx in range(start_pos, end_pos):
                 new_ib_id = uncached_ib[ib_idx]
                 self.inner_to_outer_block[new_ib_id] = new_ob
-                self.inner_to_request_id[new_ib_id] = request_id
             ob_idx += 1
 
     def free_blocks(self, request_id: str) -> None:
