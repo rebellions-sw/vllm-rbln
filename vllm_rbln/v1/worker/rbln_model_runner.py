@@ -670,28 +670,22 @@ class RBLNModelRunner:
 
     def _compile_model(self, model):
         if envs.RBLN_COMPILE_MODEL:
-            if envs.RBLN_TP_SIZE > 1:
-                compiled_model = torch.compile(
-                    model,
-                    backend="rbln",
-                    options={
-                        "compile_context": self.compile_context,
-                        "cache_dir": "./rsd_cache_dir",
-                        "tensor_parallel_size": envs.TP_SIZE,
-                    },
-                    dynamic=False,
-                )
-            else:
-                compiled_model = torch.compile(
-                    model,
-                    backend="rbln",
-                    options={
-                        "compile_context": self.compile_context,
-                        "cache_dir": "./cache_dir",
-                    },
-                    dynamic=False,
-                )
+            options = {
+                "compile_context": self.compile_context,
+                "tensor_parallel_size": envs.RBLN_TP_SIZE,
+            }
+            if not envs.VLLM_DISABLE_COMPILE_CACHE:
+                logger.info("Once the model is compiled for the first time, "
+                            "the cached compiled binary will be reused.")
+                options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE
+                                        > 1 else "./cache_dir")
 
+            compiled_model = torch.compile(
+                model,
+                backend="rbln",
+                options=options,
+                dynamic=False,
+            )
             return compiled_model
         else:
             return model
@@ -1586,10 +1580,6 @@ class RBLNModelRunner:
         self.may_reinitialize_input_batch(kv_cache_config)
         self.initialize_attn_backend(kv_cache_config)
         kv_caches = self.initialize_kv_cache_tensors(kv_cache_config)
-
-        # for partition skip, we need dummy block slot.
-        no_dummy_slots = 1
-        kv_cache_config.num_blocks -= no_dummy_slots
 
         if self.speculative_config and self.speculative_config.use_eagle():
             assert isinstance(self.drafter, EagleProposer)

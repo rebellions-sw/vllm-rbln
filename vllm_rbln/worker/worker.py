@@ -99,8 +99,10 @@ class RBLNCacheEngine:
 
     def _allocate_kv_cache(self, ) -> List[torch.Tensor]:
         """Allocates KV cache on RBLN."""
+
+        # One extra block is reserved for padding.
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
-            self.num_cpu_blocks, self.block_size, self.num_heads,
+            self.num_cpu_blocks + 1, self.block_size, self.num_heads,
             self.head_size)
         kv_cache: List[torch.Tensor] = []
         logger.info("[RBLN] attention backend get_kv_cache_shape = %s",
@@ -303,12 +305,16 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             # 1 : prefill
             num_runtimes=1 + self.scheduler_config.max_num_seqs)
 
-        max_required_num_blocks = (self.model_config.max_model_len *
-                                   self.scheduler_config.max_num_seqs //
-                                   block_size)
+        max_required_num_blocks = (
+            self.model_config.max_model_len *
+            self.scheduler_config.max_num_seqs //
+            block_size) + self.scheduler_config.max_num_seqs + 1
 
-        num_gpu_blocks = min(max_num_blocks - 1, max_required_num_blocks)
-
+        # We always allocate this number of blocks, but the last one is
+        # reserved for padding. As a result, the vLLM system should treat
+        # it as if there is one fewer usable block than the number
+        # actually allocated.
+        num_gpu_blocks = min(max_num_blocks, max_required_num_blocks) - 1
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1
 

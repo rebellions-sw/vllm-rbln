@@ -20,45 +20,16 @@ if TYPE_CHECKING:
     from vllm.config import ModelConfig, VllmConfig
 else:
     VllmConfig = None
-import os
-from pathlib import Path
 
 import rebel
 from torch._dynamo import register_backend
-from vllm import envs
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
-
-_RBLN_TORCH_COMPILE_SUPPORTED = [
-    "LlamaForCausalLM",
-    "Qwen3ForCausalLM",
-    "Qwen3MoeForCausalLM",
-    "Qwen2MoeModel",
-    "Qwen2MoeForCausalLM",
-    "DeepseekV2ForCausalLM",
-    "DeepseekV3ForCausalLM",
-]
-
-
-def is_torch_compile_supported(vllm_config: VllmConfig) -> bool:
-    model = vllm_config.model_config.model  # noqa
-
-    # Compiled models (e.g., local paths) must use Optimum-rbln
-    if isinstance(model, (str, Path)) and os.path.exists(model):
-        return False
-
-    if (vllm_config.additional_config is not None and
-            vllm_config.additional_config.get("force_optimum_rbln", False)):
-        return False
-
-    # Check if the architecture supports torch.compile
-    architectures = getattr(vllm_config.model_config.hf_config,
-                            "architectures", [])
-    return any(arch in _RBLN_TORCH_COMPILE_SUPPORTED for arch in architectures)
 
 
 def bypass_backend(graph_module: "torch.fx.GraphModule"):
@@ -81,10 +52,6 @@ class RblnPlatform(Platform):
     ray_device_key: str = "RBLN"
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
-
-    # torch.compile() is currently disabled.
-    # TODO: Replace with dynamic check via is_torch_compile_supported().
-    is_torch_compile: bool = False
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
@@ -165,7 +132,7 @@ class RblnPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
-        if cls.is_torch_compile:
+        if envs.RBLN_USE_VLLM_MODEL:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
@@ -211,7 +178,7 @@ class RblnPlatform(Platform):
                 "block_size must be configured for RBLN backend")
             cache_config.enable_prefix_caching = False
 
-        if envs.VLLM_USE_V1 and cls.is_torch_compile:
+        if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
 
             if (vllm_config.compilation_config.level
