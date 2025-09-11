@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib.util
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -28,7 +29,6 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
-from vllm.v1.attention.backends.utils import validate_kv_sharing_target
 
 # @FIXME(RBLN): We hope to remove the Custom Attention forward.
 # The original vLLM forward function will be used in the future.
@@ -170,11 +170,15 @@ def __custom_init__(
             raise NotImplementedError(
                 "Cross-layer KV sharing is not supported in V0.")
 
-        validate_kv_sharing_target(
-            prefix,
-            kv_sharing_target_layer_name,
-            compilation_config.static_forward_context,
-        )
+        if importlib.util.find_spec(
+                "vllm.v1.attention.backends.utils") is not None:
+            from vllm.v1.attention.backends.utils import (
+                validate_kv_sharing_target)
+            validate_kv_sharing_target(
+                prefix,
+                kv_sharing_target_layer_name,
+                compilation_config.static_forward_context,
+            )
     self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
 
     # use a placeholder kv cache tensor during init, which will be replaced
@@ -191,6 +195,14 @@ def __custom_init__(
 
     # NOTE(jiwoo.park) layer index is required to use external binding KV cache.
     self.layer_index = extract_layer_index(self.layer_name)
+
+    # NOTE - consider PP
+    vllm_config = get_current_vllm_config()
+    parallel_config = vllm_config.parallel_config
+    model_config = vllm_config.model_config
+    start, end = model_config.get_layers_start_end_indices(parallel_config)
+    assert self.layer_index >= start and self.layer_index < end
+    self.layer_index -= start
 
 
 def custom_attention_forward(

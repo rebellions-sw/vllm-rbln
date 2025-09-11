@@ -45,6 +45,9 @@ environment_variables = {
     "RBLN_USE_VLLM_MODEL":
     (lambda: os.environ.get("USE_VLLM_MODEL", "False").lower() in
      ("true", "1")),
+    "RBLN_FLASH_CAUSAL_ATTN":
+    (lambda: os.environ.get("FLASH_CAUSAL_ATTN", "True").lower() in
+     ("true", "1")),
 }
 
 

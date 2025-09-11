@@ -74,6 +74,10 @@ def __deepseek_v2_attention_forward(
     k_pe = k_pe.view(-1, 1, self.qk_rope_head_dim)
 
     q_pe, k_pe = self.rotary_emb(positions, q_pe, k_pe)
+    if q_nope.dim() != q_pe.dim():
+        q_pe = q_pe.squeeze(0)
+    if k_nope.dim() != k_pe.dim():
+        k_pe = k_pe.squeeze(0)
 
     q = torch.cat([q_nope, q_pe], dim=-1)
     k = torch.cat([k_nope, k_pe.repeat(1, self.num_local_heads, 1)], dim=-1)
