@@ -10,6 +10,7 @@ import time
 import warnings
 from typing import Any, Optional, Union
 
+import numpy as np
 import uvloop
 from benchmark_dataset import (AIMODataset, BurstGPTDataset,
                                ConversationDataset, InstructCoderDataset,
@@ -347,11 +348,17 @@ def main(args: argparse.Namespace):
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
 
+    median_ttft_ms, mean_ttft_ms, max_ttft_ms = 0, 0, 0
+    median_tpot_ms, mean_tpot_ms, max_tpot_ms = 0, 0, 0
     if request_outputs:
         # Note: with the vllm and vllm-chat backends,
         # we have request_outputs, which we use to count tokens.
         total_prompt_tokens = 0
         total_output_tokens = 0
+
+        ttfts: list[float] = []
+        tpots: list[float] = []
+
         for ro in request_outputs:
             if not isinstance(ro, RequestOutput):
                 continue
@@ -359,7 +366,25 @@ def main(args: argparse.Namespace):
                                     if ro.prompt_token_ids else 0)
             total_output_tokens += sum(
                 len(o.token_ids) for o in ro.outputs if o)
+
+            if ro.metrics is not None:
+                num_output_tokens = sum(
+                    len(o.token_ids) for o in ro.outputs if o)
+                ttfts.append(ro.metrics.first_token_time -
+                             ro.metrics.arrival_time)
+                tpot = (ro.metrics.finished_time -
+                        ro.metrics.first_token_time) / (num_output_tokens - 1)
+                tpots.append(tpot)
+
         total_num_tokens = total_prompt_tokens + total_output_tokens
+        if ttfts:
+            median_ttft_ms = np.median(ttfts) * 1000
+            mean_ttft_ms = np.mean(ttfts) * 1000
+            max_ttft_ms = np.max(ttfts) * 1000
+        if tpots:
+            median_tpot_ms = np.median(tpots) * 1000
+            mean_tpot_ms = np.mean(tpots) * 1000
+            max_tpot_ms = np.max(tpots) * 1000
     else:
         total_num_tokens = sum(r.prompt_len + r.expected_output_len
                                for r in requests)
@@ -379,6 +404,10 @@ def main(args: argparse.Namespace):
           f"{total_output_tokens / elapsed_time:.2f} output tokens/s")
     print(f"Total num prompt tokens:  {total_prompt_tokens}")
     print(f"Total num output tokens:  {total_output_tokens}")
+    print(f"Median TTFT: {median_ttft_ms:.2f} ms, ",
+          f"Mean TTFT: {mean_ttft_ms:.2f} ms, Max TTFT: {max_ttft_ms:.2f} ms")
+    print(f"Median TPOT: {median_tpot_ms:.2f} ms, ",
+          f"Mean TPOT: {mean_tpot_ms:.2f} ms, Max TPOT: {max_tpot_ms:.2f} ms")
 
     # Output JSON results if specified
     if args.output_json:
@@ -386,8 +415,17 @@ def main(args: argparse.Namespace):
             "elapsed_time": elapsed_time,
             "num_requests": len(requests),
             "total_num_tokens": total_num_tokens,
+            "total_input_tokens": total_prompt_tokens,
+            "total_output_tokens": total_output_tokens,
             "requests_per_second": len(requests) / elapsed_time,
-            "tokens_per_second": total_num_tokens / elapsed_time,
+            "total_tokens_per_second": total_num_tokens / elapsed_time,
+            "output_tokens_per_second": total_output_tokens / elapsed_time,
+            "median_ttft_ms": median_ttft_ms,
+            "mean_ttft_ms": mean_ttft_ms,
+            "max_ttft_ms": max_ttft_ms,
+            "median_tpot_ms": median_tpot_ms,
+            "mean_tpot_ms": mean_tpot_ms,
+            "max_tpot_ms": max_tpot_ms,
         }
         with open(args.output_json, "w") as f:
             json.dump(results, f, indent=4)
