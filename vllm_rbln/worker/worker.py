@@ -322,7 +322,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # it as if there is one fewer usable block than the number
         # actually allocated.
         num_gpu_blocks = min(
-            max_num_blocks * self.cache_config.gpu_memory_utilization,
+            int(max_num_blocks * self.cache_config.gpu_memory_utilization),
             max_required_num_blocks) - 1
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks) - 1
