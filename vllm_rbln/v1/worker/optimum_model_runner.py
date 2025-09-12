@@ -175,7 +175,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 ob_size=self.vllm_config.additional_config["attn_block_size"],
                 ib_size=self.vllm_config.cache_config.block_size,
                 max_model_len=self.max_model_len,
-                num_ob=self.model.kv_block_adapter.get_available_num_blocks())
+                num_ob=self.model.kv_block_adapter.get_available_num_outer_blocks(),
+            )
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -477,7 +478,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_blocks = num_blocks_per_req[req_index]
             # TODO how to log the block ids?
             if self.enable_prefix_caching:
-                if len(scheduled.new_block_ids) > 0:
+                if len(scheduled.new_block_ids[0]) > 0:
                     self.prefix_cache_manager.allocate_blocks(
                         req_id, scheduled.num_computed_tokens,
                         scheduled.new_block_ids[0])
@@ -515,7 +516,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     "Generated tokens: %s, Freed block(s): %s", req_id,
                     len(self.requests[req_id].prompt_token_ids),
                     len(self.requests[req_id].output_token_ids), block_ids)
-            self.prefix_cache_manager.free_request(req_id)
+            if self.enable_prefix_caching:
+                self.prefix_cache_manager.free_request(req_id)
             self.requests.pop(req_id, None)
             self.encoder_cache.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
