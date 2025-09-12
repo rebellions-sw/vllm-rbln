@@ -73,6 +73,8 @@ class RBLNPrefixKVCacheManager:
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
                  num_ob: int):
         self.req_to_outer_blocks: dict[str, list[int]] = {}
+        self.outer_block_to_req: dict[int, str] = {}
+        # TODO 1 inner block to multiple outer blocks?
         self.inner_to_outer_block: dict[int, int] = {}
         self.outer_to_inner_blocks: [tuple[RBLNBlock, list[int]]
                                      ] = [tuple() for _ in range(num_ob)]
@@ -107,33 +109,15 @@ class RBLNPrefixKVCacheManager:
         for ob_id, (ob, ibs) in enumerate(self.outer_to_inner_blocks):
             if len(ibs) == 0:
                 continue
-            all_uncached = True
-            for ib in ibs:
-                if ib in self.inner_to_outer_block:
-                    all_uncached = False
-                    break
-            if all_uncached:
+            # Evict the outer blocks of finished requests.
+            if ob_id not in self.outer_block_to_req:
                 self.outer_block_manager.append(ob)
                 logger.debug("Evict outer block %d (inner %s).", ob_id, ibs)
                 for ib in ibs:
                     self.inner_to_outer_block.pop(ib, None)
                 self.outer_to_inner_blocks[ob_id] = tuple()
-                num_evicted_obs += 1
-            else:
-                passed_obs.append(ob_id)
-
-        if num_evicted_obs == 0:
-            logger.debug("All outer blocks have cached inner blocks, evicting one cached outer block.")
-            evicted_ob_id = passed_obs[-1]
-            ob, ibs = self.outer_to_inner_blocks[evicted_ob_id]
-            self.outer_block_manager.append(ob)
-            for ib in ibs:
-                self.inner_to_outer_block.pop(ib, None)
-            self.outer_to_inner_blocks[evicted_ob_id] = tuple()
-            logger.debug("Evict outer block %d (inner %s).", evicted_ob_id, ibs)
 
     def _allocate_new_ob(self, cached_ibs: list[int]) -> int:
-        # EVICTION
         if self.outer_block_manager.is_empty():
             self._evict_uncached_ib(cached_ibs)
         new_ob = self.outer_block_manager.popleft()
@@ -172,6 +156,7 @@ class RBLNPrefixKVCacheManager:
         for _ in range(num_cached_outer_blocks):
             new_ob = self._allocate_new_ob(cached_ib)
             self.req_to_outer_blocks[request_id].append(new_ob.block_id)
+            self.outer_block_to_req[new_ob.block_id] = request_id
 
         # Allocate the outer blocks that are not cached yet.
         # Map the inner blocks to the new outer blocks.
@@ -180,6 +165,7 @@ class RBLNPrefixKVCacheManager:
         while ob_idx < num_new_ob:
             new_ob = self._allocate_new_ob(cached_ib)
             self.req_to_outer_blocks[request_id].append(new_ob.block_id)
+            self.outer_block_to_req[new_ob.block_id] = request_id
             self._allocate_ibs_per_ob(new_ob, ob_idx, uncached_ib)
             ob_idx += 1
         obs = self.req_to_outer_blocks[request_id]
@@ -207,7 +193,9 @@ class RBLNPrefixKVCacheManager:
             "Free request %s (keeping outer blocks alive by inner lifecycle)",
             request_id,
         )
-        self.req_to_outer_blocks.pop(request_id, None)
+        outer_blocks = self.req_to_outer_blocks.pop(request_id, None)
+        for ob_id in outer_blocks:
+            self.outer_block_to_req.pop(ob_id, None)
 
     def get_cached_origin_blocks(self, request_id, cached_len,
                                  inner_blocks: list[int]) -> torch.Tensor:
@@ -246,4 +234,5 @@ class RBLNPrefixKVCacheManager:
         value = torch.tensor(self.req_to_outer_blocks[request_id],
                              dtype=torch.int32)
         self.pooled_tensor[:len(value)].copy_(value)
-        return self.pooled_tensor
+        ret = self.pooled_tensor.clone()
+        return ret
