@@ -75,7 +75,7 @@ class KVCacheBlockAdapter:
         """True if we can allocate a full batch worth of blocks."""
         estimated = self._estimated_num_blocks()
 
-        if self.vllm_config.cache_config.enable_caching:
+        if self.vllm_config.cache_config.enable_prefix_caching:
             block_size = self.vllm_config.additional_config.attn_block_size
         else:
             block_size = self.vllm_config.cache_config.block_size
