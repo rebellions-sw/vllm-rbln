@@ -57,17 +57,25 @@ class RBLNPrefixKVCacheManager:
     - outer_to_inner_blocks, inner_to_outer_block
         - Frees outer blocks when the inner blocks
         mapped to them are newly allocated to other requests.
-    - req_to_outer_blocks
+    - req_to_outer_blocks, outer_block_to_req
         - Frees outer blocks when the request is finished.
 
-
     Note
-    - We do not care about the eviction.
-    We just follow the eviction policy of vLLM.
-    - Life cycle of inner block and request are different.
-    If a block is cached to other requests, it is not freed
-    even though the initial request is finished.
-    - So we just follow the life cycle of inner blocks.
+    - Eviction policy:
+        1. Evict outer blocks whose inner blocks are reused
+            to other requests in round-robin manner.
+        2. If no free outer blocks, evict outer blocks
+            whose finished requests in round-robin manner.
+    - Life cycle:
+        1. Request != Inner blocks in vLLM
+            - Even though a request is finished,
+                its inner blocks may be reused by other requests.
+            - So we keep the inner blocks alive
+                until they are reused by other requests.
+        2. Inner blocks in vLLM <-> Outer blocks in RBLN
+            - Inner blocks are cached in vLLM, but outer blocks
+                can be evicted in RBLN if free outer blocks are needed.
+            - So we evict outer blocks whose inner blocks are cached in vLLM.
     """
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
@@ -98,18 +106,14 @@ class RBLNPrefixKVCacheManager:
 
     def _evict_uncached_ib(self, cached_ibs: list[int]) -> None:
         """
-        Evict the outer block
-        1. whose inner blocks are all uncached in round-robin manner.
-        2. If all outer blocks have cached inner blocks, evict the last cached ones.
+        Evict the outer blocks of finished requests
+        if no free outer blocks are available.
         TODO optimize the eviction policy.
         TODO sub prefix caching
         """
-        num_evicted_obs = 0
-        passed_obs = []
         for ob_id, (ob, ibs) in enumerate(self.outer_to_inner_blocks):
             if len(ibs) == 0:
                 continue
-            # Evict the outer blocks of finished requests.
             if ob_id not in self.outer_block_to_req:
                 self.outer_block_manager.append(ob)
                 logger.debug("Evict outer block %d (inner %s).", ob_id, ibs)
@@ -118,6 +122,10 @@ class RBLNPrefixKVCacheManager:
                 self.outer_to_inner_blocks[ob_id] = tuple()
 
     def _allocate_new_ob(self, cached_ibs: list[int]) -> int:
+        """
+        Allocate a new outer block.
+        If no free outer blocks, evict the outer blocks of finished requests.
+        """
         if self.outer_block_manager.is_empty():
             self._evict_uncached_ib(cached_ibs)
         new_ob = self.outer_block_manager.popleft()
@@ -211,7 +219,9 @@ class RBLNPrefixKVCacheManager:
         for ib_id in cached_ib:
             ob_id = self.inner_to_outer_block.get(ib_id)
             if ob_id is None:
-                logger.debug("Inner block %s was prefix cached in vLLM but not in RBLN. So it will be re-cached.", ib_id)
+                logger.debug(
+                    "Inner block %s was prefix cached in vLLM "
+                    "but not in RBLN. So it will be re-cached.", ib_id)
                 continue
             if ob_id != last_cached_outer_block:
                 cached_outer_blocks.append(ob_id)
@@ -219,8 +229,7 @@ class RBLNPrefixKVCacheManager:
 
         logger.debug(
             "Request %s cache hits for inner blocks: %s -> outer blocks: %s.",
-            request_id, cached_ib, cached_outer_blocks
-        )
+            request_id, cached_ib, cached_outer_blocks)
 
         if cached_outer_blocks:
             return torch.tensor(cached_outer_blocks, dtype=torch.int32)

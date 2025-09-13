@@ -54,9 +54,6 @@ class KVCacheBlockAdapter:
         self.vllm_config = vllm_config
         self.estimated_kvcache_num_blocks = estimated_kvcache_num_blocks
         self.use_v1 = env.VLLM_USE_V1
-        if self.vllm_config.cache_config.enable_prefix_caching:
-            self.attn_block_size = self.vllm_config.additional_config[
-                "attn_block_size"]
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -79,7 +76,8 @@ class KVCacheBlockAdapter:
         estimated = self._estimated_num_blocks()
 
         if self.vllm_config.cache_config.enable_prefix_caching:
-            block_size = self.attn_block_size
+            block_size = self.vllm_config.additional_config["attn_block_size"]
+
         else:
             block_size = self.vllm_config.cache_config.block_size
 
@@ -91,14 +89,17 @@ class KVCacheBlockAdapter:
         return estimated >= ideal_total
 
     def get_available_num_blocks(self) -> int:
-        blk_ratio = self.attn_block_size // self.vllm_config.cache_config.block_size \
-            if self.vllm_config.cache_config.enable_prefix_caching else 1
+        if self.vllm_config.cache_config.enable_prefix_caching:
+            ob_size = self.vllm_config.additional_config["attn_block_size"]
+            ib_size = self.vllm_config.cache_config.block_size
+            blk_ratio = ob_size // ib_size
+        else:
+            blk_ratio = 1
         estimated = self._estimated_num_blocks() * blk_ratio
         if self.is_full_block_available():
             return estimated + 1 if self.use_v1 else estimated
 
         return estimated if self.use_v1 else max(0, estimated - 1)
-
 
     def get_available_num_outer_blocks(self) -> int:
         """Number of outer blocks available for prefix caching."""
@@ -120,12 +121,6 @@ class RBLNOptimumModelBase(nn.Module):
         self.model_config = vllm_config.model_config
         self.scheduler_config = vllm_config.scheduler_config
         self.cache_config = vllm_config.cache_config
-        self.enable_prefix_caching = vllm_config.cache_config.enable_prefix_caching
-        self.attn_block_size = vllm_config.additional_config.get(
-            "attn_block_size", None)
-        self.blk_ratio = self.attn_block_size // self.cache_config.block_size if self.enable_prefix_caching else 1
-
-
         self.init_model()
         self.batch_size = self.scheduler_config.max_num_seqs
         self.kv_block_adapter = KVCacheBlockAdapter(

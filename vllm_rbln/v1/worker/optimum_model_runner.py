@@ -175,7 +175,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 ob_size=self.vllm_config.additional_config["attn_block_size"],
                 ib_size=self.vllm_config.cache_config.block_size,
                 max_model_len=self.max_model_len,
-                num_ob=self.model.kv_block_adapter.get_available_num_outer_blocks(),
+                num_ob=self.model.kv_block_adapter.
+                get_available_num_outer_blocks(),
             )
 
     def get_model(self) -> nn.Module:
