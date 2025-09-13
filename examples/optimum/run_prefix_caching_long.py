@@ -68,6 +68,8 @@ def get_wiki_based_questions():
     Answer the users QUESTION using the DOCUMENT text above.
     Keep your answer ground in the facts of the DOCUMENT.
     If the DOCUMENT doesn’t contain the facts to answer the QUESTION return NONE.
+
+    ANSWER:
     """
     doc = wikipedia.page("Artificial intelligence").content[:3000]
     questions = [
