@@ -116,7 +116,7 @@ class RBLNPrefixKVCacheManager:
                 continue
             if ob_id not in self.outer_block_to_req:
                 self.outer_block_manager.append(ob)
-                logger.debug("Evict outer block %d (inner %s).", ob_id, ibs)
+                logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", ob_id, ibs)
                 for ib in ibs:
                     self.inner_to_outer_block.pop(ib, None)
                 self.outer_to_inner_blocks[ob_id] = tuple()
@@ -141,8 +141,6 @@ class RBLNPrefixKVCacheManager:
 
         self.outer_to_inner_blocks[new_ob.block_id] = (
             new_ob, uncached_ib[start_pos:end_pos])
-        logger.debug("Map the inner blocks %s to the outer block %d.",
-                     uncached_ib[start_pos:end_pos], new_ob.block_id)
 
     def allocate_blocks(self, request_id: str, cached_len: int,
                         inner_blocks: list[int]) -> None:
@@ -159,13 +157,15 @@ class RBLNPrefixKVCacheManager:
         if request_id not in self.req_to_outer_blocks:
             self.req_to_outer_blocks[request_id] = []
 
-        # Allocate the outer blocks that are cached.
+        # Allocate the outer blocks that are cached in vLLM.
         num_cached_outer_blocks = self._num_cached_outer_blocks(cached_len)
         for _ in range(num_cached_outer_blocks):
             new_ob = self._allocate_new_ob(cached_ib)
             self.req_to_outer_blocks[request_id].append(new_ob.block_id)
             self.outer_block_to_req[new_ob.block_id] = request_id
+            # TODO cached in vLLM, but not in RBLN
 
+        
         # Allocate the outer blocks that are not cached yet.
         # Map the inner blocks to the new outer blocks.
         num_new_ob = (len(uncached_ib) + self.blk_ratio - 1) // self.blk_ratio
@@ -177,7 +177,7 @@ class RBLNPrefixKVCacheManager:
             self._allocate_ibs_per_ob(new_ob, ob_idx, uncached_ib)
             ob_idx += 1
         obs = self.req_to_outer_blocks[request_id]
-        logger.debug("Request %s allocated outer blocks %s.", request_id, obs)
+        logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id, obs, inner_blocks)
 
     def _release_blocks_if_reused(self, inner_blocks: list[int]) -> None:
         """
@@ -191,16 +191,17 @@ class RBLNPrefixKVCacheManager:
                 continue
             ob, ibs = self.outer_to_inner_blocks[ob_id]
             self.outer_block_manager.append(ob)
-            logger.debug("Release outer block %d (inner %s).", ob_id, ibs)
+            logger.debug("[PFX] [RELEASED] OB=%d (IB=%s)", ob_id, ibs)
             for ib in ibs:
                 self.inner_to_outer_block.pop(ib)
             self.outer_to_inner_blocks[ob_id] = tuple()
 
     def free_request(self, request_id: str) -> None:
-        logger.debug(
-            "Free request %s (keeping outer blocks alive by inner lifecycle)",
-            request_id,
-        )
+        """
+        Remove the mapping of the given request.
+        Keep the outer blocks alive until their inner blocks
+        are reused by other requests.
+        """
         outer_blocks = self.req_to_outer_blocks.pop(request_id, None)
         for ob_id in outer_blocks:
             self.outer_block_to_req.pop(ob_id, None)
@@ -219,17 +220,13 @@ class RBLNPrefixKVCacheManager:
         for ib_id in cached_ib:
             ob_id = self.inner_to_outer_block.get(ib_id)
             if ob_id is None:
-                logger.debug(
-                    "Inner block %s was prefix cached in vLLM "
-                    "but not in RBLN. So it will be re-cached.", ib_id)
                 continue
             if ob_id != last_cached_outer_block:
                 cached_outer_blocks.append(ob_id)
                 last_cached_outer_block = ob_id
 
-        logger.debug(
-            "Request %s cache hits for inner blocks: %s -> outer blocks: %s.",
-            request_id, cached_ib, cached_outer_blocks)
+        logger.debug("[PFX] [CACHE-HIT] REQUEST=%s IB=%s -> OB=%s",
+                    request_id, cached_ib, cached_outer_blocks)
 
         if cached_outer_blocks:
             return torch.tensor(cached_outer_blocks, dtype=torch.int32)

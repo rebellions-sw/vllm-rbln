@@ -508,10 +508,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         """
         for req_id in scheduler_output.finished_req_ids:
             if logger.isEnabledFor(logging.DEBUG):
-                block_ids = [
-                    block_id - 1
-                    for block_id in self.requests[req_id].block_ids[0]
-                ]
+                if self.enable_prefix_caching:
+                    block_ids = self.requests[req_id].block_ids[0]
+                else:
+                    block_ids = [
+                        block_id - 1
+                        for block_id in self.requests[req_id].block_ids[0]
+                    ]
                 logger.debug(
                     "Request %s is finished. Prompt tokens: %s, "
                     "Generated tokens: %s, Freed block(s): %s", req_id,

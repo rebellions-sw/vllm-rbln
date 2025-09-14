@@ -315,9 +315,10 @@ class RBLNOptimumScheduler(Scheduler):
                         preempted_blocks = self.kv_cache_manager.get_block_ids(
                             preempted_req.request_id)[0]
                         self.kv_cache_manager.free(preempted_req)
-                        preempted_blocks = [
-                            block_idx - 1 for block_idx in preempted_blocks
-                        ]
+                        if not self.cache_config.enable_prefix_caching:
+                            preempted_blocks = [
+                                block_idx - 1 for block_idx in preempted_blocks
+                            ]
                         logger.warning(
                             "Request %s is preempted. Freed block(s): %s",
                             preempted_req.request_id, preempted_blocks)
