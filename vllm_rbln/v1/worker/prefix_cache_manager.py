@@ -80,9 +80,8 @@ class RBLNPrefixKVCacheManager:
                  num_ob: int):
         self.req_to_outer_blocks: dict[str, list[int]] = {}
         self.outer_block_to_req: dict[int, str] = {}
-        # TODO 1 inner block to multiple outer blocks?
+        # TODO Save only newly allocated inner blocks
         self.inner_to_outer_block: dict[int, int] = {}
-        # TODO contained cached inner blocks?
         self.outer_to_inner_blocks: [tuple[RBLNBlock, list[int]]
                                      ] = [tuple() for _ in range(num_ob)]
 
@@ -127,31 +126,28 @@ class RBLNPrefixKVCacheManager:
         new_ob = self.outer_block_manager.popleft()
         return new_ob
 
-    def _allocate_ibs_per_ob(self, new_ob: RBLNBlock, ob_idx: int,
-                             uncached_ib: list[int]) -> None:
-        for ib_id in uncached_ib:
+    def _allocate_ibs_per_ob(self, new_ob: RBLNBlock,
+                             inner_blocks: list[int]) -> None:
+        for ib_id in inner_blocks:
             self.inner_to_outer_block[ib_id] = new_ob.block_id
 
         self.outer_to_inner_blocks[new_ob.block_id] = (
-            new_ob, uncached_ib)
+            new_ob, inner_blocks)
 
-    def _append_new_ib(self, last_ob_id: int, inner_blocks: list[int]) -> None:
+    def _append_new_ib(self, ob_id: int, inner_blocks: list[int]) -> None:
         """
         Append new inner blocks to the last outer block of the request.
         """
         assert len(inner_blocks) == 1
         new_ib = inner_blocks[0]
-        self.inner_to_outer_block[new_ib] = last_ob_id
-        self.outer_to_inner_blocks[last_ob_id][1].append(new_ib)
+        self.inner_to_outer_block[new_ib] = ob_id
+        self.outer_to_inner_blocks[ob_id][1].append(new_ib)
 
     def allocate_blocks(self, request_id: str, cached_len: int,
                         inner_blocks: list[int]) -> None:
         """
         Allocate outer blocks for the given inner blocks.
         """
-        print("request_id:", request_id)
-        print("cached_len:", cached_len)
-        print("inner_blocks:", inner_blocks)
         if request_id in self.req_to_outer_blocks:
             num_already_allocated_ibs = cached_len // self.ib_size
             if num_already_allocated_ibs % self.blk_ratio == 0:
@@ -177,7 +173,7 @@ class RBLNPrefixKVCacheManager:
             for ib_id in inner_blocks[start_pos:end_pos]:
                 if ib_id not in self.inner_to_outer_block:
                     new_ibs.append(ib_id)
-            self._allocate_ibs_per_ob(new_ob, ob_idx, new_ibs)
+            self._allocate_ibs_per_ob(new_ob, new_ibs)
 
         obs = self.req_to_outer_blocks[request_id]
         logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id, obs, inner_blocks)
