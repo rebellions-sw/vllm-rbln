@@ -62,9 +62,7 @@ class RBLNPrefixKVCacheManager:
 
     Note
     - Eviction policy:
-        1. Evict outer blocks whose inner blocks are reused
-            to other requests in round-robin manner.
-        2. If no free outer blocks, evict outer blocks
+        - If no free outer blocks, evict outer blocks
             whose finished requests in round-robin manner.
     - Life cycle:
         1. Request != Inner blocks in vLLM
@@ -84,6 +82,7 @@ class RBLNPrefixKVCacheManager:
         self.outer_block_to_req: dict[int, str] = {}
         # TODO 1 inner block to multiple outer blocks?
         self.inner_to_outer_block: dict[int, int] = {}
+        # TODO contained cached inner blocks?
         self.outer_to_inner_blocks: [tuple[RBLNBlock, list[int]]
                                      ] = [tuple() for _ in range(num_ob)]
 
@@ -98,13 +97,10 @@ class RBLNPrefixKVCacheManager:
 
         self.outer_block_manager = RBLNBlockManager(self.num_ob)
 
-    def _num_cached_outer_blocks(self, cached_len_tokens: int) -> int:
-        return cached_len_tokens // self.ob_size
-
     def _num_cached_inner_blocks(self, cached_len_tokens: int) -> int:
         return cached_len_tokens // self.ib_size
 
-    def _evict_uncached_ib(self, cached_ibs: list[int]) -> None:
+    def _evict_uncached_ib(self) -> None:
         """
         Evict the outer blocks of finished requests
         if no free outer blocks are available.
@@ -121,80 +117,70 @@ class RBLNPrefixKVCacheManager:
                     self.inner_to_outer_block.pop(ib, None)
                 self.outer_to_inner_blocks[ob_id] = tuple()
 
-    def _allocate_new_ob(self, cached_ibs: list[int]) -> int:
+    def _allocate_new_ob(self) -> int:
         """
         Allocate a new outer block.
         If no free outer blocks, evict the outer blocks of finished requests.
         """
         if self.outer_block_manager.is_empty():
-            self._evict_uncached_ib(cached_ibs)
+            self._evict_uncached_ib()
         new_ob = self.outer_block_manager.popleft()
         return new_ob
 
     def _allocate_ibs_per_ob(self, new_ob: RBLNBlock, ob_idx: int,
                              uncached_ib: list[int]) -> None:
-        start_pos = ob_idx * self.blk_ratio
-        end_pos = min((ob_idx + 1) * self.blk_ratio, len(uncached_ib))
-        for ib_idx in range(start_pos, end_pos):
-            new_ib_id = uncached_ib[ib_idx]
-            self.inner_to_outer_block[new_ib_id] = new_ob.block_id
+        for ib_id in uncached_ib:
+            self.inner_to_outer_block[ib_id] = new_ob.block_id
 
         self.outer_to_inner_blocks[new_ob.block_id] = (
-            new_ob, uncached_ib[start_pos:end_pos])
+            new_ob, uncached_ib)
+
+    def _append_new_ib(self, last_ob_id: int, inner_blocks: list[int]) -> None:
+        """
+        Append new inner blocks to the last outer block of the request.
+        """
+        assert len(inner_blocks) == 1
+        new_ib = inner_blocks[0]
+        self.inner_to_outer_block[new_ib] = last_ob_id
+        self.outer_to_inner_blocks[last_ob_id][1].append(new_ib)
 
     def allocate_blocks(self, request_id: str, cached_len: int,
                         inner_blocks: list[int]) -> None:
         """
         Allocate outer blocks for the given inner blocks.
         """
-        num_cached_ib = self._num_cached_inner_blocks(cached_len)
-        uncached_ib = inner_blocks[num_cached_ib:]
-        cached_ib = inner_blocks[:num_cached_ib]
-        # Lazy release of the outer blocks
-        # whose inner blocks are newly allocated.
-        self._release_blocks_if_reused(uncached_ib)
-
-        if request_id not in self.req_to_outer_blocks:
+        print("request_id:", request_id)
+        print("cached_len:", cached_len)
+        print("inner_blocks:", inner_blocks)
+        if request_id in self.req_to_outer_blocks:
+            num_already_allocated_ibs = cached_len // self.ib_size
+            if num_already_allocated_ibs % self.blk_ratio == 0:
+                num_obs = 1
+            else:
+                last_ob_id = self.req_to_outer_blocks[request_id][-1]
+                self._append_new_ib(last_ob_id, inner_blocks)
+                return
+        else:
             self.req_to_outer_blocks[request_id] = []
-
-        # Allocate the outer blocks that are cached in vLLM.
-        num_cached_outer_blocks = self._num_cached_outer_blocks(cached_len)
-        for _ in range(num_cached_outer_blocks):
-            new_ob = self._allocate_new_ob(cached_ib)
-            self.req_to_outer_blocks[request_id].append(new_ob.block_id)
-            self.outer_block_to_req[new_ob.block_id] = request_id
-            # TODO cached in vLLM, but not in RBLN
-
+            num_obs = (len(inner_blocks) + self.blk_ratio - 1) // self.blk_ratio
         
-        # Allocate the outer blocks that are not cached yet.
-        # Map the inner blocks to the new outer blocks.
-        num_new_ob = (len(uncached_ib) + self.blk_ratio - 1) // self.blk_ratio
-        ob_idx = 0
-        while ob_idx < num_new_ob:
-            new_ob = self._allocate_new_ob(cached_ib)
+        for ob_idx in range(num_obs):
+            new_ob = self._allocate_new_ob()
+            # Map the new outer block to the request.
             self.req_to_outer_blocks[request_id].append(new_ob.block_id)
             self.outer_block_to_req[new_ob.block_id] = request_id
-            self._allocate_ibs_per_ob(new_ob, ob_idx, uncached_ib)
-            ob_idx += 1
+
+            # Map the new outer block to the inner blocks.
+            start_pos = ob_idx * self.blk_ratio
+            end_pos = min((ob_idx + 1) * self.blk_ratio, len(inner_blocks))
+            new_ibs = []
+            for ib_id in inner_blocks[start_pos:end_pos]:
+                if ib_id not in self.inner_to_outer_block:
+                    new_ibs.append(ib_id)
+            self._allocate_ibs_per_ob(new_ob, ob_idx, new_ibs)
+
         obs = self.req_to_outer_blocks[request_id]
         logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id, obs, inner_blocks)
-
-    def _release_blocks_if_reused(self, inner_blocks: list[int]) -> None:
-        """
-        Release the outer blocks whose inner blocks
-        are newly allocated to other requests.
-        """
-        for ib in inner_blocks:
-            ob_id = self.inner_to_outer_block.get(ib, None)
-            if ob_id is None:
-                # It is already released.
-                continue
-            ob, ibs = self.outer_to_inner_blocks[ob_id]
-            self.outer_block_manager.append(ob)
-            logger.debug("[PFX] [RELEASED] OB=%d (IB=%s)", ob_id, ibs)
-            for ib in ibs:
-                self.inner_to_outer_block.pop(ib)
-            self.outer_to_inner_blocks[ob_id] = tuple()
 
     def free_request(self, request_id: str) -> None:
         """
@@ -219,16 +205,20 @@ class RBLNPrefixKVCacheManager:
 
         for ib_id in cached_ib:
             ob_id = self.inner_to_outer_block.get(ib_id)
-            if ob_id is None:
-                continue
+            assert ob_id is not None, (
+                "Inconsistent state: cached inner block"
+            )
+            # It is cached in vLLM, but not in RBLN.
+            req = self.outer_block_to_req.get(ob_id)
+            if req == request_id:
+                break
             if ob_id != last_cached_outer_block:
                 cached_outer_blocks.append(ob_id)
                 last_cached_outer_block = ob_id
 
-        logger.debug("[PFX] [CACHE-HIT] REQUEST=%s IB=%s -> OB=%s",
-                    request_id, cached_ib, cached_outer_blocks)
-
         if cached_outer_blocks:
+            logger.debug("[PFX] [CACHE-HIT] REQUEST=%s IB=%s -> OB=%s",
+                        request_id, cached_ib, cached_outer_blocks)
             return torch.tensor(cached_outer_blocks, dtype=torch.int32)
         return None
 
