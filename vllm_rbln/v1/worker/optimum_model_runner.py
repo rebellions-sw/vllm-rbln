@@ -295,10 +295,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         if is_prefill:
             input_ids, positions, block_tables, cached_block_tables, \
-            multi_modal_kwargs, running_request_ids \
+            cached_len, multi_modal_kwargs, running_request_ids \
                 = self._prepare_prefill(scheduler_output)
         else:
             cached_block_tables = None
+            cached_len = 0
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
 
@@ -318,6 +319,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             token_type_ids=None,
             pooling_metadata=None,  # FIXME
             cached_block_tables=cached_block_tables,
+            cached_len=cached_len,
             is_prompt=is_prefill)
         return model_input
 
@@ -383,7 +385,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int,
                Optional[torch.Tensor], Optional[RBLNOptimumMultiModalKwargs],
                list[str]]:
         input_tokens: list[list[int]] = []
@@ -401,13 +403,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             raise RuntimeError(
                 "Prefill stage request cannot processed with other requests.")
 
-        req_id = self.input_batch.req_ids[0]
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
         cached_block_table = None
-        for req_id, scheduled in zip(self.input_batch.req_ids, reqs):
+        cached_len = 0
+        for scheduled in reqs:
+            req_id = scheduled.req_id
             req_index = self.input_batch.req_id_to_index[req_id]
             # TODO the prompt tokens in the prefix cached blocks
             # must be excluded.
@@ -427,11 +430,17 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     req_id, scheduled.num_computed_tokens,
                     scheduled.block_ids[0])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
-                cached_block_table = \
+                cached_block_table, cached_len = \
                     self.prefix_cache_manager.get_cached_origin_blocks(
                         req_id,
                         scheduled.num_computed_tokens, scheduled.block_ids[0]
                     )
+                logger.debug(
+                    "Request %s is now scheduled. Prompt tokens: %s, "
+                    "Already generated tokens: %s, Allocated block(s): %s",
+                    req_id, len(self.requests[req_id].prompt_token_ids),
+                    len(self.requests[req_id].output_token_ids),
+                    scheduled.block_ids[0])
             else:
                 block_table = block_tables_cpu[req_index]
                 block_table = self.mask_block_table(block_table, num_blocks)
@@ -454,7 +463,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             0) if cached_block_table is not None else None
 
         return input_tokens, input_positions, block_table, cached_block_table, \
-            batched_mm_inputs, running_request_ids
+        cached_len, batched_mm_inputs, running_request_ids
 
     def _prepare_decode(
         self,
@@ -468,21 +477,27 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             0].get_cpu_tensor()
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
-
-        for req_id, scheduled in zip(self.input_batch.req_ids,
-                                     scheduler_output.scheduled_cached_reqs):
+        if self.enable_prefix_caching:
+            new_blocks_ids = {
+                req.req_id: req.new_block_ids[0]
+                for req in scheduler_output.scheduled_cached_reqs
+            }
+            num_computed_tokens = {
+                req.req_id: req.num_computed_tokens
+                for req in scheduler_output.scheduled_cached_reqs
+            }
+        for req_id in self.input_batch.req_ids:
             req_index = self.input_batch.req_id_to_index[req_id]
             input_position = int(self.input_batch.num_tokens[req_index] - 1)
             input_tokens.append(
                 [self.input_batch.token_ids_cpu[req_index][input_position]])
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
-            # TODO how to log the block ids?
             if self.enable_prefix_caching:
-                if len(scheduled.new_block_ids[0]) > 0:
+                if len(new_blocks_ids[req_id]) > 0:
                     self.prefix_cache_manager.allocate_blocks(
-                        req_id, scheduled.num_computed_tokens,
-                        scheduled.new_block_ids[0])
+                        req_id, num_computed_tokens[req_id],
+                        new_blocks_ids[req_id])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
             else:
                 block_table = block_tables_cpu[req_index]
