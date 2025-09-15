@@ -195,11 +195,8 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         list_input_block_ids: List[List[int]] = []
 
         block_size = self.runner.block_size
-        assert (
-            len(seq_group_metadata_list) == 1), f"seq_group_metadata_list: \
-            len({len(seq_group_metadata_list)}) - {seq_group_metadata_list}"
 
-        for seq_group_metadata in seq_group_metadata_list:
+        for i,seq_group_metadata in enumerate(seq_group_metadata_list):
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
             assert len(seq_ids) == 1
@@ -223,7 +220,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
             data.num_prefill_tokens += len(tokens)
             data.query_lens.append(len(tokens))
             data.seq_lens.append(seq_len)
-            for i, pos in enumerate(data.input_positions[0]):
+            for pos in data.input_positions[i]:
                 block_number = block_table[pos // block_size]
                 block_offset = pos % block_size
                 data.slot_mapping.append(block_number)
@@ -232,20 +229,16 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         max_seq_len = max(data.seq_lens)
         assert max_seq_len > 0
 
-        num_partition = self.max_model_len // block_size
+        data.input_tokens = [[token for tokens in data.input_tokens for token in tokens]]
+        data.input_positions = [[position for positions in data.input_positions for position in positions]]
+
         dummy = self.runner.cache_config.num_gpu_blocks
         # make_tensor_with_pad takes List[List[]] as input
         # To make it work, input_block_ids is expanded
         input_block_ids = make_tensor_with_pad(list_input_block_ids,
-                                               max_len=num_partition,
                                                pad=dummy,
                                                dtype=torch.long,
                                                device=self.device)
-        # input_block_ids gets back in here.
-        input_block_ids = input_block_ids.flatten().tolist()
-        input_block_ids = torch.tensor(input_block_ids,
-                                       dtype=torch.long,
-                                       device=self.device)
 
         prefill_size = (self.chunked_prefill_size if self.chunked_prefill else
                         1 << (math.ceil(math.log2(max_seq_len))))

@@ -296,7 +296,7 @@ class RBLNAttentionMetadataBuilder(
         # prefill attention mask vs decode attention mask
         if input_data.num_prefills:
             step = steps[0][0]
-            assert input_data.num_prefills == 1
+
             prefill_chunk_size = (
                 self.chunked_prefill_size if self.chunked_prefill else 1 <<
                 (math.ceil(math.log2(input_data.seq_lens[0]))))
@@ -306,13 +306,15 @@ class RBLNAttentionMetadataBuilder(
                                                  prefill_chunk_size,
                                                  max_seq_len,
                                                  dtype=torch.float32)
-            causal_mask = 1 - torch.triu(torch.ones(1, 1, prefill_chunk_size,
-                                                    prefill_chunk_size),
-                                         diagonal=1)
-            if step >= prefill_chunk_size:
-                chunked_attention_mask[:, :, :, :, :step] = 1
+            valid_len = sum(query_lens)
+            causal_masks = [torch.tril(torch.ones(query_len, query_len)) for query_len in query_lens]
+            causal_mask = torch.block_diag(*causal_masks)
+            cur_causal_mask = torch.zeros(1, 1, prefill_chunk_size, prefill_chunk_size)
+            cur_causal_mask[:, :, :valid_len, :valid_len] = causal_mask
+            if step > 0:
+                chunked_attention_mask[:, :, :, :query_lens[0], :step] = 1
             chunked_attention_mask[:, :, :, :, step:step +
-                                   prefill_chunk_size] = causal_mask
+                                   prefill_chunk_size] = cur_causal_mask
             attn_masks = chunked_attention_mask
         else:
             decode_attention_mask = torch.zeros(batch_size,
