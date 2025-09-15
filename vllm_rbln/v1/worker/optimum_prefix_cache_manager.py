@@ -6,16 +6,14 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+import time
 from abc import ABC, abstractmethod
-from collections import deque
+from vllm_rbln.v1.worker.optimum_eviction_policy import (LRUEvictionPolicy,
+                                                 RREvictionPolicy)
+from vllm_rbln.v1.worker.optimum_block_mapping_manager import BlockMappingManager, RBLNBlock
+from collections import OrderedDict, deque
 from dataclasses import dataclass
-from typing import Optional, dict, list, tuple
+from typing import Optional
 
 import torch
 
@@ -41,14 +39,6 @@ class BlockConfiguration:
 
 
 @dataclass
-class BlockMapping:
-    outer_block_id: int
-    inner_block_ids: list[int]
-    request_id: Optional[str] = None
-    is_active: bool = True
-
-
-@dataclass
 class CacheSearchResult:
     cached_outer_blocks: list[int]
     cached_lengths: list[int]
@@ -57,15 +47,6 @@ class CacheSearchResult:
     @property
     def has_cache_hit(self) -> bool:
         return len(self.cached_outer_blocks) > 0
-
-
-class RBLNBlock:
-
-    def __init__(self, block_id: int):
-        self.block_id = block_id
-
-    def __repr__(self) -> str:
-        return f"RBLNBlock(id={self.block_id})"
 
 
 class BlockAllocatorInterface(ABC):
@@ -87,97 +68,36 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
 
     def __init__(self, num_blocks: int):
         self._free_blocks = deque([RBLNBlock(i) for i in range(num_blocks)])
+        # 실제 할당된 블록 객체들을 추적
+        self._allocated_blocks: dict[int, RBLNBlock] = {}
 
     def allocate(self, count: int) -> list[RBLNBlock]:
         if len(self._free_blocks) < count:
             raise RuntimeError(
                 f"Insufficient free blocks. Requested: {count}, "
-                "Available: {len(self._free_blocks)}")
+                f"Available: {len(self._free_blocks)}")
 
-        return [self._free_blocks.popleft() for _ in range(count)]
+        allocated = []
+        for _ in range(count):
+            block = self._free_blocks.popleft()
+            self._allocated_blocks[block.block_id] = block
+            allocated.append(block)
+        return allocated
 
     def deallocate(self, block: RBLNBlock) -> None:
-        self._free_blocks.append(block)
+        if block.block_id in self._allocated_blocks:
+            self._free_blocks.append(block)
+            del self._allocated_blocks[block.block_id]
+        else:
+            logger.warning("Attempting to deallocate unallocated block: %d",
+                           block.block_id)
+
+    def get_allocated_block(self, block_id: int) -> Optional[RBLNBlock]:
+        """할당된 블록 객체 반환"""
+        return self._allocated_blocks.get(block_id)
 
     def get_free_count(self) -> int:
         return len(self._free_blocks)
-
-
-class BlockMappingManager:
-    """
-    Manage mappings between outer blocks and inner blocks.
-    Also manage mappings between requests and their allocated outer blocks.
-    """
-
-    def __init__(self):
-        self._outer_to_inner: dict[int, BlockMapping] = {}
-        self._inner_to_outer: dict[int, list[int]] = {}
-        self._request_mappings: dict[str, list[int]] = {}
-
-    def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
-                       request_id: str) -> None:
-        """
-        Create a new block mapping.
-        """
-        mapping = BlockMapping(outer_block_id=outer_block.block_id,
-                               inner_block_ids=inner_blocks.copy(),
-                               request_id=request_id)
-
-        self._outer_to_inner[outer_block.block_id] = mapping
-
-        # Update Inner to outer mapping
-        for ib_id in inner_blocks:
-            if ib_id not in self._inner_to_outer:
-                self._inner_to_outer[ib_id] = []
-            self._inner_to_outer[ib_id].append(outer_block.block_id)
-
-        # Update Request mapping
-        if request_id not in self._request_mappings:
-            self._request_mappings[request_id] = []
-        self._request_mappings[request_id].append(outer_block.block_id)
-
-    def remove_mapping(self, outer_block_id: int) -> Optional[BlockMapping]:
-        """
-        Remove a mapping by outer block ID and return the removed mapping.
-        """
-        mapping = self._outer_to_inner.pop(outer_block_id, None)
-        if mapping:
-            for ib_id in mapping.inner_block_ids:
-                if ib_id in self._inner_to_outer:
-                    self._inner_to_outer[ib_id].remove(outer_block_id)
-                    if not self._inner_to_outer[ib_id]:
-                        del self._inner_to_outer[ib_id]
-
-        return mapping
-
-    def get_request_blocks(self, request_id: str) -> list[int]:
-        """
-        Return the list of outer block IDs associated with a request.
-        """
-        return self._request_mappings.get(request_id, []).copy()
-
-    def remove_request(self, request_id: str) -> list[int]:
-        """
-        Remove all mappings associatedwith a request
-        and return the outer block IDs.
-        """
-        return self._request_mappings.pop(request_id, [])
-
-    def get_mapping(self, outer_block_id: int) -> Optional[BlockMapping]:
-        """
-        Return the mapping for a given outer block ID.
-        """
-        return self._outer_to_inner.get(outer_block_id)
-
-    def get_inactive_mappings(self) -> list[BlockMapping]:
-        """
-        Return a list of inactive mappings.
-        """
-        return [
-            mapping for mapping in self._outer_to_inner.values()
-            if not mapping.is_active
-        ]
-
 
 class CacheSearchManager:
     """
@@ -268,26 +188,6 @@ class CacheSearchManager:
                                  source_request_id=target_request_id)
 
 
-class EvictionPolicy:
-    """
-    Simple eviction policy to select blocks for eviction.
-    TODO upgrade to LRU or LFU based policy.
-    """
-
-    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int) -> list[int]:
-        # Select blocks for eviction.
-        inactive_mappings = mapping_manager.get_inactive_mappings()
-        evicted_blocks = []
-
-        for mapping in inactive_mappings:
-            if len(evicted_blocks) >= count:
-                break
-            evicted_blocks.append(mapping.outer_block_id)
-
-        return evicted_blocks
-
-
 class MemoryPoolManager:
     """
     Manage a memory pool to return a tensor of block IDs.
@@ -317,7 +217,7 @@ class RBLNPrefixKVCacheManager:
         self._mapping_manager = BlockMappingManager()
         self._cache_search_manager = CacheSearchManager(self._config)
         self._memory_pool_manager = MemoryPoolManager(max_model_len, ob_size)
-        self._eviction_policy = EvictionPolicy()
+        self._eviction_policy = RREvictionPolicy()
 
     def allocate_blocks(self, request_id: str, cached_len: int,
                         inner_blocks: list[int]) -> None:
@@ -339,10 +239,10 @@ class RBLNPrefixKVCacheManager:
         num_already_allocated_ibs = cached_len // self._config.ib_size
 
         if num_already_allocated_ibs % self._config.block_ratio == 0:
-            # 새로운 outer block 필요
+            # New outer block needed
             self._allocate_new_blocks(request_id, 1, inner_blocks)
         else:
-            # 기존 마지막 outer block에 추가
+            # Append to the last outer block
             request_blocks = self._mapping_manager.get_request_blocks(
                 request_id)
             last_ob_id = request_blocks[-1]
@@ -395,6 +295,12 @@ class RBLNPrefixKVCacheManager:
         blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
             self._mapping_manager, evict_count)
 
+        # 충분한 블록을 확보할 수 없는 경우 예외 발생
+        if len(blocks_to_evict) < evict_count:
+            raise RuntimeError(
+                f"Cannot evict enough blocks. Need {evict_count}, "
+                f"can evict {len(blocks_to_evict)}")
+
         for block_id in blocks_to_evict:
             self._evict_block(block_id)
 
@@ -404,10 +310,14 @@ class RBLNPrefixKVCacheManager:
         """
         mapping = self._mapping_manager.remove_mapping(block_id)
         if mapping:
-            block = RBLNBlock(block_id)  # mock block object
-            self._allocator.deallocate(block)
-            logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", block_id,
-                         mapping.inner_block_ids)
+            block = self._allocator.get_allocated_block(block_id)
+            if block:
+                self._allocator.deallocate(block)
+                logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", block_id,
+                             mapping.inner_block_ids)
+            else:
+                logger.error("Block %d not found in allocator during eviction",
+                             block_id)
 
     def _append_to_existing_block(self, outer_block_id: int,
                                   inner_blocks: list[int]) -> None:
@@ -416,16 +326,20 @@ class RBLNPrefixKVCacheManager:
         """
         assert len(
             inner_blocks) == 1, "Can only append one inner block at a time"
+        ib_id = inner_blocks[0]
 
+        # Update the outer to inner mapping
         mapping = self._mapping_manager.get_mapping(outer_block_id)
-        if mapping:
-            mapping.inner_block_ids.extend(inner_blocks)
+        if not mapping:
+            raise RuntimeError(
+                f"Mapping not found for outer block {outer_block_id}")
 
-            # Update the inner to outer mapping
-            ib_id = inner_blocks[0]
-            if ib_id not in self._mapping_manager._inner_to_outer:
-                self._mapping_manager._inner_to_outer[ib_id] = []
-            self._mapping_manager._inner_to_outer[ib_id].append(outer_block_id)
+        mapping.inner_block_ids.append(ib_id)
+
+        # Update the inner to outer mapping
+        if ib_id not in self._mapping_manager._inner_to_outer:
+            self._mapping_manager._inner_to_outer[ib_id] = []
+        self._mapping_manager._inner_to_outer[ib_id].append(outer_block_id)
 
     def free_request(self, request_id: str) -> None:
         """
@@ -452,11 +366,20 @@ class RBLNPrefixKVCacheManager:
             request_id, num_computed_tokens, inner_blocks,
             self._mapping_manager)
 
+        if result.has_cache_hit and isinstance(self._eviction_policy,
+                                               LRUEvictionPolicy):
+            for ob_id in result.cached_outer_blocks:
+                self._eviction_policy.touch(ob_id)
+
         return result.cached_outer_blocks, result.cached_lengths
 
     def get_blocks(self, request_id: str) -> torch.Tensor:
         """
         Get the tensor of outer block IDs for a given request.
         """
+        if request_id not in self._mapping_manager._request_mappings:
+            logger.warning("Request %s not found in mappings", request_id)
+            return self._memory_pool_manager.get_tensor_for_blocks([])
+
         block_ids = self._mapping_manager.get_request_blocks(request_id)
         return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
