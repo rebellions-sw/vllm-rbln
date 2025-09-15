@@ -38,25 +38,48 @@ class LRUEvictionPolicy(RREvictionPolicy):
         self._access_order: OrderedDict[int, float] = OrderedDict()
     
     def touch(self, block_id: int) -> None:
+        """Mark a block as recently accessed"""
         self._access_order[block_id] = time.time()
         # Move to the end to mark as most recently used
         self._access_order.move_to_end(block_id)
+    
+    def register_block(self, block_id: int) -> None:
+        """Register a new block (called when block is first allocated)"""
+        assert block_id not in self._access_order
+        self._access_order[block_id] = time.time()
+    
+    def unregister_block(self, block_id: int) -> None:
+        """Unregister a block (called when block is deallocated)"""
+        self._access_order.pop(block_id, None)
     
     def select_blocks_for_eviction(self, mapping_manager, count: int) -> list[int]:
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
         
-        # Sort the blocks in LRU order (oldest first)
-        evictable_blocks = [
+        if not inactive_block_ids:
+            logger.warning("No inactive blocks available for eviction")
+            return []
+        
+        untouched_blocks = [
+            block_id for block_id in inactive_block_ids
+            if block_id not in self._access_order
+        ]
+        
+        touched_blocks = [
             block_id for block_id in self._access_order.keys()
             if block_id in inactive_block_ids
         ]
         
+        evictable_blocks = untouched_blocks + touched_blocks
         selected = evictable_blocks[:count]
         
-        # Remove the selected blocks from the record
         for block_id in selected:
             self._access_order.pop(block_id, None)
         
+        if len(selected) < count:
+            logger.warning(
+                f"Could not find enough inactive blocks for eviction. "
+                f"Requested: {count}, Found: {len(selected)}")
+            
         return selected
 

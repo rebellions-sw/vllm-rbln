@@ -269,6 +269,7 @@ class RBLNPrefixKVCacheManager:
         new_blocks = self._allocator.allocate(count)
 
         # Create mappings
+        block_ids = []
         for i, block in enumerate(new_blocks):
             start_idx = i * self._config.block_ratio
             end_idx = min((i + 1) * self._config.block_ratio,
@@ -277,8 +278,10 @@ class RBLNPrefixKVCacheManager:
 
             self._mapping_manager.create_mapping(block, block_inner_blocks,
                                                  request_id)
+            if isinstance(self._eviction_policy, LRUEvictionPolicy):
+                self._eviction_policy.register_block(block.block_id)
+            block_ids.append(block.block_id)
 
-        block_ids = [block.block_id for block in new_blocks]
         logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id,
                      block_ids, inner_blocks)
 
@@ -313,6 +316,8 @@ class RBLNPrefixKVCacheManager:
             block = self._allocator.get_allocated_block(block_id)
             if block:
                 self._allocator.deallocate(block)
+                if isinstance(self._eviction_policy, LRUEvictionPolicy):
+                    self._eviction_policy.unregister_block(block_id)
                 logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", block_id,
                              mapping.inner_block_ids)
             else:
