@@ -299,7 +299,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 = self._prepare_prefill(scheduler_output)
         else:
             cached_block_tables = None
-            cached_len = 0
+            cached_len = []
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
 
@@ -385,7 +385,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int,
+    ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[int],
                Optional[torch.Tensor], Optional[RBLNOptimumMultiModalKwargs],
                list[str]]:
         input_tokens: list[list[int]] = []
@@ -408,7 +408,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
         cached_block_table = None
-        cached_len = 0
+        cached_len = []
         for scheduled in reqs:
             req_id = scheduled.req_id
             req_index = self.input_batch.req_id_to_index[req_id]
@@ -430,6 +430,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     req_id, scheduled.num_computed_tokens,
                     scheduled.block_ids[0])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
+                # TODO fix the position calling
                 cached_block_table, cached_len = \
                     self.prefix_cache_manager.get_cached_origin_blocks(
                         req_id,
@@ -459,8 +460,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_tokens = torch.tensor(prompt_tokens).unsqueeze(0)
         input_positions = torch.tensor(input_positions).unsqueeze(0)
         block_table = block_table.unsqueeze(0)
-        cached_block_table = cached_block_table.unsqueeze(
-            0) if cached_block_table is not None else None
+        # NOTE The cached_block_table is not unsqueezed for convenience.
+        # It is used only for prefill
 
         return input_tokens, input_positions, block_table, cached_block_table, \
         cached_len, batched_mm_inputs, running_request_ids
