@@ -15,7 +15,7 @@
 from typing import Optional
 
 import torch
-from vllm.config import ModelConfig, PoolerConfig, SchedulerConfig
+from vllm.config import PoolerConfig, VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import Pooler, PoolingType
 from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
@@ -31,11 +31,10 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
+        vllm_config: VllmConfig,
     ) -> None:
-        super().__init__(model_config, scheduler_config)
-        self._pooler = self._build_pooler(model_config.pooler_config)
+        super().__init__(vllm_config=vllm_config)
+        self._pooler = self._build_pooler(self.model_config.pooler_config)
 
     def is_classification_arch(self):
         architectures = getattr(
@@ -94,7 +93,8 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
             )
         return None
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids, token_type_ids, positions = self.preprocess(
             model_input.input_tokens,
             model_input.token_type_ids,
@@ -114,14 +114,17 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
         if token_type_ids:
             kwargs["token_type_ids"] = token_type_ids
         else:
-            rbln_model_input_names = self.rbln_model_config.model_input_names
-            if "token_type_ids" in rbln_model_input_names:
-                kwargs["token_type_ids"] = torch.zeros_like(input_ids)
+            model_input_names = getattr(self.rbln_model_config,
+                                        "model_input_names", None)
+            if model_input_names is not None:
+                rbln_model_input_names = \
+                    self.rbln_model_config.model_input_names
+                if "token_type_ids" in rbln_model_input_names:
+                    kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
         embeds = self.model.forward(**kwargs)
 
         hidden_states = embeds[0]
-
         if isinstance(hidden_states, tuple):
             hidden_states = hidden_states[0]
 

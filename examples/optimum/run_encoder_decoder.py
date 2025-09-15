@@ -25,12 +25,12 @@ GOLDEN_PROMPT = "UN Chief Says There Is No Security in Syria"
 async def generate(engine: AsyncLLMEngine,
                    prompt: str,
                    model: str,
-                   requst_id=0):
-    print(f"generate request_id={requst_id}, prompt={prompt}")
+                   request_id=0):
+    print(f"generate request_id={request_id}, prompt={prompt}")
     example_input = {
         "stream": True,
         "temperature": 0.0,
-        "request_id": requst_id,
+        "request_id": str(request_id),
     }
     # start the generation
     tokenizer = AutoTokenizer.from_pretrained(model)
@@ -93,7 +93,7 @@ async def main(
 
         futures.append(
             asyncio.create_task(
-                generate(engine, prompt=p, model=model_id, requst_id=i)))
+                generate(engine, prompt=p, model=model_id, request_id=i)))
 
     result = await asyncio.gather(*futures)
 

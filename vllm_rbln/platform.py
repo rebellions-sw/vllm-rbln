@@ -17,47 +17,19 @@ from typing import TYPE_CHECKING, Optional
 import torch
 
 if TYPE_CHECKING:
-    from vllm.config import VllmConfig
+    from vllm.config import ModelConfig, VllmConfig
 else:
     VllmConfig = None
-import os
-from pathlib import Path
 
 import rebel
 from torch._dynamo import register_backend
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
-
-_RBLN_TORCH_COMPILE_SUPPORTED = [
-    "LlamaForCausalLM",
-    "Qwen3ForCausalLM",
-    "Qwen3MoeForCausalLM",
-    "Qwen2MoeModel",
-    "Qwen2MoeForCausalLM",
-    "DeepseekV2ForCausalLM",
-    "DeepseekV3ForCausalLM",
-]
-
-
-def is_torch_compile_supported(vllm_config: VllmConfig) -> bool:
-    model = vllm_config.model_config.model  # noqa
-
-    # Compiled models (e.g., local paths) must use Optimum-rbln
-    if isinstance(model, (str, Path)) and os.path.exists(model):
-        return False
-
-    if (vllm_config.additional_config is not None and
-            vllm_config.additional_config.get("force_optimum_rbln", False)):
-        return False
-
-    # Check if the architecture supports torch.compile
-    architectures = getattr(vllm_config.model_config.hf_config,
-                            "architectures", [])
-    return any(arch in _RBLN_TORCH_COMPILE_SUPPORTED for arch in architectures)
 
 
 def bypass_backend(graph_module: "torch.fx.GraphModule"):
@@ -129,10 +101,26 @@ class RblnPlatform(Platform):
             raise NotImplementedError(
                 "Multi-step execution is not supported for RBLN")
 
-        # torch.compile() is currently disabled.
-        # TODO: Replace with dynamic check via is_torch_compile_supported().
-        is_torch_compile = False
         model_config = vllm_config.model_config
+        task = model_config.task
+        supported_tasks = set(model_config.supported_tasks)
+        pooling_tasks = {"embed", "classify", "reward", "score"}
+
+        if task == "auto":
+            is_pooling = bool(pooling_tasks & supported_tasks)
+            is_generate = "generate" in supported_tasks
+        else:
+            is_pooling = task in pooling_tasks
+            is_generate = task == "generate"
+
+        if is_pooling and envs.VLLM_USE_V1:
+            raise ValueError("Pooling models are only supported on v0.")
+
+        if is_generate and cls.supports_v1(
+                model_config
+        ) and not envs.VLLM_USE_V1 and not model_config.is_encoder_decoder:
+            logger.warning("V0 support for decoder models is deprecated.")
+
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
             logger.warning("bfloat16 is not supported on RBLN.")
@@ -143,15 +131,33 @@ class RblnPlatform(Platform):
         logger.info("RBLN model_config.dtype = %s", model_config.dtype)
 
         parallel_config = vllm_config.parallel_config
-        if parallel_config.worker_cls == "auto":
-            parallel_config.worker_cls = (
-                "vllm_rbln.worker.worker.RBLNWorker" if is_torch_compile else
-                "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker")
-
         scheduler_config = vllm_config.scheduler_config
-        scheduler_config.scheduler_cls = (
-            "vllm_rbln.core.scheduler.RBLNScheduler" if is_torch_compile else
-            "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler")
+        if envs.RBLN_USE_VLLM_MODEL:
+            if envs.VLLM_USE_V1:
+                if parallel_config.worker_cls == "auto":
+                    parallel_config.worker_cls = (
+                        "vllm_rbln.v1.worker.rbln_worker.RBLNWorker")
+                scheduler_config.scheduler_cls = (
+                    "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler")
+            else:
+                if parallel_config.worker_cls == "auto":
+                    parallel_config.worker_cls = (
+                        "vllm_rbln.worker.worker.RBLNWorker")
+                scheduler_config.scheduler_cls = (
+                    "vllm_rbln.core.scheduler.RBLNScheduler")
+        else:
+            if envs.VLLM_USE_V1:
+                if parallel_config.worker_cls == "auto":
+                    parallel_config.worker_cls = \
+                        "vllm_rbln.v1.worker.optimum_worker.RBLNOptimumWorker"
+                scheduler_config.scheduler_cls = \
+                        "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler"
+            else:
+                if parallel_config.worker_cls == "auto":
+                    parallel_config.worker_cls = \
+                        "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
+                scheduler_config.scheduler_cls = \
+                    "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -170,6 +176,25 @@ class RblnPlatform(Platform):
         if cache_config:
             assert vllm_config.cache_config.block_size is not None, (
                 "block_size must be configured for RBLN backend")
+            cache_config.enable_prefix_caching = False
+
+        if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
+            from vllm.config import CompilationLevel
+
+            if (vllm_config.compilation_config.level
+                    != CompilationLevel.NO_COMPILATION):
+                logger.info("RBLN doesn't @support_torch_compile decorator")
+                vllm_config.compilation_config.level = (
+                    CompilationLevel.NO_COMPILATION)
+                if (len(vllm_config.compilation_config.custom_ops) == 1
+                        and vllm_config.compilation_config.custom_ops[0]
+                        == "none"):
+                    vllm_config.compilation_config.custom_ops = []
+
+            if not model_config.disable_cascade_attn:
+                logger.info("The cascade attention is disabled"
+                            " because RBLN does not support it")
+                model_config.disable_cascade_attn = True
 
     @classmethod
     def get_attn_backend_cls(
@@ -182,9 +207,16 @@ class RblnPlatform(Platform):
         use_v1: bool,
         use_mla: bool,
     ) -> str:
-        attn_backend_cls = (
-            "vllm_rbln.attention.backends.flash_attention.RBLNAttentionBackend"
-        )
+        if envs.VLLM_USE_V1:
+            attn_backend_cls = ("vllm_rbln.v1.attention.backends."
+                                "flash_attention.RBLNAttentionBackend")
+        else:
+            attn_backend_cls = ("vllm_rbln.attention.backends."
+                                "flash_attention.RBLNAttentionBackend")
         logger.info("Using RBLN Attention Backend: %s", attn_backend_cls)
 
         return attn_backend_cls
+
+    @classmethod
+    def supports_v1(cls, model_config: "ModelConfig") -> bool:
+        return True

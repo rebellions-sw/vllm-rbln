@@ -48,7 +48,7 @@ async def encode(engine, prompt, request_id):
     pooling_params = PoolingParams()
     results_generator = engine.encode(prompt=prompt,
                                       pooling_params=pooling_params,
-                                      request_id=request_id)
+                                      request_id=str(request_id))
     # get the results
     final_output = None
     async for request_output in results_generator:

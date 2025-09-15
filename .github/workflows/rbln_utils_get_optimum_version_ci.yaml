@@ -1,0 +1,24 @@
+name: CI / Utils / Get optimum-rbln version
+
+on:
+  workflow_call:
+    outputs:
+      optimum_version:
+        description: "optimum-rbln package version"
+        value: ${{ jobs.get-optimum-version.outputs.optimum_version }}
+
+jobs:
+  get-optimum-version:
+    runs-on: ubuntu-latest-rbln
+    outputs:
+      optimum_version: ${{ steps.get_target_optimum_version.outputs.OPTIMUM_RBLN_VERSION }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get optimum version from requirements.txt
+        id: get_target_optimum_version
+        run: |
+          OPTIMUM_RBLN_VERSION=$(grep '^optimum-rbln' requirements.txt | sed 's/optimum-rbln>=//')
+          echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
+          echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT

@@ -11,59 +11,50 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Dict, Optional, cast
+from typing import Any, Optional
 
 import torch
-from vllm.config import ModelConfig, SchedulerConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
 from .base import ModelInputForRBLN
-from .model_base import (RBLNOptimumDecoderMixin, RBLNOptimumDictTableMixin,
-                         RBLNOptimumModelBase)
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
+from .optimum_attention import (AttentionManager, InnerAttentionEntry,
+                                InnerAttentionStrategy, InnerR1, InnerR2)
 
 logger = init_logger(__name__)
 
 
 class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
-                                                 RBLNOptimumDecoderMixin,
-                                                 RBLNOptimumDictTableMixin):
+                                                 RBLNOptimumDecoderMixin):
     INVALID_TOKEN = 100
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
-    ):
-        super().__init__(model_config=model_config,
-                         scheduler_config=scheduler_config)
+        vllm_config: VllmConfig,
+    ) -> None:
+        super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            padding_value=self.padding_value,
-            vocab_size=model_config.get_vocab_size,
+            vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=False,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
         )
         self.dec_max_seq_len = self.model_config.max_model_len
         self.dec_lengths = [0] * self.batch_size
-        self.table_mapping: Dict[str, int] = {}
+        # self.table_mapping: Dict[str, int] = {}
+        # Result1T = list[int]
+        # Result2T = tuple[torch.Tensor, torch.Tensor]
 
-    def get_table_id(
-        self,
-        is_prompt: bool,
-        finished_requests_ids: list[str],
-        running_requests_ids: list[str],
-    ) -> list[int]:
-        table_ids = self.get_table_mapping_values(
-            self.table_mapping,
-            self.decoder_batch_size,
-            is_prompt,
-            finished_requests_ids,
-            running_requests_ids,
-        )
-        return cast(list[int], table_ids)
+        self.strategy = InnerAttentionStrategy()
+        self.attention_manager: AttentionManager[InnerAttentionStrategy,
+                                                 InnerAttentionEntry, InnerR1,
+                                                 InnerR2] = AttentionManager(
+                                                     self.strategy)
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables
@@ -72,8 +63,12 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         running_requests_ids = model_input.running_requests_ids
         request_nums = input_ids.shape[0]
 
-        table_ids = self.get_table_id(is_prompt, finished_requests_ids,
-                                      running_requests_ids)
+        table_ids = self.attention_manager.get(
+            is_prompt,
+            self.decoder_batch_size,
+            running_requests_ids,
+            finished_requests_ids,
+        )
         valid_block_ids = torch.tensor(table_ids)
 
         if is_prompt:
@@ -88,6 +83,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
         kwargs = self.preprocess_for_decoder(is_prompt,
                                              block_tables,
+                                             self.kv_block_adapter,
                                              input_ids,
                                              cache_position,
                                              input_block_ids=valid_block_ids)
@@ -103,7 +99,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             lm_logits[0][0][-1] = 1
-            self.table_mapping[running_requests_ids[0]] = table_ids[0]
+            self.attention_manager.add(
+                running_requests_ids[0],
+                table_ids[0],
+            )
             self.dec_lengths[table_ids[0]] = 0
 
         else:
@@ -140,3 +139,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         if input_features is not None:
             input_features = input_features.squeeze(0)
         return input_features
+
+    def clear_dict_table(self):
+        self.table_mapping.clear()

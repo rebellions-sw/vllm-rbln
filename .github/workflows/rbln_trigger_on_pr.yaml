@@ -1,0 +1,87 @@
+
+name: vllm-rbln / PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
+  REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
+  REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
+  REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
+
+jobs:
+  check-skip-ci:
+    runs-on: runner-vllm-ci
+    outputs:
+      should_skip: ${{ contains(github.event.pull_request.head.commit.message, '[skip ci]') }}
+    steps:
+      - name: Check if [skip ci] is in commit message
+        run: |
+          if ${{ contains(github.event.pull_request.head.commit.message, '[skip ci]') }}; then
+            echo "Found [skip ci] in commit message, skipping CI"
+          else
+            echo "No [skip ci] found, continuing with CI"
+          fi
+
+  check-team-member:
+    needs: check-skip-ci
+    runs-on: runner-vllm-ci
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    outputs:
+      is_team_member: ${{ steps.check_member.outputs.IS_TEAM_MEMBER }}
+    steps:
+      - name: Fetch team members
+        id: fetch_team
+        run: |
+          response=$(curl -s -H "Authorization: Bearer ${{ secrets.GIT_PAT }}" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"query { organization(login: \"rebellions-sw\") { team(slug: \"rebel-sw-team\") { members(first: 100) { nodes { login } } } } }"}' \
+            https://api.github.com/graphql)
+          echo "$response" | jq -r '.data.organization.team.members.nodes[].login' > team_members.txt
+      - name: Check if PR author is a team member
+        id: check_member
+        run: |
+          pr_author=${{ github.event.pull_request.user.login }}
+          if grep -qx "$pr_author" team_members.txt; then
+            echo "IS_TEAM_MEMBER=true" >> $GITHUB_OUTPUT
+          else
+            echo "IS_TEAM_MEMBER=false" >> $GITHUB_OUTPUT
+          fi
+
+  check-code-quality:
+    needs: check-skip-ci
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
+    uses: ./.github/workflows/pre-commit.yml
+
+  get-compiler-version:
+    needs: [check-skip-ci, check-team-member, check-code-quality]
+    if: ${{ !inputs.rebel_compiler_version }}
+    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+    secrets: inherit
+
+  get-optimum-version:
+    needs: [check-skip-ci, check-team-member, check-code-quality]
+    if: ${{ !inputs.optimum_rbln_version }}
+    uses: ./.github/workflows/rbln_utils_get_optimum_version_ci.yaml
+    secrets: inherit
+
+  vllm-rbln-pytest:
+    needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version]
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
+    uses: ./.github/workflows/rbln_vllm-rbln_pytest.yaml
+    secrets: inherit
+    with:
+      rebel_compiler_version: ${{ needs.get-compiler-version.outputs.compiler_version }}
+      optimum_rbln_version: ${{ needs.get-optimum-version.outputs.optimum_version }}
+
+  vllm-rbln-optimum-ci:
+    needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version, vllm-rbln-pytest]
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
+    uses: ./.github/workflows/rbln_optimum_ci.yaml
+    secrets: inherit
+    with:
+      rebel_compiler_version: ${{ needs.get-compiler-version.outputs.compiler_version }}
+      optimum_rbln_version: ${{ needs.get-optimum-version.outputs.optimum_version }}

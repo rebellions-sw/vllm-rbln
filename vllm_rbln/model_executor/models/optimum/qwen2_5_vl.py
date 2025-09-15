@@ -14,7 +14,8 @@
 from typing import Any, Dict, Optional
 
 import torch
-from vllm.config import ModelConfig, SchedulerConfig
+import vllm.envs as env
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.qwen2_5_vl import (
     Qwen2_5_VLImageEmbeddingInputs, Qwen2_5_VLImageInputs,
@@ -32,14 +33,12 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
 
     def __init__(
         self,
-        model_config: ModelConfig,
-        scheduler_config: SchedulerConfig,
+        vllm_config: VllmConfig,
     ) -> None:
-        super().__init__(model_config, scheduler_config)
+        super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            padding_value=self.padding_value,
-            vocab_size=model_config.get_vocab_size,
+            vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=getattr(self.model.rbln_config,
                                          "use_multiple_decoder", False),
             default_batch_size=self.scheduler_config.max_num_seqs,
@@ -47,15 +46,20 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
         )
         self.rope_deltas: Dict = dict()
 
-    def forward(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN,
+                **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
-        is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables
 
         request_nums = input_ids.shape[0]
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
+
+        if env.VLLM_USE_V1:
+            is_prompt = model_input.is_prompt
+        else:
+            is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         if is_prompt:
             image_input = None
@@ -93,12 +97,9 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
                     self.rope_deltas.pop(request_id)
             self.rope_deltas[cur_request_id] = rope_deltas.item()
 
-        kwargs = self.preprocess_for_decoder(
-            is_prompt,
-            block_tables,
-            input_ids,
-            cache_position,
-        )
+        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
+                                             self.kv_block_adapter, input_ids,
+                                             cache_position)
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
 
