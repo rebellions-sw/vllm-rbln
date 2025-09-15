@@ -62,7 +62,15 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         if is_prompt:
             if self.model.prefill_decoder is None:
                 raise version_error
-
+            if model_input.cached_block_tables is not None:
+                src_block_table = model_input.cached_block_tables
+                cached_len = model_input.cached_len
+                for block_idx, (dst_block, src_block) in enumerate(zip(block_tables[0], 
+                                            src_block_table)):
+                    dst_block = dst_block.item()
+                    self.model.prefill_decoder.runtime._copy_kv_cache(
+                        src_block, dst_block,
+                        cached_len[block_idx])
             # TODO mark the kv cache is already copied
             # or just handle it in the optimum
             return self.model.prefill_decoder(**kwargs).logits
