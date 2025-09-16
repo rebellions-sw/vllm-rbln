@@ -253,6 +253,8 @@ class RBLNModelRunner:
         self.max_num_batched_tokens = (
             self.scheduler_config.max_num_batched_tokens)
 
+        self._accumulative_compilation_count = 0
+
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler
         output.
@@ -849,7 +851,7 @@ class RBLNModelRunner:
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
             num_common_prefix_blocks=[1],
-            finished_req_ids=set(f"dummy_decode__{i}"
+            finished_req_ids=set(f"dummy_decode_{i}"
                                  for i in range(decode_max_batch_size)),
             free_encoder_input_ids=[],
             structured_output_request_ids={},
@@ -1253,6 +1255,23 @@ class RBLNModelRunner:
         # Clear KVConnector state after all KVs are generated.
         if has_kv_transfer_group():
             get_kv_transfer_group().clear_connector_metadata()
+
+        if len(compilation_metrics :=
+               torch._dynamo.utils.get_compilation_metrics(
+               )) > self._accumulative_compilation_count:
+            new_compilation_metrics = compilation_metrics[
+                self._accumulative_compilation_count:]
+            reasons = ",".join([
+                cm.recompile_reason or "initial compilation"
+                for cm in new_compilation_metrics
+            ])
+            logger.debug(
+                "graph compilation(s) triggered due to following reason(s): %s",
+                reasons)
+            self._accumulative_compilation_count += len(
+                new_compilation_metrics)
+            logger.debug("accumulative compilation count: %s",
+                         self._accumulative_compilation_count)
 
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
