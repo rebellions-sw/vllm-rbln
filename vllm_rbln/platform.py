@@ -121,14 +121,22 @@ class RblnPlatform(Platform):
         ) and not envs.VLLM_USE_V1 and not model_config.is_encoder_decoder:
             logger.warning("V0 support for decoder models is deprecated.")
 
-        logger.info("original model_config.dtype = %s", model_config.dtype)
-        if model_config.dtype == torch.bfloat16:
-            logger.warning("bfloat16 is not supported on RBLN.")
+        if False:
+            logger.info("original model_config.dtype = %s", model_config.dtype)
+            if model_config.dtype == torch.bfloat16:
+                logger.warning("bfloat16 is not supported on RBLN.")
 
-        # FIXME - force model dtype into fp32 for graph compilation
-        model_config.dtype = torch.float
-        assert model_config.dtype == torch.float
-        logger.info("RBLN model_config.dtype = %s", model_config.dtype)
+            # FIXME - force model dtype into fp32 for graph compilation
+            model_config.dtype = torch.float
+            assert model_config.dtype == torch.float
+            logger.info("RBLN model_config.dtype = %s", model_config.dtype)
+        else:
+            dtype = model_config.dtype
+            logger.info("original model_config.dtype = %s", dtype)
+            if dtype != torch.bfloat16 and dtype != torch.float16 and dtype != torch.float:
+                logger.warning("%s is not supported on RBLN. only fp32,fp16,bf16 is supported", dtype)
+                model_config.dtype = torch.float
+            logger.info("RBLN model_config.dtype = %s", model_config.dtype)
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
