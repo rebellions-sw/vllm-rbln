@@ -296,11 +296,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         if is_prefill:
             input_ids, positions, block_tables, cached_block_tables, \
-            cached_len, multi_modal_kwargs, running_request_ids \
+            cached_lengths, multi_modal_kwargs, running_request_ids \
                 = self._prepare_prefill(scheduler_output)
         else:
-            cached_block_tables = None
-            cached_len = []
+            cached_block_tables = []
+            cached_lengths = []
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
 
@@ -320,7 +320,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             token_type_ids=None,
             pooling_metadata=None,  # FIXME
             cached_block_tables=cached_block_tables,
-            cached_len=cached_len,
+            cached_lengths=cached_lengths,
             is_prompt=is_prefill)
         return model_input
 
@@ -408,8 +408,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             0].num_blocks_per_row
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
-        cached_block_table = None
-        cached_len = []
+        cached_block_table = []
+        cached_length = []
         for scheduled in reqs:
             req_id = scheduled.req_id
             req_index = self.input_batch.req_id_to_index[req_id]
@@ -432,7 +432,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     scheduled.block_ids[0])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
                 # TODO fix the position calling
-                cached_block_table, cached_len = \
+                cached_block_table, cached_length = \
                     self.prefix_cache_manager.get_cached_origin_blocks(
                         req_id,
                         scheduled.num_computed_tokens, scheduled.block_ids[0]
@@ -465,7 +465,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # It is used only for prefill
 
         return input_tokens, input_positions, block_table, cached_block_table, \
-        cached_len, batched_mm_inputs, running_request_ids
+        cached_length, batched_mm_inputs, running_request_ids
 
     def _prepare_decode(
         self,
