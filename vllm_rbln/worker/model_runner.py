@@ -24,7 +24,7 @@ import torch
 from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
-from vllm.distributed import get_pp_group
+from vllm.distributed import get_pp_group, get_tp_group
 from vllm.forward_context import set_forward_context
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
@@ -434,16 +434,32 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 cast(RBLNModelRunner, weakref.proxy(self)))
 
     def compile_model(self, model):
-        options = {
-            "compile_context": self.compile_context,
-            "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
-            "mode": "strict",
-        }
-        if not envs.VLLM_DISABLE_COMPILE_CACHE:
-            logger.info("Once the model is compiled for the first time, "
-                        "the cached compiled binary will be reused.")
-            options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
-                                    > 1 else "./cache_dir")
+        if envs.RBLN_COMPILE_MODEL:
+            # GroupCoordinator
+            TP = get_tp_group()
+            PP = get_pp_group()
+            logger.info("[RBLN] GroupCoordinator unique_name = %s", TP.unique_name)
+            logger.info("[RBLN] group ranks = %s, local rank = %s", TP.ranks, TP.rank)
+            logger.info("[RBLN] device group id = %s", TP.device_group.group_name)
+            logger.info("[RBLN] cpu group id = %s", TP.cpu_group.group_name)
+            process_group_dict = {}
+            process_group_dict[TP.device_group.group_name] = TP.ranks
+            process_group_dict[TP.cpu_group.group_name] = TP.ranks
+            process_group_dict[PP.device_group.group_name] = PP.ranks
+            process_group_dict[PP.cpu_group.group_name] = PP.ranks
+
+            logger.info("[RBLN] process_group_dict = %s", process_group_dict)
+            options = {
+                "compile_context": self.compile_context,
+                "tensor_parallel_size": envs.RBLN_TP_SIZE,
+                "mode": "strict",
+                "process_group_dict": process_group_dict
+            }
+            if not envs.VLLM_DISABLE_COMPILE_CACHE:
+                logger.info("Once the model is compiled for the first time, "
+                            "the cached compiled binary will be reused.")
+                options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE
+                                        > 1 else "./cache_dir")
 
         compiled_model = torch.compile(
             model,
