@@ -179,8 +179,8 @@ class RBLNWorker(WorkerBase):
             nbits_per_param=16 if not self.model_config.quantization else 4,
             n_model_params=sum(p.numel()
                                for p in self.model_runner.model.parameters()),
-            # 1 : prefill
-            num_runtimes=1 + self.scheduler_config.max_num_seqs)
+            # 2 : 1 for prefill and decode each
+            num_runtimes=2)
 
         # for partition skip, we need dummy block slot.
         no_dummy_slots = 1
