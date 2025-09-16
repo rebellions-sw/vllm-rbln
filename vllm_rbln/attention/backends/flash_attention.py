@@ -55,7 +55,7 @@ def flash_attention_naive_prefill_impl(
         seq_len = q.size(-2)
         s = seq_idx[0][0]
         e = s + seq_len
-        block = block_tables[0]
+        block = block_tables[0].to(torch.int32)
         k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
                                                                 dim=3,
                                                                 start=s,
@@ -110,7 +110,7 @@ def flash_attention_naive_decode_impl(
         seq_len = q.size(-2)
         s = seq_idx[0][0]
         e = s + seq_len
-        block = block_tables[0]
+        block = block_tables[0][0].to(torch.int32)
         k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
                                                                 dim=3,
                                                                 start=s,
@@ -165,7 +165,7 @@ def flash_causal_attention_naive_prefill_impl(
         seq_len = q.size(-2)
         s = seq_idx[0][0]
         e = s + seq_len
-        block = block_tables[0]
+        block = block_tables[0].to(torch.int32)
         k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
                                                                 dim=3,
                                                                 start=s,
@@ -216,7 +216,7 @@ def flash_causal_attention_naive_decode_impl(
         seq_len = q.size(-2)
         s = seq_idx[0][0]
         e = s + seq_len
-        block = block_tables[0]
+        block = block_tables[0][0].to(torch.int32)
         k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
                                                                 dim=3,
                                                                 start=s,
@@ -590,9 +590,13 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
 
         # kv cache update
         if not envs.RBLN_COMPILE_MODEL:
-            s = attn_metadata.seq_lens_tensor.to(torch.int16)[0][0]
+            s = attn_metadata.seq_lens_tensor[0][0]
             e = s + q_len
-            block = attn_metadata.block_tables.to(torch.int16)[0]
+            if q_len == 1:
+                block = attn_metadata.block_tables[0][0]
+            else:
+                block = attn_metadata.block_tables[0]
+            assert block.dim() == 0
             k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(key,
                                                                     dim=3,
                                                                     start=s,
