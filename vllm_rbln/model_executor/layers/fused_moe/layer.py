@@ -55,10 +55,10 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
     hidden_states = x
     gating_output = router_logits
     topk_weights = gating_output.softmax(dim=-1, dtype=torch.float)
+    topk_weights = topk_weights.to(torch.float)
     topk_weights, selected_experts = topk_weights.topk(top_k, dim=-1)
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-    topk_weights = topk_weights.to(dtype)
 
     if expert_map is not None:
         selected_experts = expert_map[selected_experts]
@@ -91,8 +91,9 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
     # [1,num_tokens,1] <- broadcast add
     hidden_states = hidden_states + temp_expert_weights - temp_expert_weights
     # [num_experts,1,num_tokens,1] -> [num_experts,1,num_tokens,hidden_size]
+    hidden_states = hidden_states.to(dtype)
     expert_weights_array = expert_weights_array.broadcast_to(
-        (num_experts, 1, num_tokens, hidden_size))
+        (num_experts, 1, num_tokens, hidden_size)).to(dtype)
     # solution1. make custom operation for expert loop
     # solution2. add dummy use of expert_weights_array
     for expert_idx in range(num_experts):
