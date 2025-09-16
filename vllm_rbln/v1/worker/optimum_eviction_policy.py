@@ -26,7 +26,7 @@ class RREvictionPolicy:
                 f"Could not find enough inactive blocks for eviction. "
                 f"Requested: {count}, Found: {len(evicted_blocks)}")
 
-        return evicted_blocks
+        return evicted_blocks[:count]
 
 
 class LRUEvictionPolicy(RREvictionPolicy):

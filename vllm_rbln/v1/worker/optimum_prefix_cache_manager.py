@@ -123,7 +123,7 @@ class CacheSearchManager:
         best_match = CacheSearchResult([], [])
 
         # Find the cached blocks in unit of requests
-        # NOTE we don't match cached blocks in unit of outer blocks
+        # TODO Find the cached block in the finished requests (not running outer blocks)
         for req_id in mapping_manager._request_mappings:
             if req_id == request_id:
                 continue
@@ -217,7 +217,7 @@ class RBLNPrefixKVCacheManager:
         self._mapping_manager = BlockMappingManager()
         self._cache_search_manager = CacheSearchManager(self._config)
         self._memory_pool_manager = MemoryPoolManager(max_model_len, ob_size)
-        self._eviction_policy = RREvictionPolicy()
+        self._eviction_policy = LRUEvictionPolicy()
 
     def allocate_blocks(self, request_id: str, cached_len: int,
                         inner_blocks: list[int]) -> None:
@@ -358,8 +358,6 @@ class RBLNPrefixKVCacheManager:
             if mapping:
                 mapping.is_active = False
                 mapping.request_id = None
-
-        logger.debug("[PFX] [FREE] REQUEST=%s OB=%s", request_id, outer_blocks)
 
     def get_cached_origin_blocks(
             self, request_id: str, num_computed_tokens: int,
