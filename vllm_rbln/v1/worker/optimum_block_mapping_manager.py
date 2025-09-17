@@ -6,14 +6,8 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import time
-from abc import ABC, abstractmethod
-
-from collections import OrderedDict, deque
 from dataclasses import dataclass
 from typing import Optional
-
-import torch
 
 from vllm_rbln.logger import init_logger
 
@@ -28,12 +22,14 @@ class RBLNBlock:
     def __repr__(self) -> str:
         return f"RBLNBlock(id={self.block_id})"
 
+
 @dataclass
 class BlockMapping:
     outer_block_id: int
     inner_block_ids: list[int]
     request_id: Optional[str] = None
     is_active: bool = True
+
 
 class BlockMappingManager:
     """
@@ -100,7 +96,7 @@ class BlockMappingManager:
         Return the mapping for a given outer block ID.
         """
         return self._outer_to_inner.get(outer_block_id)
-    
+
     def get_outer_blocks_for_inner(self, inner_block_id: int) -> list[int]:
         """
         Return the list of outer block IDs that map to a given inner block ID.

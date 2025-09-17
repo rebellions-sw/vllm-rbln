@@ -6,18 +6,23 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import time
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 from abc import ABC, abstractmethod
-from vllm_rbln.v1.worker.optimum_eviction_policy import (LRUEvictionPolicy,
-                                                 RREvictionPolicy)
-from vllm_rbln.v1.worker.optimum_block_mapping_manager import BlockMappingManager, RBLNBlock
-from collections import OrderedDict, deque
+from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
 import torch
 
 from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.worker.optimum_block_mapping_manager import (
+    BlockMappingManager, RBLNBlock)
+from vllm_rbln.v1.worker.optimum_eviction_policy import (FIFOEvictionPolicy,
+                                                         LRUEvictionPolicy)
 
 logger = init_logger(__name__)
 
@@ -98,6 +103,7 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
     def get_free_count(self) -> int:
         return len(self._free_blocks)
 
+
 class CacheSearchManager:
     """
     Search for cached blocks that can be reused.
@@ -119,14 +125,11 @@ class CacheSearchManager:
             return CacheSearchResult([], [])
 
         cached_ib = inner_blocks[:num_cached_ib]
-        best_match = self._try_match_request(cached_ib,
-                                                mapping_manager)
+        best_match = self._try_match_request(cached_ib, mapping_manager)
 
         if best_match.has_cache_hit:
-            logger.debug(
-                "[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
-                request_id, best_match.cached_outer_blocks,
-                cached_ib)
+            logger.debug("[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
+                         request_id, best_match.cached_outer_blocks, cached_ib)
 
         return best_match
 
@@ -150,16 +153,20 @@ class CacheSearchManager:
             end_ib_idx = min(start_ib_idx + self._config.block_ratio,
                              len(cached_ib))
             cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
-            candidate_obs = mapping_manager.get_outer_blocks_for_inner(cur_ib_segment[0])
+            candidate_obs = mapping_manager.get_outer_blocks_for_inner(
+                cur_ib_segment[0])
             for ob_id in candidate_obs:
-                inner_blocks = mapping_manager.get_inner_blocks_for_outer(ob_id)
+                inner_blocks = mapping_manager.get_inner_blocks_for_outer(
+                    ob_id)
                 if inner_blocks[:len(cur_ib_segment)] == cur_ib_segment:
                     cached_ob.append(ob_id)
-                    cached_lengths.append(len(cur_ib_segment) * self._config.ib_size)
+                    cached_lengths.append(
+                        len(cur_ib_segment) * self._config.ib_size)
                     break
-        
+
         return CacheSearchResult(cached_outer_blocks=cached_ob,
                                  cached_lengths=cached_lengths)
+
 
 class MemoryPoolManager:
     """
@@ -190,30 +197,28 @@ class RBLNPrefixKVCacheManager:
         self._mapping_manager = BlockMappingManager()
         self._cache_search_manager = CacheSearchManager(self._config)
         self._memory_pool_manager = MemoryPoolManager(max_model_len, ob_size)
-        self._eviction_policy = LRUEvictionPolicy()
+        self._eviction_policy = FIFOEvictionPolicy()
 
-    def allocate_blocks(self, request_id: str, cached_len: int,
+    def allocate_blocks(self, request_id: str, num_new_ob: int,
                         inner_blocks: list[int]) -> None:
         """
         Allocate blocks for a given request
         based on its phase (PREFILL or DECODE).
         """
         if request_id in self._mapping_manager._request_mappings:
-            self._handle_decode_allocation(request_id, cached_len,
+            self._handle_decode_allocation(request_id, num_new_ob,
                                            inner_blocks)
         else:
-            self._handle_prefill_allocation(request_id, inner_blocks)
+            self._handle_prefill_allocation(request_id, num_new_ob,
+                                            inner_blocks)
 
-    def _handle_decode_allocation(self, request_id: str, cached_len: int,
+    def _handle_decode_allocation(self, request_id: str, num_new_ob: int,
                                   inner_blocks: list[int]) -> None:
         """
         Allocate new blocks for DECODE phase.
         """
-        num_already_allocated_ibs = cached_len // self._config.ib_size
-
-        if num_already_allocated_ibs % self._config.block_ratio == 0:
-            # New outer block needed
-            self._allocate_new_blocks(request_id, 1, inner_blocks)
+        if num_new_ob > 0:
+            self._allocate_new_blocks(request_id, num_new_ob, inner_blocks)
         else:
             # Append to the last outer block
             request_blocks = self._mapping_manager.get_request_blocks(
@@ -221,25 +226,21 @@ class RBLNPrefixKVCacheManager:
             last_ob_id = request_blocks[-1]
             self._append_to_existing_block(last_ob_id, inner_blocks)
 
-    def _handle_prefill_allocation(self, request_id: str,
+    def _handle_prefill_allocation(self, request_id: str, num_new_ob: int,
                                    inner_blocks: list[int]) -> None:
         """
         Allocate new blocks for PREFILL phase.
         """
-        num_obs_needed = (len(inner_blocks) + self._config.block_ratio -
-                          1) // self._config.block_ratio
-        self._allocate_new_blocks(request_id, num_obs_needed, inner_blocks)
+        self._allocate_new_blocks(request_id, num_new_ob, inner_blocks)
 
-    def _allocate_new_blocks(self, request_id: str, count: int,
+    def _allocate_new_blocks(self, request_id: str, num_new_ob: int,
                              inner_blocks: list[int]) -> None:
         """
         Allocate new outer blocks and create mappings.
         """
-        # Ensure enough free blocks
-        self._ensure_free_blocks(count)
-
+        assert num_new_ob > 0, "One or more new blocks must be allocated"
         # Allocate blocks
-        new_blocks = self._allocator.allocate(count)
+        new_blocks = self._allocator.allocate(num_new_ob)
 
         # Create mappings
         block_ids = []
@@ -251,27 +252,46 @@ class RBLNPrefixKVCacheManager:
 
             self._mapping_manager.create_mapping(block, block_inner_blocks,
                                                  request_id)
-            if isinstance(self._eviction_policy, LRUEvictionPolicy):
-                self._eviction_policy.register_block(block.block_id)
+            self._eviction_policy.register_block(block.block_id)
             block_ids.append(block.block_id)
 
         logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id,
                      block_ids, inner_blocks)
 
-    def _ensure_free_blocks(self, needed_count: int) -> None:
+    def get_num_new_ob(self,
+                       inner_blocks: list[int],
+                       num_allocated_tokens: int = 0) -> int:
+        """
+        If there are not enough free blocks,
+        evict some blocks based on the eviction policy.
+        """
+        if num_allocated_tokens == 0:
+            num_obs_needed = (len(inner_blocks) + self._config.block_ratio -
+                              1) // self._config.block_ratio
+        else:
+            num_already_allocated_ibs = \
+                num_allocated_tokens // self._config.ib_size
+            if num_already_allocated_ibs % self._config.block_ratio != 0:
+                num_obs_needed = 1
+            else:
+                num_obs_needed = 0
+
+        return num_obs_needed
+
+    def ensure_free_blocks(self, num_new_blocks: int) -> None:
         """
         If there are not enough free blocks,
         evict some blocks based on the eviction policy.
         """
         free_count = self._allocator.get_free_count()
-        if free_count >= needed_count:
+        if free_count >= num_new_blocks:
             return
 
-        evict_count = needed_count - free_count
+        evict_count = num_new_blocks - free_count
         blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
             self._mapping_manager, evict_count)
 
-        # 충분한 블록을 확보할 수 없는 경우 예외 발생
+        # Check if we could evict enough blocks
         if len(blocks_to_evict) < evict_count:
             raise RuntimeError(
                 f"Cannot evict enough blocks. Need {evict_count}, "
@@ -289,8 +309,7 @@ class RBLNPrefixKVCacheManager:
             block = self._allocator.get_allocated_block(block_id)
             if block:
                 self._allocator.deallocate(block)
-                if isinstance(self._eviction_policy, LRUEvictionPolicy):
-                    self._eviction_policy.unregister_block(block_id)
+                self._eviction_policy.unregister_block(block_id)
                 logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", block_id,
                              mapping.inner_block_ids)
             else:

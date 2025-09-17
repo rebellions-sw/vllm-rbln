@@ -63,15 +63,17 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
                 src_block_table = model_input.cached_block_tables
                 cached_lengths = model_input.cached_lengths
                 total_cached_length = sum(cached_lengths)
-                # FIXME if len(input_ids) become 0 after slicing, it causes error in RBLN
-                kwargs["input_ids"] = kwargs["input_ids"][:, total_cached_length:]
-                kwargs["cache_position"] = kwargs["cache_position"][:, total_cached_length:]
-                for block_idx, (dst_block, src_block) in enumerate(zip(block_tables[0], 
-                                            src_block_table)):
+                # FIXME if len(input_ids) become 0 after slicing
+                # it causes error in RBLN
+                kwargs["input_ids"] = kwargs["input_ids"][:,
+                                                          total_cached_length:]
+                kwargs["cache_position"] = kwargs[
+                    "cache_position"][:, total_cached_length:]
+                for block_idx, (dst_block, src_block) in enumerate(
+                        zip(block_tables[0], src_block_table)):
                     dst_block = dst_block.item()
                     self.model.prefill_decoder.runtime._copy_kv_cache(
-                        src_block, dst_block,
-                        cached_lengths[block_idx])
+                        src_block, dst_block, cached_lengths[block_idx])
             return self.model.prefill_decoder(**kwargs).logits
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]

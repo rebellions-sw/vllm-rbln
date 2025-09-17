@@ -428,14 +428,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # TODO How to log the block table?
             if self.enable_prefix_caching:
                 # TODO fix the position calling
+                num_new_ob = self.prefix_cache_manager.get_num_new_ob(
+                    scheduled.block_ids[0])
+                self.prefix_cache_manager.ensure_free_blocks(num_new_ob)
                 cached_block_table, cached_length = \
                     self.prefix_cache_manager.get_cached_origin_blocks(
                         req_id,
                         scheduled.num_computed_tokens, scheduled.block_ids[0]
                     )
                 self.prefix_cache_manager.allocate_blocks(
-                    req_id, scheduled.num_computed_tokens,
-                    scheduled.block_ids[0])
+                    req_id, num_new_ob, scheduled.block_ids[0])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
                 logger.debug(
                     "Request %s is now scheduled. Prompt tokens: %s, "
@@ -497,9 +499,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
                 if len(new_blocks_ids[req_id]) > 0:
+                    num_new_ob = self.prefix_cache_manager.get_num_new_ob(
+                        new_blocks_ids[req_id], num_computed_tokens[req_id])
+                    self.prefix_cache_manager.ensure_free_blocks(num_new_ob)
                     self.prefix_cache_manager.allocate_blocks(
-                        req_id, num_computed_tokens[req_id],
-                        new_blocks_ids[req_id])
+                        req_id, num_new_ob, new_blocks_ids[req_id])
                 block_table = self.prefix_cache_manager.get_blocks(req_id)
             else:
                 block_table = block_tables_cpu[req_index]
