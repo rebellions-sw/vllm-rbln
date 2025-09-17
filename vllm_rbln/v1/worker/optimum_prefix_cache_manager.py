@@ -42,7 +42,6 @@ class BlockConfiguration:
 class CacheSearchResult:
     cached_outer_blocks: list[int]
     cached_lengths: list[int]
-    source_request_id: Optional[str] = None
 
     @property
     def has_cache_hit(self) -> bool:
@@ -120,26 +119,14 @@ class CacheSearchManager:
             return CacheSearchResult([], [])
 
         cached_ib = inner_blocks[:num_cached_ib]
-        best_match = CacheSearchResult([], [])
-
-        # Find the cached blocks in unit of requests
-        # TODO Find the cached block in the finished requests (not running outer blocks)
-        for req_id in mapping_manager._request_mappings:
-            if req_id == request_id:
-                continue
-
-            match_result = self._try_match_request(req_id, cached_ib,
-                                                   mapping_manager)
-
-            if len(match_result.cached_outer_blocks) > len(
-                    best_match.cached_outer_blocks):
-                best_match = match_result
+        best_match = self._try_match_request(cached_ib,
+                                                mapping_manager)
 
         if best_match.has_cache_hit:
             logger.debug(
-                "[PFX] [CACHE-HIT] REQUEST=%s -> REQUEST=%s (IB=%s of OB=%s)",
-                request_id, best_match.source_request_id, cached_ib,
-                best_match.cached_outer_blocks)
+                "[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
+                request_id, best_match.cached_outer_blocks,
+                cached_ib)
 
         return best_match
 
@@ -151,42 +138,29 @@ class CacheSearchManager:
         return cached_len_tokens // self._config.ib_size
 
     def _try_match_request(
-            self, target_request_id: str, cached_ib: list[int],
+            self, cached_ib: list[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Check if the cached inner blocks match
         with the blocks of the target request.
         """
         cached_ob = []
-        cached_len = []
-
-        request_blocks = mapping_manager.get_request_blocks(target_request_id)
-
-        for ob_idx, ob_id in enumerate(request_blocks):
-            start_pos = ob_idx * self._config.block_ratio
-            end_pos = min((ob_idx + 1) * self._config.block_ratio,
-                          len(cached_ib))
-
-            if start_pos >= len(cached_ib):
-                break
-
-            cur_cached_ib = cached_ib[start_pos:end_pos]
-            mapping = mapping_manager.get_mapping(ob_id)
-
-            if not mapping or len(
-                    mapping.inner_block_ids) < len(cur_cached_ib):
-                break
-
-            if mapping.inner_block_ids[:len(cur_cached_ib)] == cur_cached_ib:
-                cached_ob.append(ob_id)
-                cached_len.append(len(cur_cached_ib) * self._config.ib_size)
-            else:
-                break
-
+        cached_lengths = []
+        for start_ib_idx in range(0, len(cached_ib), self._config.block_ratio):
+            end_ib_idx = min(start_ib_idx + self._config.ib_size,
+                             len(cached_ib))
+            cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
+            candidate_obs = mapping_manager.get_outer_blocks_for_inner(cur_ib_segment[0])
+            for ob_id in candidate_obs:
+                inner_blocks = mapping_manager.get_inner_blocks_for_outer(ob_id)
+                # NOTE Currently, we only support exact match of the inner blocks
+                if inner_blocks[:len(cur_ib_segment)] == cur_ib_segment:
+                    cached_ob.append(ob_id)
+                    cached_lengths.append(len(cur_ib_segment) * self._config.ib_size)
+                    break
+        
         return CacheSearchResult(cached_outer_blocks=cached_ob,
-                                 cached_lengths=cached_len,
-                                 source_request_id=target_request_id)
-
+                                 cached_lengths=cached_lengths)
 
 class MemoryPoolManager:
     """

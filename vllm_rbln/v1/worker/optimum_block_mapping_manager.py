@@ -100,6 +100,19 @@ class BlockMappingManager:
         Return the mapping for a given outer block ID.
         """
         return self._outer_to_inner.get(outer_block_id)
+    
+    def get_outer_blocks_for_inner(self, inner_block_id: int) -> list[int]:
+        """
+        Return the list of outer block IDs that map to a given inner block ID.
+        """
+        return self._inner_to_outer.get(inner_block_id, []).copy()
+
+    def get_inner_blocks_for_outer(self, outer_block_id: int) -> list[int]:
+        """
+        Return the list of inner block IDs that map to a given outer block ID.
+        """
+        mapping = self._outer_to_inner.get(outer_block_id)
+        return mapping.inner_block_ids if mapping else []
 
     def get_inactive_mappings(self) -> list[BlockMapping]:
         """
