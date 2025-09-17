@@ -564,7 +564,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         assert kv_cache is not None
 
         # kv cache update
-        if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+        if not envs.RBLN_COMPILE_MODEL:
             s = attn_metadata.seq_lens_tensor.to(torch.int16)[0][0]
             e = s + q_len
             block = attn_metadata.block_tables.to(torch.int16).flatten()[0]
@@ -580,7 +580,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
             kv_cache[1][block] = v_state.squeeze(0)
 
         if q_len == 1:
-            if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            if not envs.RBLN_COMPILE_MODEL:
                 attn_output = _attention_decode_eager_mode(
                     query,
                     key,
@@ -606,7 +606,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                         self.scale,
                     ))
         else:
-            if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            if not envs.RBLN_COMPILE_MODEL:
                 attn_output = _attention_prefill_eager_mode(
                     query,
                     key,
