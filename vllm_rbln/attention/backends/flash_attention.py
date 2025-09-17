@@ -475,12 +475,14 @@ class RBLNAttentionMetadataBuilder(
                 prefill_chunk_size = (
                     self.chunked_prefill_size if self.chunked_prefill else 1 <<
                     (math.ceil(math.log2(input_data.seq_lens[0]))))
-                chunked_attention_mask = torch.zeros(1,
-                                                     1,
-                                                     1,
-                                                     prefill_chunk_size,
-                                                     max_seq_len,
-                                                     dtype=torch.float16 if self.enforce_eager else torch.float32)
+                chunked_attention_mask = torch.zeros(
+                    1,
+                    1,
+                    1,
+                    prefill_chunk_size,
+                    max_seq_len,
+                    dtype=torch.float16
+                    if self.enforce_eager else torch.float32)
                 causal_mask = 1 - torch.triu(torch.ones(
                     1, 1, prefill_chunk_size, prefill_chunk_size),
                                              diagonal=1)
@@ -490,12 +492,14 @@ class RBLNAttentionMetadataBuilder(
                                        prefill_chunk_size] = causal_mask
                 attn_masks = chunked_attention_mask
             else:
-                decode_attention_mask = torch.zeros(batch_size,
-                                                    1,
-                                                    1,
-                                                    1,
-                                                    max_seq_len,
-                                                    dtype=torch.float16 if self.enforce_eager else torch.float32)
+                decode_attention_mask = torch.zeros(
+                    batch_size,
+                    1,
+                    1,
+                    1,
+                    max_seq_len,
+                    dtype=torch.float16
+                    if self.enforce_eager else torch.float32)
                 for batch_index, batch_step in enumerate(steps):
                     decode_attention_mask[
                         batch_index, :, :, :, :batch_step[0] + 1] = 1
@@ -667,7 +671,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         assert kv_cache is not None
 
         # kv cache update
-        if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+        if not envs.RBLN_COMPILE_MODEL:
             s = attn_metadata.seq_lens_tensor[0][0]
             e = s + q_len
             if q_len == 1:
@@ -687,7 +691,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
             kv_cache[1][block] = v_state.squeeze(0)
 
         if q_len == 1:
-            if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            if not envs.RBLN_COMPILE_MODEL:
                 attn_output = _attention_decode_eager_mode(
                     query,
                     key,
@@ -726,8 +730,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                                    self.scale,
                                ))
         else:
-            # actually non-flash paged attention DOES NOT use slot_mapping
-            if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            if not envs.RBLN_COMPILE_MODEL:
                 attn_output = _attention_prefill_eager_mode(
                     query,
                     key,

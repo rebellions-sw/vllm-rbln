@@ -531,7 +531,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # NOTE - refer to pytorch 2.5 release notes
             # torch.compile regional compilation without recompilations
             # To prevent nn.modules parameters to be model input, set false
-            # if this flag is set, nn.modules parameters are treated as model input
+            # if this flag is set,
+            # nn.modules parameters are treated as model input
             torch._dynamo.config.inline_inbuilt_nn_modules = False
             # RBLN compile context to mark static address for kv cache tensor
             # if tensor is set to have static address,
@@ -631,9 +632,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # RBLN compile context is much similar to vLLM forward context
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
-            if not self.model_config.enforce_eager and envs.RBLN_COMPILE_MODEL:
-                for kv_cache in kv_caches:
-                    self.compile_context.mark_static_address(kv_cache)
+
             hidden_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,

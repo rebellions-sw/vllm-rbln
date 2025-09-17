@@ -337,7 +337,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                                        self.scheduler_config.max_num_seqs) + 1
             max_required_num_blocks = max_required_num_blocks * ve_cnt
 
-            num_gpu_blocks = min(max_num_blocks, max_required_num_blocks)
+            num_gpu_blocks = min(
+                max_num_blocks * self.cache_config.gpu_memory_utilization,
+                max_required_num_blocks)
 
         num_blocks_per_ve = num_gpu_blocks // ve_cnt
         assert num_blocks_per_seq <= num_blocks_per_ve, \
@@ -390,9 +392,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         bind_kv_cache(self.compilation_config.static_forward_context,
                       self.cpu_cache)
-
-        for kv_cache in cpu_cache:
-            self.model_runner.compile_context.mark_static_address(kv_cache)
+        if not self.model_config.enforce_eager:
+            for kv_cache in cpu_cache:
+                self.model_runner.compile_context.mark_static_address(kv_cache)
 
     @property
     def do_metadata_broadcast(self) -> bool:
