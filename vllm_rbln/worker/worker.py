@@ -323,8 +323,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                 if not self.model_config.quantization else 4,
                 n_model_params=sum(
                     p.numel() for p in self.model_runner.model.parameters()),
-                # 1 : prefill
-                num_runtimes=1 + self.scheduler_config.max_num_seqs) - 1
+                # 2 : 1 for prefill and decode each
+                num_runtimes=2) - 1
 
             max_required_num_blocks = (num_blocks_per_seq *
                                        self.scheduler_config.max_num_seqs) + 1
