@@ -67,6 +67,7 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
                 # we need to reduce it by 1 to avoid having an empty input_ids
                 if total_cached_length == len(input_ids[0]):
                     total_cached_length -= 1                
+                    cached_lengths[-1] -= 1               
                 kwargs["input_ids"] = kwargs["input_ids"][:,
                                                           total_cached_length:]
                 kwargs["cache_position"] = kwargs[
