@@ -91,9 +91,6 @@ class RBLNOptimumWorker(WorkerBase):
     def profile(self, is_start: bool = True):
         raise RuntimeError("Profiler is not enabled.")
 
-    def add_lora(self, lora_request: LoRARequest) -> bool:
-        raise RuntimeError("LoRA is not enabled.")
-
     def load_model(self):
         self.model_runner.load_model()
 
@@ -129,11 +126,22 @@ class RBLNOptimumWorker(WorkerBase):
         """
         raise NotImplementedError
 
+    def add_lora(self, lora_request: LoRARequest) -> bool:
+        raise RuntimeError("It is not required in vLLM RBLN.")
+
     def remove_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError
+        raise RuntimeError("It is not required in vLLM RBLN.")
 
     def list_loras(self) -> set[int]:
-        raise NotImplementedError
+        rbln_cfg = getattr(self.model_runner.model.model, "rbln_config", None)
+        lora_cfg = getattr(rbln_cfg, "lora_config", None)
+        if lora_cfg is None:
+            raise ValueError("The model is not compiled with LoRA.")
+
+        lora_adapters = getattr(lora_cfg, "adapters", [])
+
+        adapter_ids = set(a.lora_int_id for a in lora_adapters)
+        return adapter_ids
 
     def pin_lora(self, lora_id: int) -> bool:
-        raise NotImplementedError
+        raise RuntimeError("It is not required in vLLM RBLN.")
