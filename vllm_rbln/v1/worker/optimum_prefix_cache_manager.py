@@ -270,7 +270,7 @@ class RBLNPrefixKVCacheManager:
         else:
             num_already_allocated_ibs = \
                 num_allocated_tokens // self._config.ib_size
-            if num_already_allocated_ibs % self._config.block_ratio != 0:
+            if num_already_allocated_ibs % self._config.block_ratio == 0:
                 num_obs_needed = 1
             else:
                 num_obs_needed = 0
