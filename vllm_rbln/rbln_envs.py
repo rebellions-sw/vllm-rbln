@@ -53,6 +53,10 @@ environment_variables = {
     "VLLM_RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
      ("true", "1")),
+    # enforce model data type into fp32 not model_config.dtype
+    "RBLN_ENFORCE_MODEL_FP32":
+    (lambda: os.environ.get("ENFORCE_MODEL_FP32", "False").lower() in
+     ("true", "1")),
 }
 
 
