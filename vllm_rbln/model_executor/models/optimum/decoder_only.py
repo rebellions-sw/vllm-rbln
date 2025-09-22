@@ -14,7 +14,7 @@
 import torch
 import vllm.envs as env
 from vllm.config import VllmConfig
-from vllm.logger import init_logger
+from vllm_rbln.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -64,10 +64,7 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
                 cached_lengths = model_input.cached_lengths
                 total_cached_length = sum(cached_lengths)
                 # If the total_cached_length is equal to the input length,
-                # we need to reduce it by 1 to avoid having an empty input_ids
-                if total_cached_length == len(input_ids[0]):
-                    total_cached_length -= 1
-                    cached_lengths[-1] -= 1               
+                # we need to reduce it by 1 to avoid having an empty input_ids            
                 kwargs["input_ids"] = kwargs["input_ids"][:,
                                                           total_cached_length:]
                 kwargs["cache_position"] = kwargs[
