@@ -45,8 +45,13 @@ environment_variables = {
     "RBLN_USE_VLLM_MODEL":
     (lambda: os.environ.get("USE_VLLM_MODEL", "False").lower() in
      ("true", "1")),
+    # enable flash attention w/o attention mask (called as causal attention)
     "RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("FLASH_CAUSAL_ATTN", "True").lower() in
+     ("true", "1")),
+    # enforce model data type into fp32 not model_config.dtype
+    "RBLN_ENFORCE_MODEL_FP32":
+    (lambda: os.environ.get("ENFORCE_MODEL_FP32", "False").lower() in
      ("true", "1")),
 }
 
