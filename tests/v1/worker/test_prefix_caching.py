@@ -18,7 +18,7 @@ from vllm.platforms import current_platform
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-from vllm_rbln.v1.worker.prefix_cache_manager import RBLNPrefixKVCacheManager
+from vllm_rbln.v1.worker.optimum_prefix_cache_manager import RBLNPrefixKVCacheManager
 
 from .utils import (MockModelWrapper, _schedule_cached_reqs,
                     _schedule_new_request, finish_request, get_vllm_config,
@@ -93,7 +93,7 @@ def test_prefill(model_runner):
     inputs = model_runner._prepare_inputs(scheduler_output)
     assert torch.allclose(inputs.block_tables[0],
                           torch.tensor([0, 1, 2, -1], dtype=torch.int32))
-    assert inputs.cached_block_tables is None
+    assert inputs.cached_block_tables == []
 
     # 2. Generate partially cached request req1
     unique_token_ids = [1] * 10
@@ -121,8 +121,7 @@ def test_prefill(model_runner):
 
     assert torch.allclose(inputs.block_tables[0],
                           torch.tensor([3, 4, 5, -1], dtype=torch.int32))
-    assert torch.allclose(inputs.cached_block_tables,
-                          torch.tensor([[0, 1]], dtype=torch.int32))
+    assert inputs.cached_block_tables == [0, 1]
     # 3. Finish req1 and schedule req2
     finished_req = req1
     finish_request(manager, finished_req)
@@ -157,22 +156,11 @@ def test_prefill(model_runner):
 
     # Check the allocated outer blocks
     assert torch.allclose(inputs.block_tables[0],
-                          torch.tensor([6, 7, 8, -1], dtype=torch.int32))
-    assert torch.allclose(inputs.cached_block_tables,
-                          torch.tensor([[0, 1]], dtype=torch.int32))
+                          torch.tensor([6, 7, 8, 3], dtype=torch.int32))
+    assert inputs.cached_block_tables == [0, 1]
 
 
-@pytest.mark.parametrize(
-    "num_generated_token_ids, new_inner_blocks, outer_blocks_allocated",
-    [
-        pytest.param(4, [3], [0, -1, -1, -1],
-                     id="without-new-outer-block-allocated"),
-        pytest.param(30, [3, 4, 5, 6, 7, 8, 9], [0, 1, 2, -1],
-                     id="with-new-outer-block-allocated"),
-    ],
-)
-def test_decode(model_runner, num_generated_token_ids, new_inner_blocks,
-                outer_blocks_allocated):
+def test_decode(model_runner):
     """
     Check the prefix caching works as expected during decode.
     """
@@ -187,10 +175,8 @@ def test_decode(model_runner, num_generated_token_ids, new_inner_blocks,
     )
 
     # 1. Generate req0: 6 tokens -> 2 inner blocks
-    common_token_ids = [i for i in range(4)]
-    unique_token_ids = [3] * 2
+    all_token_ids = [i for i in range(16)]
 
-    all_token_ids = common_token_ids + unique_token_ids
     req_id = "0"
     req0 = make_request(req_id, all_token_ids)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
@@ -199,7 +185,7 @@ def test_decode(model_runner, num_generated_token_ids, new_inner_blocks,
     blocks = manager.allocate_slots(req0, len(all_token_ids),
                                     len(computed_blocks.blocks[0]) * IB_SIZE,
                                     computed_blocks)
-    assert blocks.get_block_ids() == ([1, 2], )
+    assert blocks.get_block_ids() == ([1, 2, 3, 4], )
     scheduler_output = _schedule_new_request(
         req_id,
         token_ids=all_token_ids,
@@ -209,12 +195,14 @@ def test_decode(model_runner, num_generated_token_ids, new_inner_blocks,
     inputs = model_runner._prepare_inputs(scheduler_output)
     assert torch.allclose(inputs.block_tables[0],
                           torch.tensor([0, -1, -1, -1], dtype=torch.int32))
-    assert inputs.cached_block_tables is None
+    assert inputs.cached_block_tables == []
 
     # 2. Decode req0: `num_generated_token_ids` tokens
     req0.num_computed_tokens = len(all_token_ids)
-    for _ in range(num_generated_token_ids):
-        req0.append_output_token_ids(1)
+    req0.append_output_token_ids(1)
+    new_inner_blocks = [5]
+    num_generated_token_ids = 1
+    outer_blocks_allocated = [0, 1, -1, -1]
 
     blocks = manager.allocate_slots(req0, num_generated_token_ids)
     assert blocks.get_block_ids() == (new_inner_blocks, )
@@ -227,4 +215,4 @@ def test_decode(model_runner, num_generated_token_ids, new_inner_blocks,
     assert torch.allclose(
         inputs.block_tables[0],
         torch.tensor(outer_blocks_allocated, dtype=torch.int32))
-    assert inputs.cached_block_tables is None
+    assert inputs.cached_block_tables == []
