@@ -68,6 +68,9 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                        model_config.hf_config, "use_sliding_window", True):
             logger.info(
                 "The model is initialized with Sliding Window Attention.")
+            assert vllm_config.cache_config.enable_prefix_caching is False, (
+                "Prefix caching is not supported with sliding window "
+                "attention.")
             rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
                 vllm_config)
         else:

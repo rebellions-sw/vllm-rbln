@@ -207,6 +207,10 @@ class RblnPlatform(Platform):
                 if not envs.VLLM_USE_V1:
                     raise RuntimeError(
                         "Prefix caching is only supported on v1 for RBLN.")
+                if model_config.is_multimodal_model:
+                    raise NotImplementedError(
+                        "Prefix caching is not supported for multimodal "
+                        "models yet.")
                 attn_block_size = vllm_config.additional_config.get(
                     "attn_block_size", None)
                 assert attn_block_size is not None, \

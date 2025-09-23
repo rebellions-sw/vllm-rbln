@@ -60,13 +60,12 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             if self.model.prefill_decoder is None:
                 raise version_error
             if model_input.cached_block_tables:
-                src_block_table = model_input.cached_block_tables
-                cached_lengths = model_input.cached_lengths
-                for block_idx, (dst_block, src_block) in enumerate(
-                        zip(block_tables[0], src_block_table)):
-                    dst_block = dst_block.item()
-                    self.model.prefill_decoder.runtime._copy_kv_cache(
-                        src_block, dst_block, cached_lengths[block_idx])
+                self._copy_cached_kv_blocks(
+                    self.model.prefill_decoder,
+                    model_input.cached_block_tables,
+                    model_input.cached_lengths,
+                    block_tables
+                )
             return self.model.prefill_decoder(**kwargs).logits
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]
