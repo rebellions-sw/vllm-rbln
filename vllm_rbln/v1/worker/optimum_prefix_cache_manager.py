@@ -398,6 +398,9 @@ class RBLNPrefixKVCacheManager:
         num_new_ob = self.compute_num_blocks_to_allocate(
             inner_blocks, num_allocated_tokens)
         self.ensure_free_blocks(num_new_ob)
+        # TODO In PREFILL phase, we can figure out the re-allocated blocks
+        # using num_computed_tokens, so we can evict them too.
+        # But it will be already evicted in ensure_free_blocks.
         cached_block_table, cached_length = self.get_cached_origin_blocks(
             request_id, num_computed_tokens, inner_blocks)
         self.allocate_blocks(request_id, num_new_ob, inner_blocks)

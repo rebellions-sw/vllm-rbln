@@ -69,7 +69,7 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
 
     def select_blocks_for_eviction(self, mapping_manager,
                                    count: int) -> list[int]:
-        # TODO If the cached block is evicted, we should also evict its mapping
+        # NOTE If the cached block is evicted, we should also evict its mapping
         # How about exclude the cached blocks from eviction?
         # AS-IS: Eviction -> Cache check -> Allocation
         # TO-DO: Cache check -> Eviction -> Allocation (more complicated)
