@@ -62,15 +62,6 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             if model_input.cached_block_tables:
                 src_block_table = model_input.cached_block_tables
                 cached_lengths = model_input.cached_lengths
-                total_cached_length = sum(cached_lengths)
-                # If the total_cached_length is equal to the input length,
-                # we need to reduce it by 1 to avoid having an empty input_ids            
-                kwargs["input_ids"] = kwargs["input_ids"][:,
-                                                          total_cached_length:]
-                kwargs["cache_position"] = kwargs[
-                    "cache_position"][:, total_cached_length:]
-                assert kwargs["input_ids"].shape[1] > 0, (
-                    "The input_ids is empty after removing the cached tokens. ")
                 for block_idx, (dst_block, src_block) in enumerate(
                         zip(block_tables[0], src_block_table)):
                     dst_block = dst_block.item()

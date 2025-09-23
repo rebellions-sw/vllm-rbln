@@ -86,7 +86,7 @@ class BlockMappingManager:
 
     def remove_request(self, request_id: str) -> list[int]:
         """
-        Remove all mappings associatedwith a request
+        Remove all mappings associated with a request
         and return the outer block IDs.
         """
         return self._request_mappings.pop(request_id, [])

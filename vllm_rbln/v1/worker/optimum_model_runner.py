@@ -386,8 +386,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[int],
-               Optional[torch.Tensor], Optional[RBLNOptimumMultiModalKwargs],
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor],
+                list[int], list[int],
+                Optional[RBLNOptimumMultiModalKwargs],
                list[str]]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
@@ -439,6 +440,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     req_id, len(self.requests[req_id].prompt_token_ids),
                     len(self.requests[req_id].output_token_ids),
                     scheduled.block_ids[0])
+                total_cached_length = sum(cached_length)
+                if total_cached_length > 0:
+                    prompt_tokens = prompt_tokens[total_cached_length:]
+                    input_positions = input_positions[total_cached_length:]
+                    assert len(prompt_tokens) > 0, (
+                        "The prompt tokens is empty after removing the "
+                        "cached tokens.")
             else:
                 block_table = block_tables_cpu[req_index]
                 block_table = self.mask_block_table(block_table, num_blocks)
