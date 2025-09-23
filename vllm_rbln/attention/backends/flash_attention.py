@@ -435,6 +435,7 @@ class RBLNAttentionMetadataBuilder(
                     decode_attention_mask[
                         batch_index, :, :, :, :batch_step[0] + 1] = 1
                 attn_masks = decode_attention_mask
+            attn_masks = attn_masks.to(self.device)
             assert attn_masks.dim() == 5
 
         attn_metadata = RBLNAttentionMetadata(
@@ -447,7 +448,7 @@ class RBLNAttentionMetadataBuilder(
             seq_lens_tensor=seq_lens_tensor.to(self.device),
             max_decode_seq_len=max_seq_len,
             block_tables=block_tables.to(self.device),
-            attn_masks=attn_masks.to(self.device),
+            attn_masks=attn_masks,
             kv_caches=None,
         )
         logger.info("RBLNAttentionMetadata = %s", attn_metadata)
