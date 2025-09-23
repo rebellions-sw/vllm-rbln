@@ -649,8 +649,8 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                                    self.scale,
                                ))
         else:
+            # actually non-flash paged attention DOES NOT use slot_mapping
             if not envs.RBLN_FLASH_CAUSAL_ATTN:
-                # actually non-flash paged attention DOES NOT use slot_mapping
                 attn_output = (
                     torch.ops.rbln_custom_ops.flash_attention_naive_prefill(
                         query,
