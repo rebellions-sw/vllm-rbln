@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import random
 import time
 from collections import deque
@@ -388,7 +389,7 @@ class RBLNScheduler(Scheduler):
             )
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
-            if not enable_chunking:
+            if not enable_chunking or os.environ.get("DISABLE_MULTIPLE_PREFILLS", "0") == "1":
                 # NOTE(RBLN):
                 # For rbln target, we only consider batch size of 1 for prefill.
                 # In case of chunked prefill, it's available to schedule multiple

@@ -23,12 +23,12 @@ prompts = [
 ]
 
 # Create a sampling params object.
-sampling_params = SamplingParams(temperature=0.0)
+sampling_params = SamplingParams(temperature=0.0, max_tokens=4)
 
 # Create an LLM.
 llm = LLM(
     model="meta-llama/Llama-3.2-1B",
-    max_model_len=40 * 1024,
+    max_model_len=1024,
     block_size=1024,
     enable_chunked_prefill=True,
     max_num_batched_tokens=128,
