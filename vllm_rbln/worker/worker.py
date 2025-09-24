@@ -338,7 +338,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             max_required_num_blocks = max_required_num_blocks * ve_cnt
 
             num_gpu_blocks = min(
-                max_num_blocks * self.cache_config.gpu_memory_utilization,
+                int(max_num_blocks * self.cache_config.gpu_memory_utilization),
                 max_required_num_blocks)
 
         num_blocks_per_ve = num_gpu_blocks // ve_cnt

@@ -438,6 +438,8 @@ class RBLNAttentionMetadataBuilder(
             attn_masks = attn_masks.to(self.device)
             assert attn_masks.dim() == 5
 
+        assert seq_lens_tensor is not None
+        assert block_tables is not None
         attn_metadata = RBLNAttentionMetadata(
             num_prefills=input_data.num_prefills,
             num_prefill_tokens=input_data.num_prefill_tokens,
