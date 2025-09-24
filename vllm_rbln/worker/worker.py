@@ -63,6 +63,7 @@ class RBLNCacheEngine:
         self.cache_config = cache_config
         self.model_config = model_config
         self.parallel_config = parallel_config
+        self.device_config = device_config
 
         self.head_size = model_config.get_head_size()
         self.num_layers = model_config.get_num_layers(parallel_config)
@@ -83,7 +84,12 @@ class RBLNCacheEngine:
         # default cache type is bf16 (half precision)
         # FIXME - force cache data type into fp32 for graph compilation
         if cache_config.cache_dtype == "auto":
-            self.dtype = STR_DTYPE_TO_TORCH_DTYPE["float"]
+            # NOTE(jiwoo.park) Currently, eager mode can support only FP16 dtype
+            # for the KV cache.
+            if self.device_config.device_type == "rbln":
+                self.dtype = torch.float16
+            else:
+                self.dtype = STR_DTYPE_TO_TORCH_DTYPE["float"]
         else:
             self.dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_config.cache_dtype]
 
@@ -126,7 +132,8 @@ class RBLNCacheEngine:
         # RBLN device tensor allocation
         for _ in range(self.num_layers):
             kv_cache.append(
-                torch.empty(kv_cache_shape, dtype=self.dtype, device="cpu"))
+                torch.empty(kv_cache_shape,
+                            dtype=self.dtype).to(self.device_config.device))
         logger.info("[RBLN] allocate kv cache length = %d", len(kv_cache))
 
         return kv_cache
@@ -330,7 +337,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                                        self.scheduler_config.max_num_seqs) + 1
             max_required_num_blocks = max_required_num_blocks * ve_cnt
 
-            num_gpu_blocks = min(max_num_blocks, max_required_num_blocks)
+            num_gpu_blocks = min(
+                int(max_num_blocks * self.cache_config.gpu_memory_utilization),
+                max_required_num_blocks)
 
         num_blocks_per_ve = num_gpu_blocks // ve_cnt
         assert num_blocks_per_seq <= num_blocks_per_ve, \
@@ -383,9 +392,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         bind_kv_cache(self.compilation_config.static_forward_context,
                       self.cpu_cache)
-
-        for kv_cache in cpu_cache:
-            self.model_runner.compile_context.mark_static_address(kv_cache)
+        if not self.model_config.enforce_eager:
+            for kv_cache in cpu_cache:
+                self.model_runner.compile_context.mark_static_address(kv_cache)
 
     @property
     def do_metadata_broadcast(self) -> bool:
