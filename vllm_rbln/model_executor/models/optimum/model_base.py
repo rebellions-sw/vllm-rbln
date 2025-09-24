@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import optimum.rbln
+from optimum.rbln.transformers.models.decoderonly.decoderonly_runtime_utils import RBLNRuntimeModel
 import torch
 import torch.nn as nn
 import vllm.envs as env
@@ -75,7 +76,12 @@ class KVCacheBlockAdapter:
         """True if we can allocate a full batch worth of blocks."""
         estimated = self._estimated_num_blocks()
 
-        block_size = self.vllm_config.cache_config.block_size
+        if self.vllm_config.cache_config.enable_prefix_caching:
+            block_size = self.vllm_config.additional_config["attn_block_size"]
+
+        else:
+            block_size = self.vllm_config.cache_config.block_size
+
         max_model_len = self.vllm_config.model_config.max_model_len
         max_num_seqs = self.vllm_config.scheduler_config.max_num_seqs
 
@@ -84,12 +90,26 @@ class KVCacheBlockAdapter:
         return estimated >= ideal_total
 
     def get_available_num_blocks(self) -> int:
-        estimated = self._estimated_num_blocks()
-
+        if self.vllm_config.cache_config.enable_prefix_caching:
+            ob_size = self.vllm_config.additional_config["attn_block_size"]
+            ib_size = self.vllm_config.cache_config.block_size
+            blk_ratio = ob_size // ib_size
+        else:
+            blk_ratio = 1
+        estimated = self._estimated_num_blocks() * blk_ratio
         if self.is_full_block_available():
             return estimated + 1 if self.use_v1 else estimated
 
         return estimated if self.use_v1 else max(0, estimated - 1)
+
+    def get_available_num_outer_blocks(self) -> int:
+        """Number of outer blocks available for prefix caching."""
+        estimated = self._estimated_num_blocks()
+
+        if self.is_full_block_available():
+            return estimated
+
+        return estimated - 1
 
 
 class RBLNOptimumModelBase(nn.Module):
@@ -99,10 +119,10 @@ class RBLNOptimumModelBase(nn.Module):
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__()
+        self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.scheduler_config = vllm_config.scheduler_config
         self.cache_config = vllm_config.cache_config
-
         self.init_model()
         self.batch_size = self.scheduler_config.max_num_seqs
         self.kv_block_adapter = KVCacheBlockAdapter(
@@ -290,6 +310,41 @@ class RBLNOptimumDecoderMixin:
             "cache_position": cache_position,
         }
         return kwargs
+
+    def _copy_cached_kv_blocks(self, prefill_decoder: RBLNRuntimeModel, cached_block_tables: list[int], cached_lengths: list[int], block_tables: torch.Tensor):
+        """Copy cached KV blocks from source to destination blocks.
+        
+        Args:
+            cached_block_tables: List of source block IDs to copy from
+            cached_lengths: List of cached lengths for each block
+            block_tables: Tensor containing destination block IDs
+        """
+        if not cached_block_tables:
+            return
+            
+        if len(cached_block_tables) != len(cached_lengths):
+            raise ValueError(
+                f"Mismatch between cached_block_tables length ({len(cached_block_tables)}) "
+                f"and cached_lengths length ({len(cached_lengths)})")
+            
+        # Convert to list once for efficiency
+        dst_blocks = block_tables[0].tolist()
+        
+        for block_idx, (src_block, dst_block) in enumerate(
+                zip(cached_block_tables, dst_blocks)):
+            try:
+                prefill_decoder.runtime._copy_kv_cache(
+                    src_block,
+                    dst_block,
+                    cached_lengths[block_idx]
+                )
+                logger.debug(f"Successfully copied KV cache from block {src_block} to block {dst_block}")
+            except Exception as e:
+                error_msg = (
+                    f"Failed to copy KV cache from block {src_block} to block {dst_block} "
+                    f"at index {block_idx}: {e}")
+                logger.error(error_msg)
+                raise RuntimeError(error_msg) from e
 
     def sample(
         self,

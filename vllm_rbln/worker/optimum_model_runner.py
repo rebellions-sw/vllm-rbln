@@ -286,7 +286,8 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                  token_type_ids=type_token_ids,
                                  pooling_metadata=pooling_metadata,
                                  running_requests_ids=running_requests_ids,
-                                 finished_requests_ids=finished_requests_ids)
+                                 finished_requests_ids=finished_requests_ids,
+                                 )
 
     def _prepare_pooling(
         self,
