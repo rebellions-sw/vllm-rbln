@@ -341,9 +341,7 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
                                               image_embeds=image_embeds,
                                               image_grid_thw=image_grid_thw)
 
-    def _create_video_pixel_inputs(self,
-                                   pixel_values_videos,
-                                   video_grid_thw,
+    def _create_video_pixel_inputs(self, pixel_values_videos, video_grid_thw,
                                    second_per_grid_ts):
         if second_per_grid_ts is None:
             raise ValueError(
