@@ -342,7 +342,7 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
                                               image_grid_thw=image_grid_thw)
 
     def _create_video_pixel_inputs(self, pixel_values_videos, video_grid_thw,
-                                   second_per_grid_ts):
+                                   second_per_grid_ts=None):
         if second_per_grid_ts is None:
             raise ValueError(
                 "second_per_grid_ts is required for Qwen2.5-VL video inputs.")
