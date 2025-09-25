@@ -344,8 +344,10 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
     def _create_video_pixel_inputs(self,
                                    pixel_values_videos,
                                    video_grid_thw,
-                                   second_per_grid_ts=None):
-        assert isinstance(second_per_grid_ts, torch.Tensor)
+                                   second_per_grid_ts):
+        if second_per_grid_ts is None:
+            raise ValueError(
+                "second_per_grid_ts is required for Qwen2.5-VL video inputs.")
         return Qwen2_5_VLVideoPixelInputs(
             type="pixel_values_videos",
             pixel_values_videos=pixel_values_videos,
@@ -379,7 +381,7 @@ class RBLNOptimumQwen2VLForConditionalGeneration(
                                    pixel_values_videos,
                                    video_grid_thw,
                                    second_per_grid_ts=None):
-        # Qwen2-VL doesn't use second_per_grid_ts
+        # NOTE Qwen2-VL doesn't use second_per_grid_ts
         return Qwen2VLVideoPixelInputs(type="pixel_values_videos",
                                        pixel_values_videos=pixel_values_videos,
                                        video_grid_thw=video_grid_thw)
