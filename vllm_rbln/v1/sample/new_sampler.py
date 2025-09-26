@@ -81,7 +81,6 @@ class Sampler(VLLMSampler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        print("Initialized RBLN Sampler (new one) with native top_p_only op")
 
     def forward(self, logits: torch.Tensor,
                 sampling_metadata: SamplingMetadata) -> torch.Tensor:
