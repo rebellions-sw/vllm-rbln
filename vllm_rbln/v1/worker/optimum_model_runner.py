@@ -13,7 +13,7 @@ import logging
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Optional, Union
-
+import time
 import numpy as np
 import torch
 import torch.distributed
@@ -110,6 +110,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         elif self.use_rbln_sampler == 2:
             logger.info("Using RBLN sampler: RBLNSampler in RBLN device")
             sampler = NewRBLNSampler()
+            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
 
         self.sampler = sampler
         """
@@ -205,10 +206,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # FIXME [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
         hidden_states = hidden_states.squeeze(1)
         logits = self.model.compute_logits(hidden_states, None)
+        start_time = time.time()
         sampler_output = self.sampler(
             logits=logits,
             sampling_metadata=sampling_metadata,
         )
+        end_time = time.time()
+        elapsed_time = (end_time - start_time) * 1000  # Convert to milliseconds
+        logger.info(f"Sampler time: {elapsed_time:.6f} ms")
         valid_sampled_token_ids = sampler_output.sampled_token_ids
         max_gen_len = valid_sampled_token_ids.shape[-1]
         if max_gen_len == 1:
@@ -672,8 +677,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         pass
 
     def dummy_sampler_run(self):
-        if self.use_rbln_sampler != 1:
-            logger.info("Skip dummy sampler run since it is only used in RBLN_SAMPLER=1")
+        if self.use_rbln_sampler < 1:
+            logger.info("Skip dummy sampler run since it is only used in RBLN_SAMPLER=1,2")
             return
 
         def set_sampling_tensors(input_batch, **params):
