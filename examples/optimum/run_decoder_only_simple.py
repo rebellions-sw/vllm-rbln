@@ -24,7 +24,7 @@ def get_sampling_params() -> SamplingParams:
         temperature=0.1,
         top_p=0.9,
         ignore_eos=True,
-        max_tokens=10,
+        max_tokens=80,
     )
 
 def get_input_prompts(num_input_prompt: int) -> list[str]:

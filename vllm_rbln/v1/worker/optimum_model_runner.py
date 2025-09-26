@@ -110,7 +110,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         elif self.use_rbln_sampler == 2:
             logger.info("Using RBLN sampler: RBLNSampler in RBLN device")
             sampler = NewRBLNSampler()
-            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
+            sampler = torch.compile(sampler, dynamic=False, fullgraph=False, backend="rbln")
 
         self.sampler = sampler
         """
@@ -211,6 +211,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             logits=logits,
             sampling_metadata=sampling_metadata,
         )
+        #breakpoint()
         end_time = time.time()
         elapsed_time = (end_time - start_time) * 1000  # Convert to milliseconds
         logger.info(f"Sampler time: {elapsed_time:.6f} ms")
