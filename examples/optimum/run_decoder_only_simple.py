@@ -24,7 +24,7 @@ def get_sampling_params() -> SamplingParams:
         temperature=0.1,
         top_p=0.9,
         ignore_eos=True,
-        max_tokens=300,
+        max_tokens=10,
     )
 
 def get_input_prompts(num_input_prompt: int) -> list[str]:
@@ -57,9 +57,7 @@ def main(
                                   block_size=kvcache_block_size)
     prompts = get_input_prompts(num_input_prompt)
     sampling_params = get_sampling_params()
-    start_time = time.time()
     outputs = llm.generate(prompts, sampling_params)
-    end_time = time.time()
 
     # Print the outputs.
     print("-" * 50)
@@ -68,8 +66,6 @@ def main(
         generated_text = output.outputs[0].text
         print(f"Prompt: {prompt!r}\nGenerated text: {generated_text!r}")
         print("-" * 50)
-
-    print(f"🕰️ Elapsed time: {end_time - start_time:.2f} seconds")
 
 
 def entry_point(
