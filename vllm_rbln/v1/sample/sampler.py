@@ -13,7 +13,7 @@
 # limitations under the License.
 # isort: off
 import torch
-from vllm.logger import init_logger
+from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.ops.topk_topp_sampler import random_sample
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
