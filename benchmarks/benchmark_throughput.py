@@ -238,7 +238,8 @@ def save_to_pytorch_benchmark_format(args: argparse.Namespace,
         args=args,
         metrics={
             "requests_per_second": [results["requests_per_second"]],
-            "tokens_per_second": [results["tokens_per_second"]],
+            "total_tokens_per_second": [results["total_tokens_per_second"]],
+            "output_tokens_per_second": [results["output_tokens_per_second"]],
         },
         extra_info={
             k: results[k]
