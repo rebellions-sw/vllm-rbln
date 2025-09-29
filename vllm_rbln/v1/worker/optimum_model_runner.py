@@ -135,7 +135,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             device=self.device,
             pin_memory=self.pin_memory,
             vocab_size=self.model_config.get_vocab_size(),
-            block_sizes=[self.cache_config.block_size],
+            block_sizes=[cache_config.block_size],
         )
 
         # Cache the device properties.
@@ -174,7 +174,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if self.enable_prefix_caching:
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=self.vllm_config.additional_config["attn_block_size"],
-                ib_size=self.cache_config.block_size,
+                ib_size=cache_config.block_size,
                 max_model_len=self.max_model_len,
                 num_ob=self.model.kv_block_adapter.
                 get_available_num_outer_blocks(),
