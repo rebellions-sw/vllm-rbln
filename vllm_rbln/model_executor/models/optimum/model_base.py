@@ -22,8 +22,8 @@ import optimum.rbln
 import torch
 import torch.nn as nn
 import vllm.envs as env
-from optimum.rbln.transformers.models.decoderonly.decoderonly_runtime_utils import (
-    RBLNRuntimeModel)
+from optimum.rbln.transformers.models.decoderonly import (
+    decoderonly_runtime_utils as runtime_utils)
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
@@ -312,7 +312,8 @@ class RBLNOptimumDecoderMixin:
         }
         return kwargs
 
-    def _copy_cached_kv_blocks(self, prefill_decoder: RBLNRuntimeModel,
+    def _copy_cached_kv_blocks(self,
+                               prefill_decoder: runtime_utils.RBLNRuntimeModel,
                                cached_block_tables: list[int],
                                cached_lengths: list[int],
                                block_tables: torch.Tensor):
@@ -328,8 +329,9 @@ class RBLNOptimumDecoderMixin:
 
         if len(cached_block_tables) != len(cached_lengths):
             raise ValueError(
-                f"Mismatch between cached_block_tables length ({len(cached_block_tables)}) "
-                f"and cached_lengths length ({len(cached_lengths)})")
+                "Mismatch between cached_block_tables length (%s) "
+                "and cached_lengths length (%s)", len(cached_block_tables),
+                len(cached_lengths))
 
         # Convert to list once for efficiency
         dst_blocks = block_tables[0].tolist()
@@ -340,12 +342,12 @@ class RBLNOptimumDecoderMixin:
                 prefill_decoder.runtime._copy_kv_cache(
                     src_block, dst_block, cached_lengths[block_idx])
                 logger.debug(
-                    f"Successfully copied KV cache from block {src_block} to block {dst_block}"
-                )
+                    "Successfully copied KV cache from block %d to block %d",
+                    src_block, dst_block)
             except Exception as e:
                 error_msg = (
-                    f"Failed to copy KV cache from block {src_block} to block {dst_block} "
-                    f"at index {block_idx}: {e}")
+                    "Failed to copy KV cache from block %d to block %d "
+                    "at index %d: %s", src_block, dst_block, block_idx, e)
                 logger.error(error_msg)
                 raise RuntimeError(error_msg) from e
 
