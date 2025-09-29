@@ -336,9 +336,7 @@ class RBLNPrefixKVCacheManager:
         mapping.inner_block_ids.append(ib_id)
 
         # Update the inner to outer mapping
-        if not self._mapping_manager.is_inner_block_mapped(ib_id):
-            self._mapping_manager._inner_to_outer[ib_id] = []
-        self._mapping_manager._inner_to_outer[ib_id].append(outer_block_id)
+        self._mapping_manager.add_new_inner_to_outer(ib_id, outer_block_id)
 
     def free_request(self, request_id: str) -> None:
         """
