@@ -28,7 +28,7 @@ MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
 OB_SIZE = 16
 IB_SIZE = 4
-NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1
+NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1 # 9
 DEVICE = current_platform.device_type
 
 
@@ -174,8 +174,8 @@ def test_decode(model_runner):
         enable_caching=True,
     )
 
-    # 1. Generate req0: 6 tokens -> 2 inner blocks
-    all_token_ids = [i for i in range(16)]
+    # 1. Generate req0: 16 tokens -> 4 inner blocks
+    all_token_ids = [i for i in range(OB_SIZE)]
 
     req_id = "0"
     req0 = make_request(req_id, all_token_ids)
@@ -197,7 +197,8 @@ def test_decode(model_runner):
                           torch.tensor([0, -1, -1, -1], dtype=torch.int32))
     assert inputs.cached_block_tables == []
 
-    # 2. Decode req0: `num_generated_token_ids` tokens
+    # 2. Decode req0: 1 new token
+    # -> 1 new inner block -> 1 new outer block allocated
     req0.num_computed_tokens = len(all_token_ids)
     req0.append_output_token_ids(1)
     new_inner_blocks = [5]
@@ -216,3 +217,96 @@ def test_decode(model_runner):
         inputs.block_tables[0],
         torch.tensor(outer_blocks_allocated, dtype=torch.int32))
     assert inputs.cached_block_tables == []
+
+def test_simple_eviction():
+    """
+    req0: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated
+    req1: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated
+    finish req0
+    req2: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated (evict req0)
+    """
+    num_ib = NUM_BLOCKS * (OB_SIZE // IB_SIZE)
+    manager = KVCacheManager(
+        make_kv_cache_config(
+            block_size=IB_SIZE,
+            num_blocks=num_ib,
+        ),
+        max_model_len=MAX_MODEL_LEN,
+        enable_caching=True,
+    )
+    print((manager.block_pool.get_num_free_blocks()), "blocks available")
+
+    prefix_cache_manager = RBLNPrefixKVCacheManager(
+        ob_size=OB_SIZE,
+        ib_size=IB_SIZE,
+        max_model_len=MAX_MODEL_LEN,
+        num_ob=NUM_BLOCKS - 1, # -1 = reserve one outer block for null block
+    )
+
+    req_id = "0"
+    num_tokens = 64
+    num_allocated_tokens = 0
+    all_token_ids = list(range(num_tokens))
+    req0 = make_request(req_id, all_token_ids)
+    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
+    assert not computed_blocks.blocks[0]
+    assert num_computed_tokens == 0
+    blocks = manager.allocate_slots(req0, len(all_token_ids),
+                                    len(computed_blocks.blocks[0]) * IB_SIZE,
+                                    computed_blocks)
+    golden_inner_block_ids = list(range(1, 17))
+    assert blocks.get_block_ids() == (golden_inner_block_ids, )
+
+
+    obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
+        req_id,
+        num_allocated_tokens=num_allocated_tokens,
+        num_computed_tokens=num_computed_tokens,
+        inner_blocks=blocks.get_block_ids()[0],
+    )
+    assert torch.allclose(obs, torch.tensor([0, 1, 2, 3], dtype=torch.int32))
+
+    req_id = "1"
+    all_token_ids = list(range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
+    req1 = make_request(req_id, all_token_ids)
+    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
+    blocks = manager.allocate_slots(req1, len(all_token_ids),
+                                    len(computed_blocks.blocks[0]) * IB_SIZE,
+                                    computed_blocks)
+    golden_inner_block_ids = list(range(17, 33))
+    assert blocks.get_block_ids() == (golden_inner_block_ids, )
+    obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
+        req_id,
+        num_allocated_tokens=num_allocated_tokens,
+        num_computed_tokens=num_computed_tokens,
+        inner_blocks=blocks.get_block_ids()[0],
+    )
+    assert torch.allclose(obs, torch.tensor([4, 5, 6, 7], dtype=torch.int32))
+
+    # Finish req0
+    manager.free(req0)
+    prefix_cache_manager.free_request("0")
+
+    req_id = "2"
+    all_token_ids = list(range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
+    print("all_token_ids", len(all_token_ids))
+    req2 = make_request(req_id, all_token_ids)
+    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req2)
+    blocks = manager.allocate_slots(req2, len(all_token_ids),
+                                    len(computed_blocks.blocks[0]) * IB_SIZE,
+                                    computed_blocks)
+    remained_blocks = list(range(33, num_ib))
+    # In vLLM, the blocks are returned to the free block queue in reversed order.
+    # It is for preventing memory fragmentation.
+    golden_inner_block_ids = remained_blocks + list(reversed(range(len(remained_blocks) + 1, 17)))
+    assert blocks.get_block_ids() == (golden_inner_block_ids, )
+    obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
+        req_id,
+        num_allocated_tokens=num_allocated_tokens,
+        num_computed_tokens=num_computed_tokens,
+        inner_blocks=blocks.get_block_ids()[0],
+    )
+    assert torch.allclose(obs, torch.tensor([0, 1, 2, 3], dtype=torch.int32))
+
+
+
