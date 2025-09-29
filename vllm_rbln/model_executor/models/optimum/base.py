@@ -106,8 +106,10 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     token_type_ids: Optional[torch.Tensor] = None
     pooling_metadata: Optional[PoolingMetadata] = None  # for V0
-    cached_block_tables: List[int] = field(default_factory=list)  # for prefix caching
-    cached_lengths: List[int] = field(default_factory=list)  # for prefix caching
+    cached_block_tables: List[int] = field(
+        default_factory=list)  # for prefix caching
+    cached_lengths: List[int] = field(
+        default_factory=list)  # for prefix caching
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:

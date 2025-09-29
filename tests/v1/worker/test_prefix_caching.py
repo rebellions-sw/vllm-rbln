@@ -18,7 +18,8 @@ from vllm.platforms import current_platform
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-from vllm_rbln.v1.worker.optimum_prefix_cache_manager import RBLNPrefixKVCacheManager
+from vllm_rbln.v1.worker.optimum_prefix_cache_manager import (
+    RBLNPrefixKVCacheManager)
 
 from .utils import (MockModelWrapper, _schedule_cached_reqs,
                     _schedule_new_request, finish_request, get_vllm_config,
@@ -28,7 +29,7 @@ MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
 OB_SIZE = 16
 IB_SIZE = 4
-NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1 # 9
+NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1  # 9
 DEVICE = current_platform.device_type
 
 
@@ -218,6 +219,7 @@ def test_decode(model_runner):
         torch.tensor(outer_blocks_allocated, dtype=torch.int32))
     assert inputs.cached_block_tables == []
 
+
 def test_simple_eviction():
     """
     req0: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated
@@ -240,7 +242,7 @@ def test_simple_eviction():
         ob_size=OB_SIZE,
         ib_size=IB_SIZE,
         max_model_len=MAX_MODEL_LEN,
-        num_ob=NUM_BLOCKS - 1, # -1 = reserve one outer block for null block
+        num_ob=NUM_BLOCKS - 1,  # -1 = reserve one outer block for null block
     )
 
     req_id = "0"
@@ -257,7 +259,6 @@ def test_simple_eviction():
     golden_inner_block_ids = list(range(1, 17))
     assert blocks.get_block_ids() == (golden_inner_block_ids, )
 
-
     obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
         req_id,
         num_allocated_tokens=num_allocated_tokens,
@@ -267,7 +268,8 @@ def test_simple_eviction():
     assert torch.allclose(obs, torch.tensor([0, 1, 2, 3], dtype=torch.int32))
 
     req_id = "1"
-    all_token_ids = list(range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
+    all_token_ids = list(
+        range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
     req1 = make_request(req_id, all_token_ids)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
     blocks = manager.allocate_slots(req1, len(all_token_ids),
@@ -288,7 +290,8 @@ def test_simple_eviction():
     prefix_cache_manager.free_request("0")
 
     req_id = "2"
-    all_token_ids = list(range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
+    all_token_ids = list(
+        range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
     print("all_token_ids", len(all_token_ids))
     req2 = make_request(req_id, all_token_ids)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req2)
@@ -298,7 +301,8 @@ def test_simple_eviction():
     remained_blocks = list(range(33, num_ib))
     # In vLLM, the blocks are returned to the free block queue in reversed order.
     # It is for preventing memory fragmentation.
-    golden_inner_block_ids = remained_blocks + list(reversed(range(len(remained_blocks) + 1, 17)))
+    golden_inner_block_ids = remained_blocks + list(
+        reversed(range(len(remained_blocks) + 1, 17)))
     assert blocks.get_block_ids() == (golden_inner_block_ids, )
     obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
         req_id,
@@ -307,6 +311,3 @@ def test_simple_eviction():
         inner_blocks=blocks.get_block_ids()[0],
     )
     assert torch.allclose(obs, torch.tensor([0, 1, 2, 3], dtype=torch.int32))
-
-
-

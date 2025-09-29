@@ -14,6 +14,7 @@
 import torch
 import vllm.envs as env
 from vllm.config import VllmConfig
+
 from vllm_rbln.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
@@ -60,12 +61,10 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             if self.model.prefill_decoder is None:
                 raise version_error
             if model_input.cached_block_tables:
-                self._copy_cached_kv_blocks(
-                    self.model.prefill_decoder,
-                    model_input.cached_block_tables,
-                    model_input.cached_lengths,
-                    block_tables
-                )
+                self._copy_cached_kv_blocks(self.model.prefill_decoder,
+                                            model_input.cached_block_tables,
+                                            model_input.cached_lengths,
+                                            block_tables)
             return self.model.prefill_decoder(**kwargs).logits
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]

@@ -386,10 +386,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor],
-                list[int], list[int],
-                Optional[RBLNOptimumMultiModalKwargs],
-               list[str]]:
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], list[int],
+               list[int], Optional[RBLNOptimumMultiModalKwargs], list[str]]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
         running_request_ids = []

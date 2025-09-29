@@ -47,14 +47,15 @@ class BlockMappingManager:
         Check if a request ID is registered in the manager.
         """
         return request_id in self._request_mappings
-    
+
     def is_inner_block_mapped(self, inner_block_id: int) -> bool:
         """
         Check if an inner block ID is mapped in the manager.
         """
         return inner_block_id in self._inner_to_outer
 
-    def add_new_inner_to_outer(self, inner_block_id: int, outer_block_id: int) -> None:
+    def add_new_inner_to_outer(self, inner_block_id: int,
+                               outer_block_id: int) -> None:
         """
         Add a new mapping from an inner block ID to an outer block ID.
         """
