@@ -24,6 +24,7 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionType)
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.paged_attn import PagedAttentionMetadata
+from vllm.config import get_current_vllm_config
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -345,6 +346,10 @@ class RBLNAttentionMetadataBuilder(
         self.partition_len = input_builder.block_size
         self.max_seq_len = input_builder.max_model_len
 
+        self.device = get_current_vllm_config().device_config.device
+        self.enforce_eager = (
+            get_current_vllm_config().model_config.enforce_eager)
+
     def prepare(self):
         self.input_data = self.input_builder.input_data
 
@@ -401,12 +406,14 @@ class RBLNAttentionMetadataBuilder(
                 prefill_chunk_size = (
                     self.chunked_prefill_size if self.chunked_prefill else 1 <<
                     (math.ceil(math.log2(input_data.seq_lens[0]))))
-                chunked_attention_mask = torch.zeros(1,
-                                                     1,
-                                                     1,
-                                                     prefill_chunk_size,
-                                                     max_seq_len,
-                                                     dtype=torch.float32)
+                chunked_attention_mask = torch.zeros(
+                    1,
+                    1,
+                    1,
+                    prefill_chunk_size,
+                    max_seq_len,
+                    dtype=torch.float16
+                    if self.enforce_eager else torch.float32)
                 causal_mask = 1 - torch.triu(torch.ones(
                     1, 1, prefill_chunk_size, prefill_chunk_size),
                                              diagonal=1)
@@ -416,18 +423,23 @@ class RBLNAttentionMetadataBuilder(
                                        prefill_chunk_size] = causal_mask
                 attn_masks = chunked_attention_mask
             else:
-                decode_attention_mask = torch.zeros(batch_size,
-                                                    1,
-                                                    1,
-                                                    1,
-                                                    max_seq_len,
-                                                    dtype=torch.float32)
+                decode_attention_mask = torch.zeros(
+                    batch_size,
+                    1,
+                    1,
+                    1,
+                    max_seq_len,
+                    dtype=torch.float16
+                    if self.enforce_eager else torch.float32)
                 for batch_index, batch_step in enumerate(steps):
                     decode_attention_mask[
                         batch_index, :, :, :, :batch_step[0] + 1] = 1
                 attn_masks = decode_attention_mask
-
+            attn_masks = attn_masks.to(self.device)
             assert attn_masks.dim() == 5
+
+        assert seq_lens_tensor is not None
+        assert block_tables is not None
         attn_metadata = RBLNAttentionMetadata(
             num_prefills=input_data.num_prefills,
             num_prefill_tokens=input_data.num_prefill_tokens,
@@ -435,9 +447,9 @@ class RBLNAttentionMetadataBuilder(
             slot_mapping=slot_mapping,
             multi_modal_placeholder_index_maps=placeholder_index_maps,
             enable_kv_scales_calculation=False,
-            seq_lens_tensor=seq_lens_tensor,
+            seq_lens_tensor=seq_lens_tensor.to(self.device),
             max_decode_seq_len=max_seq_len,
-            block_tables=block_tables,
+            block_tables=block_tables.to(self.device),
             attn_masks=attn_masks,
             kv_caches=None,
         )
@@ -470,9 +482,13 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         kv_sharing_target_layer_name: Optional[str] = None,
         use_irope: bool = False,
     ) -> None:
+        self.enforce_eager = (
+            get_current_vllm_config().model_config.enforce_eager)
+        self.device = get_current_vllm_config().device_config.device
+
         self.num_heads = num_heads
         self.head_size = head_size
-        self.scale = torch.tensor(scale)
+        self.scale = torch.tensor(scale, device=self.device)
         self.num_kv_heads = num_kv_heads
         if alibi_slopes is not None:
             alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32)
@@ -666,7 +682,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
 
         # 2. attention output reshape for attention backend return
         # attn_output = [batch,H*4,L,D] -> [batch,L,H*4,D] -> [batch,L,H*4*D]
-        if not envs.RBLN_COMPILE_MODEL:
+        if self.enforce_eager or not envs.RBLN_COMPILE_MODEL:
             attn_output = attn_output.reshape(b_size, self.num_heads, q_len,
                                               self.head_size).transpose(1, 2)
             attn_output = attn_output.reshape(b_size, q_len,

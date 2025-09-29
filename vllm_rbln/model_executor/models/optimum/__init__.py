@@ -29,8 +29,9 @@ from .idefics3 import RBLNOptimumIdefics3ForConditionalGeneration  # noqa: F401
 from .llava import RBLNOptimumLlavaForConditionalGeneration  # noqa: F401
 from .llava_next import (  # noqa: F401
     RBLNOptimumLlavaNextForConditionalGeneration)
-from .qwen2_5_vl import (  # noqa: F401
-    RBLNOptimumQwen2_5_VLForConditionalGeneration)
+from .qwen_vl import (  # noqa: F401
+    RBLNOptimumQwen2_5_VLForConditionalGeneration,
+    RBLNOptimumQwen2VLForConditionalGeneration)
 from .sliding_window import (  # noqa: F401
     RBLNOptimumSlidingWindowAttentionForCausalLM)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401

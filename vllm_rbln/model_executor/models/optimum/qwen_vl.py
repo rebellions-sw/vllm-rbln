@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 import torch
@@ -18,9 +19,12 @@ import vllm.envs as env
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.qwen2_5_vl import (
-    Qwen2_5_VLImageEmbeddingInputs, Qwen2_5_VLImageInputs,
-    Qwen2_5_VLImagePixelInputs, Qwen2_5_VLVideoEmbeddingInputs,
-    Qwen2_5_VLVideoInputs, Qwen2_5_VLVideoPixelInputs)
+    Qwen2_5_VLImageEmbeddingInputs, Qwen2_5_VLImagePixelInputs,
+    Qwen2_5_VLVideoEmbeddingInputs, Qwen2_5_VLVideoPixelInputs)
+from vllm.model_executor.models.qwen2_vl import (Qwen2VLImageEmbeddingInputs,
+                                                 Qwen2VLImagePixelInputs,
+                                                 Qwen2VLVideoEmbeddingInputs,
+                                                 Qwen2VLVideoPixelInputs)
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -28,8 +32,12 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
-                                                    RBLNOptimumDecoderMixin):
+class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
+                                                RBLNOptimumDecoderMixin, ABC):
+    """
+    Unified class for both Qwen2-VL and Qwen2.5-VL models.
+    Automatically detects model type based on the model configuration.
+    """
 
     def __init__(
         self,
@@ -45,6 +53,82 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
         )
         self.rope_deltas: Dict = dict()
+
+    def preprocess_prefill(self, input_ids, attention_mask, image_input,
+                           video_input):
+        """
+        Common preprocessing logic for prefill inputs.
+        Calls model-specific parameter preparation method.
+        
+        Args:
+            input_ids: Input token IDs
+            attention_mask: Attention mask
+            image_input: Image input data
+            video_input: Video input data
+            
+        Returns:
+            Tuple of (inputs_embeds, position_embed, rope_deltas)
+        """
+        # Prepare base arguments common to all models
+        preprocess_args = {
+            "input_ids":
+            input_ids,
+            "attention_mask":
+            attention_mask,
+            "pixel_values":
+            image_input["pixel_values"] if image_input is not None else None,
+            "image_grid_thw":
+            image_input["image_grid_thw"] if image_input is not None else None,
+            "pixel_values_videos":
+            video_input["pixel_values_videos"]
+            if video_input is not None else None,
+            "video_grid_thw":
+            video_input["video_grid_thw"] if video_input is not None else None,
+        }
+
+        # Add model-specific parameters
+        self._add_model_specific_args(preprocess_args, video_input)
+
+        # Call the actual preprocessing
+        return self.model._preprocess_prefill(**preprocess_args)
+
+    @abstractmethod
+    def _add_model_specific_args(self, preprocess_args: dict,
+                                 video_input: Any):
+        """
+        Add model-specific arguments to preprocessing args.
+        
+        Args:
+            preprocess_args: Dictionary of preprocessing arguments to modify
+            video_input: Video input data
+        """
+        pass
+
+    @abstractmethod
+    def _create_image_pixel_inputs(self, pixel_values: torch.Tensor,
+                                   image_grid_thw: torch.Tensor) -> Any:
+        """Create image pixel inputs based on model type"""
+        pass
+
+    @abstractmethod
+    def _create_image_embedding_inputs(self, image_embeds: torch.Tensor,
+                                       image_grid_thw: torch.Tensor) -> Any:
+        """Create image embedding inputs based on model type"""
+        pass
+
+    @abstractmethod
+    def _create_video_pixel_inputs(
+            self, pixel_values_videos: torch.Tensor,
+            video_grid_thw: torch.Tensor,
+            second_per_grid_ts: Optional[torch.Tensor]) -> Any:
+        """Create video pixel inputs based on model type"""
+        pass
+
+    @abstractmethod
+    def _create_video_embedding_inputs(self, video_embeds,
+                                       video_grid_thw) -> Any:
+        """Create video embedding inputs based on model type"""
+        pass
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -77,20 +161,8 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
             attention_mask = torch.ones_like(input_ids)
 
             (inputs_embeds, position_embed,
-             rope_deltas) = self.model._preprocess_prefill(
-                 input_ids=input_ids,
-                 attention_mask=attention_mask,
-                 pixel_values=image_input["pixel_values"]
-                 if image_input is not None else None,
-                 image_grid_thw=image_input["image_grid_thw"]
-                 if image_input is not None else None,
-                 pixel_values_videos=video_input["pixel_values_videos"]
-                 if video_input is not None else None,
-                 video_grid_thw=video_input["video_grid_thw"]
-                 if video_input is not None else None,
-                 second_per_grid_ts=video_input["second_per_grid_ts"]
-                 if video_input is not None else None,
-             )
+             rope_deltas) = self.preprocess_prefill(input_ids, attention_mask,
+                                                    image_input, video_input)
 
             if finished_requests_ids:
                 for request_id in finished_requests_ids:
@@ -178,8 +250,7 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
 
         raise RuntimeError(f"Unhandled case for input '{name}'")
 
-    def _parse_and_validate_image_input(
-            self, **kwargs: Any) -> Optional[Qwen2_5_VLImageInputs]:
+    def _parse_and_validate_image_input(self, **kwargs: Any) -> Optional[Any]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         image_grid_thw = kwargs.pop("image_grid_thw", None)
@@ -197,9 +268,8 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
                 raise ValueError("Incorrect type of image pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
-            return Qwen2_5_VLImagePixelInputs(type="pixel_values",
-                                              pixel_values=pixel_values,
-                                              image_grid_thw=image_grid_thw)
+            return self._create_image_pixel_inputs(pixel_values,
+                                                   image_grid_thw)
 
         if image_embeds is not None:
             image_embeds = self._validate_and_reshape_mm_tensor(
@@ -210,17 +280,15 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
             if not isinstance(image_embeds, torch.Tensor):
                 raise ValueError("Incorrect type of image embeddings. "
                                  f"Got type: {type(image_embeds)}")
-            return Qwen2_5_VLImageEmbeddingInputs(
-                type="image_embeds",
-                image_embeds=image_embeds,
-                image_grid_thw=image_grid_thw)
+
+            return self._create_image_embedding_inputs(image_embeds,
+                                                       image_grid_thw)
 
         # fallback return if both are None
         return None
 
-    # type: ignore[return]
-    def _parse_and_validate_video_input(
-            self, **kwargs: object) -> Optional[Qwen2_5_VLVideoInputs]:
+    def _parse_and_validate_video_input(self,
+                                        **kwargs: object) -> Optional[Any]:
         pixel_values_videos = kwargs.pop("pixel_values_videos", None)
         video_embeds = kwargs.pop("video_embeds", None)
         video_grid_thw = kwargs.pop("video_grid_thw", None)
@@ -235,14 +303,9 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
             video_grid_thw = self._validate_and_reshape_mm_tensor(
                 video_grid_thw, "video grid_thw")
 
-            assert isinstance(second_per_grid_ts, torch.Tensor)
-
-            return Qwen2_5_VLVideoPixelInputs(
-                type="pixel_values_videos",
-                pixel_values_videos=pixel_values_videos,
-                video_grid_thw=video_grid_thw,
-                second_per_grid_ts=second_per_grid_ts.squeeze(0),
-            )
+            return self._create_video_pixel_inputs(pixel_values_videos,
+                                                   video_grid_thw,
+                                                   second_per_grid_ts)
 
         if video_embeds is not None:
             video_embeds = self._validate_and_reshape_mm_tensor(
@@ -253,10 +316,80 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(RBLNOptimumModelBase,
             if not isinstance(video_embeds, torch.Tensor):
                 raise ValueError("Incorrect type of video embeddings. "
                                  f"Got type: {type(video_embeds)}")
-            return Qwen2_5_VLVideoEmbeddingInputs(
-                type="video_embeds",
-                video_embeds=video_embeds,
-                video_grid_thw=video_grid_thw)
+
+            return self._create_video_embedding_inputs(video_embeds,
+                                                       video_grid_thw)
 
         # fallback return if both are None
         return None
+
+
+class RBLNOptimumQwen2_5_VLForConditionalGeneration(
+        RBLNOptimumQwenVLForConditionalGeneration):
+
+    def _add_model_specific_args(self, preprocess_args: dict,
+                                 video_input: Any):
+        """Add second_per_grid_ts for Qwen2.5-VL"""
+        if video_input is not None:
+            preprocess_args["second_per_grid_ts"] = video_input[
+                "second_per_grid_ts"]
+
+    def _create_image_pixel_inputs(self, pixel_values, image_grid_thw):
+        return Qwen2_5_VLImagePixelInputs(type="pixel_values",
+                                          pixel_values=pixel_values,
+                                          image_grid_thw=image_grid_thw)
+
+    def _create_image_embedding_inputs(self, image_embeds, image_grid_thw):
+        return Qwen2_5_VLImageEmbeddingInputs(type="image_embeds",
+                                              image_embeds=image_embeds,
+                                              image_grid_thw=image_grid_thw)
+
+    def _create_video_pixel_inputs(self,
+                                   pixel_values_videos: torch.Tensor,
+                                   video_grid_thw: torch.Tensor,
+                                   second_per_grid_ts=Optional[torch.Tensor]):
+        if second_per_grid_ts is None:
+            raise ValueError(
+                "second_per_grid_ts is required for Qwen2.5-VL video inputs.")
+        return Qwen2_5_VLVideoPixelInputs(
+            type="pixel_values_videos",
+            pixel_values_videos=pixel_values_videos,
+            video_grid_thw=video_grid_thw,
+            second_per_grid_ts=second_per_grid_ts.squeeze(0))
+
+    def _create_video_embedding_inputs(self, video_embeds, video_grid_thw):
+        return Qwen2_5_VLVideoEmbeddingInputs(type="video_embeds",
+                                              video_embeds=video_embeds,
+                                              video_grid_thw=video_grid_thw)
+
+
+class RBLNOptimumQwen2VLForConditionalGeneration(
+        RBLNOptimumQwenVLForConditionalGeneration):
+
+    def _add_model_specific_args(self, preprocess_args: dict,
+                                 video_input: Any):
+        """Qwen2-VL doesn't need additional arguments"""
+        pass
+
+    def _create_image_pixel_inputs(self, pixel_values, image_grid_thw):
+        return Qwen2VLImagePixelInputs(type="pixel_values",
+                                       pixel_values=pixel_values,
+                                       image_grid_thw=image_grid_thw)
+
+    def _create_image_embedding_inputs(self, image_embeds, image_grid_thw):
+        return Qwen2VLImageEmbeddingInputs(type="image_embeds",
+                                           image_embeds=image_embeds,
+                                           image_grid_thw=image_grid_thw)
+
+    def _create_video_pixel_inputs(self, pixel_values_videos: torch.Tensor,
+                                   video_grid_thw: torch.Tensor,
+                                   second_per_grid_ts: Optional[torch.Tensor]):
+        # NOTE Qwen2-VL doesn't use second_per_grid_ts
+        return Qwen2VLVideoPixelInputs(type="pixel_values_videos",
+                                       pixel_values_videos=pixel_values_videos,
+                                       video_grid_thw=video_grid_thw)
+
+    def _create_video_embedding_inputs(self, video_embeds, video_grid_thw):
+        return Qwen2VLVideoEmbeddingInputs(type="video_embeds",
+                                           video_embeds=video_embeds,
+                                           video_grid_thw=video_grid_thw)
