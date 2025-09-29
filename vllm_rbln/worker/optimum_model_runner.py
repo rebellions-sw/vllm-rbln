@@ -278,16 +278,17 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             generators=self.get_generators(finished_requests_ids)
         ) if seq_group_metadata_list[0].sampling_params is not None else None
 
-        return ModelInputForRBLN(input_tokens=input_tokens,
-                                 input_positions=input_positions,
-                                 sampling_metadata=sampling_metadata,
-                                 multi_modal_kwargs=multi_modal_kwargs,
-                                 block_tables=block_tables,
-                                 token_type_ids=type_token_ids,
-                                 pooling_metadata=pooling_metadata,
-                                 running_requests_ids=running_requests_ids,
-                                 finished_requests_ids=finished_requests_ids,
-                                 )
+        return ModelInputForRBLN(
+            input_tokens=input_tokens,
+            input_positions=input_positions,
+            sampling_metadata=sampling_metadata,
+            multi_modal_kwargs=multi_modal_kwargs,
+            block_tables=block_tables,
+            token_type_ids=type_token_ids,
+            pooling_metadata=pooling_metadata,
+            running_requests_ids=running_requests_ids,
+            finished_requests_ids=finished_requests_ids,
+        )
 
     def _prepare_pooling(
         self,
