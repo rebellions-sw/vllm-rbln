@@ -613,6 +613,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         assert model_input.attn_metadata is not None
         token_indices = None
         if get_pp_group().is_last_rank:
+            assert model_input.sampling_metadata is not None
             num_prefills = model_input.attn_metadata.num_prefills
             selected_token_indices = \
                 model_input.sampling_metadata.selected_token_indices
@@ -644,7 +645,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         if get_pp_group().is_last_rank:
             # Gather logits for TP
             logits_processor = self.compute_logits_model.logits_processor
-            logits = logits_processor._gather_logits(logits_or_intermediate_states)
+            logits = logits_processor._gather_logits(
+                logits_or_intermediate_states)
             logits = logits.view(-1, logits.size(-1))
 
         else:
@@ -653,7 +655,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             return intermediate_states
 
         # Compute the logits. -> moved to model executable
-        if not(num_prefills > 0 and len_token_indices != 0):
+        if not (num_prefills > 0 and len_token_indices != 0):
             logits = logits[selected_token_indices]
 
         # Only perform sampling in the driver worker.
