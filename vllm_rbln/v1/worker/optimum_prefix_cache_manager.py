@@ -295,7 +295,10 @@ class RBLNPrefixKVCacheManager:
             raise RuntimeError(
                 f"Cannot evict enough blocks. Need {evict_count}, "
                 f"can evict {len(blocks_to_evict)}")
-
+        # NOTE: In vLLM, the blocks are returned
+        # to the free block queue in reversed order.
+        # It is for preventing memory fragmentation.
+        # But here, we don't need to reverse the order.
         for block_id in blocks_to_evict:
             self._evict_block(block_id)
 
