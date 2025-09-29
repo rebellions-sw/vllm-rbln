@@ -42,6 +42,18 @@ class BlockMappingManager:
         self._inner_to_outer: dict[int, list[int]] = {}
         self._request_mappings: dict[str, list[int]] = {}
 
+    def is_request_registered(self, request_id: str) -> bool:
+        """
+        Check if a request ID is registered in the manager.
+        """
+        return request_id in self._request_mappings
+    
+    def is_inner_block_mapped(self, inner_block_id: int) -> bool:
+        """
+        Check if an inner block ID is mapped in the manager.
+        """
+        return inner_block_id in self._inner_to_outer
+
     def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
                        request_id: str) -> None:
         """
