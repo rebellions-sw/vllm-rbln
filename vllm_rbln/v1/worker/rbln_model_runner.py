@@ -922,9 +922,13 @@ class RBLNModelRunner:
             get_pp_group().send_tensor_dict(hidden_states.tensors,
                                             all_gather_group=get_tp_group())
             logits = None
-        else:
+        elif is_prefills[0]:  # prefill
             sample_hidden_states = hidden_states[logits_indices]
             logits = self.model.compute_logits(sample_hidden_states, None)
+        else:  # decode
+            logits = self.model.compute_logits(hidden_states, None)
+            logits = logits[logits_indices]
+
         if broadcast_pp_output:
             model_output_broadcast_data = ({
                 "logits": logits.contiguous(),
@@ -1253,6 +1257,15 @@ class RBLNModelRunner:
 
             self.compile_context = CompileContext(use_weight_sharing=True)
             self.model_executable = self._compile_model(self.model)
+            self.model.logits_processor = torch.compile(
+                self.model.logits_processor,
+                backend="rbln",
+                options={
+                    "compile_context": self.compile_context,
+                    "tensor_parallel_size": envs.RBLN_TP_SIZE,
+                },
+                dynamic=False,
+            )
 
     def save_tensorized_model(
         self,
