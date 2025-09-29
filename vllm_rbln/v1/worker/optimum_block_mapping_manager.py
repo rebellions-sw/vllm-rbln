@@ -54,6 +54,14 @@ class BlockMappingManager:
         """
         return inner_block_id in self._inner_to_outer
 
+    def add_new_inner_to_outer(self, inner_block_id: int, outer_block_id: int) -> None:
+        """
+        Add a new mapping from an inner block ID to an outer block ID.
+        """
+        if inner_block_id not in self._inner_to_outer:
+            self._inner_to_outer[inner_block_id] = []
+        self._inner_to_outer[inner_block_id].append(outer_block_id)
+
     def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
                        request_id: str) -> None:
         """
@@ -67,9 +75,7 @@ class BlockMappingManager:
 
         # Update Inner to outer mapping
         for ib_id in inner_blocks:
-            if ib_id not in self._inner_to_outer:
-                self._inner_to_outer[ib_id] = []
-            self._inner_to_outer[ib_id].append(outer_block.block_id)
+            self.add_new_inner_to_outer(ib_id, outer_block.block_id)
 
         # Update Request mapping
         if request_id not in self._request_mappings:
