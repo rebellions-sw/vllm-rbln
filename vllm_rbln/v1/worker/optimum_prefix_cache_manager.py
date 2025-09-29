@@ -389,7 +389,8 @@ class RBLNPrefixKVCacheManager:
         2. Allocate new blocks if needed
         3. Return the block table tensor, cached block IDs, and cached lengths
 
-        num_allocated_tokens: Number of tokens already allocated (for DECODE phase)
+        num_allocated_tokens: Number of tokens already allocated
+        (for DECODE phase)
         num_computed_tokens: Number of tokens computed so far (for cache search)
         inner_blocks: List of inner block IDs corresponding to the request
         """

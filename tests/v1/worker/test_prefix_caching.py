@@ -299,7 +299,8 @@ def test_simple_eviction():
                                     len(computed_blocks.blocks[0]) * IB_SIZE,
                                     computed_blocks)
     remained_blocks = list(range(33, num_ib))
-    # In vLLM, the blocks are returned to the free block queue in reversed order.
+    # In vLLM, the blocks are returned
+    # to the free block queue in reversed order.
     # It is for preventing memory fragmentation.
     golden_inner_block_ids = remained_blocks + list(
         reversed(range(len(remained_blocks) + 1, 17)))
