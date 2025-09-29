@@ -204,7 +204,7 @@ class RBLNPrefixKVCacheManager:
         Allocate blocks for a given request
         based on its phase (PREFILL or DECODE).
         """
-        if request_id in self._mapping_manager._request_mappings:
+        if self._mapping_manager.is_request_registered(request_id):
             self._handle_decode_allocation(request_id, num_new_ob,
                                            inner_blocks)
         else:
@@ -336,7 +336,7 @@ class RBLNPrefixKVCacheManager:
         mapping.inner_block_ids.append(ib_id)
 
         # Update the inner to outer mapping
-        if ib_id not in self._mapping_manager._inner_to_outer:
+        if not self._mapping_manager.is_inner_block_mapped(ib_id):
             self._mapping_manager._inner_to_outer[ib_id] = []
         self._mapping_manager._inner_to_outer[ib_id].append(outer_block_id)
 
@@ -374,7 +374,7 @@ class RBLNPrefixKVCacheManager:
         """
         Get the tensor of outer block IDs for a given request.
         """
-        if request_id not in self._mapping_manager._request_mappings:
+        if not self._mapping_manager.is_request_registered(request_id):
             logger.warning("Request %s not found in mappings", request_id)
             return self._memory_pool_manager.get_tensor_for_blocks([])
 
