@@ -61,9 +61,13 @@ environment_variables = {
     "RBLN_MOE_CUSTOM_KERNEL":
     (lambda: os.environ.get("MOE_CUSTOM_KERNEL", "False").lower() in
      ("true", "1")),
-    # DP_INPUT_ALL_GATHER
+    # DP_INPUT_ALL_GATHER, use DP input all_gather
     "RBLN_DP_INPUT_ALL_GATHER":
     (lambda: os.environ.get("DP_INPUT_ALL_GATHER", "False").lower() in
+     ("true", "1")),
+    # LOGITS_ALL_GATHER, include logits all_gather into model compilation
+    "RBLN_LOGITS_ALL_GATHER":
+    (lambda: os.environ.get("LOGITS_ALL_GATHER", "False").lower() in
      ("true", "1")),
     # Number of Ray nodes
     "RBLN_NUM_RAY_NODES":
