@@ -24,7 +24,7 @@ import torch
 from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
-from vllm.distributed import get_pp_group, get_tp_group
+from vllm.distributed import get_pp_group, get_tp_group, get_dp_group
 from vllm.forward_context import set_forward_context
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
@@ -440,19 +440,35 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 cast(RBLNModelRunner, weakref.proxy(self)))
 
     def compile_model(self, model):
+        TP = get_tp_group()
+        PP = get_pp_group()
+        DP = get_dp_group()
+        logger.info("[RBLN] TP group unique_name = %s", TP.unique_name)
+        logger.info("[RBLN] TP group ranks = %s, local rank = %s",
+                TP.ranks, TP.rank)
+        logger.info("[RBLN] TP device group id = %s, cpu group id = %s",
+                TP.device_group.group_name, TP.cpu_group.group_name)
+
+        logger.info("[RBLN] PP group unique_name = %s", PP.unique_name)
+        logger.info("[RBLN] PP group ranks = %s, local rank = %s",
+                PP.ranks, PP.rank)
+        logger.info("[RBLN] PP device group id = %s, cpu group id = %s",
+                PP.device_group.group_name, PP.cpu_group.group_name)
+
+        logger.info("[RBLN] DP group unique_name = %s", DP.unique_name)
+        logger.info("[RBLN] DP group ranks = %s, local rank = %s",
+                DP.ranks, DP.rank)
+        logger.info("[RBLN] DP device group id = %s, cpu group id = %s",
+                DP.device_group.group_name, DP.cpu_group.group_name)
+
         if envs.RBLN_COMPILE_MODEL:
-            # GroupCoordinator
-            TP = get_tp_group()
-            PP = get_pp_group()
-            logger.info("[RBLN] GroupCoordinator unique_name = %s", TP.unique_name)
-            logger.info("[RBLN] group ranks = %s, local rank = %s", TP.ranks, TP.rank)
-            logger.info("[RBLN] device group id = %s", TP.device_group.group_name)
-            logger.info("[RBLN] cpu group id = %s", TP.cpu_group.group_name)
             process_group_dict = {}
             process_group_dict[TP.device_group.group_name] = TP.ranks
             process_group_dict[TP.cpu_group.group_name] = TP.ranks
             process_group_dict[PP.device_group.group_name] = PP.ranks
             process_group_dict[PP.cpu_group.group_name] = PP.ranks
+            process_group_dict[DP.device_group.group_name] = DP.ranks
+            process_group_dict[DP.cpu_group.group_name] = DP.ranks
 
             logger.info("[RBLN] process_group_dict = %s", process_group_dict)
             options = {

@@ -159,6 +159,7 @@ def flash_causal_attention_naive_prefill_impl(
     slot_mapping: torch.Tensor,
 ) -> torch.Tensor:
     if not envs.RBLN_COMPILE_MODEL:
+        assert False, "causal mask generation NYI"
         # attn_weights = MM(q,kt) * scale
         # attn_weights = causal masked softmax(attn_weights)
         # MM(attn_weights, v)
@@ -175,7 +176,7 @@ def flash_causal_attention_naive_prefill_impl(
                                                                 start=s,
                                                                 end=e)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-        # TODO - how to build causal mask?
+        # FIXME - causal mask is missing, NYI
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
         return attn_output
@@ -211,6 +212,7 @@ def flash_causal_attention_naive_decode_impl(
     slot_mapping: torch.Tensor,
 ) -> torch.Tensor:
     if not envs.RBLN_COMPILE_MODEL:
+        assert False, "causal mask generation NYI"
         # NOTE - multiple decode kernel implementation is necessary
         assert q.size(0) == 1
         seq_len = q.size(-2)
@@ -226,6 +228,7 @@ def flash_causal_attention_naive_decode_impl(
                                                                 start=s,
                                                                 end=e)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
+        # FIXME - causal mask is missing, NYI
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
         return attn_output

@@ -120,6 +120,18 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     assert self.quant_method is not None
 
     if self.dp_size > 1:
+        # input broadcast, all DPs broadcast each hidden_states & router_logits into dp group
+        # example) DP2, TP/EP2
+        # dp_group = {{0, 2}, {1, 3}}
+        # tp_group = {{0, 1}, {2, 3}}
+        # 1. initially, each DP hidden_states = [1, 128, 1024]
+        # 2. after multicast(multiple broadcast), all DPs hidden_states = [dp_size, 128, 1024]
+        # - all DP ranks braodcast its input to process group
+        # 3. DP x TP/EP expert parallel
+        # ex) 0, 1, 2, 3 has its own hidden_states = [dp_size, 128, 1024]
+        # 4. dp_group all reduce - {0+2}, {1+3}, {0+2}, {1+3}
+        # 5. select each DP rank output
+        # 6. to_group all reduce - {0+2+1+3}, {0+2+1+3}, {0+2+1+3}, {0+2+1+3}
         cu_tokens_across_dp_cpu = get_forward_context(
         ).dp_metadata.cu_tokens_across_dp_cpu
 
@@ -148,16 +160,64 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     )
 
     if self.dp_size > 1:
-        start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
-            self.dp_rank - 1]
-        end = cu_tokens_across_dp_cpu[self.dp_rank]
-
+        # output all_reduce, all DPs broadcast each hidden_states & router_logits into dp group
+        # within expert, dp_group all_reduce
+        # ouf of expert, tp_group all_reduce
         all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
-        final_hidden_states = all_hidden_states[start:end, :]
+        # NOTE - DO NOT use slice assign since it makes tensor copy
+        #final_hidden_states = all_hidden_states[dp_rank:dp_rank+1,:,:]
+        final_hidden_states = all_hidden_states[self.dp_rank].unsqueeze(0)
 
     return final_hidden_states
+
+
+def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
+                        cu_tokens_across_dp_cpu: torch.Tensor):
+    # as-is : [num_tokens, hidden_size]
+    # to-be : buffer = [data_parallel_size*batch, seq, hidden_size], entire buffer for broadcast
+    #         hidden = [batch, seq, hidden_size]
+    # x.shape = [1, seq, hidden_size]
+    # assert len(x.shape) == 3
+
+    dp_size = self.dp_size
+    # assert dp_size == cu_tokens_across_dp_cpu.size(-1)
+    dp_rank = self.dp_rank
+    batch_size = x.size(0)
+    seq_size = x.size(1)
+    hidden_size = x.size(2)
+
+    if False:
+        # each DP rank gather all inputs via torch.distributed.broadcast
+        buffer = torch.empty((dp_size * batch_size, seq_size, hidden_size),
+                    device=x.device,
+                    dtype=x.dtype)
+        # buffer[dp_rank] = x
+        buffer = buffer.slice_scatter(x, dim=0, start=dp_rank, end=dp_rank+1)
+        # gather all tensors of all ranks within dp group
+        for rank in range(get_dp_group().world_size):
+            get_dp_group().broadcast(buffer[rank:rank+1,:,:], rank)
+        return buffer
+    else:
+        # each DP rank gather all inputs via torch.distributed.all_reduce
+        # broadcast(value) == all_reduce(value for me or zeros for others)
+        all_gather_buffer = None
+        #buffer = torch.zeros((batch_size, seq_size, hidden_size),
+        #            device=x.device,
+        #            dtype=x.dtype)
+        zeros = x - x
+        for rank in range(get_dp_group().world_size):
+            if rank == dp_rank:
+                broadcast_tensor = get_dp_group().all_reduce(x)
+            else:
+                broadcast_tensor = get_dp_group().all_reduce(zeros)
+            if all_gather_buffer is None:
+                all_gather_buffer = broadcast_tensor
+            else:
+                all_gather_buffer = torch.cat((all_gather_buffer, broadcast_tensor), dim=0)
+        return all_gather_buffer
 
 
 UnquantizedFusedMoEMethod.forward_oot = (
     unquantized_fused_moe_method_forward_rbln_rsd)
 FusedMoE.forward_impl = fused_moe_forward_rbln
+FusedMoE.naive_multicast = fused_moe_naive_multicast_rbln
