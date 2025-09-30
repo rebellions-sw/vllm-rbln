@@ -86,7 +86,7 @@ class RBLNModelRunner:
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
 
-        assert device in [torch.device("cpu"), torch.device("rbln")]
+        assert str(device) in ["cpu", "rbln"]
         assert self.speculative_config is None, "spec decode is not supported."
 
         model_config = self.model_config
