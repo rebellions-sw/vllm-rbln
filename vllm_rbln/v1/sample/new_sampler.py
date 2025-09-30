@@ -13,6 +13,7 @@
 # limitations under the License.
 # isort: off
 import torch
+import rebel.core.random
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.ops.topk_topp_sampler import random_sample
@@ -81,6 +82,7 @@ class Sampler(VLLMSampler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        rebel.core.random.manual_seed(42)
 
     def forward(self, logits: torch.Tensor,
                 sampling_metadata: SamplingMetadata) -> torch.Tensor:
@@ -103,7 +105,8 @@ class Sampler(VLLMSampler):
                 logits = logits / sampling_metadata.temperature.unsqueeze(-1)
             
             # Use native RBLN top_p_only operation
-            indices = torch.ops.rbln.top_p_only(logits, sampling_metadata.top_p)
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            indices = torch.ops.rbln.top_p_only(probs, sampling_metadata.top_p)
             return indices
 
         return super().sample(logits, sampling_metadata)
