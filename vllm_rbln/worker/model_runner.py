@@ -53,7 +53,6 @@ TModelInputForRebel = TypeVar("TModelInputForRebel",
                               bound="ModelInputForRebel")
 _PAD_SLOT_ID = -1
 
-
 @dataclass(frozen=True)
 class ModelInputForRebel(ModelRunnerInputBase):
     """
@@ -564,9 +563,13 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     model_output = model_output[:, selected_token_indices]
                 logits = self.compute_logits_model.compute_logits(
                     model_output, None)
+                if envs.RBLN_LOGITS_ALL_GATHER:
+                    logits = self.compute_logits_model.logits_processor._gather_logits(logits)
             else:
                 # non last rank create intermediate tensors, bypass it
                 logits = model_output
+            if envs.RBLN_LOGITS_ALL_GATHER:
+                logits = logits.view(-1, logits.size(-1))
             return logits
 
         # NOTE - refer to pytorch 2.5 release notes
@@ -681,7 +684,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 **execute_model_kwargs,
             )
 
-            if get_pp_group().is_last_rank:
+            if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
                 # Gather logits for TP
                 logits_processor = self.compute_logits_model.logits_processor
                 hidden_states = logits_processor._gather_logits(hidden_states)
