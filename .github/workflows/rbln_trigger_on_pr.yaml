@@ -52,7 +52,7 @@ jobs:
           else
             echo "IS_TEAM_MEMBER=false" >> $GITHUB_OUTPUT
           fi
-          echo "IS_TEAM_MEMBER: $IS_TEAM_MEMBER"
+          echo "IS_TEAM_MEMBER: ${{ steps.check_member.outputs.IS_TEAM_MEMBER }}"
 
       - name: Check if collaborator
         #if: ${{ needs.check-team-member.outputs.is_team_member != 'true' }}
@@ -65,7 +65,7 @@ jobs:
           else
             echo "IS_COLLABORATOR=false" >> $GITHUB_OUTPUT
           fi
-          echo "IS_COLLABORATOR: $IS_COLLABORATOR"
+          echo "IS_COLLABORATOR: ${{ steps.check_member.outputs.IS_COLLABORATOR }}"
 
   check-code-quality:
     needs: check-skip-ci
