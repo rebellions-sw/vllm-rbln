@@ -41,6 +41,8 @@ jobs:
             -d '{"query":"query { organization(login: \"rebellions-sw\") { team(slug: \"rebel-sw-team\") { members(first: 100) { nodes { login } } } } }"}' \
             https://api.github.com/graphql)
           echo "$response" | jq -r '.data.organization.team.members.nodes[].login' > team_members.txt
+          cat team_members.txt
+
       - name: Check if PR author is a team member
         id: check_member
         run: |
@@ -50,6 +52,18 @@ jobs:
           else
             echo "IS_TEAM_MEMBER=false" >> $GITHUB_OUTPUT
           fi
+
+      # - name: Check if collaborator
+      #   if: ${{ needs.check-team-member.outputs.is_team_member != 'true' }}
+      #   run: |
+      #     pr_author=${{ github.event.pull_request.user.login }}
+      #     is_collaborator=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GIT_PAT }}" \
+      #       https://api.github.com/repos/${{ github.repository }}/collaborators/$pr_author)
+      #     if [ "$is_collaborator" -eq 204 ]; then
+      #       echo "IS_TEAM_MEMBER=true" >> $GITHUB_OUTPUT
+      #     else
+      #       echo "IS_TEAM_MEMBER=false" >> $GITHUB_OUTPUT
+      #     fi
 
   check-code-quality:
     needs: check-skip-ci
