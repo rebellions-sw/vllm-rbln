@@ -1,4 +1,3 @@
-
 name: vllm-rbln / PR
 
 on:
@@ -59,7 +58,7 @@ jobs:
           fi
 
       - name: Check if collaborator
-        #if: ${{ needs.check-team-member.outputs.is_team_member != 'true' }}
+        if: ${{ needs.check-team-member.outputs.is_team_member != 'true' }}
         run: |
           pr_author=${{ github.event.pull_request.user.login }}
           echo "Checking if PR author '$pr_author' is a collaborator..."
@@ -95,7 +94,7 @@ jobs:
 
   vllm-rbln-pytest:
     needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version]
-    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && (needs.check-team-member.outputs.is_team_member == 'true' || needs.check-team-member.outputs.is_collaborator == 'true') }}
     uses: ./.github/workflows/rbln_vllm-rbln_pytest.yaml
     secrets: inherit
     with:
@@ -104,7 +103,7 @@ jobs:
 
   vllm-rbln-optimum-ci:
     needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version, vllm-rbln-pytest]
-    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && (needs.check-team-member.outputs.is_team_member == 'true' || needs.check-team-member.outputs.is_collaborator == 'true') }}
     uses: ./.github/workflows/rbln_optimum_ci.yaml
     secrets: inherit
     with:
