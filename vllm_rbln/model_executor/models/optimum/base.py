@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -104,6 +104,10 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     token_type_ids: Optional[torch.Tensor] = None
     pooling_metadata: Optional[PoolingMetadata] = None  # for V0
+    cached_block_tables: List[int] = field(
+        default_factory=list)  # for prefix caching
+    cached_lengths: List[int] = field(
+        default_factory=list)  # for prefix caching
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:

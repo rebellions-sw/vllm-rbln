@@ -185,7 +185,20 @@ class RblnPlatform(Platform):
         if cache_config:
             assert vllm_config.cache_config.block_size is not None, (
                 "block_size must be configured for RBLN backend")
-            cache_config.enable_prefix_caching = False
+            if cache_config.enable_prefix_caching:
+                if not envs.VLLM_USE_V1:
+                    raise RuntimeError(
+                        "Prefix caching is only supported on v1 for RBLN.")
+                if model_config.is_multimodal_model:
+                    raise NotImplementedError(
+                        "Prefix caching is not supported for multimodal "
+                        "models yet.")
+                attn_block_size = vllm_config.additional_config.get(
+                    "attn_block_size", None)
+                assert attn_block_size is not None, \
+                    "`attn_block_size` must be set."
+                assert attn_block_size % cache_config.block_size == 0, \
+                    "`attn_block_size` must be a multiple of `block_size`."
 
         if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
