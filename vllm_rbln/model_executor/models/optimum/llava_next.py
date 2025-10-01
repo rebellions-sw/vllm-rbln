@@ -75,10 +75,6 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                               torch.Tensor] = None,  # vllm keyword argument
         **kwargs,
     ):
-        if inputs_embeds is not None:
-            raise NotImplementedError(
-                "Specifying inputs_embeds is not supported.")
-
         if is_prefill:
             # NOTE inputs_embeds will be generated inside _preprocess_prefill
             inputs_embeds = self.model._preprocess_prefill(
