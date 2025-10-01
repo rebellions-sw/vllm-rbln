@@ -41,7 +41,6 @@ jobs:
             -d '{"query":"query { organization(login: \"rebellions-sw\") { team1: team(slug: \"rebel-sw-team\") { members(first: 100) { nodes { login } } } team2: team(slug: \"framework_sw\") { members(first: 100) { nodes { login } } } } }"}' \
             https://api.github.com/graphql)
           echo "$response" | jq -r '.data.organization.team1.members.nodes[].login, .data.organization.team2.members.nodes[].login' | sort -u > team_members.txt
-          cat team_members.txt
 
       - name: Check if PR author is a team member
         id: check_member
