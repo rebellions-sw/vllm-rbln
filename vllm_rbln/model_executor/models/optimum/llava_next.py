@@ -71,35 +71,18 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         input_ids: torch.LongTensor = None,
         pixel_values: torch.FloatTensor = None,
         image_sizes: Optional[torch.LongTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        vision_feature_layer: Optional[int] = None,
-        vision_feature_select_strategy: Optional[str] = None,
         cache_position: Union[List[torch.Tensor],
                               torch.Tensor] = None,  # vllm keyword argument
         **kwargs,
     ):
-        if inputs_embeds is not None:
-            raise NotImplementedError(
-                "Specifying inputs_embeds is not supported.")
-
         if is_prefill:
-            # Get text_embeds
-            inputs_embeds = self.model.text_embedding(input_ids)
+            # NOTE inputs_embeds will be generated inside _preprocess_prefill
+            inputs_embeds = self.model._preprocess_prefill(
+                input_ids=input_ids,
+                pixel_values=pixel_values,
+                image_sizes=image_sizes,
+            )
 
-            # If any images in the prompt, get image_embeds and merge with text
-            if pixel_values is not None and input_ids.shape[
-                    1] != 1 and pixel_values.size(0) > 0:
-                image_features, _ = self.model.image_embedding(
-                    image_sizes, pixel_values, vision_feature_layer,
-                    vision_feature_select_strategy)
-
-                inputs_embeds = self.merge_multimodal_embeddings(
-                    input_ids, inputs_embeds, image_features,
-                    self.model.config.image_token_index)
-        else:
-            inputs_embeds = self.model.text_embedding(input_ids=input_ids)
-
-        if is_prefill:
             if self.model.language_model.prefill_decoder is None:
                 raise version_error
 
@@ -113,7 +96,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 raise version_error
 
             logits = self.model.language_model.decoder(
-                inputs_embeds=inputs_embeds,
+                input_ids=input_ids,
                 cache_position=cache_position,
                 block_tables=block_tables,
             ).logits
@@ -160,9 +143,9 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             is_prefill=is_prompt,
             block_tables=block_tables,
             input_ids=input_ids,
-            cache_position=cache_position,
             pixel_values=pixel_values,
             image_sizes=image_sizes,
+            cache_position=cache_position,
         )
 
         if not is_prompt:

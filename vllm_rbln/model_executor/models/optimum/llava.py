@@ -54,20 +54,18 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
         input_ids: torch.LongTensor = None,
         pixel_values: torch.FloatTensor = None,
         image_sizes: Optional[torch.LongTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        vision_feature_layer: Optional[int] = None,
-        vision_feature_select_strategy: Optional[str] = None,
         cache_position: Union[List[torch.Tensor],
                               torch.Tensor] = None,  # vllm keyword argument
         **kwargs,
     ):
         if is_prefill:
+            # NOTE inputs_embeds will be generated inside _preprocess_prefill
             inputs_embeds = self.model._preprocess_prefill(
                 input_ids=input_ids,
-                inputs_embeds=inputs_embeds,
                 pixel_values=pixel_values,
                 image_sizes=image_sizes,
             )
+
             if self.model.language_model.prefill_decoder is None:
                 raise version_error
 
@@ -131,9 +129,9 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             is_prefill=is_prompt,
             block_tables=block_tables,
             input_ids=input_ids,
-            cache_position=cache_position,
             pixel_values=pixel_values,
             image_sizes=image_sizes,
+            cache_position=cache_position,
         )
 
         if not is_prompt:
