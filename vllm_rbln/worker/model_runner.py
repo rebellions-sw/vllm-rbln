@@ -202,11 +202,8 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         num_blocks_per_ve = num_blocks // \
             self.runner.parallel_config.pipeline_parallel_size
         ve_offset = num_blocks_per_ve * virtual_engine
-        assert (
-            len(seq_group_metadata_list) == 1), f"seq_group_metadata_list: \
-            len({len(seq_group_metadata_list)}) - {seq_group_metadata_list}"
 
-        for seq_group_metadata in seq_group_metadata_list:
+        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
             assert seq_group_metadata.is_prompt
             seq_ids = list(seq_group_metadata.seq_data.keys())
             assert len(seq_ids) == 1
@@ -231,7 +228,7 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
             data.num_prefill_tokens += len(tokens)
             data.query_lens.append(len(tokens))
             data.seq_lens.append(seq_len)
-            for i, pos in enumerate(data.input_positions[0]):
+            for pos in data.input_positions[i]:
                 block_number = block_table[pos // block_size]
                 block_offset = pos % block_size
                 data.slot_mapping.append(block_number)
@@ -239,6 +236,14 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
 
         max_seq_len = max(data.seq_lens)
         assert max_seq_len > 0
+
+        data.input_tokens = [[
+            token for tokens in data.input_tokens for token in tokens
+        ]]
+        data.input_positions = [[
+            position for positions in data.input_positions
+            for position in positions
+        ]]
 
         dummy = num_blocks
         # make_tensor_with_pad takes List[List[]] as input
@@ -248,11 +253,11 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                pad=dummy,
                                                dtype=torch.long,
                                                device=self.device)
-        # input_block_ids gets back in here.
-        input_block_ids = input_block_ids.flatten().tolist()
-        input_block_ids = torch.tensor(input_block_ids,
-                                       dtype=torch.long,
-                                       device=self.device)
+        if data.num_prefills == 1:
+            input_block_ids = input_block_ids.flatten().tolist()
+            input_block_ids = torch.tensor(input_block_ids,
+                                           dtype=torch.long,
+                                           device=self.device)
 
         prefill_size = (self.chunked_prefill_size if self.chunked_prefill else
                         1 << (math.ceil(math.log2(max_seq_len))))
@@ -612,13 +617,12 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         assert model_input.attn_metadata is not None
         token_indices = None
+        num_prefills = model_input.attn_metadata.num_prefills
         if get_pp_group().is_last_rank:
-            num_prefills = model_input.attn_metadata.num_prefills
             selected_token_indices = \
                 model_input.sampling_metadata.selected_token_indices
             len_token_indices = len(selected_token_indices)
             if num_prefills > 0:
-                assert len_token_indices == 0 or len_token_indices == 1
                 num_prefill_tokens = \
                     model_input.attn_metadata.num_prefill_tokens
                 token_indices = torch.tensor(
@@ -637,7 +641,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
                 intermediate_tensors=intermediate_tensors,
-                selected_token_indices=token_indices,
+                selected_token_indices=selected_token_indices
+                if num_prefills > 0 else token_indices,
                 **execute_model_kwargs,
             )
 
