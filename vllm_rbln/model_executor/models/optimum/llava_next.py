@@ -83,7 +83,6 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 image_sizes=image_sizes,
             )
 
-        if is_prefill:
             if self.model.language_model.prefill_decoder is None:
                 raise version_error
 
@@ -97,7 +96,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 raise version_error
 
             logits = self.model.language_model.decoder(
-                inputs_embeds=inputs_embeds,
+                input_ids=input_ids,
                 cache_position=cache_position,
                 block_tables=block_tables,
             ).logits
