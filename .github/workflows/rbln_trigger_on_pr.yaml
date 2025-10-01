@@ -31,6 +31,7 @@ jobs:
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
     outputs:
       is_team_member: ${{ steps.check_member.outputs.IS_TEAM_MEMBER }}
+      is_collaborator: ${{ steps.check_member.outputs. IS_COLLABORATOR }}
     steps:
       - name: Fetch team members
         id: fetch_team
