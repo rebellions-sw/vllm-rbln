@@ -5,4 +5,4 @@ datasets
 qwen_vl_utils
 transformers==4.53.1
 vllm==0.9.1
-optimum-rbln>=0.9.1
+optimum-rbln>=0.9.2a2
