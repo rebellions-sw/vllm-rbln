@@ -86,7 +86,7 @@ class RBLNModelRunner:
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
 
-        assert device in [torch.device("cpu"), torch.device("rbln")]
+        assert str(device) in ["cpu", "rbln"]
         assert self.speculative_config is None, "spec decode is not supported."
 
         model_config = self.model_config
@@ -836,9 +836,6 @@ class RBLNModelRunner:
             if attn_metadata is not None:
                 for attn_metadatum in attn_metadata.values():
                     attn_metadatum.kv_caches = self.kv_caches
-            if not self.model_config.enforce_eager and envs.RBLN_COMPILE_MODEL:
-                for kv_cache in self.kv_caches:
-                    self.compile_context.mark_static_address(kv_cache)
 
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
@@ -1576,6 +1573,11 @@ class RBLNModelRunner:
             self.vllm_config.compilation_config.static_forward_context,
             self.kv_caches,
         )
+
+        if not self.model_config.enforce_eager and envs.RBLN_COMPILE_MODEL:
+            for kv_cache in self.kv_caches:
+                self.compile_context.mark_static_address(kv_cache)
+
         return kv_caches
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:

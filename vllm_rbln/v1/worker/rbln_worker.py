@@ -120,9 +120,14 @@ class RBLNWorker(WorkerBase):
         else:
             device_ids = os.environ[env_var].split(",")
 
-        if len(device_ids) < total_device_count:
-            raise RuntimeError(f"{env_var} has {len(device_ids)} devices"
-                               " but required {total_device_count}")
+        # This check is only valid for single node mp backends, invalid for ray
+        # ex) node#0 : RBLN_DEVICES=0,1
+        #     node#1 : RBLN_DEVICES=2,3
+        distributed_backend = self.parallel_config.distributed_executor_backend
+        if distributed_backend == "mp" and len(
+                device_ids) < total_device_count:
+            raise RuntimeError(f"{env_var} has devices {device_ids}"
+                               f" but required {total_device_count}")
 
         start_idx = self.local_rank * envs.RBLN_TP_SIZE
         end_idx = start_idx + envs.RBLN_TP_SIZE
@@ -262,6 +267,10 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
+
+    # Set envs for RCCL
+    os.environ['LOCAL_RANK'] = str(local_rank)
+    os.environ['WORLD_SIZE'] = str(parallel_config.world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
