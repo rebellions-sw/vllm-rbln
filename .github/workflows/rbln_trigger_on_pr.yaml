@@ -1,4 +1,3 @@
-
 name: vllm-rbln / PR
 
 on:
@@ -32,6 +31,7 @@ jobs:
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
     outputs:
       is_team_member: ${{ steps.check_member.outputs.IS_TEAM_MEMBER }}
+      is_collaborator: ${{ steps.check_member.outputs. IS_COLLABORATOR }}
     steps:
       - name: Fetch team members
         id: fetch_team
@@ -41,14 +41,39 @@ jobs:
             -d '{"query":"query { organization(login: \"rebellions-sw\") { team(slug: \"rebel-sw-team\") { members(first: 100) { nodes { login } } } } }"}' \
             https://api.github.com/graphql)
           echo "$response" | jq -r '.data.organization.team.members.nodes[].login' > team_members.txt
+          cat team_members.txt
+
       - name: Check if PR author is a team member
         id: check_member
         run: |
           pr_author=${{ github.event.pull_request.user.login }}
+          echo "Checking if PR author '$pr_author' is a team member..."
           if grep -qx "$pr_author" team_members.txt; then
+            result="true"
             echo "IS_TEAM_MEMBER=true" >> $GITHUB_OUTPUT
+            echo "✅ IS_TEAM_MEMBER set to: $result"
           else
+            result="false"
             echo "IS_TEAM_MEMBER=false" >> $GITHUB_OUTPUT
+            echo "❌ IS_TEAM_MEMBER set to: $result"
+          fi
+
+      - name: Check if collaborator
+        if: ${{ needs.check-team-member.outputs.is_team_member != 'true' }}
+        run: |
+          pr_author=${{ github.event.pull_request.user.login }}
+          echo "Checking if PR author '$pr_author' is a collaborator..."
+          is_collaborator=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${{ secrets.GIT_PAT }}" \
+            https://api.github.com/repos/${{ github.repository }}/collaborators/$pr_author)
+          echo "HTTP response code: $is_collaborator"
+          if [ "$is_collaborator" -eq 204 ]; then
+            result="true"
+            echo "IS_COLLABORATOR=true" >> $GITHUB_OUTPUT
+            echo "✅ IS_COLLABORATOR set to: $result"
+          else
+            result="false"
+            echo "IS_COLLABORATOR=false" >> $GITHUB_OUTPUT
+            echo "❌ IS_COLLABORATOR set to: $result"
           fi
 
   check-code-quality:
@@ -70,7 +95,7 @@ jobs:
 
   vllm-rbln-pytest:
     needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version]
-    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && (needs.check-team-member.outputs.is_team_member == 'true' || needs.check-team-member.outputs.is_collaborator == 'true') }}
     uses: ./.github/workflows/rbln_vllm-rbln_pytest.yaml
     secrets: inherit
     with:
@@ -79,7 +104,7 @@ jobs:
 
   vllm-rbln-optimum-ci:
     needs: [check-skip-ci, check-team-member, check-code-quality, get-compiler-version, get-optimum-version, vllm-rbln-pytest]
-    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && needs.check-team-member.outputs.is_team_member == 'true' }}
+    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && (needs.check-team-member.outputs.is_team_member == 'true' || needs.check-team-member.outputs.is_collaborator == 'true') }}
     uses: ./.github/workflows/rbln_optimum_ci.yaml
     secrets: inherit
     with:
