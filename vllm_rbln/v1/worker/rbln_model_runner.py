@@ -653,19 +653,19 @@ class RBLNModelRunner:
         # Hot-Swap lora model
         # if self.lora_config:
         #     self.set_active_loras(self.input_batch, num_scheduled_tokens)
-        logger.info("num_reqs: %s", num_reqs)
-        logger.info("token_indices: %s", token_indices)
-        logger.info("input_batch: %s", vars(self.input_batch))
-        logger.info(
+        logger.debug("num_reqs: %s", num_reqs)
+        logger.debug("token_indices: %s", token_indices)
+        logger.debug("input_batch: %s", vars(self.input_batch))
+        logger.debug(
             "input_ids: %s",
             self.input_ids[:scheduler_output.total_num_scheduled_tokens],
         )
-        logger.info(
+        logger.debug(
             "positions: %s",
             self.positions[:scheduler_output.total_num_scheduled_tokens],
         )
-        logger.info("attn_metadata: %s", next(iter(attn_metadata.items())))
-        logger.info("logits_indices: %s", logits_indices)
+        logger.debug("attn_metadata: %s", next(iter(attn_metadata.items())))
+        logger.debug("logits_indices: %s", logits_indices)
         return attn_metadata, logits_indices, spec_decode_metadata
 
     def _compile_model(self, model):
