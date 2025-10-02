@@ -267,12 +267,12 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                dtype=torch.long,
                                                device=self.device)
 
-        logger.info("[RBLN] model input builder, prepare_prompt")
-        logger.info("\tpadded input_tokens = %s", input_tokens)
-        logger.info("\tpadded input_positions = %s", input_positions)
-        logger.info("\tinput_block_ids = %s", input_block_ids)
-        logger.info("\tseq_lens = %s", data.seq_lens)
-        logger.info("\tquery_lens = %s", data.query_lens)
+        logger.debug("[RBLN] model input builder, prepare_prompt")
+        logger.debug("\tpadded input_tokens = %s", input_tokens)
+        logger.debug("\tpadded input_positions = %s", input_positions)
+        logger.debug("\tinput_block_ids = %s", input_block_ids)
+        logger.debug("\tseq_lens = %s", data.seq_lens)
+        logger.debug("\tquery_lens = %s", data.query_lens)
         return (input_tokens, input_positions, input_block_ids)
 
     def _prepare_decode(
@@ -340,12 +340,12 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                dtype=torch.long,
                                                device=self.device)
 
-        logger.info("[RBLN] model input builder, prepare_decode")
-        logger.info("\tpadded input_tokens = %s", data.input_tokens)
-        logger.info("\tpadded input_positions = %s", data.input_positions)
-        logger.info("\tinput_block_ids = %s", input_block_ids)
-        logger.info("\tseq_lens = %s", data.seq_lens)
-        logger.info("\tquery_lens = %s", data.query_lens)
+        logger.debug("[RBLN] model input builder, prepare_decode")
+        logger.debug("\tpadded input_tokens = %s", data.input_tokens)
+        logger.debug("\tpadded input_positions = %s", data.input_positions)
+        logger.debug("\tinput_block_ids = %s", input_block_ids)
+        logger.debug("\tseq_lens = %s", data.seq_lens)
+        logger.debug("\tquery_lens = %s", data.query_lens)
 
         assert input_tokens.shape[0] == self.max_num_seqs
         assert input_positions.shape[0] == self.max_num_seqs
@@ -583,9 +583,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         is_prompt = seq_group_metadata_list[
             0].is_prompt if seq_group_metadata_list else None
-        logger.info("[RBLN] num_requests = %d", len(seq_group_metadata_list))
-        logger.info("[RBLN] input_ids = %s", model_input.input_tokens)
-        logger.info("[RBLN] positions = %s", model_input.input_positions)
+        logger.debug("[RBLN] num_requests = %d", len(seq_group_metadata_list))
+        logger.debug("[RBLN] input_ids = %s", model_input.input_tokens)
+        logger.debug("[RBLN] positions = %s", model_input.input_positions)
         return dataclasses.replace(model_input,
                                    sampling_metadata=sampling_metadata,
                                    virtual_engine=virtual_engine,
