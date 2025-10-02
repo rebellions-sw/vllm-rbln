@@ -34,6 +34,7 @@ from vllm.distributed.parallel_state import (
     get_pp_group, get_tp_group, prepare_communication_buffer_for_model)
 from vllm.forward_context import (DPMetadata, get_forward_context,
                                   set_forward_context)
+from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.model_loader import TensorizerLoader, get_model_loader
 from vllm.sampling_params import SamplingType
@@ -750,6 +751,14 @@ class RBLNModelRunner:
         )
         return max_tokens_across_dp_cpu - num_tokens, num_tokens_after_padding
 
+    def compute_logits(
+        self,
+        hidden_states: torch.Tensor,
+        sampling_metadata: Optional[SamplingMetadata] = None,
+    ) -> torch.Tensor:
+
+        return self.model.compute_logits(hidden_states, sampling_metadata)
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -920,8 +929,15 @@ class RBLNModelRunner:
                                             all_gather_group=get_tp_group())
             logits = None
         else:
-            sample_hidden_states = hidden_states[logits_indices]
-            logits = self.model.compute_logits(sample_hidden_states, None)
+            if is_prefills[0]:  # prefill
+                sample_hidden_states = hidden_states[logits_indices]
+                logits = self.compute_logits(sample_hidden_states, None)
+            else:  # decode
+                logits = self.compute_logits(hidden_states, None)
+                logits = logits[logits_indices]
+            logits = self.logits_processor._gather_logits(logits)
+            logits = logits.view(-1, logits.size(-1))
+
         if broadcast_pp_output:
             model_output_broadcast_data = ({
                 "logits": logits.contiguous(),
@@ -1215,6 +1231,13 @@ class RBLNModelRunner:
             self.model_config.get_num_layers(self.parallel_config),
         )
 
+        # get logits processor from model
+        if self.model_config.is_multimodal_model and hasattr(
+                self.model.get_language_model(), "logits_processor"):
+            self.logits_processor = self.model.get_language_model(
+            ).logits_processor
+        else:
+            self.logits_processor = self.model.logits_processor
         # if self.lora_config:
         #     self.model = self.load_lora_model(
         #         self.model,
@@ -1250,6 +1273,15 @@ class RBLNModelRunner:
 
             self.compile_context = CompileContext(use_weight_sharing=True)
             self.model_executable = self._compile_model(self.model)
+            self.compute_logits = torch.compile(
+                self.compute_logits,
+                backend="rbln",
+                options={
+                    "compile_context": self.compile_context,
+                    "tensor_parallel_size": envs.RBLN_TP_SIZE,
+                },
+                dynamic=False,
+            )
 
     def save_tensorized_model(
         self,
