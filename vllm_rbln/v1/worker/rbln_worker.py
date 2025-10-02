@@ -212,8 +212,11 @@ class RBLNWorker(WorkerBase):
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def compile_or_warm_up_model(self) -> None:
-        logger.warning("model warm-up is not supported on RBLN.")
-        pass
+        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            logger.warning("skipping compile_or_warm_up_model")
+            return
+
+        self.model_runner.warmup_model()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
