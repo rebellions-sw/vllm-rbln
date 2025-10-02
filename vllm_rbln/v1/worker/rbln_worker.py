@@ -64,7 +64,7 @@ class RBLNWorker(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
         assert "rbln" in current_platform.get_device_name().lower()
-        self.device = torch.device(current_platform.device_name)
+        self.device = torch.device(current_platform.device_type)
 
         if self.parallel_config.distributed_executor_backend == "ray":
             logger.info(
@@ -120,9 +120,14 @@ class RBLNWorker(WorkerBase):
         else:
             device_ids = os.environ[env_var].split(",")
 
-        if len(device_ids) < total_device_count:
-            raise RuntimeError(f"{env_var} has {len(device_ids)} devices"
-                               " but required {total_device_count}")
+        # This check is only valid for single node mp backends, invalid for ray
+        # ex) node#0 : RBLN_DEVICES=0,1
+        #     node#1 : RBLN_DEVICES=2,3
+        distributed_backend = self.parallel_config.distributed_executor_backend
+        if distributed_backend == "mp" and len(
+                device_ids) < total_device_count:
+            raise RuntimeError(f"{env_var} has devices {device_ids}"
+                               f" but required {total_device_count}")
 
         start_idx = self.local_rank * envs.RBLN_TP_SIZE
         end_idx = start_idx + envs.RBLN_TP_SIZE
@@ -179,15 +184,17 @@ class RBLNWorker(WorkerBase):
             nbits_per_param=16 if not self.model_config.quantization else 4,
             n_model_params=sum(p.numel()
                                for p in self.model_runner.model.parameters()),
-            # 1 : prefill
-            num_runtimes=1 + self.scheduler_config.max_num_seqs)
+            # 2 : 1 for prefill and decode each
+            num_runtimes=2)
 
         # for partition skip, we need dummy block slot.
         no_dummy_slots = 1
         max_required_num_blocks = (self.model_config.max_model_len *
                                    self.scheduler_config.max_num_seqs //
                                    block_size) + no_dummy_slots
-        num_gpu_blocks = min(max_num_blocks, max_required_num_blocks)
+        num_gpu_blocks = min(
+            max_num_blocks * self.cache_config.gpu_memory_utilization,
+            max_required_num_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks)
@@ -260,6 +267,10 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
+
+    # Set envs for RCCL
+    os.environ['LOCAL_RANK'] = str(local_rank)
+    os.environ['WORLD_SIZE'] = str(parallel_config.world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 

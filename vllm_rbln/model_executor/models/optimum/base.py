@@ -53,12 +53,14 @@ _RBLN_ENCODER_DECODER_MODELS: Dict[str, Tuple[str, str]] = {
 _RBLN_MULTIMODAL_MODELS = {
     "LlavaNextForConditionalGeneration":
     ("llava_next", "RBLNLlavaNextForConditionalGeneration"),
+    "Qwen2VLForConditionalGeneration":
+    ("qwen2_vl", "RBLNQwen2VLForConditionalGeneration"),
     "Qwen2_5_VLForConditionalGeneration":
     ("qwen2_5_vl", "RBLNQwen2_5_VLForConditionalGeneration"),
     "Idefics3ForConditionalGeneration":
     ("idefics3", "RBLNIdefics3ForConditionalGeneration"),
-    "Blip2ForConditionalGeneration":
-    ("blip2", "RBLNBlip2ForConditionalGeneration"),
+    "Blip2ForConditionalGeneration": ("blip2",
+                                      "RBLNBlip2ForConditionalGeneration"),
     "Gemma3ForConditionalGeneration": ("gemma3",
                                        "RBLNGemma3ForConditionalGeneration"),
     "WhisperForConditionalGeneration": ("whisper",

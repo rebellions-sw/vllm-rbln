@@ -86,7 +86,7 @@ class RBLNModelRunner:
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
 
-        assert device == torch.device("cpu")
+        assert str(device) in ["cpu", "rbln"]
         assert self.speculative_config is None, "spec decode is not supported."
 
         model_config = self.model_config
@@ -669,32 +669,23 @@ class RBLNModelRunner:
         return attn_metadata, logits_indices, spec_decode_metadata
 
     def _compile_model(self, model):
-        if envs.RBLN_COMPILE_MODEL:
-            if envs.RBLN_TP_SIZE > 1:
-                compiled_model = torch.compile(
-                    model,
-                    backend="rbln",
-                    options={
-                        "compile_context": self.compile_context,
-                        "cache_dir": "./rsd_cache_dir",
-                        "tensor_parallel_size": envs.TP_SIZE,
-                    },
-                    dynamic=False,
-                )
-            else:
-                compiled_model = torch.compile(
-                    model,
-                    backend="rbln",
-                    options={
-                        "compile_context": self.compile_context,
-                        "cache_dir": "./cache_dir",
-                    },
-                    dynamic=False,
-                )
+        options = {
+            "compile_context": self.compile_context,
+            "tensor_parallel_size": envs.RBLN_TP_SIZE,
+        }
+        if not envs.VLLM_DISABLE_COMPILE_CACHE:
+            logger.info("Once the model is compiled for the first time, "
+                        "the cached compiled binary will be reused.")
+            options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
+                                    else "./cache_dir")
 
-            return compiled_model
-        else:
-            return model
+        compiled_model = torch.compile(
+            model,
+            backend="rbln",
+            options=options,
+            dynamic=False,
+        )
+        return compiled_model
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -845,8 +836,6 @@ class RBLNModelRunner:
             if attn_metadata is not None:
                 for attn_metadatum in attn_metadata.values():
                     attn_metadatum.kv_caches = self.kv_caches
-            for kv_cache in self.kv_caches:
-                self.compile_context.mark_static_address(kv_cache)
 
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
@@ -865,14 +854,14 @@ class RBLNModelRunner:
                                 self.scheduler_config.chunked_prefill_enabled
                                 else 1 << (math.ceil(math.log2(max_seq_len))))
                 input_ids = make_tensor_with_pad(
-                    input_ids,
+                    input_ids.to("cpu"),
                     max_len=prefill_size,
                     pad=0,
                     dtype=torch.long,
                     device=self.device,
                 )
                 positions = make_tensor_with_pad(
-                    positions,
+                    positions.to("cpu"),
                     max_len=prefill_size,
                     pad=0,
                     dtype=torch.long,
@@ -884,11 +873,15 @@ class RBLNModelRunner:
                                       self.input_batch.num_reqs)
                 input_ids = torch.cat([
                     input_ids,
-                    torch.full((batch_padding_size, input_ids.shape[-1]), 0),
+                    torch.full((batch_padding_size, input_ids.shape[-1]),
+                               0,
+                               device=self.device),
                 ], )
                 positions = torch.cat([
                     positions,
-                    torch.full((batch_padding_size, positions.shape[-1]), 0),
+                    torch.full((batch_padding_size, positions.shape[-1]),
+                               0,
+                               device=self.device),
                 ])
 
             model_output = self.model_executable(
@@ -1240,19 +1233,23 @@ class RBLNModelRunner:
 
         prepare_communication_buffer_for_model(self.model)
 
-        # NOTE - refer to pytorch 2.5 release notes
-        # torch.compile regional compilation without recompilations
-        # To prevent nn.modules parameters to be model input, set false
-        # if this flag is set, nn.modules parameters are treated as model input
-        torch._dynamo.config.inline_inbuilt_nn_modules = False
-        # RBLN compile context to mark static address for kv cache tensor
-        # if tensor is set to have static address,
-        # similar to RBLN kv cache binding
-        from rebel.compile_context import CompileContext
-
         self.model.eval()
-        self.compile_context = CompileContext(use_weight_sharing=True)
-        self.model_executable = self._compile_model(self.model)
+        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+            self.model_executable = self.model
+        else:
+            # NOTE - refer to pytorch 2.5 release notes
+            # torch.compile regional compilation without recompilations
+            # To prevent nn.modules parameters to be model input, set false
+            # if this flag is set, nn.modules parameters are treated
+            # as model input
+            torch._dynamo.config.inline_inbuilt_nn_modules = False
+            # RBLN compile context to mark static address for kv cache tensor
+            # if tensor is set to have static address,
+            # similar to RBLN kv cache binding
+            from rebel.compile_context import CompileContext
+
+            self.compile_context = CompileContext(use_weight_sharing=True)
+            self.model_executable = self._compile_model(self.model)
 
     def save_tensorized_model(
         self,
@@ -1471,7 +1468,7 @@ class RBLNModelRunner:
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
             tensor = torch.zeros(kv_cache_tensor.size,
                                  dtype=torch.int8,
-                                 device=self.device)
+                                 device="cpu")
             for layer_name in kv_cache_tensor.shared_by:
                 kv_cache_raw_tensors[layer_name] = tensor
 
@@ -1559,6 +1556,9 @@ class RBLNModelRunner:
         # Change the memory buffer to the desired shape
         kv_caches = self._reshape_kv_cache_tensors(kv_cache_config,
                                                    kv_cache_raw_tensors)
+        if self.device != next(iter(kv_caches.values())).device:
+            for key in kv_caches:
+                kv_caches[key] = kv_caches[key].to(self.device)
 
         # Setup `kv_cache_config` and `kv_caches` for models
         # with cross-layer KV sharing
@@ -1573,6 +1573,11 @@ class RBLNModelRunner:
             self.vllm_config.compilation_config.static_forward_context,
             self.kv_caches,
         )
+
+        if not self.model_config.enforce_eager and envs.RBLN_COMPILE_MODEL:
+            for kv_cache in self.kv_caches:
+                self.compile_context.mark_static_address(kv_cache)
+
         return kv_caches
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
@@ -1586,10 +1591,6 @@ class RBLNModelRunner:
         self.may_reinitialize_input_batch(kv_cache_config)
         self.initialize_attn_backend(kv_cache_config)
         kv_caches = self.initialize_kv_cache_tensors(kv_cache_config)
-
-        # for partition skip, we need dummy block slot.
-        no_dummy_slots = 1
-        kv_cache_config.num_blocks -= no_dummy_slots
 
         if self.speculative_config and self.speculative_config.use_eagle():
             assert isinstance(self.drafter, EagleProposer)
