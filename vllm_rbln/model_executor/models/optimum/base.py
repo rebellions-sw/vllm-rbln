@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from transformers import PretrainedConfig
+from vllm.lora.layers import LoRAMapping
+from vllm.lora.request import LoRARequest
 from vllm.model_executor.pooling_metadata import PoolingMetadata
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import BatchedTensorInputs
@@ -104,6 +106,8 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     token_type_ids: Optional[torch.Tensor] = None
     pooling_metadata: Optional[PoolingMetadata] = None  # for V0
+    lora_requests: Optional[List[LoRARequest]] = None  # for V0
+    lora_mapping: Optional["LoRAMapping"] = None  # for V0
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
