@@ -520,10 +520,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     model_output = model_output[:, selected_token_indices]
                 logits = self.compute_logits_model.compute_logits(
                     model_output, None)
+                return logits
             else:
                 # non last rank create intermediate tensors, bypass it
-                logits = model_output
-            return logits
+                return model_output
 
         if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
             self.model_executable = model_wrapper
@@ -594,12 +594,12 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
     @torch.inference_mode()
     def execute_model(
         self,
-        model_input: ModelInputForRebel,
+        model_input: ModelInputForRebelWithSamplingMetadata,
         kv_caches: Optional[List[torch.Tensor]] = None,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
         previous_hidden_states: Optional[torch.Tensor] = None,
-    ) -> Optional[SamplerOutput]:
+    ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         assert kv_caches is not None
         if num_steps > 1:
             raise ValueError(
@@ -613,6 +613,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         assert model_input.attn_metadata is not None
         token_indices = None
         if get_pp_group().is_last_rank:
+            assert model_input.sampling_metadata is not None
             num_prefills = model_input.attn_metadata.num_prefills
             selected_token_indices = \
                 model_input.sampling_metadata.selected_token_indices
@@ -633,7 +634,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
 
-            hidden_states = self.model_executable(
+            logits_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
                 intermediate_tensors=intermediate_tensors,
@@ -641,22 +642,21 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 **execute_model_kwargs,
             )
 
-            if get_pp_group().is_last_rank:
-                # Gather logits for TP
-                logits_processor = self.compute_logits_model.logits_processor
-                hidden_states = logits_processor._gather_logits(hidden_states)
-                hidden_states = hidden_states.view(-1, hidden_states.size(-1))
+        if get_pp_group().is_last_rank:
+            # Gather logits for TP
+            logits_processor = self.compute_logits_model.logits_processor
+            logits = logits_processor._gather_logits(
+                logits_or_intermediate_states)
+            logits = logits.view(-1, logits.size(-1))
 
-        if not get_pp_group().is_last_rank:
-            intermediate_states = hidden_states
+        else:
+            intermediate_states = logits_or_intermediate_states
             assert isinstance(intermediate_states, IntermediateTensors)
             return intermediate_states
 
         # Compute the logits. -> moved to model executable
-        if num_prefills > 0 and len_token_indices != 0:
-            logits = hidden_states
-        else:
-            logits = hidden_states[selected_token_indices]
+        if not (num_prefills > 0 and len_token_indices != 0):
+            logits = logits[selected_token_indices]
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
