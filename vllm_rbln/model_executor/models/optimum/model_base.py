@@ -156,9 +156,9 @@ class RBLNOptimumModelBase(nn.Module):
             if model_path.is_dir() and any(model_path.glob('*.rbln')):
                 compiled_path = self.model_config.model
             else:
-                compiled_path = self.model_config.compiled_model_dir
+                compiled_path = None
         else:
-            compiled_path = self.model_config.compiled_model_dir
+            compiled_path = None
 
         if compiled_path is None or not os.path.exists(compiled_path):
             raise RuntimeError(

@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -199,24 +202,8 @@ class RblnPlatform(Platform):
         assert (not vllm_config.speculative_config
                 ), "Speculative decoding not yet supported for RBLN backend."
 
-        cache_config = vllm_config.cache_config
-        if cache_config:
-            assert vllm_config.cache_config.block_size is not None, (
-                "block_size must be configured for RBLN backend")
-            if cache_config.enable_prefix_caching:
-                if not envs.VLLM_USE_V1:
-                    raise RuntimeError(
-                        "Prefix caching is only supported on v1 for RBLN.")
-                if model_config.is_multimodal_model:
-                    raise NotImplementedError(
-                        "Prefix caching is not supported for multimodal "
-                        "models yet.")
-                attn_block_size = vllm_config.additional_config.get(
-                    "attn_block_size", None)
-                assert attn_block_size is not None, \
-                    "`attn_block_size` must be set."
-                assert attn_block_size % cache_config.block_size == 0, \
-                    "`attn_block_size` must be a multiple of `block_size`."
+        if not envs.RBLN_USE_VLLM_MODEL:
+            cls.sync_with_rbln_config(vllm_config)
 
         if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
@@ -260,3 +247,17 @@ class RblnPlatform(Platform):
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
         return True
+
+    @classmethod
+    def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
+        rbln_config_path = Path(
+            os.path.join(vllm_config.model_config.model, "rbln_config.json"))
+        with open(rbln_config_path, encoding='utf-8') as f:
+            rbln_config = json.load(f)
+        kvcache_block_size = rbln_config.get("kvcache_block_size", None)
+        if vllm_config.cache_config.enable_prefix_caching:
+            vllm_config.cache_config.block_size = 128
+            vllm_config.additional_config[
+                "attn_block_size"] = kvcache_block_size
+        else:
+            vllm_config.cache_config.block_size = kvcache_block_size
