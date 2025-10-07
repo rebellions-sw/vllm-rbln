@@ -204,6 +204,7 @@ class RblnPlatform(Platform):
 
         if not envs.RBLN_USE_VLLM_MODEL:
             cls.sync_with_rbln_config(vllm_config)
+            # TODO Enable prefix caching in V0
 
         if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
