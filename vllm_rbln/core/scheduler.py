@@ -28,6 +28,7 @@ from vllm.core.scheduler import (ARTIFICIAL_PREEMPTION_PROB,
                                  SchedulerSwappedInOutputs, SchedulingBudget)
 from vllm.sequence import SequenceGroup, SequenceStage, SequenceStatus
 
+import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
@@ -388,9 +389,12 @@ class RBLNScheduler(Scheduler):
             )
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
-            # NOTE(RBLN):
-            # For rbln target, we only consider batch size of 1 for prefill.
-            break
+            if not enable_chunking or envs.RBLN_FLASH_CAUSAL_ATTN:
+                # NOTE(RBLN):
+                # For rbln target, we only consider batch size of 1 for prefill.
+                # In case of chunked prefill, it's available to schedule
+                # multiple requests in a single batch.
+                break
 
         logger.debug("waiting_queue -> len=%s", len(waiting_queue))
         # Queue requests that couldn't be scheduled.
