@@ -14,12 +14,13 @@
 
 import pytest
 import torch
+from vllm.config import VllmConfig
 from vllm.platforms import current_platform
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 
-from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-from vllm_rbln.v1.worker.optimum_prefix_cache_manager import (
+from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
+from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 from .utils import (MockModelWrapper, _schedule_cached_reqs,
                     _schedule_new_request, finish_request, get_vllm_config,
@@ -31,6 +32,18 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1  # 9
 DEVICE = current_platform.device_type
+
+
+def set_block_size(cls, vllm_config: VllmConfig):
+    vllm_config.cache_config.block_size = IB_SIZE
+    vllm_config.additional_config["attn_block_size"] = OB_SIZE
+
+
+@pytest.fixture
+def common_monkeypatch(monkeypatch):
+    monkeypatch.setattr(
+        "vllm_rbln.platform.RblnPlatform.sync_with_rbln_config",
+        classmethod(set_block_size))
 
 
 @pytest.fixture
@@ -49,7 +62,7 @@ def model_runner():
     return runner
 
 
-def test_prefill(model_runner):
+def test_prefill(common_monkeypatch, model_runner):
     """
     Check the prefix caching works as expected during prefill.
 
@@ -161,7 +174,7 @@ def test_prefill(model_runner):
     assert inputs.cached_block_tables == [0, 1]
 
 
-def test_decode(model_runner):
+def test_decode(common_monkeypatch, model_runner):
     """
     Check the prefix caching works as expected during decode.
     """
@@ -220,7 +233,7 @@ def test_decode(model_runner):
     assert inputs.cached_block_tables == []
 
 
-def test_simple_eviction():
+def test_simple_eviction(common_monkeypatch):
     """
     req0: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated
     req1: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated

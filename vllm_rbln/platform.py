@@ -253,6 +253,9 @@ class RblnPlatform(Platform):
     def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
         rbln_config_path = Path(
             os.path.join(vllm_config.model_config.model, "rbln_config.json"))
+        if not rbln_config_path.exists():
+            raise FileNotFoundError(
+                f"rbln_config.json not found in {rbln_config_path}")
         with open(rbln_config_path, encoding='utf-8') as f:
             rbln_config = json.load(f)
         kvcache_block_size = rbln_config.get("kvcache_block_size", None)
