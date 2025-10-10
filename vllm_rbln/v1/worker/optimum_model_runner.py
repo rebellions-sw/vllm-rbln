@@ -356,6 +356,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             return
 
         # Batch the multi-modal inputs.
+        # TODO support for prefix caching with multi-modal inputs
+        # Remove mm_inputs that are already cached.
         mm_inputs = list[RBLNOptimumMultiModalKwargs]()
         for req_id, encoder_input_ids in scheduled_encoder_inputs.items():
             req_state = self.requests[req_id]

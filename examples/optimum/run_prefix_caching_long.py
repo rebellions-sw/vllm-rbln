@@ -87,7 +87,6 @@ def get_wiki_based_questions():
 sampling_params = SamplingParams(temperature=0.0)
 BATCH_SIZE = 3
 MAX_SEQ_LEN = 4096
-BLOCK_SIZE = 4096
 MODEL = "./llama3.2-3b-rbln-b3"
 
 
@@ -99,7 +98,6 @@ def main():
 
     regular_llm = LLM(
         model=MODEL,
-        block_size=BLOCK_SIZE,
         max_num_seqs=BATCH_SIZE,
         max_num_batched_tokens=MAX_SEQ_LEN,
         max_model_len=MAX_SEQ_LEN,
@@ -134,10 +132,6 @@ def main():
     # Create an LLM with prefix caching enabled.
     prefix_cached_llm = LLM(
         model=MODEL,
-        block_size=128,
-        additional_config={
-            "attn_block_size": BLOCK_SIZE,
-        },
         max_num_seqs=BATCH_SIZE,
         max_num_batched_tokens=MAX_SEQ_LEN,
         max_model_len=MAX_SEQ_LEN,

@@ -57,7 +57,6 @@ sampling_params = SamplingParams(temperature=0.0)
 
 BATCH_SIZE = 3
 MAX_SEQ_LEN = 4096
-BLOCK_SIZE = 4096
 MODEL = "./llama3.2-3b-rbln-b3"
 
 
