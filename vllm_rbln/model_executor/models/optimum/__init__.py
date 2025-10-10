@@ -49,7 +49,8 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
 
     if is_multi_modal(model_config.hf_config):
         assert vllm_config.cache_config.enable_prefix_caching is False, (
-            "Prefix caching is not supported with multimodal models.")
+            "Prefix caching is not supported with multimodal models. Please set "
+            "`enable_prefix_caching` to False.")
         architectures = getattr(model_config.hf_config, "architectures", [])
         if architectures[0] in _RBLN_OPTIMUM_MULTIMODAL_MODELS:
             rbln_model_arch = _RBLN_OPTIMUM_MULTIMODAL_MODELS[architectures[0]]
@@ -62,11 +63,13 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                 f"{list(_RBLN_OPTIMUM_MULTIMODAL_MODELS.keys())}")
     elif is_enc_dec_arch(model_config.hf_config):
         assert vllm_config.cache_config.enable_prefix_caching is False, (
-            "Prefix caching is not supported with encoder-decoder models.")
+            "Prefix caching is not supported with encoder-decoder models. Please set "
+            "`enable_prefix_caching` to False.")
         rbln_model = RBLNOptimumEncoderDecoder(vllm_config)
     elif is_pooling_arch(model_config.hf_config):
         assert vllm_config.cache_config.enable_prefix_caching is False, (
-            "Prefix caching is not supported with pooling models.")
+            "Prefix caching is not supported with pooling models. Please set "
+            "`enable_prefix_caching` to False.")
         rbln_model = RBLNOptimumForEncoderModel(vllm_config)
     else:
         if getattr(model_config.hf_config,
@@ -76,7 +79,7 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                 "The model is initialized with Sliding Window Attention.")
             assert vllm_config.cache_config.enable_prefix_caching is False, (
                 "Prefix caching is not supported with sliding window "
-                "attention.")
+                "attention. Please set `enable_prefix_caching` to False.")
             rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
                 vllm_config)
         else:

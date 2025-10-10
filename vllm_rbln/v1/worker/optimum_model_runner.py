@@ -41,7 +41,7 @@ from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
 from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
-from vllm_rbln.v1.worker.optimum_prefix_cache_manager import (
+from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
 
 logger = init_logger(__name__)

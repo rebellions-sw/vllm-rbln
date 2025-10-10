@@ -19,9 +19,9 @@ from typing import Optional
 import torch
 
 from vllm_rbln.logger import init_logger
-from vllm_rbln.v1.worker.optimum_block_mapping_manager import (
+from vllm_rbln.prefix_cache_manager.optimum_block_mapping_manager import (
     BlockMappingManager, RBLNBlock)
-from vllm_rbln.v1.worker.optimum_eviction_policy import (FIFOEvictionPolicy,
+from vllm_rbln.prefix_cache_manager.optimum_eviction_policy import (FIFOEvictionPolicy,
                                                          LRUEvictionPolicy)
 
 logger = init_logger(__name__)

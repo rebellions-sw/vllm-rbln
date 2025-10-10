@@ -14,7 +14,7 @@
 from collections import OrderedDict
 
 from vllm_rbln.logger import init_logger
-from vllm_rbln.v1.worker.optimum_block_mapping_manager import (
+from vllm_rbln.prefix_cache_manager.optimum_block_mapping_manager import (
     BlockMappingManager)
 
 logger = init_logger(__name__)
