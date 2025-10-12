@@ -26,7 +26,7 @@ else:
 
 import rebel
 from torch._dynamo import register_backend
-from vllm.config.model import _RUNNER_TASKS
+from vllm.config import _RUNNER_TASKS
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
