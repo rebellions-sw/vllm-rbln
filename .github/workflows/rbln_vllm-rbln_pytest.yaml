@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
-        test_type: [core, worker]
+        test_type: [core, worker, prefix-caching]
     steps:
       - name: Checkout the vllm-rbln repository
         uses: actions/checkout@v4
