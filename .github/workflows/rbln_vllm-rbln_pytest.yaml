@@ -172,6 +172,9 @@ jobs:
             "worker")
               pytest tests/v1/worker -vv --durations 0
               ;;
+            "prefix-caching")
+              pytest tests/v1/prefix_caching -vv --durations 0
+              ;;
           esac
 
       - name: Skip message
