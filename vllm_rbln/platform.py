@@ -252,6 +252,15 @@ class RblnPlatform(Platform):
         return True
 
     @classmethod
+    def _disable_prefix_caching(cls, vllm_config: VllmConfig,
+                                reason: str) -> None:
+        """Disable prefix caching with warning message."""
+        logger.warning(
+            "Prefix caching is not supported for %s. "
+            "Disabling prefix caching.", reason)
+        vllm_config.cache_config.enable_prefix_caching = False
+
+    @classmethod
     def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
         rbln_config_path = Path(
             os.path.join(vllm_config.model_config.model, "rbln_config.json"))
@@ -261,27 +270,19 @@ class RblnPlatform(Platform):
         with open(rbln_config_path, encoding='utf-8') as f:
             rbln_config = json.load(f)
         kvcache_block_size = rbln_config.get("kvcache_block_size", None)
+
+        # NOTE The logic is different with models/optimum/__init__.py
         if vllm_config.cache_config.enable_prefix_caching:
             if vllm_config.model_config.is_encoder_decoder:
-                logger.warning(
-                    "Prefix caching is not supported for "
-                    "encoder-decoder models. Disabling prefix caching.")
-                vllm_config.cache_config.enable_prefix_caching = False
+                cls._disable_prefix_caching(vllm_config,
+                                            "encoder-decoder models")
             elif vllm_config.model_config.is_multimodal_model:
-                logger.warning(
-                    "Prefix caching is not supported for multimodal models."
-                    " Disabling prefix caching.")
-                vllm_config.cache_config.enable_prefix_caching = False
+                cls._disable_prefix_caching(vllm_config, "multimodal models")
             elif vllm_config.model_config.task in _RUNNER_TASKS["pooling"]:
-                logger.warning(
-                    "Prefix caching is not supported for pooling models."
-                    " Disabling prefix caching.")
-                vllm_config.cache_config.enable_prefix_caching = False
+                cls._disable_prefix_caching(vllm_config, "pooling models")
             elif rbln_config.get("sliding_window", None) is not None:
-                logger.warning(
-                    "Prefix caching is not supported for sliding window models."
-                    " Disabling prefix caching.")
-                vllm_config.cache_config.enable_prefix_caching = False
+                cls._disable_prefix_caching(vllm_config,
+                                            "sliding window models")
 
         if vllm_config.cache_config.enable_prefix_caching:
             vllm_config.cache_config.block_size = 128
