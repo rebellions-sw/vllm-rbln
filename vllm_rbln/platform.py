@@ -262,6 +262,23 @@ class RblnPlatform(Platform):
             rbln_config = json.load(f)
         kvcache_block_size = rbln_config.get("kvcache_block_size", None)
         if vllm_config.cache_config.enable_prefix_caching:
+            if vllm_config.model_config.is_encoder_decoder or \
+                logger.warning(
+                    "Prefix caching is not supported for encoder-decoder models."
+                    " Disabling prefix caching.")
+                vllm_config.cache_config.enable_prefix_caching = False
+            elif vllm_config.model_config.is_multimodal_model:
+                logger.warning(
+                    "Prefix caching is not supported for multimodal models."
+                    " Disabling prefix caching.")
+                vllm_config.cache_config.enable_prefix_caching = False
+            elif rbln_config.get("sliding_window", None) is not None:
+                logger.warning(
+                    "Prefix caching is not supported for sliding window models."
+                    " Disabling prefix caching.")
+                vllm_config.cache_config.enable_prefix_caching = False
+
+        if vllm_config.cache_config.enable_prefix_caching:
             vllm_config.cache_config.block_size = 128
             vllm_config.additional_config[
                 "attn_block_size"] = kvcache_block_size
