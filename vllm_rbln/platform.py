@@ -28,7 +28,7 @@ import rebel
 from torch._dynamo import register_backend
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
-
+from vllm.config.model import _RUNNER_TASKS
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
@@ -270,6 +270,11 @@ class RblnPlatform(Platform):
             elif vllm_config.model_config.is_multimodal_model:
                 logger.warning(
                     "Prefix caching is not supported for multimodal models."
+                    " Disabling prefix caching.")
+                vllm_config.cache_config.enable_prefix_caching = False
+            elif vllm_config.model_config.task in _RUNNER_TASKS["pooling"]:
+                logger.warning(
+                    "Prefix caching is not supported for pooling models."
                     " Disabling prefix caching.")
                 vllm_config.cache_config.enable_prefix_caching = False
             elif rbln_config.get("sliding_window", None) is not None:
