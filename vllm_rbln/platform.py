@@ -26,9 +26,10 @@ else:
 
 import rebel
 from torch._dynamo import register_backend
+from vllm.config.model import _RUNNER_TASKS
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
-from vllm.config.model import _RUNNER_TASKS
+
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
@@ -262,10 +263,10 @@ class RblnPlatform(Platform):
             rbln_config = json.load(f)
         kvcache_block_size = rbln_config.get("kvcache_block_size", None)
         if vllm_config.cache_config.enable_prefix_caching:
-            if vllm_config.model_config.is_encoder_decoder or \
+            if vllm_config.model_config.is_encoder_decoder:
                 logger.warning(
-                    "Prefix caching is not supported for encoder-decoder models."
-                    " Disabling prefix caching.")
+                    "Prefix caching is not supported for "
+                    "encoder-decoder models. Disabling prefix caching.")
                 vllm_config.cache_config.enable_prefix_caching = False
             elif vllm_config.model_config.is_multimodal_model:
                 logger.warning(
