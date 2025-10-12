@@ -392,7 +392,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         bind_kv_cache(self.compilation_config.static_forward_context,
                       self.cpu_cache)
-        if not self.model_config.enforce_eager:
+        if not self.model_config.enforce_eager and envs.RBLN_COMPILE_MODEL:
             for kv_cache in cpu_cache:
                 self.model_runner.compile_context.mark_static_address(kv_cache)
 
