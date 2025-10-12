@@ -191,6 +191,7 @@ class RblnPlatform(Platform):
                         "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
                 scheduler_config.scheduler_cls = \
                     "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
+            cls.sync_with_rbln_config(vllm_config)
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -203,11 +204,9 @@ class RblnPlatform(Platform):
         assert (not vllm_config.speculative_config
                 ), "Speculative decoding not yet supported for RBLN backend."
 
-        if vllm_config.cache_config.enable_prefix_caching \
-            and not envs.RBLN_USE_VLLM_MODEL:
+        if vllm_config.cache_config.enable_prefix_caching:
             assert envs.VLLM_USE_V1 is True, (
                 "Prefix caching is only supported on v1 with RBLN model.")
-            cls.sync_with_rbln_config(vllm_config)
 
         if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
