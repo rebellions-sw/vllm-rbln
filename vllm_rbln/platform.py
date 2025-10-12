@@ -202,9 +202,11 @@ class RblnPlatform(Platform):
         assert (not vllm_config.speculative_config
                 ), "Speculative decoding not yet supported for RBLN backend."
 
-        if not envs.RBLN_USE_VLLM_MODEL:
+        if cache_config.enable_prefix_caching and not envs.RBLN_USE_VLLM_MODEL:
+            assert envs.VLLM_USE_V1 is True, (
+                "Prefix caching is only supported on v1 with RBLN model."
+            )
             cls.sync_with_rbln_config(vllm_config)
-            # TODO Enable prefix caching in V0
 
         if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
