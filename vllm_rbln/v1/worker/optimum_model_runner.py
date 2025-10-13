@@ -13,7 +13,7 @@ import logging
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Optional, Union
-import time
+
 import numpy as np
 import torch
 import torch.distributed
@@ -40,7 +40,7 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
 from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
-from vllm_rbln.v1.sample.sort_free_top_p_sampler import Sampler as NewRBLNSampler
+from vllm_rbln.v1.sample.sort_free_sampler import Sampler as SortFreeSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
 logger = init_logger(__name__)
@@ -104,13 +104,17 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             logger.info("Using default VLLM sampler: Sampler in CPU")
             sampler = Sampler()
         elif self.use_rbln_sampler == 1:
-            logger.info("Using RBLN sampler: RBLNSampler in CPU(torch.compiled)")
+            logger.info(
+                "Using RBLN sampler: RBLNSampler in CPU(torch.compiled)")
             sampler = RBLNSampler()
             sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         elif self.use_rbln_sampler == 2:
             logger.info("Using RBLN sampler: RBLNSampler in RBLN device")
-            sampler = NewRBLNSampler()
-            sampler = torch.compile(sampler, dynamic=False, fullgraph=False, backend="rbln")
+            sampler = SortFreeSampler(seed=model_config.seed)
+            sampler = torch.compile(sampler,
+                                    dynamic=False,
+                                    fullgraph=False,
+                                    backend="rbln")
 
         self.sampler = sampler
         """
@@ -674,7 +678,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def dummy_sampler_run(self):
         if self.use_rbln_sampler < 1:
-            logger.info("Skip dummy sampler run since it is only used in RBLN_SAMPLER=1,2")
+            logger.info("Skip dummy sampler run since "
+                        "it is only used in RBLN_SAMPLER=1,2")
             return
 
         def set_sampling_tensors(input_batch, **params):

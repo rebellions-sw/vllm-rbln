@@ -35,8 +35,7 @@ environment_variables = {
     "RBLN_TP_SIZE":
     lambda: int(os.environ.get("TP_SIZE", 1)),
     # Use customized sampler
-    "RBLN_SAMPLER":
-    (lambda: int(os.environ.get("VLLM_RBLN_SAMPLER", 0))),
+    "RBLN_SAMPLER": (lambda: int(os.environ.get("VLLM_RBLN_SAMPLER", 0))),
     # Enable warmup
     "RBLN_ENABLE_WARM_UP":
     (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in

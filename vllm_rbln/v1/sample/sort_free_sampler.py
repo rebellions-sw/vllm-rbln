@@ -16,7 +16,6 @@ import torch
 import rebel.core.random
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
-from vllm.v1.sample.ops.topk_topp_sampler import random_sample
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
@@ -48,6 +47,7 @@ def _random_sample(
             q[i].exponential_(generator=generator)
     return probs.div_(q).argmax(dim=-1).view(-1)
 
+
 # It is fake implementation for torch.compile
 # For implementation, refer to the flash-infer repository.
 @torch.library.custom_op("rbln::top_p_only", mutates_args=())
@@ -61,11 +61,12 @@ def top_p_only_fake(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
     probs = logits.softmax(dim=-1, dtype=torch.float32)
     return _random_sample(probs, {})
 
+
 class Sampler(VLLMSampler):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        rebel.manual_seed(seed)
+    def __init__(self, seed):
+        super().__init__()
+        rebel.core.random.manual_seed(seed)
 
     def forward(self, logits: torch.Tensor,
                 sampling_metadata: SamplingMetadata) -> torch.Tensor:
@@ -73,11 +74,29 @@ class Sampler(VLLMSampler):
 
     def sample(self, logits: torch.Tensor,
                sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        """Sample logits based on sampling metadata.
+
+        The various logits processing functions called in this method
+        may update the logits tensor in-place.
+        """
+
         assert not (sampling_metadata.all_greedy
                     and sampling_metadata.all_random)
+        if sampling_metadata.all_random:
+            greedy_sampled = None
+        else:
+            greedy_sampled = self.greedy_sample(logits)
+            if sampling_metadata.all_greedy:
+                return greedy_sampled
 
-        if sampling_metadata.all_greedy:
-            return self.greedy_sample(logits)
+        assert sampling_metadata.temperature is not None
+
+        # Apply temperature.
+        logits = self.apply_temperature(logits, sampling_metadata.temperature)
+
+        # Apply min_p.
+        if sampling_metadata.min_p is not None:
+            logits = self.apply_min_p(logits, sampling_metadata.min_p)
 
         # Currently, RBLN only supports top_p sampling.
         # Covering other cases with RBLN is work in progress.
@@ -86,13 +105,31 @@ class Sampler(VLLMSampler):
             # Apply temperature scaling if needed
             if sampling_metadata.temperature is not None:
                 logits = logits / sampling_metadata.temperature.unsqueeze(-1)
-            
+
             # Use native RBLN top_p_only operation
             probs = torch.nn.functional.softmax(logits, dim=-1)
-            indices = torch.ops.rbln.top_p_only(probs, sampling_metadata.top_p)
-            return indices
+            random_sampled = torch.ops.rbln.top_p_only(probs, sampling_metadata.top_p)
 
-        return super().sample(logits, sampling_metadata)
+        elif sampling_metadata.top_k is not None:
+            # Apply top_k and/or top_p.
+            random_sampled = self.topk_topp_sampler(
+                logits,
+                sampling_metadata.generators,
+                sampling_metadata.top_k,
+                sampling_metadata.top_p,
+            )
+
+        if greedy_sampled is None:
+            return random_sampled
+
+        sampled = torch.where(
+            sampling_metadata.temperature < _SAMPLING_EPS,
+            greedy_sampled,
+            random_sampled,
+            out=greedy_sampled,  # Reuse tensor
+        )
+
+        return sampled
 
     @torch.compiler.disable
     def apply_penalties(
