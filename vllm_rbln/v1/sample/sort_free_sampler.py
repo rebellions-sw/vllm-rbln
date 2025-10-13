@@ -26,40 +26,114 @@ logger = init_logger(__name__)
 _SAMPLING_EPS = 1e-5
 
 
-def _random_sample(
+def dual_pivot_top_p_sample(
     probs: torch.Tensor,
-    generators: dict[int, torch.Generator],
+    top_p: torch.Tensor,
+    max_rounds: int = 64,
 ) -> torch.Tensor:
-    """Randomly sample from the probabilities.
-
-    We use this function instead of torch.multinomial because torch.multinomial
-    causes CPU-GPU synchronization.
     """
-    q = torch.empty_like(probs)
-    # NOTE(woosuk): To batch-process the requests without their own seeds,
-    # which is the common case, we first assume that every request does
-    # not have its own seed. Then, we overwrite the values for the requests
-    # that have their own seeds.
-    if len(generators) != probs.shape[0]:
-        q.exponential_()
-    if generators:
-        # TODO(woosuk): This can be slow because we handle each request
-        # one by one. Optimize this.
-        for i, generator in generators.items():
-            q[i].exponential_(generator=generator)
-    return probs.div_(q).argmax(dim=-1).view(-1)
+    Simple implementation of Dual Pivot Rejection Sampling
+    # for top-p (nucleus) sampling.
+    Returns: sampled indices of shape (B,)
+    Notes:
+    - We do `inverse transform sampling` over entries whose prob > low.
+    - Then use two pivots (pivot0, pivot1) to shrink [low, high] until accepted.
+    - Acceptance rule: sum_{i: p_i > pivot0} p_i < top_p  -> accept sampled_id
+    """
+    assert probs.dim() == 2, "probs must be (B, V)"
+    B, V = probs.shape
+    device = probs.device
+    dtype = probs.dtype
+
+    if isinstance(top_p, (int, float)):
+        top_p = torch.full((B, ), float(top_p), device=device, dtype=dtype)
+    else:
+        top_p = top_p.to(device=device, dtype=dtype).view(B)
+
+    low = torch.zeros(B, device=device, dtype=dtype)
+    high = torch.ones(B, device=device, dtype=dtype)
+    q = probs.sum(dim=1)
+    accepted = torch.zeros(B, device=device, dtype=torch.bool)
+    out_idx = torch.zeros(B, device=device, dtype=torch.long)
+
+    arange_V = torch.arange(V, device=device)
+
+    for _ in range(max_rounds):
+        if accepted.all():
+            break
+
+        # 1. Inverse-transform sampling only for non-accepted rows
+        act = ~accepted
+        # Uniform u in [0, q)
+        u = torch.rand(act.sum(), device=device, generator=None,
+                       dtype=dtype) * q[act]
+        # Build per-row masks and cumsum
+        P = probs[act]  # (A, V)
+        low_rows = low[act].unsqueeze(1)  # (A, 1)
+        mask_low = (low_rows < P)  # (A, V)
+        # Cumulative Distribution Function of probs where probs > low
+        cdf = (P * mask_low).cumsum(dim=1)  # (A, V)
+        # Get first index where cdf >= u  (handle case with no True later)
+        ge = cdf >= u.unsqueeze(1)  # (A, V)
+        any_ge = ge.any(dim=1)
+        # Get first true index via argmax on flipped mask
+        # (works because all-False handled separately)
+        first_idx = torch.zeros_like(any_ge, dtype=torch.long)
+        if any_ge.any():
+            first_idx[any_ge] = ge[any_ge].float().argmax(dim=1)
+        # Get the last valid index where mask_low is True
+        # (used if u is ~1 and sum < u due to fp)
+        last_valid = torch.where(mask_low, arange_V,
+                                 -1).max(dim=1).values.clamp_min(0)
+        # Select sampled index over active rows
+        sampled_idx_active = torch.where(any_ge, first_idx, last_valid)  # (A,)
+        # Write to out_idx
+        out_idx[act] = sampled_idx_active
+        sampled_p = P.gather(1, sampled_idx_active.unsqueeze(1)).squeeze(1)
+        pivot0 = torch.zeros(B, device=device, dtype=dtype)
+        pivot0[act] = sampled_p
+        pivot1 = (pivot0 + high) * 0.5
+
+        # 2. Compute mass_gt_pivot0, mass_gt_pivot1 per row
+        mass_gt_pivot0 = ((probs > pivot0.unsqueeze(1)) * probs).sum(dim=1)
+        mass_gt_pivot1 = ((probs > pivot1.unsqueeze(1)) * probs).sum(dim=1)
+
+        # 3. Binary search to update [low, high] per row
+        # Case 1: pivot0 accepted (use sampled id)
+        case1 = (mass_gt_pivot0 < top_p) & (~accepted)
+        accepted |= case1
+
+        # Case 2: pivot0 rejected, pivot1 accepted
+        case2 = (~accepted) & (mass_gt_pivot0 >= top_p) & (mass_gt_pivot1
+                                                           < top_p)
+        low = torch.where(case2, pivot0, low)
+        high = torch.where(case2, pivot1, high)
+        q = torch.where(case2, mass_gt_pivot0, q)
+
+        # Case 3: both rejected
+        case3 = (~accepted) & (mass_gt_pivot1 >= top_p)
+        low = torch.where(case3, pivot1, low)
+        q = torch.where(case3, mass_gt_pivot1, q)
+
+    return out_idx
 
 
-# It is fake implementation for torch.compile
-# For implementation, refer to the flash-infer repository.
 @torch.library.custom_op("rbln::top_p_only", mutates_args=())
-def top_p_only(probs: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-    return _random_sample(probs, {})
+def top_p_only(
+    probs: torch.Tensor,
+    top_p: torch.Tensor,
+    max_rounds: int = 64,
+) -> torch.Tensor:
+    return dual_pivot_top_p_sample(probs, top_p, max_rounds)
 
 
 @top_p_only.register_fake
-def top_p_only_fake(probs: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-    return _random_sample(probs, {})
+def top_p_only_fake(
+    probs: torch.Tensor,
+    top_p: torch.Tensor,
+    max_rounds: int = 64,
+) -> torch.Tensor:
+    return dual_pivot_top_p_sample(probs, top_p, max_rounds)
 
 
 class Sampler(VLLMSampler):
