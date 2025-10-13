@@ -206,15 +206,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # FIXME [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
         hidden_states = hidden_states.squeeze(1)
         logits = self.model.compute_logits(hidden_states, None)
-        start_time = time.time()
         sampler_output = self.sampler(
             logits=logits,
             sampling_metadata=sampling_metadata,
         )
-        #breakpoint()
-        end_time = time.time()
-        elapsed_time = (end_time - start_time) * 1000  # Convert to milliseconds
-        logger.info(f"Sampler time: {elapsed_time:.6f} ms")
         valid_sampled_token_ids = sampler_output.sampled_token_ids
         max_gen_len = valid_sampled_token_ids.shape[-1]
         if max_gen_len == 1:
