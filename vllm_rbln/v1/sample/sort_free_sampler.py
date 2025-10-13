@@ -51,14 +51,12 @@ def _random_sample(
 # It is fake implementation for torch.compile
 # For implementation, refer to the flash-infer repository.
 @torch.library.custom_op("rbln::top_p_only", mutates_args=())
-def top_p_only(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-    probs = logits.softmax(dim=-1, dtype=torch.float32)
+def top_p_only(probs: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
     return _random_sample(probs, {})
 
 
 @top_p_only.register_fake
-def top_p_only_fake(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-    probs = logits.softmax(dim=-1, dtype=torch.float32)
+def top_p_only_fake(probs: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
     return _random_sample(probs, {})
 
 

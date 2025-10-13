@@ -12,13 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-import json
-import time
 import fire
-from transformers import AutoTokenizer
-from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
-from vllm import LLM
+from vllm import LLM, SamplingParams
+
+
 def get_sampling_params() -> SamplingParams:
     return SamplingParams(
         temperature=0.1,
@@ -26,6 +23,7 @@ def get_sampling_params() -> SamplingParams:
         ignore_eos=True,
         max_tokens=80,
     )
+
 
 def get_input_prompts(num_input_prompt: int) -> list[str]:
     prompts = [
@@ -42,6 +40,7 @@ def get_input_prompts(num_input_prompt: int) -> list[str]:
     ]
     return prompts[:num_input_prompt]
 
+
 def main(
     batch_size: int,
     max_seq_len: int,
@@ -50,11 +49,11 @@ def main(
     model_id: str,
 ):
     llm = LLM(model=model_id,
-                                  device="auto",
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  max_model_len=max_seq_len,
-                                  block_size=kvcache_block_size)
+              device="auto",
+              max_num_seqs=batch_size,
+              max_num_batched_tokens=max_seq_len,
+              max_model_len=max_seq_len,
+              block_size=kvcache_block_size)
     prompts = get_input_prompts(num_input_prompt)
     sampling_params = get_sampling_params()
     outputs = llm.generate(prompts, sampling_params)
