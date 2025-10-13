@@ -14,7 +14,6 @@
 
 import pytest
 import torch
-from vllm.config import VllmConfig
 from vllm.platforms import current_platform
 from vllm.v1.core.kv_cache_manager import KVCacheManager
 
@@ -32,6 +31,7 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1  # 9
 DEVICE = current_platform.device_type
+
 
 @pytest.fixture
 def model_runner():
