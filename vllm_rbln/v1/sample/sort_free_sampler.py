@@ -23,6 +23,8 @@ from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
 
 logger = init_logger(__name__)
 
+_SAMPLING_EPS = 1e-5
+
 
 def _random_sample(
     probs: torch.Tensor,
@@ -106,7 +108,8 @@ class Sampler(VLLMSampler):
 
             # Use native RBLN top_p_only operation
             probs = torch.nn.functional.softmax(logits, dim=-1)
-            random_sampled = torch.ops.rbln.top_p_only(probs, sampling_metadata.top_p)
+            random_sampled = torch.ops.rbln.top_p_only(probs,
+                                                       sampling_metadata.top_p)
 
         elif sampling_metadata.top_k is not None:
             # Apply top_k and/or top_p.
@@ -146,3 +149,83 @@ class Sampler(VLLMSampler):
                 sampling_metadata.output_token_ids,
             )
         return logits
+
+
+WARM_UP_CONFIGS = [
+    {
+        "name": "no_penalty_greedy",
+        "no_penalties": True,
+        "all_greedy": True,
+        "all_random": False,
+        "temperature": 0.0
+    },
+    {
+        "name": "no_penalty_topp",
+        "no_penalties": True,
+        "all_greedy": False,
+        "all_random": True,
+        "top_p": 0.9,
+        "temperature": 0.5
+    },
+    {
+        "name": "no_penalty_topk",
+        "no_penalties": True,
+        "all_greedy": False,
+        "all_random": True,
+        "top_k": 1.0,
+        "temperature": 0.5
+    },
+    {
+        "name": "no_penalty_topp_topk",
+        "no_penalties": True,
+        "all_greedy": False,
+        "all_random": True,
+        "top_p": 0.9,
+        "top_k": 1.0,
+        "temperature": 0.5
+    },
+    {
+        "name": "penalty_greedy",
+        "no_penalties": False,
+        "frequency_penalties": 0.1,
+        "presence_penalties": 0.1,
+        "repetition_penalties": 1.0,
+        "all_greedy": True,
+        "all_random": False,
+        "temperature": 0.0
+    },
+    {
+        "name": "penalty_topp",
+        "no_penalties": False,
+        "frequency_penalties": 0.1,
+        "presence_penalties": 0.1,
+        "repetition_penalties": 1.0,
+        "all_greedy": False,
+        "all_random": True,
+        "top_p": 0.9,
+        "temperature": 0.5
+    },
+    {
+        "name": "penalty_topk",
+        "no_penalties": False,
+        "frequency_penalties": 0.1,
+        "presence_penalties": 0.1,
+        "repetition_penalties": 1.0,
+        "all_greedy": False,
+        "all_random": True,
+        "top_k": 1.0,
+        "temperature": 0.5
+    },
+    {
+        "name": "penalty_topp_topk",
+        "no_penalties": False,
+        "frequency_penalties": 0.1,
+        "presence_penalties": 0.1,
+        "repetition_penalties": 1.0,
+        "all_greedy": False,
+        "all_random": True,
+        "top_p": 0.9,
+        "top_k": 1.0,
+        "temperature": 0.5
+    },
+]

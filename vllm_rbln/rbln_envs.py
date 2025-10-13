@@ -20,9 +20,10 @@ from vllm.envs import environment_variables as vllm_envs
 if TYPE_CHECKING:
     RBLN_COMPILE_MODEL: bool = True
     RBLN_TP_SIZE: int = 1
-    RBLN_SAMPLER: int = 0
+    RBLN_SAMPLER: bool = True
     RBLN_ENABLE_WARM_UP: bool = False
     RBLN_USE_VLLM_MODEL: bool = False
+    RBLN_FLASH_CAUSAL_ATTN: bool = True
 
 # extended environments
 environment_variables = {
@@ -35,7 +36,9 @@ environment_variables = {
     "RBLN_TP_SIZE":
     lambda: int(os.environ.get("TP_SIZE", 1)),
     # Use customized sampler
-    "RBLN_SAMPLER": (lambda: int(os.environ.get("VLLM_RBLN_SAMPLER", 0))),
+    "RBLN_SAMPLER":
+    (lambda: os.environ.get("VLLM_RBLN_SAMPLER", "True").lower() in
+     ("true", "1")),
     # Enable warmup
     "RBLN_ENABLE_WARM_UP":
     (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in
