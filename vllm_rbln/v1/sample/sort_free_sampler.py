@@ -32,8 +32,16 @@ def dual_pivot_top_p_sample(
     max_rounds: int = 64,
 ) -> torch.Tensor:
     """
-    Simple implementation of Dual Pivot Rejection Sampling
-    # for top-p (nucleus) sampling.
+    Simple torch implementation of `Dual Pivot Rejection Sampling`
+    for top-p (nucleus) sampling.
+    It excludes complicated logic like thread block-level handling
+    (e.g. block scan/reduce algorithm),
+    shared memory access, etc.
+
+    Args:
+    - probs: (B, V) unnormalized probabilities (non-negative)
+    - top_p: (B,) or float, top_p value per batch
+    - max_rounds: maximum number of rounds to try (for safety)
     Returns: sampled indices of shape (B,)
     Notes:
     - We do `inverse transform sampling` over entries whose prob > low.
