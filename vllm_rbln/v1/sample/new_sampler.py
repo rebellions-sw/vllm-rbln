@@ -82,7 +82,7 @@ class Sampler(VLLMSampler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        rebel.core.random.manual_seed(42)
+        rebel.manual_seed(seed)
 
     def forward(self, logits: torch.Tensor,
                 sampling_metadata: SamplingMetadata) -> torch.Tensor:
