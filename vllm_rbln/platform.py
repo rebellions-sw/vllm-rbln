@@ -278,7 +278,9 @@ class RblnPlatform(Platform):
                                             "encoder-decoder models")
             elif vllm_config.model_config.is_multimodal_model:
                 cls._disable_prefix_caching(vllm_config, "multimodal models")
-            elif vllm_config.model_config.task in ["embed", "classify", "score", "reward"]:
+            elif vllm_config.model_config.task in [
+                    "embed", "classify", "score", "reward"
+            ]:
                 cls._disable_prefix_caching(vllm_config, "pooling models")
             elif rbln_config.get("sliding_window", None) is not None:
                 cls._disable_prefix_caching(vllm_config,
