@@ -132,8 +132,10 @@ class RblnPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
+        dev_mode = vllm_config.additional_config.get("dev_mode", None)
         if envs.RBLN_USE_VLLM_MODEL:
             if envs.VLLM_USE_V1:
+                assert dev_mode is None, "dev_mode is not supported on V1."
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
                         "vllm_rbln.v1.worker.rbln_worker.RBLNWorker")
@@ -143,9 +145,14 @@ class RblnPlatform(Platform):
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
                         "vllm_rbln.worker.worker.RBLNWorker")
-                scheduler_config.scheduler_cls = (
-                    "vllm_rbln.core.scheduler.RBLNScheduler")
-
+                if dev_mode is None:
+                    scheduler_config.scheduler_cls = (
+                        "vllm_rbln.core.scheduler.RBLNScheduler")
+                elif dev_mode == "debug":
+                    scheduler_config.scheduler_cls = (
+                        "vllm_rbln.core.debug_scheduler.DebugRBLNScheduler")
+                else:
+                    raise ValueError(f"Unknown dev_mode: {dev_mode}")
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
                 RblnPlatform.device_type = "rbln"
