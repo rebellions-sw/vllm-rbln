@@ -193,11 +193,12 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         is_driver_worker: bool = False,
     ) -> None:
         WorkerBase.__init__(self, vllm_config=vllm_config)
-        assert "rbln" in current_platform.get_device_name().lower()
 
         self.local_rank = local_rank
         self.rank = rank
         self.parallel_config.rank = rank
+        self.parallel_config.local_world_size = (
+            self.parallel_config.world_size // envs.RBLN_NUM_RAY_NODES)
 
         distributed_backend = self.parallel_config.distributed_executor_backend
         if distributed_backend == "mp":
@@ -256,12 +257,13 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.profiler.stop()
 
     def set_device(self) -> None:
-        world_size = self.parallel_config.world_size
+        world_size = self.parallel_config.local_world_size
         env_var = current_platform.device_control_env_var
 
         total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
-        if env_var not in os.environ:
+        distributed_backend = self.parallel_config.distributed_executor_backend
+        if env_var not in os.environ or distributed_backend == "ray":
             device_ids = [str(i) for i in range(total_device_count)]
         else:
             device_ids = os.environ[env_var].split(",")
@@ -269,7 +271,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # This check is only valid for single node mp backends, invalid for ray
         # ex) node#0 : RBLN_DEVICES=0,1
         #     node#1 : RBLN_DEVICES=2,3
-        distributed_backend = self.parallel_config.distributed_executor_backend
         if distributed_backend == "mp" and len(
                 device_ids) < total_device_count:
             raise RuntimeError(f"{env_var} has devices {device_ids}"
