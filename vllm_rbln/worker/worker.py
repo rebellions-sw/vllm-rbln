@@ -24,7 +24,8 @@ from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
 from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
-from vllm.sequence import ExecuteModelRequest
+from vllm.sampling_params import SamplingParams
+from vllm.sequence import ExecuteModelRequest, SequenceGroupMetadata
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, bind_kv_cache
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
@@ -355,6 +356,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # Initialize the cache.
         self._init_cache_engine()
 
+        self._warm_up_model()
+
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
         # All cache engines share the same cpu_cache
@@ -386,6 +389,70 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         for kv_cache in cpu_cache:
             self.model_runner.compile_context.mark_static_address(kv_cache)
+
+    def _warm_up_model(self) -> None:
+        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL \
+            or not envs.RBLN_ENABLE_WARM_UP:
+            logger.warning("skipping _warm_up_model")
+            return
+
+        assert self.kv_cache is not None
+        model_inputs = self._prepare_dummy_input()
+        self.model_runner._dummy_run(model_inputs, self.kv_cache[0])
+
+    def _prepare_dummy_input(self,
+                             max_num_batched_tokens: int = 8,
+                             max_num_seqs: int = 1):
+        prefill_req = None
+        decode_req = None
+        if self.is_driver_worker:
+            sampling_params = SamplingParams()
+
+            prefill_seqs: List[SequenceGroupMetadata] = []
+            decode_seqs: List[SequenceGroupMetadata] = []
+
+            for group_id in range(max_num_seqs):
+                seq_len = max_num_batched_tokens
+
+                dummy_data = self.model_runner.input_registry \
+                    .dummy_data_for_profiling(self.model_config,
+                                            seq_len,
+                                            self.model_runner.mm_registry)
+                prefill_seq_data = dummy_data.seq_data
+                block_tables = {group_id: [group_id]}
+
+                prefill_seq = SequenceGroupMetadata(
+                    request_id=str(group_id),
+                    is_prompt=True,
+                    seq_data={group_id: prefill_seq_data},
+                    sampling_params=sampling_params,
+                    block_tables=block_tables,
+                )
+                prefill_seqs.append(prefill_seq)
+
+                decode_seq_data = prefill_seq_data.from_seqs(
+                    prefill_seq_data.get_prompt_token_ids(),
+                    prefill_seq_data.get_prompt_token_ids()[-1:],
+                )
+                decode_seq_data.update_num_computed_tokens(seq_len)
+
+                decode_seq = SequenceGroupMetadata(
+                    request_id=str(group_id),
+                    is_prompt=False,
+                    seq_data={group_id: decode_seq_data},
+                    sampling_params=sampling_params,
+                    block_tables=block_tables,
+                )
+                decode_seqs.append(decode_seq)
+
+            prefill_req = ExecuteModelRequest(prefill_seqs[:1])
+            decode_req = ExecuteModelRequest(decode_seqs)
+
+        prefill_inputs = self.prepare_input(prefill_req)
+        decode_inputs = self.prepare_input(decode_req)
+        prefill_model_input, _, _ = prefill_inputs
+        decode_model_input, _, _ = decode_inputs
+        return (prefill_model_input, decode_model_input)
 
     @property
     def do_metadata_broadcast(self) -> bool:
