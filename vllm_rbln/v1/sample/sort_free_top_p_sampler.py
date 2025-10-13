@@ -48,33 +48,16 @@ def _random_sample(
             q[i].exponential_(generator=generator)
     return probs.div_(q).argmax(dim=-1).view(-1)
 
-
+# It is fake implementation for torch.compile
+# For implementation, refer to the flash-infer repository.
 @torch.library.custom_op("rbln::top_p_only", mutates_args=())
 def top_p_only(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-    logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
-    probs_sort = logits_sort.softmax(dim=-1)
-    probs_sum = torch.cumsum(probs_sort, dim=-1, out=probs_sort)
-    top_p_mask = probs_sum <= 1 - p.unsqueeze(dim=1)
-    # at least one
-    top_p_mask[:, -1] = False
-    logits_sort.masked_fill_(top_p_mask, -float("inf"))
-    # Re-sort the probabilities.
-    logits = logits_sort.scatter(dim=-1, index=logits_idx, src=logits_sort)
     probs = logits.softmax(dim=-1, dtype=torch.float32)
     return _random_sample(probs, {})
 
 
 @top_p_only.register_fake
 def top_p_only_fake(logits: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-    logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
-    probs_sort = logits_sort.softmax(dim=-1)
-    probs_sum = torch.cumsum(probs_sort, dim=-1, out=probs_sort)
-    top_p_mask = probs_sum <= 1 - p.unsqueeze(dim=1)
-    # at least one
-    top_p_mask[:, -1] = False
-    logits_sort.masked_fill_(top_p_mask, -float("inf"))
-    # Re-sort the probabilities.
-    logits = logits_sort.scatter(dim=-1, index=logits_idx, src=logits_sort)
     probs = logits.softmax(dim=-1, dtype=torch.float32)
     return _random_sample(probs, {})
 
