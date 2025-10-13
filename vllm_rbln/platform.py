@@ -264,11 +264,16 @@ class RblnPlatform(Platform):
         rbln_config_path = Path(
             os.path.join(vllm_config.model_config.model, "rbln_config.json"))
         if not rbln_config_path.exists():
-            raise FileNotFoundError(
-                f"rbln_config.json not found in {rbln_config_path}")
-        with open(rbln_config_path, encoding='utf-8') as f:
-            rbln_config = json.load(f)
-        kvcache_block_size = rbln_config.get("kvcache_block_size", None)
+            logger.warning(
+                "rbln_config.json not found in model directory: %s. "
+                "Using `block_size` from vllm_config.cache_config instead.",
+                rbln_config_path)
+            rbln_config = {}
+            kvcache_block_size = vllm_config.cache_config.block_size
+        else:
+            with open(rbln_config_path, encoding='utf-8') as f:
+                rbln_config = json.load(f)
+            kvcache_block_size = rbln_config.get("kvcache_block_size", None)
 
         # NOTE The logic is different with models/optimum/__init__.py
         # to prevent circular import.

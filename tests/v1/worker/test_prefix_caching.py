@@ -33,19 +33,6 @@ IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1  # 9
 DEVICE = current_platform.device_type
 
-
-def set_block_size(cls, vllm_config: VllmConfig):
-    vllm_config.cache_config.block_size = IB_SIZE
-    vllm_config.additional_config["attn_block_size"] = OB_SIZE
-
-
-@pytest.fixture
-def common_monkeypatch(monkeypatch):
-    monkeypatch.setattr(
-        "vllm_rbln.platform.RblnPlatform.sync_with_rbln_config",
-        classmethod(set_block_size))
-
-
 @pytest.fixture
 def model_runner():
     vllm_config = get_vllm_config()
@@ -62,7 +49,7 @@ def model_runner():
     return runner
 
 
-def test_prefill(common_monkeypatch, model_runner):
+def test_prefill(model_runner):
     """
     Check the prefix caching works as expected during prefill.
 
@@ -174,7 +161,7 @@ def test_prefill(common_monkeypatch, model_runner):
     assert inputs.cached_block_tables == [0, 1]
 
 
-def test_decode(common_monkeypatch, model_runner):
+def test_decode(model_runner):
     """
     Check the prefix caching works as expected during decode.
     """
@@ -233,7 +220,7 @@ def test_decode(common_monkeypatch, model_runner):
     assert inputs.cached_block_tables == []
 
 
-def test_simple_eviction(common_monkeypatch):
+def test_simple_eviction():
     """
     req0: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated
     req1: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated
