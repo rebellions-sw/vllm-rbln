@@ -16,7 +16,7 @@ import torch
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
-
+import rebel
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
 
@@ -80,19 +80,18 @@ def dual_pivot_top_p_sample(
         mask_low = (low_rows < P)  # (A, V)
         # Cumulative Distribution Function of probs where probs > low
         cdf = (P * mask_low).cumsum(dim=1)  # (A, V)
-        # Get first index where cdf >= u  (handle case with no True later)
+        # Get first index for sampled token(j) index
+        # where CDF(j-1) ≤ u < CDF(j)
         ge = cdf >= u.unsqueeze(1)  # (A, V)
         any_ge = ge.any(dim=1)
-        # Get first true index via argmax on flipped mask
-        # (works because all-False handled separately)
         first_idx = torch.zeros_like(any_ge, dtype=torch.long)
         if any_ge.any():
             first_idx[any_ge] = ge[any_ge].float().argmax(dim=1)
         # Get the last valid index where mask_low is True
-        # (used if u is ~1 and sum < u due to fp)
+        # for rows where no CDF(j) ≥ u (Fallback)
         last_valid = torch.where(mask_low, arange_V,
                                  -1).max(dim=1).values.clamp_min(0)
-        # Select sampled index over active rows
+        # Select sampled token index over active rows
         sampled_idx_active = torch.where(any_ge, first_idx, last_valid)  # (A,)
         # Write to out_idx
         out_idx[act] = sampled_idx_active
