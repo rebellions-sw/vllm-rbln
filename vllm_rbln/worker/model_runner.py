@@ -24,12 +24,14 @@ import torch
 from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
-from vllm.distributed import get_pp_group, get_tp_group, get_dp_group
+from vllm.distributed import get_dp_group, get_pp_group, get_tp_group
 from vllm.forward_context import set_forward_context
+from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.model_loader import get_model
-from vllm.multimodal import MultiModalKwargs, MultiModalPlaceholderMap
+from vllm.multimodal import (MULTIMODAL_REGISTRY, MultiModalKwargs,
+                             MultiModalPlaceholderMap, MultiModalRegistry)
 from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
 from vllm.utils import make_tensor_with_pad
 from vllm.worker.model_runner_base import (
@@ -391,6 +393,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         return_hidden_states: bool = False,
+        input_registry: InputRegistry = INPUT_REGISTRY,
+        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
         ModelRunnerBase.__init__(self, vllm_config)
         model_config = self.model_config
@@ -420,6 +424,11 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             self.model_config.is_attention_free,
         ) if needs_attn_backend else None)
 
+        # Multi-modal data support
+        self.input_registry = input_registry
+        self.mm_registry = mm_registry
+        self.mm_registry.init_mm_limits_per_prompt(self.model_config)
+
         # Lazy initialization.
         self.model: nn.Module  # initialize after load_model.
 
@@ -438,22 +447,22 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         PP = get_pp_group()
         DP = get_dp_group()
         logger.info("[RBLN] TP group unique_name = %s", TP.unique_name)
-        logger.info("[RBLN] TP group ranks = %s, local rank = %s",
-                TP.ranks, TP.rank)
+        logger.info("[RBLN] TP group ranks = %s, local rank = %s", TP.ranks,
+                    TP.rank)
         logger.info("[RBLN] TP device group id = %s, cpu group id = %s",
-                TP.device_group.group_name, TP.cpu_group.group_name)
+                    TP.device_group.group_name, TP.cpu_group.group_name)
 
         logger.info("[RBLN] PP group unique_name = %s", PP.unique_name)
-        logger.info("[RBLN] PP group ranks = %s, local rank = %s",
-                PP.ranks, PP.rank)
+        logger.info("[RBLN] PP group ranks = %s, local rank = %s", PP.ranks,
+                    PP.rank)
         logger.info("[RBLN] PP device group id = %s, cpu group id = %s",
-                PP.device_group.group_name, PP.cpu_group.group_name)
+                    PP.device_group.group_name, PP.cpu_group.group_name)
 
         logger.info("[RBLN] DP group unique_name = %s", DP.unique_name)
-        logger.info("[RBLN] DP group ranks = %s, local rank = %s",
-                DP.ranks, DP.rank)
+        logger.info("[RBLN] DP group ranks = %s, local rank = %s", DP.ranks,
+                    DP.rank)
         logger.info("[RBLN] DP device group id = %s, cpu group id = %s",
-                DP.device_group.group_name, DP.cpu_group.group_name)
+                    DP.device_group.group_name, DP.cpu_group.group_name)
 
         if envs.RBLN_COMPILE_MODEL:
             process_group_dict = {}
@@ -714,3 +723,27 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
     @property
     def vocab_size(self) -> int:
         return self.model_config.get_vocab_size()
+
+    def _dummy_run(self,
+                   model_inputs: Tuple[ModelInputForRebelWithSamplingMetadata],
+                   kv_caches: List[torch.Tensor]) -> None:
+        # Run the model with the dummy inputs.
+        for model_input in model_inputs:
+            assert model_input.input_tokens is not None
+            batch_size, seq_len = model_input.input_tokens.shape
+            intermediate_tensors = None
+            if not get_pp_group().is_first_rank:
+                intermediate_tensors = \
+                    self.model.make_empty_intermediate_tensors(
+                    batch_size=batch_size * seq_len,
+                    dtype=self.model_config.dtype,
+                    device=self.device)
+                intermediate_tensors = IntermediateTensors({
+                    key:
+                    val.reshape((batch_size, seq_len, -1))
+                    for key, val in intermediate_tensors.items()
+                })
+
+            self.execute_model(model_input, kv_caches, intermediate_tensors)
+
+        return
