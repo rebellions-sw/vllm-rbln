@@ -13,7 +13,6 @@
 # limitations under the License.
 # isort: off
 import torch
-import rebel.core.random
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
