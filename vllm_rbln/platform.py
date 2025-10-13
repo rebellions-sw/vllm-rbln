@@ -170,7 +170,7 @@ class RblnPlatform(Platform):
 
                 if envs.RBLN_SAMPLER:
                     logger.warning("RBLN Sampler is only supported on v1. "
-                    "V0 will be deprecated soon.")
+                                   "V0 will be deprecated soon.")
                     envs.RBLN_SAMPLER = False
 
         if (parallel_config.distributed_executor_backend is not None
