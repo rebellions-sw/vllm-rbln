@@ -52,7 +52,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
         # self.compilation_config = vllm_config.compilation_config
-        # self.lora_config = vllm_config.lora_config
+        self.lora_config = vllm_config.lora_config
         # self.load_config = vllm_config.load_config
         self.parallel_config = vllm_config.parallel_config
         self.scheduler_config = vllm_config.scheduler_config
@@ -155,6 +155,19 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
+        self.use_optimum_lora = getattr(self.model.model.rbln_config,
+                                        "use_lora", None)
+        if self.lora_config and not self.use_optimum_lora:
+            raise RuntimeError(
+                "The compiled model is for LoRA."
+                "Please compile the model with `rbln_lora_config`")
+        if not self.lora_config and self.use_optimum_lora:
+            raise RuntimeError("The model is compiled for LoRA."
+                               "Please set `enable_lora=True` in vLLM.")
+
+        if self.use_optimum_lora:
+            self.valid_lora_ids = list(
+                range(len(self.model.rbln_model_config.lora_config.adapters)))
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -277,6 +290,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         else:
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
+
+        # Hot-Swap lora model
+        if self.lora_config:
+            self.set_active_loras(self.input_batch, is_prefill)
 
         # TODO interemediate_tensor should be set
         model_input = ModelInputForRBLN(
@@ -511,6 +528,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 generator.manual_seed(sampling_params.seed)
             else:
                 generator = None
+
+            # Check lora_int_id is valid
+            if new_req_data.lora_request and self.use_optimum_lora:
+                lora_int_id = new_req_data.lora_request.lora_int_id
+                if lora_int_id >= len(self.valid_lora_ids):
+                    raise RuntimeError(
+                        f"Invalid `lora_int_id`: {lora_int_id}. "
+                        f"Valid `lora_int_ids` are {self.valid_lora_ids} "
+                        "(must be consistent with the compiled model).")
+
             self.requests[req_id] = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
@@ -745,3 +772,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             )
 
             dummy_run_batches(config)
+
+    def set_active_loras(self, input_batch: InputBatch,
+                         is_prefill: bool) -> None:
+        num_reqs = self.input_batch.num_reqs
+        req_lora_mapping_list = input_batch.request_lora_mapping[:
+                                                                 num_reqs].tolist(
+                                                                 )
+        # Padding
+        if not is_prefill and num_reqs < self.max_num_reqs:
+            req_lora_mapping_list += [0] * (self.max_num_reqs - num_reqs)
+        self.model.model.set_lora_int_ids(req_lora_mapping_list)
