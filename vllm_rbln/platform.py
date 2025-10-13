@@ -26,7 +26,6 @@ else:
 
 import rebel
 from torch._dynamo import register_backend
-from vllm.config import _RUNNER_TASKS
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
@@ -256,8 +255,8 @@ class RblnPlatform(Platform):
                                 reason: str) -> None:
         """Disable prefix caching with warning message."""
         logger.warning(
-            "Prefix caching is not supported for %s. "
-            "Disabling prefix caching.", reason)
+            "Prefix caching is not available for %s. "
+            "It has been automatically disabled.", reason)
         vllm_config.cache_config.enable_prefix_caching = False
 
     @classmethod
@@ -272,13 +271,14 @@ class RblnPlatform(Platform):
         kvcache_block_size = rbln_config.get("kvcache_block_size", None)
 
         # NOTE The logic is different with models/optimum/__init__.py
+        # to prevent circular import.
         if vllm_config.cache_config.enable_prefix_caching:
             if vllm_config.model_config.is_encoder_decoder:
                 cls._disable_prefix_caching(vllm_config,
                                             "encoder-decoder models")
             elif vllm_config.model_config.is_multimodal_model:
                 cls._disable_prefix_caching(vllm_config, "multimodal models")
-            elif vllm_config.model_config.task in _RUNNER_TASKS["pooling"]:
+            elif vllm_config.model_config.task in ["embed", "classify", "score", "reward"]:
                 cls._disable_prefix_caching(vllm_config, "pooling models")
             elif rbln_config.get("sliding_window", None) is not None:
                 cls._disable_prefix_caching(vllm_config,
