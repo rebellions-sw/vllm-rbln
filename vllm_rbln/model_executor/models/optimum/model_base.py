@@ -30,7 +30,7 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
-from .base import get_rbln_model_info
+from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 
 logger = init_logger(__name__)
 

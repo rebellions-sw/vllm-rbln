@@ -17,9 +17,11 @@ import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
-from .base import (_RBLN_MULTIMODAL_MODELS, ModelInputForRBLN,
-                   get_rbln_model_info, is_enc_dec_arch, is_multi_modal,
-                   is_pooling_arch)
+from vllm_rbln.utils.optimum.registry import (_RBLN_MULTIMODAL_MODELS,
+                                              get_rbln_model_info,
+                                              is_enc_dec_arch, is_multi_modal,
+                                              is_pooling_arch)
+
 from .blip2 import RBLNOptimumBlip2ForConditionalGeneration  # noqa: F401
 from .decoder_only import RBLNOptimumForCausalLM
 from .encoder import RBLNOptimumForEncoderModel

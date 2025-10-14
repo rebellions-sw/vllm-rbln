@@ -31,6 +31,8 @@ from vllm.utils import FlexibleArgumentParser
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
+from vllm_rbln.utils.optimum.registry import (is_enc_dec_arch, is_multi_modal,
+                                              is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -294,16 +296,17 @@ class RblnPlatform(Platform):
         # NOTE The logic is different with models/optimum/__init__.py
         # to prevent circular import.
         if vllm_config.cache_config.enable_prefix_caching:
-            if vllm_config.model_config.is_encoder_decoder:
+            if is_enc_dec_arch(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config,
                                             "encoder-decoder models")
-            elif vllm_config.model_config.is_multimodal_model:
+            elif is_multi_modal(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config, "multimodal models")
-            elif vllm_config.model_config.task in [
-                    "embed", "classify", "score", "reward"
-            ]:
+            elif is_pooling_arch(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config, "pooling models")
-            elif rbln_config.get("sliding_window", None) is not None:
+            elif getattr(vllm_config.model_config.hf_config, "sliding_window",
+                         None) is not None and getattr(
+                             vllm_config.model_config.hf_config,
+                             "use_sliding_window", True):
                 cls._disable_prefix_caching(vllm_config,
                                             "sliding window models")
 
