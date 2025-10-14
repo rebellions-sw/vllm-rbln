@@ -24,6 +24,7 @@ logger = init_logger(__name__)
 
 _SAMPLING_EPS = 1e-5
 
+
 def random_sample(
     probs: torch.Tensor,
     generators: dict[int, torch.Generator],
@@ -53,11 +54,13 @@ def dual_pivot_top_p_sample(
     top_p: torch.Tensor,
 ) -> torch.Tensor:
     """
-    Mock implementation of `dual_pivot_top_p_sample` used for torch ops registration.
+    Mock implementation of `dual_pivot_top_p_sample`
+    used for torch ops registration.
 
-    This function currently performs standard top-p (nucleus) sampling that includes
-    sorting the probabilities. It serves as a placeholder implementation — in the
-    actual version, a dual-pivot algorithm is implemented in rebel and
+    This function currently performs standard top-p (nucleus)
+    sampling that includes sorting the probabilities.
+    It serves as a placeholder implementation — in the actual version,
+    a dual-pivot algorithm is implemented in rebel and
     it will be used to avoid the sorting step and improve efficiency.
     """
     probs_sort, logits_idx = probs.sort(dim=-1, descending=False)
@@ -74,10 +77,12 @@ def dual_pivot_top_p_sample(
                                                            index=logits_idx,
                                                            src=src)
     logits = torch.gather(probs_sort, dim=-1, index=logits_idx_inv)
-    # The `generators` argument normally comes from `sampling_metadata`,
-    # but here it is passed as an empty dictionary for simplicity when calling `random_sample`.
-    random_sampled = random_sample(logits, {})  
+    # The `generators` argument is usually derived from `sampling_metadata`,
+    # but in this mock implementation, an empty dictionary is passed
+    # for simplicity when invoking `random_sample`.
+    random_sampled = random_sample(logits, {})
     return random_sampled
+
 
 @torch.library.custom_op("rbln::top_p_only", mutates_args=())
 def top_p_only(
@@ -105,7 +110,8 @@ class Sampler(VLLMSampler):
                 sampling_metadata: SamplingMetadata) -> torch.Tensor:
         return super().forward(logits, sampling_metadata)
 
-    def apply_topp_sampler(self, logits: torch.Tensor, top_p: torch.Tensor) -> torch.Tensor:
+    def apply_topp_sampler(self, logits: torch.Tensor,
+                           top_p: torch.Tensor) -> torch.Tensor:
         # Apply top-p sampling using RBLN custom op.
         # It requires softmax prior to calling the op.
         probs = torch.nn.functional.softmax(logits, dim=-1)
@@ -147,7 +153,7 @@ class Sampler(VLLMSampler):
                 logits = logits / sampling_metadata.temperature.unsqueeze(-1)
 
             random_sampled = self.apply_topp_sampler(logits,
-                                              sampling_metadata.top_p)
+                                                     sampling_metadata.top_p)
 
         elif sampling_metadata.top_k is not None:
             # Apply top_k and/or top_p.
