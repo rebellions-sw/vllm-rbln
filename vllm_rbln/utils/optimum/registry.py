@@ -1,11 +1,22 @@
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from transformers import PretrainedConfig
 
-
 # modified/customized models for RBLN
-_RBLN_GENERATION_MODELS: Dict[str, Tuple[str, str]] = {
+_RBLN_GENERATION_MODELS: dict[str, tuple[str, str]] = {
     "LlamaForCausalLM": (
         "llama",
         "RBLNLlamaForCausalLM",
@@ -21,7 +32,7 @@ _RBLN_GENERATION_MODELS: Dict[str, Tuple[str, str]] = {
     "Qwen3ForCausalLM": ("qwen3", "RBLNQwen3ForCausalLM"),
 }
 
-_RBLN_ENCODER_DECODER_MODELS: Dict[str, Tuple[str, str]] = {
+_RBLN_ENCODER_DECODER_MODELS: dict[str, tuple[str, str]] = {
     "BartForConditionalGeneration":
     ("bart", "RBLNBartForConditionalGeneration"),
     "T5ForConditionalGeneration": ("t5", "RBLNT5ForConditionalGeneration"),
@@ -66,6 +77,7 @@ _RBLN_SUPPORTED_MODELS = {
     **_RBLN_EMBEDDING_MODELS,
 }
 
+
 def is_multi_modal(config: PretrainedConfig) -> bool:
     return is_arch_supported(config, _RBLN_MULTIMODAL_MODELS)
 
@@ -79,12 +91,13 @@ def is_enc_dec_arch(config: PretrainedConfig) -> bool:
 
 
 def is_arch_supported(config: PretrainedConfig,
-                      model_set: Dict[str, Tuple[str, str]]) -> bool:
+                      model_set: dict[str, tuple[str, str]]) -> bool:
     architectures = getattr(config, "architectures", [])
     return any(arch in _RBLN_SUPPORTED_MODELS and arch in model_set
                for arch in architectures)
 
-def get_rbln_model_info(config: PretrainedConfig) -> Tuple[str, str]:
+
+def get_rbln_model_info(config: PretrainedConfig) -> tuple[str, str]:
     architectures = getattr(config, "architectures", [])
     for arch in architectures:
         if arch in _RBLN_SUPPORTED_MODELS:
