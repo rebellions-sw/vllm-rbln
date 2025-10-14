@@ -98,14 +98,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # Sampler
         self.use_rbln_sampler = envs.RBLN_SAMPLER
         if self.use_rbln_sampler:
-            logger.info("Using RBLN sampler: RBLNSampler in RBLN device")
+            logger.info("Using RBLN sampler: Sampler executes on RBLN device")
             sampler = RBLNSampler(seed=model_config.seed)
             sampler = torch.compile(sampler,
                                     dynamic=False,
                                     fullgraph=False,
                                     backend="rbln")
         else:
-            logger.info("Using default VLLM sampler: Sampler in CPU")
+            logger.info("Using default VLLM sampler: Sampler executes on CPU")
             sampler = Sampler()
 
         self.sampler = sampler
