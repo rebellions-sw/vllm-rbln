@@ -259,6 +259,22 @@ class RblnPlatform(Platform):
             "It has been automatically disabled.", reason)
         vllm_config.cache_config.enable_prefix_caching = False
 
+    def get_kvcache_block_size(rbln_config: dict) -> int:
+        kvcache_block_size = rbln_config.get("kvcache_block_size")
+        if kvcache_block_size is None:
+            submodules = ["language_model", "text_model"]
+            for submodule in submodules:
+                if submodule in rbln_config:
+                    kvcache_block_size = rbln_config[submodule].get(
+                        "kvcache_block_size", None)
+                    if kvcache_block_size is not None:
+                        break
+
+        assert kvcache_block_size is not None, (
+            "kvcache_block_size must be specified in rbln_config.json")
+
+        return kvcache_block_size
+
     @classmethod
     def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
         rbln_config_path = Path(
@@ -273,7 +289,7 @@ class RblnPlatform(Platform):
         else:
             with open(rbln_config_path, encoding='utf-8') as f:
                 rbln_config = json.load(f)
-            kvcache_block_size = rbln_config.get("kvcache_block_size", None)
+            kvcache_block_size = cls.get_kvcache_block_size(rbln_config)
 
         # NOTE The logic is different with models/optimum/__init__.py
         # to prevent circular import.
