@@ -6,12 +6,13 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import argparse
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import argparse
 import os
 import urllib.request
 from multiprocessing import get_context
@@ -43,7 +44,7 @@ def generate_llm_args(device):
     if device == "cpu":
         llm_args["block_size"] = 128
     elif device == "rbln":
-        llm_args["block_size"] = 128 # 1024 is not working for long prompt
+        llm_args["block_size"] = 128  # 1024 is not working for long prompt
         llm_args["max_num_batched_tokens"] = PREFILL_CHUNK_SIZE
     return llm_args
 
