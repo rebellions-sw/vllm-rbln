@@ -47,9 +47,9 @@ def generate_llm_args(device: str):
         "max_logprobs": VOCAB_SIZE,
     }
     if device == "cpu":
-        llm_args["block_size"] = 128
+        llm_args["block_size"] = 128 # 1024 is not working for long prompt
     elif device == "rbln":
-        llm_args["block_size"] = 128  # 1024 is not working for long prompt
+        llm_args["block_size"] = 1024
         llm_args["max_num_batched_tokens"] = PREFILL_CHUNK_SIZE
     return llm_args
 

@@ -44,7 +44,7 @@ def generate_llm_args(device: str):
         "max_logprobs": VOCAB_SIZE,
     }
     if device == "cpu":
-        llm_args["block_size"] = 16
+        llm_args["block_size"] = 128
         llm_args["max_num_batched_tokens"] = 128
     elif device == "rbln":
         llm_args["block_size"] = 1024
