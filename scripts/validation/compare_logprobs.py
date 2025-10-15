@@ -13,7 +13,11 @@
 # limitations under the License.
 
 import os
-from multiprocessing import get_context
+from multiprocessing import Queue, get_context
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vllm import LLM, SamplingParams
 
 # Set VOCAB_SIZE according to the model's tokenizer vocab size
 # Set EPSILON to the acceptable logprob difference threshold
@@ -30,7 +34,7 @@ prompts = [
 ]
 
 
-def generate_llm_args(device):
+def generate_llm_args(device: str):
     llm_args = {
         "model": "meta-llama/Llama-3.2-1B",
         "max_model_len": 40 * 1024,
@@ -49,12 +53,12 @@ def generate_llm_args(device):
     return llm_args
 
 
-def run_llm(llm, sampling_params, q):
+def run_llm(llm: "LLM", sampling_params: "SamplingParams", q: Queue[Any]):
     outputs = llm.generate(prompts, sampling_params)
     q.put(outputs)
 
 
-def _worker(device, q):
+def _worker(device: str, q: Queue[Any]):
     llm_args = generate_llm_args(device)
     if device == "cpu":
         os.environ["VLLM_PLUGINS"] = "cpu"
