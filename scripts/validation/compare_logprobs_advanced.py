@@ -17,7 +17,7 @@ import os
 import urllib.request
 from multiprocessing import get_context
 from multiprocessing.queues import Queue as MPQueue
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 from transformers import AutoTokenizer
@@ -38,16 +38,16 @@ def get_wiki_prompt():
     return source_data
 
 
-def generate_llm_args(device: str):
+def generate_llm_args(device: str, batch_size: int):
     llm_args = {
         "model": "meta-llama/Llama-3.2-1B",
         "max_model_len": 40 * 1024,
         "enable_chunked_prefill": True,
-        "max_num_seqs": 1,
+        "max_num_seqs": batch_size,
         "max_logprobs": VOCAB_SIZE,
     }
     if device == "cpu":
-        llm_args["block_size"] = 128 # 1024 is not working for long prompt
+        llm_args["block_size"] = 128  # 1024 is not working for long prompt
     elif device == "rbln":
         llm_args["block_size"] = 1024
         llm_args["max_num_batched_tokens"] = PREFILL_CHUNK_SIZE
@@ -73,8 +73,8 @@ def run_llm(llm, prompts: list[str], sampling_params: "SamplingParams",
     q.put(outputs)
 
 
-def _worker(device: str, prompts: list[str], q: MPQueue, max_tokens: int):
-    llm_args = generate_llm_args(device)
+def _worker(device: str, prompts: list[str], q: MPQueue, args: Any):
+    llm_args = generate_llm_args(device, args.batch_size)
     os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
     if device == "cpu":
         os.environ["VLLM_PLUGINS"] = "cpu"
@@ -94,7 +94,7 @@ def _worker(device: str, prompts: list[str], q: MPQueue, max_tokens: int):
         temperature=0.0,
         top_p=1.0,
         ignore_eos=True,
-        max_tokens=max_tokens,
+        max_tokens=args.max_tokens,
         logprobs=VOCAB_SIZE,
     )
     llm = LLM(**llm_args)
@@ -114,13 +114,12 @@ if __name__ == "__main__":
 
     ctx = get_context("spawn")
     q = ctx.Queue()
-    p1 = ctx.Process(target=_worker, args=("cpu", prompts, q, args.max_tokens))
+    p1 = ctx.Process(target=_worker, args=("cpu", prompts, q, args))
     p1.start()
     cpu_outputs = q.get()
     p1.join()
 
-    p2 = ctx.Process(target=_worker,
-                     args=("rbln", prompts, q, args.max_tokens))
+    p2 = ctx.Process(target=_worker, args=("rbln", prompts, q, args))
     p2.start()
     rbln_outputs = q.get()
     p2.join()
