@@ -84,10 +84,13 @@ class RblnPlatform(Platform):
     def pre_register_and_update(cls,
                                 parser: Optional[FlexibleArgumentParser] = None
                                 ) -> None:
-
         if envs.RBLN_USE_VLLM_MODEL:
             # patches
             if envs.VLLM_USE_V1:
+                # FIXME(jiwoo.park):disable timeout for RBLN
+                import vllm.v1.executor.multiproc_executor as mp
+                mp.EXECUTE_MODEL_TIMEOUT_S = None
+
                 import vllm_rbln.v1.attention.layer  # noqa
             else:
                 import vllm_rbln.attention.layer  # noqa
