@@ -86,7 +86,7 @@ def _worker(device, prompts, q, args):
         temperature=0.0,
         top_p=1.0,
         ignore_eos=True,
-        max_tokens=args.max_new_tokens,
+        max_tokens=args.max_tokens,
         logprobs=VOCAB_SIZE,
     )
     llm = LLM(**llm_args)
@@ -96,7 +96,7 @@ def _worker(device, prompts, q, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-l", "--prompt_length", type=int, default=128)
-    parser.add_argument("-m", "--max_new_tokens", type=int, default=1)
+    parser.add_argument("-m", "--max_tokens", type=int, default=1)
     parser.add_argument("-b", "--batch_size", type=int, default=1)
     args = parser.parse_args()
 
