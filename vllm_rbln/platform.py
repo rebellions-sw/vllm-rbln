@@ -276,6 +276,10 @@ class RblnPlatform(Platform):
         if "enc_max_seq_len" in rbln_config:
             kvcache_block_size = rbln_config["enc_max_seq_len"]
 
+        # embedding model
+        if "max_seq_len" in rbln_config:
+            kvcache_block_size = rbln_config["max_seq_len"]
+
         assert kvcache_block_size is not None, (
             "kvcache_block_size must be specified in rbln_config.json")
 
