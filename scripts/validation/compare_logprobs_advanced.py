@@ -15,7 +15,8 @@
 import argparse
 import os
 import urllib.request
-from multiprocessing import Queue, get_context
+from multiprocessing.queues import Queue as MPQueue
+from multiprocessing import get_context
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -67,12 +68,12 @@ def generate_prompts(prompt_length: int, batch_size: int) -> list[str]:
 
 
 def run_llm(llm, prompts: list[str], sampling_params: "SamplingParams",
-            q: Queue[Any]):
+            q: MPQueue):
     outputs = llm.generate(prompts, sampling_params=sampling_params)
     q.put(outputs)
 
 
-def _worker(device: str, prompt: list[str], q: Queue[Any], max_tokens: int):
+def _worker(device: str, prompts: list[str], q: MPQueue, max_tokens: int):
     llm_args = generate_llm_args(device)
     if device == "cpu":
         os.environ["VLLM_PLUGINS"] = "cpu"
