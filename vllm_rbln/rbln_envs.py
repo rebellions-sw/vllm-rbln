@@ -53,6 +53,10 @@ environment_variables = {
     "RBLN_ENFORCE_MODEL_FP32":
     (lambda: os.environ.get("ENFORCE_MODEL_FP32", "False").lower() in
      ("true", "1")),
+    # use moe custom kernel, by default disabled
+    "RBLN_MOE_CUSTOM_KERNEL":
+    (lambda: os.environ.get("MOE_CUSTOM_KERNEL", "False").lower() in
+     ("true", "1")),
     # Number of Ray nodes
     "RBLN_NUM_RAY_NODES":
     lambda: int(os.environ.get("NUM_RAY_NODES", 1)),
