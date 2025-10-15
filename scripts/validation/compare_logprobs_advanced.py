@@ -15,9 +15,9 @@
 import argparse
 import os
 import urllib.request
-from multiprocessing.queues import Queue as MPQueue
 from multiprocessing import get_context
-from typing import TYPE_CHECKING, Any
+from multiprocessing.queues import Queue as MPQueue
+from typing import TYPE_CHECKING
 
 import torch
 from transformers import AutoTokenizer
@@ -75,6 +75,7 @@ def run_llm(llm, prompts: list[str], sampling_params: "SamplingParams",
 
 def _worker(device: str, prompts: list[str], q: MPQueue, max_tokens: int):
     llm_args = generate_llm_args(device)
+    os.environ["VLLM_LOGGING_LEVEL"] = "DEBUG"
     if device == "cpu":
         os.environ["VLLM_PLUGINS"] = "cpu"
         os.environ["VLLM_USE_V1"] = "0"
@@ -83,7 +84,7 @@ def _worker(device: str, prompts: list[str], q: MPQueue, max_tokens: int):
         os.environ["RBLN_KERNEL_MODE"] = "triton"
         os.environ["VLLM_USE_V1"] = "0"
         os.environ["USE_VLLM_MODEL"] = "1"
-        os.environ["VLLM_DISABLE_COMPILE_CACHE"] = "1"
+        os.environ["VLLM_DISABLE_COMPILE_CACHE"] = "0"
         # 1 means disable using compile cache
     else:
         raise ValueError(f"Unknown device: {device}")

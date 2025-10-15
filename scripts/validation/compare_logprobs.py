@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import os
-from multiprocessing.queues import Queue as MPQueue
 from multiprocessing import get_context
-from typing import TYPE_CHECKING, Any
+from multiprocessing.queues import Queue as MPQueue
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vllm import LLM, SamplingParams
@@ -54,12 +54,12 @@ def generate_llm_args(device: str):
     return llm_args
 
 
-def run_llm(llm: "LLM", sampling_params: "SamplingParams", q: Queue):
+def run_llm(llm: "LLM", sampling_params: "SamplingParams", q: MPQueue):
     outputs = llm.generate(prompts, sampling_params)
     q.put(outputs)
 
 
-def _worker(device: str, q: Queue):
+def _worker(device: str, q: MPQueue):
     llm_args = generate_llm_args(device)
     if device == "cpu":
         os.environ["VLLM_PLUGINS"] = "cpu"

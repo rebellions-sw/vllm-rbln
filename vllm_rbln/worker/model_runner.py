@@ -601,6 +601,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         previous_hidden_states: Optional[torch.Tensor] = None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         assert kv_caches is not None
+        if model_input.is_prompt:
+            logger.debug("[RBLN] PREFILL STEP")
+        else:
+            logger.debug("[RBLN] DECODE STEP")
         if num_steps > 1:
             raise ValueError(
                 "Rebel worker does not support multi-step execution.")
