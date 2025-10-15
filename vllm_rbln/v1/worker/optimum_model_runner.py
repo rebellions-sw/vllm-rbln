@@ -37,7 +37,7 @@ import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
+from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
 from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS

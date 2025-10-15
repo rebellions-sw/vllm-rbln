@@ -259,7 +259,7 @@ class RblnPlatform(Platform):
         logger.warning(
             "Prefix caching is not available for %s. "
             "It has been automatically disabled.", reason)
-        vllm_config.cache_config.enable_prefix_caching = False
+        vllm_config.cache_config.enable_prefix_caching = None
 
     def get_kvcache_block_size(rbln_config: dict) -> int:
         kvcache_block_size = rbln_config.get("kvcache_block_size")
@@ -271,6 +271,10 @@ class RblnPlatform(Platform):
                         "kvcache_block_size", None)
                     if kvcache_block_size is not None:
                         break
+
+        # encoder, encoder-decoder model
+        if "enc_max_seq_len" in rbln_config:
+            kvcache_block_size = rbln_config["enc_max_seq_len"]
 
         assert kvcache_block_size is not None, (
             "kvcache_block_size must be specified in rbln_config.json")

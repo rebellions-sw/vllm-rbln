@@ -17,8 +17,8 @@ import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
+from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.utils.optimum.registry import (_RBLN_MULTIMODAL_MODELS,
-                                              get_rbln_model_info,
                                               is_enc_dec_arch, is_multi_modal,
                                               is_pooling_arch)
 
@@ -50,9 +50,10 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
     model_config = vllm_config.model_config
 
     if is_multi_modal(model_config.hf_config):
-        assert vllm_config.cache_config.enable_prefix_caching is False, (
-            "Prefix caching is not supported with multimodal models. "
-            "Please set `enable_prefix_caching` to False.")
+        assert vllm_config.cache_config.enable_prefix_caching in (
+            False,
+            None), ("Prefix caching is not supported with multimodal models. "
+                    "Please set `enable_prefix_caching` to False.")
         architectures = getattr(model_config.hf_config, "architectures", [])
         if architectures[0] in _RBLN_OPTIMUM_MULTIMODAL_MODELS:
             rbln_model_arch = _RBLN_OPTIMUM_MULTIMODAL_MODELS[architectures[0]]
@@ -64,13 +65,15 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                 "Supported multimodal architectures: "
                 f"{list(_RBLN_OPTIMUM_MULTIMODAL_MODELS.keys())}")
     elif is_enc_dec_arch(model_config.hf_config):
-        assert vllm_config.cache_config.enable_prefix_caching is False, (
-            "Prefix caching is not supported with encoder-decoder models. "
-            "Please set `enable_prefix_caching` to False.")
+        assert vllm_config.cache_config.enable_prefix_caching in (
+            False, None), (
+                "Prefix caching is not supported with encoder-decoder models. "
+                "Please set `enable_prefix_caching` to False.")
         rbln_model = RBLNOptimumEncoderDecoder(vllm_config)
     elif is_pooling_arch(model_config.hf_config):
-        assert vllm_config.cache_config.enable_prefix_caching is False, (
-            "Prefix caching is not supported with pooling models. Please set "
+        assert vllm_config.cache_config.enable_prefix_caching in (
+            False, None
+        ), ("Prefix caching is not supported with pooling models. Please set "
             "`enable_prefix_caching` to False.")
         rbln_model = RBLNOptimumForEncoderModel(vllm_config)
     else:
@@ -79,9 +82,10 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                        model_config.hf_config, "use_sliding_window", True):
             logger.info(
                 "The model is initialized with Sliding Window Attention.")
-            assert vllm_config.cache_config.enable_prefix_caching is False, (
-                "Prefix caching is not supported with sliding window "
-                "attention. Please set `enable_prefix_caching` to False.")
+            assert vllm_config.cache_config.enable_prefix_caching in (
+                False, None), (
+                    "Prefix caching is not supported with sliding window "
+                    "attention. Please set `enable_prefix_caching` to False.")
             rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
                 vllm_config)
         else:
@@ -89,7 +93,4 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
     return rbln_model.eval()
 
 
-__all__ = [
-    "load_model", "get_rbln_model_info", "ModelInputForRBLN",
-    "RBLNOptimumForEncoderModel"
-]
+__all__ = ["load_model", "ModelInputForRBLN", "RBLNOptimumForEncoderModel"]
