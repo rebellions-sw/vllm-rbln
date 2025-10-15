@@ -6,28 +6,31 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import argparse
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-import argparse
-from transformers import AutoTokenizer
-from multiprocessing import get_context
 import urllib.request
+from multiprocessing import get_context
+
 import torch
+from transformers import AutoTokenizer
 
 MODEL_NAME = "meta-llama/Llama-3.2-1B"
 PREFILL_CHUNK_SIZE = 128
 VOCAB_SIZE = 128256
 EPSILON = 1e-1 * 5
 
+
 def get_wiki_prompt():
     wiki_txt_url = "https://raw.githubusercontent.com/huggingface/optimum-neuron/refs/heads/main/benchmark/text-generation/performance/wiki.txt"
     with urllib.request.urlopen(wiki_txt_url) as resp:
         source_data = resp.read().decode("utf-8")
     return source_data
+
 
 def generate_llm_args(device):
     llm_args = {
@@ -44,15 +47,6 @@ def generate_llm_args(device):
         llm_args["max_num_batched_tokens"] = PREFILL_CHUNK_SIZE
     return llm_args
 
-def generate_sampling_params():
-    from vllm import SamplingParams
-    return SamplingParams(
-        temperature=0.0,
-        top_p=1.0,
-        ignore_eos=True,
-        max_tokens=MAX_NEW_TOKENS,
-        logprobs=VOCAB_SIZE,
-    )
 
 def generate_prompts(prompt_length, batch_size) -> list[str]:
     wiki_prompt = get_wiki_prompt()
@@ -61,13 +55,16 @@ def generate_prompts(prompt_length, batch_size) -> list[str]:
     assert len(tokens) > prompt_length * batch_size
     prompts = []
     for i in range(batch_size):
-        prompt = tokenizer.decode(tokens[i * prompt_length: (i + 1) * prompt_length])
+        prompt = tokenizer.decode(tokens[i * prompt_length:(i + 1) *
+                                         prompt_length])
         prompts.append(prompt)
     return prompts
+
 
 def run_llm(llm, prompts, sampling_params, q):
     outputs = llm.generate(prompts, sampling_params=sampling_params)
     q.put(outputs)
+
 
 def _worker(device, prompts, q, args):
     llm_args = generate_llm_args(device)
@@ -95,11 +92,12 @@ def _worker(device, prompts, q, args):
     llm = LLM(**llm_args)
     run_llm(llm, prompts, sampling_params, q)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prompt_length", type=int, default=128)
-    parser.add_argument("--max_new_tokens", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("-l", "--prompt_length", type=int, default=128)
+    parser.add_argument("-m", "--max_new_tokens", type=int, default=1)
+    parser.add_argument("-b", "--batch_size", type=int, default=1)
     args = parser.parse_args()
 
     torch.manual_seed(42)

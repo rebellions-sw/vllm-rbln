@@ -29,6 +29,7 @@ prompts = [
     "The future of AI is",
 ]
 
+
 def generate_llm_args(device):
     llm_args = {
         "model": "meta-llama/Llama-3.2-1B",
@@ -51,6 +52,7 @@ def generate_llm_args(device):
 def run_llm(llm, sampling_params, q):
     outputs = llm.generate(prompts, sampling_params)
     q.put(outputs)
+
 
 def _worker(device, q):
     llm_args = generate_llm_args(device)
