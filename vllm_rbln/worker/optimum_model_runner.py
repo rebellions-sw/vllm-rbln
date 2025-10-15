@@ -33,7 +33,7 @@ from vllm.worker.model_runner_base import ModelRunnerBase
 
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm_rbln.model_executor.models.optimum import (
+from vllm_rbln.model_executor.models.optimum import (  # noqa
     ModelInputForRBLN, RBLNOptimumForEncoderModel)
 from vllm_rbln.utils.optimum.registry import (get_rbln_model_info,
                                               is_enc_dec_arch, is_pooling_arch)
