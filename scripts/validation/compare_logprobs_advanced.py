@@ -11,23 +11,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import os
+import argparse
+from transformers import AutoTokenizer
 from multiprocessing import get_context
+import urllib.request
+import torch
 
-# Set VOCAB_SIZE according to the model's tokenizer vocab size
-# Set EPSILON to the acceptable logprob difference threshold
-# Set STEP to control the number of tokens to generate
+MODEL_NAME = "meta-llama/Llama-3.2-1B"
+PREFILL_CHUNK_SIZE = 128
 VOCAB_SIZE = 128256
 EPSILON = 1e-1 * 5
-STEP = 1
 
-prompts = [
-    "Hello, my name is",
-    "The president of the United States is",
-    "The capital of France is",
-    "The future of AI is",
-]
+def get_wiki_prompt():
+    wiki_txt_url = "https://raw.githubusercontent.com/huggingface/optimum-neuron/refs/heads/main/benchmark/text-generation/performance/wiki.txt"
+    with urllib.request.urlopen(wiki_txt_url) as resp:
+        source_data = resp.read().decode("utf-8")
+    return source_data
 
 def generate_llm_args(device):
     llm_args = {
@@ -39,20 +39,37 @@ def generate_llm_args(device):
     }
     if device == "cpu":
         llm_args["block_size"] = 16
-        llm_args["max_num_batched_tokens"] = 128
     elif device == "rbln":
         llm_args["block_size"] = 1024
-        llm_args["max_num_batched_tokens"] = 128
-    else:
-        raise ValueError(f"Unknown device: {device}")
+        llm_args["max_num_batched_tokens"] = PREFILL_CHUNK_SIZE
     return llm_args
 
+def generate_sampling_params():
+    from vllm import SamplingParams
+    return SamplingParams(
+        temperature=0.0,
+        top_p=1.0,
+        ignore_eos=True,
+        max_tokens=MAX_NEW_TOKENS,
+        logprobs=VOCAB_SIZE,
+    )
 
-def run_llm(llm, sampling_params, q):
-    outputs = llm.generate(prompts, sampling_params)
+def generate_prompts(prompt_length, batch_size) -> list[str]:
+    wiki_prompt = get_wiki_prompt()
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokens = tokenizer(wiki_prompt, return_tensors="pt").input_ids[0]
+    assert len(tokens) > prompt_length * batch_size
+    prompts = []
+    for i in range(batch_size):
+        prompt = tokenizer.decode(tokens[i * prompt_length: (i + 1) * prompt_length])
+        prompts.append(prompt)
+    return prompts
+
+def run_llm(llm, prompts, sampling_params, q):
+    outputs = llm.generate(prompts, sampling_params=sampling_params)
     q.put(outputs)
 
-def _worker(device, q):
+def _worker(device, prompts, q, args):
     llm_args = generate_llm_args(device)
     if device == "cpu":
         os.environ["VLLM_PLUGINS"] = "cpu"
@@ -62,29 +79,41 @@ def _worker(device, q):
         os.environ["RBLN_KERNEL_MODE"] = "triton"
         os.environ["VLLM_USE_V1"] = "0"
         os.environ["USE_VLLM_MODEL"] = "1"
-        os.environ["VLLM_DISABLE_COMPILE_CACHE"] = "1"
+        os.environ["VLLM_DISABLE_COMPILE_CACHE"] = "0"
         # 1 means disable using compile cache
     else:
         raise ValueError(f"Unknown device: {device}")
 
     from vllm import LLM, SamplingParams
-    sampling_params = SamplingParams(temperature=0.0,
-                                     logprobs=VOCAB_SIZE,
-                                     ignore_eos=True,
-                                     max_tokens=STEP)
+    sampling_params = SamplingParams(
+        temperature=0.0,
+        top_p=1.0,
+        ignore_eos=True,
+        max_tokens=args.max_new_tokens,
+        logprobs=VOCAB_SIZE,
+    )
     llm = LLM(**llm_args)
-    run_llm(llm, sampling_params, q)
-
+    run_llm(llm, prompts, sampling_params, q)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prompt_length", type=int, default=128)
+    parser.add_argument("--max_new_tokens", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=1)
+    args = parser.parse_args()
+
+    torch.manual_seed(42)
+
+    prompts = generate_prompts(args.prompt_length, args.batch_size)
+
     ctx = get_context("spawn")
     q = ctx.Queue()
-    p1 = ctx.Process(target=_worker, args=("cpu", q))
+    p1 = ctx.Process(target=_worker, args=("cpu", prompts, q, args))
     p1.start()
     cpu_outputs = q.get()
     p1.join()
 
-    p2 = ctx.Process(target=_worker, args=("rbln", q))
+    p2 = ctx.Process(target=_worker, args=("rbln", prompts, q, args))
     p2.start()
     rbln_outputs = q.get()
     p2.join()
