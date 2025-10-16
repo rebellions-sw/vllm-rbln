@@ -256,6 +256,8 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     assert self.quant_method is not None
 
     if self.dp_size > 1:
+        org_hidden_shape = hidden_states.shape
+
         # input broadcast, all DPs broadcast each hidden_states & router_logits into dp group
         # example) DP2, TP/EP2
         # dp_group = {{0, 2}, {1, 3}}
@@ -300,9 +302,11 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
         # within expert, dp_group all_reduce
         # ouf of expert, tp_group all_reduce
         all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
-        # NOTE - DO NOT use slice assign since it makes tensor copy
-        #final_hidden_states = all_hidden_states[dp_rank:dp_rank+1,:,:]
-        final_hidden_states = all_hidden_states[self.dp_rank].unsqueeze(0)
+
+        hidden_shape_dp = (self.dp_size, -1, org_hidden_shape[-1])
+        final_hidden_states = all_hidden_states.reshape(hidden_shape_dp)
+        final_hidden_states = final_hidden_states[self.dp_rank]
+        final_hidden_states = final_hidden_states.reshape(org_hidden_shape)
 
     return final_hidden_states
 
