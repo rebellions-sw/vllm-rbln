@@ -61,8 +61,10 @@ def generate_prompts(prompt_length: int, batch_size: int) -> list[str]:
     assert len(tokens) > prompt_length * batch_size
     prompts = []
     for i in range(batch_size):
-        prompt = tokenizer.decode(tokens[i * prompt_length:(i + 1) *
-                                         prompt_length])
+        start_pos = i * prompt_length
+        # Leave 1 token for special token(bos) in the vllm
+        end_pos = (i + 1) * prompt_length - 1
+        prompt = tokenizer.decode(tokens[start_pos:end_pos])
         prompts.append(prompt)
     return prompts
 

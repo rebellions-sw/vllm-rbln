@@ -12,14 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 # Reference - https://github.com/vllm-project/vllm/blob/v0.9.1/benchmarks/benchmark_throughput.py
 import argparse
 import os
 import time
 import urllib.request
-from multiprocessing import get_context
-from multiprocessing.queues import Queue as MPQueue
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -31,6 +28,7 @@ if TYPE_CHECKING:
 
 MODEL_NAME = "meta-llama/Llama-3.2-1B"
 PREFILL_CHUNK_SIZE = 128
+
 
 def get_wiki_prompt():
     wiki_txt_url = "https://raw.githubusercontent.com/huggingface/optimum-neuron/refs/heads/main/benchmark/text-generation/performance/wiki.txt"
@@ -56,7 +54,8 @@ def generate_prompts(prompt_length: int, batch_size: int) -> list[str]:
     tokens = tokenizer(wiki_prompt, return_tensors="pt").input_ids[0]
     assert len(tokens) > prompt_length * batch_size
     prompts = []
-    real_prompt_length = prompt_length - 1 # Leave 1 token for special token(bos) in the vllm
+    # Leave 1 token for special token(bos) in the vllm
+    real_prompt_length = prompt_length - 1
     for i in range(batch_size):
         start_pos = i * real_prompt_length
         end_pos = (i + 1) * real_prompt_length
@@ -65,7 +64,9 @@ def generate_prompts(prompt_length: int, batch_size: int) -> list[str]:
     return prompts
 
 
-def run_llm(llm, prompts: list[str], sampling_params: "SamplingParams") -> tuple[float, list["RequestOutput"]]:
+def run_llm(
+        llm, prompts: list[str], sampling_params: "SamplingParams"
+) -> tuple[float, list["RequestOutput"]]:
     start = time.perf_counter()
     outputs = llm.generate(prompts, sampling_params=sampling_params)
     end = time.perf_counter()
@@ -90,8 +91,10 @@ def _worker(prompts: list[str], args: Any):
         max_tokens=args.max_tokens,
     )
     total_elapsed_time = 0.0
-    # FIXME: In rbln, re-initializing LLM in each iteration triggers runtime error:
-    # (Runtime) code=203 INIT_ALREADY_CREATED: A runtime has already been created for that compiled model
+    # FIXME: In rbln, re-initializing LLM
+    # in each iteration triggers runtime error:
+    # (Runtime) code=203 INIT_ALREADY_CREATED:
+    # A runtime has already been created for that compiled model
     # (Context failed to be created, compile_id=0).
     # Try creating a runtime on a different NPU(s), or use an existing runtime.
     llm = LLM(**llm_args)
@@ -100,10 +103,14 @@ def _worker(prompts: list[str], args: Any):
         total_elapsed_time += elapsed_time
     return total_elapsed_time
 
-def calculate_avg_throughput_and_latency(elapsed_time: float, batch_size: int, max_tokens: int, num_iter: int) -> tuple[float, float]:
+
+def calculate_avg_throughput_and_latency(elapsed_time: float, batch_size: int,
+                                         max_tokens: int,
+                                         num_iter: int) -> tuple[float, float]:
     avg_throughput = (batch_size * max_tokens * num_iter) / elapsed_time
     avg_latency = elapsed_time / num_iter
     return avg_throughput, avg_latency
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
