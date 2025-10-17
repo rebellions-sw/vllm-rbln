@@ -810,6 +810,9 @@ class RBLNModelRunner:
         self.execute_model(dummy_prefill_schedule)
         self.execute_model(dummy_prefill_cleanup)
 
+        num_prefill_graphs = self._accumulative_compilation_count
+        logger.info("Compiled %d graph(s) for prefill", num_prefill_graphs)
+
         # compile decode graph
         decode_max_batch_size = self.scheduler_config.max_num_seqs
         decode_max_seq_len = self.scheduler_config.max_model_len
@@ -859,6 +862,9 @@ class RBLNModelRunner:
             kv_connector_metadata=None)
         self.execute_model(dummy_decode_schedule)
         self.execute_model(dummy_decode_cleanup)
+
+        logger.info("Compiled %d graph(s) for decode",
+                    self._accumulative_compilation_count - num_prefill_graphs)
 
     @torch.inference_mode()
     def execute_model(
@@ -1256,12 +1262,11 @@ class RBLNModelRunner:
         if has_kv_transfer_group():
             get_kv_transfer_group().clear_connector_metadata()
 
-        if len(compilation_metrics :=
-               torch._dynamo.utils.get_compilation_metrics(
-               )) > self._accumulative_compilation_count:
+        compilation_metrics = torch._dynamo.utils.get_compilation_metrics()
+        if len(compilation_metrics) > self._accumulative_compilation_count:
             new_compilation_metrics = compilation_metrics[
                 self._accumulative_compilation_count:]
-            reasons = ",".join([
+            reasons = ", ".join([
                 cm.recompile_reason or "initial compilation"
                 for cm in new_compilation_metrics
             ])
