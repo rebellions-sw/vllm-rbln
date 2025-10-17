@@ -105,7 +105,10 @@ class Sampler(VLLMSampler):
     def __init__(self, seed):
         super().__init__()
         rebel.manual_seed(seed)
-        self.apply_topp_sampler = torch.compile(top_p_only, dynamic=False, fullgraph=True, backend="rbln")
+        self.apply_topp_sampler = torch.compile(top_p_only,
+                                                dynamic=False,
+                                                fullgraph=True,
+                                                backend="rbln")
 
     @torch.compiler.disable
     def apply_topp_sampler(self, logits: torch.Tensor,
@@ -113,7 +116,7 @@ class Sampler(VLLMSampler):
         return self.rbln_topp_sampler(logits, top_p)
 
     def rbln_topp_sampler(self, logits: torch.Tensor,
-                           top_p: torch.Tensor) -> torch.Tensor:
+                          top_p: torch.Tensor) -> torch.Tensor:
         # Apply top-p sampling using RBLN custom op.
         # It requires softmax prior to calling the op.
         probs = torch.nn.functional.softmax(logits, dim=-1)
