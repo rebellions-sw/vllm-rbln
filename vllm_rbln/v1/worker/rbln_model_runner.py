@@ -767,7 +767,7 @@ class RBLNModelRunner:
         prefill_seq_len = (self.scheduler_config.max_num_batched_tokens
                            if self.scheduler_config.chunked_prefill_enabled
                            else self.scheduler_config.max_model_len)
-        dummy_prefill_schdule = SchedulerOutput(
+        dummy_prefill_schedule = SchedulerOutput(
             scheduled_new_reqs=[
                 NewRequestData(
                     req_id="dummy_prefill",
@@ -807,7 +807,7 @@ class RBLNModelRunner:
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
-        self.execute_model(dummy_prefill_schdule)
+        self.execute_model(dummy_prefill_schedule)
         self.execute_model(dummy_prefill_cleanup)
 
         # compile decode graph
@@ -815,7 +815,7 @@ class RBLNModelRunner:
         decode_max_seq_len = self.scheduler_config.max_model_len
         decode_max_num_blocks = (decode_max_seq_len + self.block_size -
                                  1) // self.block_size
-        dummy_decode_schdule = SchedulerOutput(
+        dummy_decode_schedule = SchedulerOutput(
             scheduled_new_reqs=[
                 NewRequestData(
                     req_id=f"dummy_decode_{i}",
@@ -857,7 +857,7 @@ class RBLNModelRunner:
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
-        self.execute_model(dummy_decode_schdule)
+        self.execute_model(dummy_decode_schedule)
         self.execute_model(dummy_decode_cleanup)
 
     @torch.inference_mode()
