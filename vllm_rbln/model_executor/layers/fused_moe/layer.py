@@ -326,24 +326,10 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
     seq_size = x.size(1)
     hidden_size = x.size(2)
 
-    if False:
-        # each DP rank gather all inputs via torch.distributed.broadcast
-        buffer = torch.empty((dp_size * batch_size, seq_size, hidden_size),
-                    device=x.device,
-                    dtype=x.dtype)
-        # buffer[dp_rank] = x
-        buffer = buffer.slice_scatter(x, dim=0, start=dp_rank, end=dp_rank+1)
-        # gather all tensors of all ranks within dp group
-        for rank in range(get_dp_group().world_size):
-            get_dp_group().broadcast(buffer[rank:rank+1,:,:], rank)
-        return buffer
-    else:
+    if not envs.RBLN_DP_INPUT_ALL_GATHER:
         # each DP rank gather all inputs via torch.distributed.all_reduce
         # broadcast(value) == all_reduce(value for me or zeros for others)
         all_gather_buffer = None
-        #buffer = torch.zeros((batch_size, seq_size, hidden_size),
-        #            device=x.device,
-        #            dtype=x.dtype)
         zeros = x - x
         for rank in range(get_dp_group().world_size):
             if rank == dp_rank:
@@ -354,6 +340,10 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
                 all_gather_buffer = broadcast_tensor
             else:
                 all_gather_buffer = torch.cat((all_gather_buffer, broadcast_tensor), dim=0)
+        return all_gather_buffer
+    else:
+        # gather all inputs via torch.distributed.all_gather
+        all_gather_buffer = get_dp_group().all_gather(x, dim=0)
         return all_gather_buffer
 
 

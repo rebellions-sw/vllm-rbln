@@ -61,6 +61,10 @@ environment_variables = {
     "RBLN_MOE_CUSTOM_KERNEL":
     (lambda: os.environ.get("MOE_CUSTOM_KERNEL", "False").lower() in
      ("true", "1")),
+    # DP_INPUT_ALL_GATHER
+    "RBLN_DP_INPUT_ALL_GATHER":
+    (lambda: os.environ.get("DP_INPUT_ALL_GATHER", "False").lower() in
+     ("true", "1")),
     # Number of Ray nodes
     "RBLN_NUM_RAY_NODES":
     lambda: int(os.environ.get("NUM_RAY_NODES", 1)),
