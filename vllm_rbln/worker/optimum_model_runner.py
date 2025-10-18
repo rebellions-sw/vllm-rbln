@@ -143,7 +143,8 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             seq_lens.append(seq_len)
 
             input_tokens.append(prompt_tokens)
-            input_positions.append(list(range(seq_len)))
+            positions = list(range(seq_len))
+            input_positions.append(positions)
 
             assert seq_group_metadata.block_tables is not None
             block_table = seq_group_metadata.block_tables[seq_id]
@@ -154,7 +155,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             if mm_data:
                 # Process multi-modal data
                 mm_kwargs = self._compute_multi_modal_input(
-                    input_positions, seq_group_metadata)
+                    positions, seq_group_metadata)
 
                 multi_modal_inputs_list.append(mm_kwargs)
 
@@ -264,7 +265,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         return ModelInputForRBLN.from_broadcasted_tensor_dict(tensor_dict)
 
     def _compute_multi_modal_input(
-            self, positions: torch.Tensor,
+            self, positions: list[int],
             seq_group_metadata: SequenceGroupMetadata
     ) -> Optional[Dict[str, Any]]:
         """If multi-modal data is given, add it to the input."""
