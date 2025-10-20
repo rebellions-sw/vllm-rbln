@@ -679,6 +679,16 @@ class RBLNModelRunner:
                         "the cached compiled binary will be reused.")
             options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
                                     else "./cache_dir")
+        if envs.RBLN_COIMPILE_STRICT_MODE:
+            options["strict"] = True
+
+        # compile compute_logits
+        self.compute_logits = torch.compile(
+            self.compute_logits,
+            backend="rbln",
+            options=options,
+            dynamic=False,
+        )
 
         compiled_model = torch.compile(
             model,
@@ -686,6 +696,7 @@ class RBLNModelRunner:
             options=options,
             dynamic=False,
         )
+
         return compiled_model
 
     def get_model(self) -> nn.Module:
@@ -1332,15 +1343,6 @@ class RBLNModelRunner:
 
             self.compile_context = CompileContext(use_weight_sharing=True)
             self.model_executable = self._compile_model(self.model)
-            self.compute_logits = torch.compile(
-                self.compute_logits,
-                backend="rbln",
-                options={
-                    "compile_context": self.compile_context,
-                    "tensor_parallel_size": envs.RBLN_TP_SIZE,
-                },
-                dynamic=False,
-            )
 
     def save_tensorized_model(
         self,

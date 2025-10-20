@@ -449,7 +449,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                         "the cached compiled binary will be reused.")
             options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
                                     else "./cache_dir")
-
+        if envs.RBLN_COIMPILE_STRICT_MODE:
+            options["strict"] = True
         compiled_model = torch.compile(
             model,
             backend="rbln",
