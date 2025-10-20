@@ -85,8 +85,7 @@ jobs:
           VERSION=${{ inputs.optimum_rbln_version }}
           pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
           echo "optimum-rbln $VERSION"
-          pip install --no-deps torch==2.8.0+cpu torchvision==0.23.0+cpu torchaudio==2.8.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
-          pip install --no-deps transformers==4.55.2
+          pip install --no-deps vllm==0.10.2
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
