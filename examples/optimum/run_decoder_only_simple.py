@@ -67,11 +67,11 @@ def main(
 
 
 def entry_point(
-    batch_size: int = 1,
+    batch_size: int = 4,
     max_seq_len: int = 131072,
     kvcache_block_size: int = 16_384,
-    num_input_prompt: int = 5,
-    model_id: str = "/home/eunji.lee/nas_data/1017/Llama-3.1-8B-Instruct-b1",
+    num_input_prompt: int = 4,
+    model_id: str = "./Llama-3.1-8B-Instruct-b4",
 ):
     main(
         batch_size=batch_size,
