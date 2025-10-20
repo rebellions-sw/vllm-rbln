@@ -26,8 +26,8 @@ from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import BatchedTensorInputs
-from vllm.multimodal.utils import group_mm_inputs_by_modality
+from vllm.multimodal.inputs import BatchedTensorInputs, MultiModalKwargsItem
+from vllm.multimodal.utils import group_mm_kwargs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
@@ -88,8 +88,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 cache_config.cache_dtype]
 
         self.is_pooling_model = (model_config.runner_type == 'pooling')
-        self.is_multimodal_raw_input_only_model = (
-            model_config.is_multimodal_raw_input_only_model)
+        # When `is_multimodal_raw_input_only_model` is True, it means that
+        # it extract multimodal raw inputs only and deliver as raw inputs to
+        # the model.
+        self.is_multimodal_raw_input_only_model = True
 
         self.max_model_len = model_config.max_model_len
         self.dcp_world_size = self.parallel_config.decode_context_parallel_size
@@ -100,9 +102,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.num_query_heads = model_config.get_num_attention_heads(
             parallel_config)
         self.hidden_size = model_config.get_hidden_size()
-        # self.attention_chunk_size = model_config.attention_chunk_size
-
-        # self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
 
         # Multi-modal data support
         self.mm_registry = MULTIMODAL_REGISTRY
@@ -384,8 +383,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         else:
             input_ids, positions, block_tables, running_request_ids \
                 = self._prepare_decode(scheduler_output)
-        print("input_ids", input_ids)
-        print("positions", positions)
+
         # Hot-Swap lora model
         if self.lora_config:
             self.set_active_loras(self.input_batch, is_prefill)
@@ -440,38 +438,27 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             )
         return kv_cache_spec
 
-    def _get_multi_kwargs(self, scheduler_output: "SchedulerOutput") -> int:
-        scheduled_encoder_inputs = scheduler_output.scheduled_encoder_inputs
-        if not scheduled_encoder_inputs:
-            return
+    def _extract_mm_kwargs(
+        self,
+        scheduler_output: "SchedulerOutput",
+    ) -> BatchedTensorInputs:
+        if not scheduler_output or not self.is_multimodal_raw_input_only_model:
+            return {}
 
-        # Batch the multi-modal inputs.
-        mm_inputs = list[RBLNOptimumMultiModalKwargs]()
-        for req_id, encoder_input_ids in scheduled_encoder_inputs.items():
-            req_state = self.requests[req_id]
-            for mm_input_id in encoder_input_ids:
-                mm_inputs.append(req_state.mm_inputs[mm_input_id])
+        mm_kwargs = list[MultiModalKwargsItem]()
+        for req in scheduler_output.scheduled_new_reqs:
+            mm_kwargs.extend(req.mm_kwargs)
 
-        # Batch mm inputs as much as we can: if a request in the batch has
-        # multiple modalities or a different modality than the previous one,
-        # we process it separately to preserve item order.
-        # FIXME(ywang96): This is a hacky way to deal with multiple modalities
-        # in the same batch while still being able to benefit from batching
-        # multimodal inputs. The proper solution should be reordering the
-        # encoder outputs.
-        grouped_mm_inputs_list = group_mm_inputs_by_modality(mm_inputs)
+        # Input all modalities at once
+        mm_kwargs_combined: BatchedTensorInputs = {}
+        for _, _, mm_kwargs_group in group_mm_kwargs_by_modality(
+                mm_kwargs,
+                device=self.device,
+                pin_memory=self.pin_memory,
+        ):
+            mm_kwargs_combined.update(mm_kwargs_group)
 
-        assert len(grouped_mm_inputs_list) == 1
-
-        grouped_mm_inputs = grouped_mm_inputs_list[0]
-        batched_mm_inputs = RBLNOptimumMultiModalKwargs.batch(
-            grouped_mm_inputs)
-        batched_mm_inputs = RBLNOptimumMultiModalKwargs.as_kwargs(
-            batched_mm_inputs,
-            device=self.device,
-        )
-
-        return batched_mm_inputs
+        return mm_kwargs_combined
 
     def _prepare_prefill(
         self,
@@ -521,10 +508,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 block_table.tolist())
             running_request_ids.append(req_id)
 
-        # if self.is_multimodal_model:
-        #     batched_mm_inputs = self._get_multi_kwargs(scheduler_output)
-        # FIXME
-        batched_mm_inputs = None
+        if self.supports_mm_inputs:
+            batched_mm_inputs = self._extract_mm_kwargs(scheduler_output)
 
         input_tokens = torch.tensor(prompt_tokens).unsqueeze(0)
         input_positions = torch.tensor(input_positions).unsqueeze(0)
