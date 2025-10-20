@@ -42,7 +42,7 @@ vllm serve meta-llama/Llama-3.2-1B-instruct \
     --tokenizer meta-llama/Llama-3.2-1B-instruct \
     --host 127.0.0.1 \
     --port 8000 \
-    --guided-decoding-backend xgrammar\
+    --guided-decoding-backend xgrammar \
     --max-num-seqs 16 \
     --max-model-len 8192 \
     --block-size 1024 \

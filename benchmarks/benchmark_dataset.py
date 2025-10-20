@@ -1,5 +1,16 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """
 This module defines a framework for sampling benchmark requests from various
 datasets. Each dataset subclass of BenchmarkDataset must implement sample
@@ -83,7 +94,8 @@ class BenchmarkDataset(ABC):
         self.dataset_path = dataset_path
         # Set the random seed, ensuring that a None value is replaced with the
         # default seed.
-        self.random_seed = random_seed if random_seed is not None else self.DEFAULT_SEED
+        self.random_seed = (random_seed
+                            if random_seed is not None else self.DEFAULT_SEED)
         self.data = None
 
     def apply_multimodal_chat_transformation(
@@ -895,7 +907,8 @@ class VisionArenaDataset(HuggingFaceDataset):
         request_id_prefix: str = "",
         **kwargs,
     ) -> list:
-        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
+        output_len = (output_len
+                      if output_len is not None else self.DEFAULT_OUTPUT_LEN)
         sampled_requests = []
         for i, item in enumerate(self.data):
             if len(sampled_requests) >= num_requests:
@@ -955,7 +968,8 @@ class InstructCoderDataset(HuggingFaceDataset):
         request_id_prefix: str = "",
         **kwargs,
     ) -> list:
-        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
+        output_len = (output_len
+                      if output_len is not None else self.DEFAULT_OUTPUT_LEN)
         sampled_requests = []
         for i, item in enumerate(self.data):
             if len(sampled_requests) >= num_requests:
@@ -1014,7 +1028,8 @@ class MTBenchDataset(HuggingFaceDataset):
         request_id_prefix: str = "",
         **kwargs,
     ) -> list:
-        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
+        output_len = (output_len
+                      if output_len is not None else self.DEFAULT_OUTPUT_LEN)
         sampled_requests = []
 
         for i, item in enumerate(self.data):
@@ -1235,6 +1250,7 @@ class ASRDataset(HuggingFaceDataset):
     IS_MULTIMODAL = True
 
     # TODO Whisper-specific. Abstract interface when more models are supported.
+    # ruff: noqa: E501
     TRANSCRIPTION_PREAMBLE = "<|startoftranscript|><|en|><|transcribe|><|notimestamps|>"
     skip_long_audios: bool = True
 
@@ -1248,7 +1264,8 @@ class ASRDataset(HuggingFaceDataset):
     ) -> list:
         import librosa
 
-        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
+        output_len = (output_len
+                      if output_len is not None else self.DEFAULT_OUTPUT_LEN)
         prompt = ASRDataset.TRANSCRIPTION_PREAMBLE
         prompt_len = len(tokenizer(prompt).input_ids)
         sampled_requests = []

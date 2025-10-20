@@ -1,5 +1,16 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 r"""Benchmark online serving throughput.
 
 On the server side, run one of the following commands:
@@ -325,7 +336,8 @@ async def benchmark(
         if profile_output.success:
             print("Profiler started")
 
-    distribution = "Poisson process" if burstiness == 1.0 else "Gamma distribution"
+    distribution = ("Poisson process"
+                    if burstiness == 1.0 else "Gamma distribution")
 
     print(f"Traffic request rate: {request_rate}")
     print(f"Burstiness factor: {burstiness} ({distribution})")
@@ -719,9 +731,8 @@ def main(args: argparse.Namespace):
 
     # Sampling parameters are only supported by openai-compatible backend.
     if sampling_params and args.backend not in OPENAI_COMPATIBLE_BACKENDS:
-        raise ValueError(
-            "Sampling parameters are only supported by openai-compatible backends."
-        )
+        raise ValueError("Sampling parameters are only supported "
+                         "by openai-compatible backends.")
 
     if "temperature" not in sampling_params:
         sampling_params["temperature"] = 0.0  # Default to greedy decoding.
@@ -1127,22 +1138,22 @@ if __name__ == "__main__":
         "--top-p",
         type=float,
         default=None,
-        help=
-        "Top-p sampling parameter. Only has effect on openai-compatible backends.",
+        help="Top-p sampling parameter."
+        " Only has effect on openai-compatible backends.",
     )
     sampling_group.add_argument(
         "--top-k",
         type=int,
         default=None,
-        help=
-        "Top-k sampling parameter. Only has effect on openai-compatible backends.",
+        help="Top-k sampling parameter."
+        " Only has effect on openai-compatible backends.",
     )
     sampling_group.add_argument(
         "--min-p",
         type=float,
         default=None,
-        help=
-        "Min-p sampling parameter. Only has effect on openai-compatible backends.",
+        help="Min-p sampling parameter."
+        " Only has effect on openai-compatible backends.",
     )
     sampling_group.add_argument(
         "--temperature",
