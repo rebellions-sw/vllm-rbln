@@ -15,10 +15,9 @@
 from typing import Optional
 
 import torch
-from vllm.config import PoolerConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.layers.pooler import Pooler, PoolingType
-from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
+from vllm.model_executor.layers.pooler import Pooler
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
@@ -28,13 +27,18 @@ logger = init_logger(__name__)
 
 class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
     PAD_TOKEN_ID = 0
+    is_pooling_model = True
+    pooler: Pooler
 
     def __init__(
         self,
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__(vllm_config=vllm_config)
-        self._pooler = self._build_pooler(self.model_config.pooler_config)
+        pooler_config = vllm_config.model_config.pooler_config
+        assert pooler_config is not None
+        # FIXME multiple tasks?
+        self.pooler = Pooler.for_embed(pooler_config)
 
     def is_classification_arch(self):
         architectures = getattr(
@@ -60,6 +64,14 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
 
             if tensor.size(1) > self.rbln_model_config.max_seq_len:
                 tensor = tensor[:, :self.rbln_model_config.max_seq_len]
+            elif tensor.size(1) < self.rbln_model_config.max_seq_len:
+                padded_tensor = torch.zeros(
+                    batch_size,
+                    self.rbln_model_config.max_seq_len,
+                    dtype=tensor.dtype,
+                )
+                padded_tensor[:, :tensor.size(1)] = tensor
+                tensor = padded_tensor
 
             if tensor.size(0) >= target_batch_size:
                 return tensor
@@ -72,26 +84,6 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
             pad_if_needed(type_token_ids),
             pad_if_needed(positions),
         )
-
-    def pool(self, hidden_states, pooling_metadata):
-        if self._pooler:
-            return self._pooler(hidden_states, pooling_metadata)
-        else:
-            # FIXME: ad-hoc for RBLNXLMRobertaForSequenceClassification
-            outputs = [
-                PoolingSequenceGroupOutput(data) for data in hidden_states
-            ]
-            return PoolerOutput(outputs=outputs)
-
-    def _build_pooler(self, pooler_config: PoolerConfig) -> Optional[Pooler]:
-        if not self.is_classification_arch():
-            return Pooler.from_config_with_defaults(
-                pooler_config,
-                pooling_type=PoolingType.CLS,
-                normalize=True,
-                softmax=False,
-            )
-        return None
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:

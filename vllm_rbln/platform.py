@@ -24,7 +24,7 @@ else:
 import rebel
 from torch._dynamo import register_backend
 from vllm.platforms import Platform, PlatformEnum, _Backend
-from vllm.utils import FlexibleArgumentParser
+from vllm.utils import FlexibleArgumentParser, _StreamPlaceholder
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -52,6 +52,7 @@ class RblnPlatform(Platform):
     ray_device_key: str = "RBLN"
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
+    current_stream = _StreamPlaceholder
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
