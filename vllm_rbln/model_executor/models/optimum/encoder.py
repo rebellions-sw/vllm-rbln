@@ -17,7 +17,7 @@ from typing import Optional
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.layers.pooler import Pooler, DispatchPooler
+from vllm.model_executor.layers.pooler import DispatchPooler, Pooler
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
@@ -43,8 +43,7 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
                 "encode": Pooler.for_encode(pooler_config),
                 "embed": Pooler.for_embed(pooler_config),
                 # classify, score is not supported for now
-            },
-        )
+            }, )
 
     def is_classification_arch(self):
         architectures = getattr(
