@@ -49,12 +49,12 @@ def random_sample(
     return probs.div_(q).argmax(dim=-1).view(-1)
 
 
-def dual_pivot_top_p_sample(
+def top_p_sample(
     probs: torch.Tensor,
     top_p: torch.Tensor,
 ) -> torch.Tensor:
     """
-    Mock implementation of `dual_pivot_top_p_sample`
+    Mock implementation of `top_p_sample`
     used for torch ops registration.
 
     This function currently performs standard top-p (nucleus)
@@ -89,7 +89,7 @@ def top_p_only(
     probs: torch.Tensor,
     top_p: torch.Tensor,
 ) -> torch.Tensor:
-    return dual_pivot_top_p_sample(probs, top_p)
+    return top_p_sample(probs, top_p)
 
 
 @top_p_only.register_fake
@@ -97,7 +97,7 @@ def top_p_only_fake(
     probs: torch.Tensor,
     top_p: torch.Tensor,
 ) -> torch.Tensor:
-    return dual_pivot_top_p_sample(probs, top_p)
+    return top_p_sample(probs, top_p)
 
 
 class Sampler(VLLMSampler):
