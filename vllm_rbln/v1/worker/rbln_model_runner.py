@@ -681,7 +681,7 @@ class RBLNModelRunner:
                         "the cached compiled binary will be reused.")
             options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
                                     else "./cache_dir")
-        if envs.RBLN_COIMPILE_STRICT_MODE:
+        if envs.RBLN_COMPILE_STRICT_MODE:
             options["strict"] = True
 
         # compile compute_logits
@@ -772,6 +772,7 @@ class RBLNModelRunner:
 
         return self.model.compute_logits(hidden_states, sampling_metadata)
 
+    # unchanged from GPUModelRunner
     def apply_grammar_bitmask(
         self,
         scheduler_output: "SchedulerOutput",

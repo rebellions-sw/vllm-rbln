@@ -19,7 +19,7 @@ from vllm.envs import environment_variables as vllm_envs
 
 if TYPE_CHECKING:
     RBLN_COMPILE_MODEL: bool = True
-    RBLN_COIMPILE_STRICT_MODE: bool = False
+    RBLN_COMPILE_STRICT_MODE: bool = False
     RBLN_TP_SIZE: int = 1
     RBLN_SAMPLER: bool = False
     RBLN_ENABLE_WARM_UP: bool = False
@@ -32,8 +32,8 @@ environment_variables = {
     # Otherwise, run the CPU eager mode, if possible.
     "RBLN_COMPILE_MODEL":
     (lambda: os.environ.get("COMPILE_MODEL", "True").lower() in ("true", "1")),
-    "RBLN_COIMPILE_STRICT_MODE":
-    (lambda: os.environ.get("RBLN_COIMPILE_STRICT_MODE", "False").lower() in
+    "RBLN_COMPILE_STRICT_MODE":
+    (lambda: os.environ.get("RBLN_COMPILE_STRICT_MODE", "False").lower() in
      ("true", "1")),
     # TP Size for RSD.
     "RBLN_TP_SIZE":
