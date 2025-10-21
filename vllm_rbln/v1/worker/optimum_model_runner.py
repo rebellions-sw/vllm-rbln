@@ -652,10 +652,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             )
             self.requests[req_id] = req_state
 
-            # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-            if self.uses_mrope:
-                self._init_mrope_positions(req_state)
-
             reqs_to_add.append(req_state)
 
         # Update the states of the running/resumed requests.
