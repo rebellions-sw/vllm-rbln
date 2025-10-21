@@ -37,11 +37,12 @@ from vllm.forward_context import (DPMetadata, get_forward_context,
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.model_loader import TensorizerLoader, get_model_loader
-from vllm.sampling_params import SamplingType
+from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader, check_use_alibi,
                         is_pin_memory_available, make_tensor_with_pad)
 from vllm.v1.attention.backends.utils import CommonAttentionMetadata
+from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.kv_cache_interface import (AttentionSpec, FullAttentionSpec,
                                         KVCacheConfig, KVCacheSpec,
                                         SlidingWindowSpec)
@@ -60,7 +61,6 @@ import vllm_rbln.rbln_envs as envs
 if TYPE_CHECKING:
     import xgrammar as xgr
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
-    from vllm.v1.core.sched.output import SchedulerOutput
 else:
     xgr = LazyLoader("xgr", globals(), "xgrammar")
 
@@ -252,6 +252,8 @@ class RBLNModelRunner:
         self.max_prefill_batch_size = 1
         self.max_num_batched_tokens = (
             self.scheduler_config.max_num_batched_tokens)
+
+        self._accumulative_compilation_count = 0
 
     def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler
@@ -830,6 +832,111 @@ class RBLNModelRunner:
         )
 
     @torch.inference_mode()
+    def warmup_model(self) -> None:
+        # compile prefill graph
+        prefill_seq_len = (self.scheduler_config.max_num_batched_tokens
+                           if self.scheduler_config.chunked_prefill_enabled
+                           else self.scheduler_config.max_model_len)
+        dummy_prefill_schedule = SchedulerOutput(
+            scheduled_new_reqs=[
+                NewRequestData(
+                    req_id="dummy_prefill",
+                    prompt_token_ids=list(range(prefill_seq_len)),
+                    mm_hashes=[],
+                    mm_inputs=[],
+                    mm_positions=[],
+                    sampling_params=SamplingParams(temperature=0.0),
+                    block_ids=([0], ),
+                    num_computed_tokens=0,
+                    lora_request=None,
+                )
+            ],
+            scheduled_cached_reqs=[],
+            num_scheduled_tokens={"dummy_prefill": prefill_seq_len},
+            total_num_scheduled_tokens=prefill_seq_len,
+            scheduled_spec_decode_tokens={},
+            scheduled_encoder_inputs={},
+            num_common_prefix_blocks=[0],
+            finished_req_ids=set(),
+            free_encoder_input_ids=[],
+            structured_output_request_ids={},
+            grammar_bitmask=None,
+            kv_connector_metadata=None)
+        dummy_prefill_cleanup = SchedulerOutput(
+            scheduled_new_reqs=[],
+            scheduled_cached_reqs=[],
+            num_scheduled_tokens={},
+            total_num_scheduled_tokens=0,
+            scheduled_spec_decode_tokens={},
+            scheduled_encoder_inputs={},
+            num_common_prefix_blocks=[1],
+            finished_req_ids={
+                "dummy_prefill",
+            },
+            free_encoder_input_ids=[],
+            structured_output_request_ids={},
+            grammar_bitmask=None,
+            kv_connector_metadata=None)
+        self.execute_model(dummy_prefill_schedule)
+        self.execute_model(dummy_prefill_cleanup)
+
+        num_prefill_graphs = self._accumulative_compilation_count
+        logger.info("Compiled %d graph(s) for prefill", num_prefill_graphs)
+
+        # compile decode graph
+        decode_max_batch_size = self.scheduler_config.max_num_seqs
+        decode_max_seq_len = self.scheduler_config.max_model_len
+        decode_max_num_blocks = (decode_max_seq_len + self.block_size -
+                                 1) // self.block_size
+        dummy_decode_schedule = SchedulerOutput(
+            scheduled_new_reqs=[
+                NewRequestData(
+                    req_id=f"dummy_decode_{i}",
+                    prompt_token_ids=list(range(decode_max_seq_len - 1)),
+                    mm_hashes=[],
+                    mm_inputs=[],
+                    mm_positions=[],
+                    sampling_params=SamplingParams(temperature=0.0),
+                    block_ids=([0] * decode_max_num_blocks, ),
+                    num_computed_tokens=decode_max_seq_len - 1,
+                    lora_request=None,
+                ) for i in range(decode_max_batch_size)
+            ],
+            scheduled_cached_reqs=[],
+            num_scheduled_tokens={
+                f"dummy_decode_{i}": 1
+                for i in range(decode_max_batch_size)
+            },
+            total_num_scheduled_tokens=decode_max_batch_size,
+            scheduled_spec_decode_tokens={},
+            scheduled_encoder_inputs={},
+            num_common_prefix_blocks=[0],
+            finished_req_ids=set(),
+            free_encoder_input_ids=[],
+            structured_output_request_ids={},
+            grammar_bitmask=None,
+            kv_connector_metadata=None)
+        dummy_decode_cleanup = SchedulerOutput(
+            scheduled_new_reqs=[],
+            scheduled_cached_reqs=[],
+            num_scheduled_tokens={},
+            total_num_scheduled_tokens=0,
+            scheduled_spec_decode_tokens={},
+            scheduled_encoder_inputs={},
+            num_common_prefix_blocks=[1],
+            finished_req_ids=set(f"dummy_decode_{i}"
+                                 for i in range(decode_max_batch_size)),
+            free_encoder_input_ids=[],
+            structured_output_request_ids={},
+            grammar_bitmask=None,
+            kv_connector_metadata=None)
+        self.execute_model(dummy_decode_schedule)
+        self.execute_model(dummy_decode_cleanup)
+
+        logger.info("Compiled %d graph(s) for decode",
+                    self._accumulative_compilation_count - num_prefill_graphs)
+
+    @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
@@ -1224,6 +1331,22 @@ class RBLNModelRunner:
         # Clear KVConnector state after all KVs are generated.
         if has_kv_transfer_group():
             get_kv_transfer_group().clear_connector_metadata()
+
+        compilation_metrics = torch._dynamo.utils.get_compilation_metrics()
+        if len(compilation_metrics) > self._accumulative_compilation_count:
+            new_compilation_metrics = compilation_metrics[
+                self._accumulative_compilation_count:]
+            reasons = ", ".join([
+                cm.recompile_reason or "initial compilation"
+                for cm in new_compilation_metrics
+            ])
+            logger.debug(
+                "graph compilation(s) triggered due to following reason(s): %s",
+                reasons)
+            self._accumulative_compilation_count += len(
+                new_compilation_metrics)
+            logger.debug("accumulative compilation count: %s",
+                         self._accumulative_compilation_count)
 
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
@@ -1693,6 +1816,9 @@ class RBLNModelRunner:
 
         if has_kv_transfer_group():
             get_kv_transfer_group().register_kv_caches(kv_caches)
+
+        self.cache_config.num_gpu_blocks = kv_cache_config.num_blocks
+        self.cache_config.num_cpu_blocks = 0
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         """
