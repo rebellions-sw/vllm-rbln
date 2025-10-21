@@ -14,6 +14,7 @@
 
 import dataclasses
 import math
+import time
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
@@ -38,6 +39,8 @@ from vllm.worker.model_runner_base import (
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
     _init_sampling_metadata_from_tensor_dict)
+
+from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
@@ -438,6 +441,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(
                 cast(RBLNModelRunner, weakref.proxy(self)))
+        if envs.RBLN_METRICS:
+            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker.register_cleanup()
 
     def compile_model(self, model):
         options = {
@@ -583,6 +589,16 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         is_prompt = seq_group_metadata_list[
             0].is_prompt if seq_group_metadata_list else None
+        if is_prompt:
+            logger.debug("[RBLN] Prefill step - requests: %s", [
+                seq_group_metadata.request_id
+                for seq_group_metadata in seq_group_metadata_list
+            ])
+        else:
+            logger.debug("[RBLN] Decode step - requests: %s", [
+                seq_group_metadata.request_id
+                for seq_group_metadata in seq_group_metadata_list
+            ])
         logger.debug("[RBLN] num_requests = %d", len(seq_group_metadata_list))
         logger.debug("[RBLN] input_ids = %s", model_input.input_tokens)
         logger.debug("[RBLN] positions = %s", model_input.input_positions)
@@ -634,6 +650,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
 
+            start_time = time.perf_counter()
             logits_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
@@ -641,6 +658,21 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 selected_token_indices=token_indices,
                 **execute_model_kwargs,
             )
+            end_time = time.perf_counter()
+
+            if envs.RBLN_METRICS:
+                # Record performance metrics
+                execution_time = end_time - start_time
+                if model_input.is_prompt:
+                    total_tokens = sum(model_input.query_lens
+                                       ) if model_input.query_lens else 0
+                    self.performance_tracker.record_prefill(
+                        execution_time, total_tokens)
+                else:
+                    num_seqs = len(
+                        model_input.seq_lens) if model_input.seq_lens else 0
+                    self.performance_tracker.record_decode(
+                        execution_time, num_seqs)
 
         if get_pp_group().is_last_rank:
             # Gather logits for TP

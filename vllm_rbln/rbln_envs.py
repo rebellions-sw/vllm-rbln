@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     RBLN_SAMPLER: bool = False
     RBLN_ENABLE_WARM_UP: bool = False
     RBLN_USE_VLLM_MODEL: bool = False
+    RBLN_FLASH_CAUSAL_ATTN: bool = True
+    RBLN_METRICS: bool = False
 
 # extended environments
 environment_variables = {
@@ -47,6 +49,9 @@ environment_variables = {
      ("true", "1")),
     "RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("FLASH_CAUSAL_ATTN", "True").lower() in
+     ("true", "1")),
+    "RBLN_METRICS":
+    (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
      ("true", "1")),
 }
 
