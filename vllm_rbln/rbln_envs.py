@@ -20,7 +20,7 @@ from vllm.envs import environment_variables as vllm_envs
 if TYPE_CHECKING:
     RBLN_COMPILE_MODEL: bool = True
     RBLN_TP_SIZE: int = 1
-    RBLN_SAMPLER: bool = True
+    RBLN_SAMPLER: bool = False
     RBLN_ENABLE_WARM_UP: bool = False
     RBLN_USE_VLLM_MODEL: bool = False
     RBLN_FLASH_CAUSAL_ATTN: bool = True
