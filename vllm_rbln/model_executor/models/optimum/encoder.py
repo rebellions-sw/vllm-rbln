@@ -17,7 +17,7 @@ from typing import Optional
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.layers.pooler import Pooler
+from vllm.model_executor.layers.pooler import Pooler, DispatchPooler
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
@@ -37,8 +37,14 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
         super().__init__(vllm_config=vllm_config)
         pooler_config = vllm_config.model_config.pooler_config
         assert pooler_config is not None
-        # FIXME multiple tasks?
-        self.pooler = Pooler.for_embed(pooler_config)
+        # self.pooler = Pooler.for_embed(pooler_config)
+        self.pooler = DispatchPooler(
+            {
+                "encode": Pooler.for_encode(pooler_config),
+                "embed": Pooler.for_embed(pooler_config),
+                # classify, score is not supported for now
+            },
+        )
 
     def is_classification_arch(self):
         architectures = getattr(
