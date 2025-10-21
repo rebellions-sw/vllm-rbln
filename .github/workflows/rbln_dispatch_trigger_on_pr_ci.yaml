@@ -17,7 +17,7 @@ jobs:
     permissions:
       contents: write
     outputs:
-      sync_branch: ${{ steps.push.outputs.push.sync_branch }}
+      sync_branch: ${{ steps.push.outputs.sync_branch }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
