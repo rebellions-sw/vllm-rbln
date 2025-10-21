@@ -45,7 +45,7 @@ def compare_copy_prompt_task_result(scores: list[float], golden_json: str):
 
 
 async def encode(engine, prompt, request_id):
-    pooling_params = PoolingParams()
+    pooling_params = PoolingParams(task="embed")
     results_generator = engine.encode(prompt=prompt,
                                       pooling_params=pooling_params,
                                       request_id=str(request_id))
