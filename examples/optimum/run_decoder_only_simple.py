@@ -18,15 +18,15 @@ from vllm import LLM, SamplingParams
 
 def get_sampling_params() -> SamplingParams:
     return SamplingParams(
-        temperature=0.1,
-        top_p=0.9,
+        temperature=0,
+        top_p=1.0,
         ignore_eos=True,
         max_tokens=80,
     )
 
 
 def get_input_prompts(num_input_prompt: int) -> list[str]:
-    prompts = [
+    base_prompts = [
         "Hello, my name is",
         "The president of the United States is",
         "The capital of France is",
@@ -38,8 +38,9 @@ def get_input_prompts(num_input_prompt: int) -> list[str]:
         "When is the next solar eclipse?",
         "The recipe for a perfect chocolate cake includes",
     ]
-    return prompts[:num_input_prompt]
-
+    
+    # Use modular arithmetic to cycle through prompts if num_input_prompt > len(base_prompts)
+    return [base_prompts[i % len(base_prompts)] for i in range(num_input_prompt)]
 
 def main(
     batch_size: int,
