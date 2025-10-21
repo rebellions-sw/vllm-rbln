@@ -39,7 +39,6 @@ def get_input_prompts(num_input_prompt: int) -> list[str]:
         "The recipe for a perfect chocolate cake includes",
     ]
 
-    # Use modular arithmetic to cycle through prompts if num_input_prompt > len(base_prompts)
     return [
         base_prompts[i % len(base_prompts)] for i in range(num_input_prompt)
     ]
