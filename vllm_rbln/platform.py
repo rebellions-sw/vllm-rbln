@@ -15,6 +15,7 @@
 from typing import TYPE_CHECKING, Optional
 
 import torch
+import torch.distributed as dist
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig, VllmConfig
@@ -23,6 +24,8 @@ else:
 
 import rebel
 from torch._dynamo import register_backend
+from vllm.distributed.device_communicators.base_device_communicator import (
+    DeviceCommunicatorBase)
 from vllm.platforms import Platform, PlatformEnum, _Backend
 from vllm.utils import FlexibleArgumentParser
 
@@ -30,6 +33,54 @@ import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+# RBLN custom communicator (vllm/distributed/device_communicators/...)
+class RblnCommunicator(DeviceCommunicatorBase):
+
+    def all_gather(self, input_: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        input_size = input_.size()
+        # NOTE: we have to use concat-style all-gather here,
+        # stack-style all-gather has compatibility issues with
+        # torch.compile . see https://github.com/pytorch/pytorch/issues/138795
+        output_size = (input_size[0] * self.world_size, ) + input_size[1:]
+        # Allocate output tensor.
+        output_tensor = torch.empty(output_size,
+                                    dtype=input_.dtype,
+                                    device=input_.device)
+        # All-gather.
+        dist.all_gather_into_tensor(output_tensor,
+                                    input_,
+                                    group=self.device_group)
+        if dim == -1:
+            if dim < 0:
+                # Convert negative dim to positive.
+                dim += input_.dim()
+
+            output_tensor = output_tensor.reshape((self.world_size, ) + input_size)
+            if dim == 2:
+                # output_tensor(dim=4).movedim(0, 2) == permute(1, 2, 0)
+                # output_tensor = output_tensor.movedim(0, dim)
+                output_tensor = output_tensor.permute(1, 2, 0, 3)
+            else:
+                assert False, "not yet implemented"
+            output_tensor = output_tensor.reshape(input_size[:dim] +
+                                                  (self.world_size *
+                                                   input_size[dim], ) +
+                                                  input_size[dim + 1:])
+        elif dim == 0:
+            pass
+        else:
+            assert False, "RBLN all_gather dim!=0 && dim!=-1, not yet implemented"
+            # Reshape
+            output_tensor = output_tensor.reshape((self.world_size, ) + input_size)
+            output_tensor = output_tensor.movedim(0, dim)
+            output_tensor = output_tensor.reshape(input_size[:dim] +
+                                                  (self.world_size *
+                                                   input_size[dim], ) +
+                                                  input_size[dim + 1:])
+
+        return output_tensor
 
 
 def bypass_backend(graph_module: "torch.fx.GraphModule"):
@@ -72,6 +123,10 @@ class RblnPlatform(Platform):
     def is_pin_memory_available(cls):
         logger.warning("Pin memory is not supported on RBLN.")
         return False
+
+    @classmethod
+    def get_device_communicator_cls(cls) -> str:
+        return "vllm_rbln.platform.RblnCommunicator"  # noqa
 
     @classmethod
     def use_all_gather(cls) -> bool:
