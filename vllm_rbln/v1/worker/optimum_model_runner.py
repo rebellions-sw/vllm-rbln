@@ -924,11 +924,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             supported_tasks.append("generate")
 
         if supports_transcription(model):
-            # FIXME
-            # if model.supports_transcription_only:
-            #     return ["transcription"]
-            return ["transcription"]
-
+            if model.supports_transcription_only:
+                return ["transcription"]
             supported_tasks.append("transcription")
 
         return supported_tasks
@@ -1065,3 +1062,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.transfer_event.record()
         # self.transfer_event.synchronize()
         return pinned.tolist()
+
+
+    def 

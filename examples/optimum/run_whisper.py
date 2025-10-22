@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
-
+import os
 import fire
 from datasets import load_dataset
 from transformers import AutoTokenizer
@@ -91,7 +91,7 @@ def entry_point(
     batch_size: int = 4,
     max_seq_len: int = 448,
     num_input_prompt: int = 1,
-    model_id: str = "/whisper-base-b4-wo-token-timestamps",
+    model_id: str = "/home/eunji.lee/nas_data/1017/whisper-tiny-b4",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
@@ -104,4 +104,9 @@ def entry_point(
 
 
 if __name__ == "__main__":
+    # NOTE To avoid multiprocessing issues
+    # `VLLM_WORKER_MULTIPROC_METHOD` must be set to "spawn".
+    # for both V0 and V1.
+    # https://github.com/vllm-project/vllm/issues/26581
+    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     fire.Fire(entry_point)
