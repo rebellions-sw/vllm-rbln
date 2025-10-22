@@ -38,8 +38,7 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
-from vllm_rbln.v1.sample import WARM_UP_CONFIGS
-from vllm_rbln.v1.sample import Sampler as RBLNSampler
+from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
 logger = init_logger(__name__)
