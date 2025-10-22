@@ -117,10 +117,6 @@ class RblnPlatform(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
-        if vllm_config.scheduler_config.is_multi_step:
-            raise NotImplementedError(
-                "Multi-step execution is not supported for RBLN")
-
         model_config = vllm_config.model_config
         task = model_config.task
         supported_tasks = set(model_config.supported_tasks)
@@ -192,6 +188,10 @@ class RblnPlatform(Platform):
                     logger.warning("RBLN Sampler is only supported on v1. "
                                    "V0 will be deprecated soon.")
                     envs.RBLN_SAMPLER = False
+            assert vllm_config.parallel_config.tensor_parallel_size == 1, (
+                "Tensor parallelism is set when compiled in optimum-rbln.")
+            assert vllm_config.parallel_config.pipeline_parallel_size == 1, (
+                "Pipeline parallelism is not supported in optimum-rbln.")
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):

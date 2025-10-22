@@ -73,7 +73,6 @@ async def main(model_id: str, max_seq_len: int, batch_size: int,
                num_input_prompt: int, q_prompt_txt: str, p_prompt_txt: str,
                golden_json: str):
     engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
                                   max_num_seqs=batch_size,
                                   max_num_batched_tokens=max_seq_len,
                                   block_size=max_seq_len,

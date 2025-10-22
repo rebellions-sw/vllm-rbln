@@ -30,6 +30,8 @@ environment_variables = {
     **vllm_envs,
     # If true, will compile models using torch.compile.
     # Otherwise, run the CPU eager mode, if possible.
+    # FIXME I think we need to adjust the environment variable name.
+    # It is a bit confusing.
     "RBLN_COMPILE_MODEL":
     (lambda: os.environ.get("COMPILE_MODEL", "True").lower() in ("true", "1")),
     # TP Size for RSD.

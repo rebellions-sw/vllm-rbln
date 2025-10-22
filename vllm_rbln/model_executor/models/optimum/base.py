@@ -18,9 +18,9 @@ import torch
 from transformers import PretrainedConfig
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
-from vllm.model_executor.pooling_metadata import PoolingMetadata
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import BatchedTensorInputs
+from vllm.v1.pool.metadata import PoolingMetadata
 from vllm.worker.model_runner_base import ModelRunnerInputBase
 
 if TYPE_CHECKING:
@@ -105,7 +105,7 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     sampling_metadata: "SamplingMetadata" = None,  # for V0
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     token_type_ids: Optional[torch.Tensor] = None
-    pooling_metadata: Optional[PoolingMetadata] = None  # for V0
+    pooling_metadata: Optional[PoolingMetadata] = None  # for V1
     lora_requests: Optional[List[LoRARequest]] = None  # for V0
     lora_mapping: Optional["LoRAMapping"] = None  # for V0
 
