@@ -178,26 +178,48 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
 
 
 # based on custom fused moe expert kernel
-def get_masked_routing_weights(router_logits, top_k, renormalize):
+def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     # routing_weights: (batch * sequence_length, n_experts)
     routing_weights = torch.nn.functional.softmax(router_logits, dim=1, dtype=torch.float)
+    routing_weights = routing_weights.to(torch.float)
 
     # selected_experts: (batch * sequence_length, top_k)
-    selected_weights, selected_experts = torch.topk(routing_weights, k=top_k, dim=-1)
-    mask = torch.zeros_like(routing_weights, dtype=torch.float32)
-    un_mask = torch.ones_like(selected_experts, dtype=torch.float32)
-    mask.scatter_(1, selected_experts, un_mask)
+    _, selected_experts = torch.topk(routing_weights, k=top_k, dim=-1)
 
-    if renormalize:  # only diff with mixtral sparse moe block!
-        routing_weights /= selected_weights.sum(dim=-1, keepdim=True)
+    # masked_routing_weights == selected_weights w/ zeros for non selected indicies
+    # selected_weights      = [..., top_k]
+    # masked_routing_weights= [..., n_experts], selected_experts index has only value
+    mask = torch.zeros_like(routing_weights, dtype=torch.float)
+    un_mask = torch.ones_like(selected_experts, dtype=torch.float)
+    mask = torch.scatter(mask, dim=1, index=selected_experts, src=un_mask)
 
     masked_routing_weights = routing_weights * mask
+    if renormalize:  # only diff with mixtral sparse moe block!
+        masked_routing_weights = masked_routing_weights / masked_routing_weights.sum(dim=-1, keepdim=True)
 
-    ## get size per expert
-    expert = router_logits.shape[1]
-    zeros = torch.zeros(expert, dtype=torch.int32)
+    ## count selected tokens for each expert index from selected_experts
+    n_expert = router_logits.shape[1]
+    zeros = torch.zeros(n_expert, dtype=torch.int32)
     ones = torch.ones_like(selected_experts.view(-1), dtype=torch.int32)
     expert_select_count = torch.scatter_add(zeros, dim=0, index=selected_experts.view(-1), src=ones)
+
+    # apply EP expert_map sharding into masked_routing_weights
+    # E = n_exoerts
+    # E'= E / ep_size
+    # since MoE custom kernel iterates only E', if index > E', DO NOTHING, ignore it
+    if expert_map is not None:
+        # expert_map out of bounds values is mapped into index(=n_expert-1) beyond E'
+        # torch.scatter index dtype SHOULD be torch.int64
+        expert_map_within_bounds = torch.where(expert_map < 0, n_expert-1, expert_map).to(torch.int64)
+
+        # scatter routing weight
+        zeros = torch.zeros_like(masked_routing_weights)
+        expert_map_within_bounds_ = expert_map_within_bounds.expand_as(masked_routing_weights).to(torch.int64)
+        masked_routing_weights = torch.scatter(zeros, dim=1, index=expert_map_within_bounds_, src=masked_routing_weights)
+
+        # select counts
+        zeros = torch.zeros_like(expert_select_count, dtype=torch.int32)
+        expert_select_count = torch.scatter(zeros, dim=0, index=expert_map_within_bounds, src=expert_select_count)
 
     return masked_routing_weights, expert_select_count
 
@@ -240,7 +262,7 @@ def unquantized_fused_moe_method_forward_rbln_custom(
     router_logits = router_logits.reshape(num_tokens, -1)
 
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/qwen3_moe_architecture.py
-    masked_routing_weights, expert_select_count = get_masked_routing_weights(router_logits, top_k, renormalize)
+    masked_routing_weights, expert_select_count = get_masked_routing_weights(router_logits, top_k, renormalize, expert_map)
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
         hidden_states,
         gate_proj_weight,
