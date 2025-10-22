@@ -6,19 +6,21 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import logging
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import logging
 from typing import Optional, Union
 
 import numpy as np
 import torch
 import torch.distributed
 import torch.nn as nn
-from vllm.config import VllmConfig
+from vllm.config import VllmConfig, set_current_vllm_config
+from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import BatchedTensorInputs
 from vllm.multimodal.utils import group_mm_inputs_by_modality
@@ -29,9 +31,11 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
+from vllm.v1.sample.logits_processor import build_logitsprocs
 from vllm.v1.sample.sampler import Sampler
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
+from vllm.v1.worker.utils import AttentionGroup, MultiModalBudget
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -60,8 +64,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.observability_config = vllm_config.observability_config
 
         from vllm.model_executor.models.utils import set_cpu_offload_max_bytes
-        set_cpu_offload_max_bytes(
-            int(self.cache_config.cpu_offload_gb * 1024**3))
+        set_cpu_offload_max_bytes(0)
 
         model_config = self.model_config
         cache_config = self.cache_config
@@ -76,9 +79,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             self.kv_cache_dtype = STR_DTYPE_TO_TORCH_DTYPE[
                 cache_config.cache_dtype]
 
-        self.is_multimodal_model = model_config.is_multimodal_model
-        self.is_pooling_model = model_config.pooler_config is not None
+        self.is_pooling_model = (model_config.runner_type == 'pooling')
+        self.is_multimodal_raw_input_only_model = (
+            model_config.is_multimodal_raw_input_only_model)
+
         self.max_model_len = model_config.max_model_len
+        self.dcp_world_size = self.parallel_config.decode_context_parallel_size
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
         self.max_num_reqs = scheduler_config.max_num_seqs
 
@@ -86,32 +92,53 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.num_query_heads = model_config.get_num_attention_heads(
             parallel_config)
         self.hidden_size = model_config.get_hidden_size()
-        self.attention_chunk_size = model_config.attention_chunk_size
+        # self.attention_chunk_size = model_config.attention_chunk_size
 
-        self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
+        # self.cascade_attn_enabled = not self.model_config.disable_cascade_attn
 
         # Multi-modal data support
         self.mm_registry = MULTIMODAL_REGISTRY
         self.uses_mrope = model_config.uses_mrope
+        self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
+            model_config)
+
+        if self.model_config.is_encoder_decoder:
+            # Maximum length of the encoder input, only for encoder-decoder
+            # models.
+            self.max_encoder_len = self.mm_registry.\
+                get_encdec_max_encoder_len(model_config)
+        else:
+            self.max_encoder_len = 0
 
         # Sampler
         self.use_rbln_sampler = envs.RBLN_SAMPLER
         if self.use_rbln_sampler:
-            logger.info("Using RBLN sampler: Sampler executes on RBLN device")
-            sampler = RBLNSampler(seed=model_config.seed)
+            logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
+            sampler = RBLNSampler(
+                logprobs_mode=self.model_config.logprobs_mode)
             sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         else:
-            logger.info("Using default VLLM sampler: Sampler executes on CPU")
-            sampler = Sampler()
-
+            logger.info("Using default vLLM sampler.")
+            sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
         self.sampler = sampler
+
+        self.eplb_state: Optional[EplbState] = None
         """
         State of the expert parallelism load balancer.
 
         Will be lazily initialized when the model is loaded.
         """
-        # req_id -> (input_id -> encoder_output)
-        self.encoder_cache: dict[str, dict[int, torch.Tensor]] = {}
+
+        # Lazy initializations
+        # self.model: nn.Module  # Set after load_model
+        # Initialize in initialize_kv_cache
+        self.kv_caches: list[torch.Tensor] = []
+        # indexes: [kv_cache_group_id][attn_group]
+        self.attn_groups: list[list[AttentionGroup]] = []
+        # self.kv_cache_config: KVCacheConfig
+
+        # mm_hash ->  encoder_output
+        self.encoder_cache: dict[str, torch.Tensor] = {}
 
         self.use_aux_hidden_state_outputs = False
 
@@ -129,33 +156,61 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # the block_sizes in the kv cache config.
         self.input_batch = InputBatch(
             max_num_reqs=self.max_num_reqs,
-            max_model_len=self.max_model_len,
+            # We need to use the encoder length for encoder-decoer
+            # because of KV cache for cross-attention.
+            max_model_len=max(self.max_model_len, self.max_encoder_len),
             max_num_batched_tokens=self.max_num_tokens,
             device=self.device,
             pin_memory=self.pin_memory,
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[self.cache_config.block_size],
+            is_spec_decode=False,  # No spec decode in optimum model runner
+            logitsprocs=build_logitsprocs(
+                self.vllm_config, self.device, self.pin_memory,
+                self.is_pooling_model,
+                self.vllm_config.model_config.logits_processors),
+            is_pooling_model=self.is_pooling_model,
         )
 
         # Cache the device properties.
         # self._init_device_properties()
 
         # NOTE The shape of input_ids, positions are modified for optimum
-        self.input_ids = torch.zeros(self.max_num_reqs,
-                                     self.max_num_tokens,
-                                     dtype=torch.int64,
-                                     device=self.device)
-        self.positions = torch.zeros(self.max_num_reqs,
-                                     self.max_num_tokens,
-                                     dtype=torch.int32,
-                                     device=self.device)
+        self.input_ids = self._make_buffer(self.max_num_reqs,
+                                           self.max_num_tokens,
+                                           dtype=torch.int64)
+        self.positions = self._make_buffer(self.max_num_reqs,
+                                           self.max_num_tokens,
+                                           dtype=torch.int32)
 
         # None in the first PP rank. The rest are set after load_model.
         # TODO(eunji) It will be implemented for PP
-        self.intermediate_tensors: Optional[IntermediateTensors] = None
+        # self.intermediate_tensors: Optional[IntermediateTensors] = None
+        self.uniform_decode_query_len = 1
+
+        self.mm_budget = MultiModalBudget(
+            self.model_config,
+            self.scheduler_config,
+            self.mm_registry,
+        ) if self.supports_mm_inputs else None
+
+        # Attention layers that are only in the KVCacheConfig of the runner
+        # (e.g., KV sharing, encoder-only attention), but not in the
+        # KVCacheConfig of the scheduler.
+        self.runner_only_attn_layers: set[str] = set()
+        # D2H copy for sampled token ids (output)
+        # unintentionally block all other copy operations
+        # To prevent this, we use a pinned buffer for sampled token ids.
+        # https://github.com/vllm-project/vllm/issues/22754
+        self.sampled_token_ids_pinned_cpu = torch.empty(
+            (self.max_model_len, 1),
+            dtype=torch.int64,
+            device="cpu",
+            pin_memory=self.pin_memory)
 
     def load_model(self) -> None:
-        self.model = get_optimum_model(vllm_config=self.vllm_config)
+        with set_current_vllm_config(self.vllm_config, check_compile=False):
+            self.model = get_optimum_model(vllm_config=self.vllm_config)
         self.use_optimum_lora = getattr(self.model.model.rbln_config,
                                         "use_lora", None)
         if self.lora_config and not self.use_optimum_lora:

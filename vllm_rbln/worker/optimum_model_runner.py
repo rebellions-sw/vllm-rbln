@@ -67,16 +67,10 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         self.device = self.device_config.device
         self.pin_memory = is_pin_memory_available()
 
-        # self.kv_cache_dtype = kv_cache_dtype
-        # self.sliding_window = model_config.get_sliding_window()
-        # self.block_size = cache_config.block_size
-
         # Multi-modal data support
         self.input_registry = INPUT_REGISTRY
         self.mm_registry = MULTIMODAL_REGISTRY
-        # self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
-        #     .create_input_mapper(self.model_config)
-        # self.mm_registry.init_mm_limits_per_prompt(self.model_config)
+
         self.enable_lora = self.vllm_config.lora_config is not None
 
         # Lazy initialization

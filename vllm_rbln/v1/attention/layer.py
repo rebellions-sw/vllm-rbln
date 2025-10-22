@@ -20,6 +20,7 @@ import vllm.envs as envs
 from vllm.attention import AttentionType
 from vllm.attention.layer import Attention
 from vllm.attention.selector import backend_name_to_enum, get_attn_backend
+from vllm.attention.utils.kv_sharing_utils import validate_kv_sharing_target
 from vllm.config import CacheConfig, get_current_vllm_config
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.model_executor.layers.linear import UnquantizedLinearMethod
@@ -28,7 +29,6 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
-from vllm.v1.attention.backends.utils import validate_kv_sharing_target
 
 # @FIXME(RBLN): We hope to remove the Custom Attention forward.
 # The original vLLM forward function will be used in the future.
