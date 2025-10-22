@@ -159,7 +159,6 @@ jobs:
           VERSION=${{ inputs.optimum_rbln_version }}
           pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
           echo "optimum-rbln $VERSION"
-          pip install vllm==0.10.2
 
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
