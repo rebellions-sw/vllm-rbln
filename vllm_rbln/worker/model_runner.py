@@ -442,12 +442,12 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
     def compile_model(self, model):
         options = {
             "compile_context": self.compile_context,
-            "tensor_parallel_size": envs.RBLN_TP_SIZE,
+            "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
                         "the cached compiled binary will be reused.")
-            options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
+            options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE > 1
                                     else "./cache_dir")
 
         compiled_model = torch.compile(
@@ -525,7 +525,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 # non last rank create intermediate tensors, bypass it
                 return model_output
 
-        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+        if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
             self.model_executable = model_wrapper
         else:
             # NOTE - refer to pytorch 2.5 release notes

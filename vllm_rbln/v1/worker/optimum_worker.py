@@ -106,7 +106,7 @@ class RBLNOptimumWorker(WorkerBase):
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
 
-        if not envs.RBLN_ENABLE_WARM_UP:
+        if not envs.VLLM_RBLN_ENABLE_WARM_UP:
             logger.info(
                 "Warm up is disabled. " \
                 "Set VLLM_RBLN_ENABLE_WARM_UP=1 to enable warm up."

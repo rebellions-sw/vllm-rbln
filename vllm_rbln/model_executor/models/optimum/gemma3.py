@@ -14,7 +14,7 @@
 from typing import Any, Optional
 
 import torch
-import vllm.envs as env
+import vllm.envs as envs
 from transformers import AutoTokenizer
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
@@ -117,7 +117,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables
 
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0

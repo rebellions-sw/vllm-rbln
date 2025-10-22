@@ -85,7 +85,7 @@ class RblnPlatform(Platform):
     def pre_register_and_update(cls,
                                 parser: Optional[FlexibleArgumentParser] = None
                                 ) -> None:
-        if envs.RBLN_USE_VLLM_MODEL:
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
             # patches
             if envs.VLLM_USE_V1:
                 # FIXME(jiwoo.park):disable timeout for RBLN
@@ -149,7 +149,7 @@ class RblnPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
-        if envs.RBLN_USE_VLLM_MODEL:
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
@@ -185,10 +185,10 @@ class RblnPlatform(Platform):
                 scheduler_config.scheduler_cls = \
                     "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
 
-                if envs.RBLN_SAMPLER:
+                if envs.VLLM_RBLN_SAMPLER:
                     logger.warning("RBLN Sampler is only supported on v1. "
                                    "V0 will be deprecated soon.")
-                    envs.RBLN_SAMPLER = False
+                    envs.VLLM_RBLN_SAMPLER = False
             assert vllm_config.parallel_config.tensor_parallel_size == 1, (
                 "Tensor parallelism is set when compiled in optimum-rbln.")
             assert vllm_config.parallel_config.pipeline_parallel_size == 1, (
@@ -213,7 +213,7 @@ class RblnPlatform(Platform):
                 "block_size must be configured for RBLN backend")
             cache_config.enable_prefix_caching = False
 
-        if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
+        if envs.VLLM_USE_V1 and envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
 
             if (vllm_config.compilation_config.level

@@ -14,7 +14,7 @@
 from typing import Any, List, Optional, Union
 
 import torch
-import vllm.envs as env
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.llava import (LlavaImageEmbeddingInputs,
@@ -92,7 +92,7 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
 
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
