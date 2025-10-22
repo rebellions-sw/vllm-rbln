@@ -100,7 +100,7 @@ def top_p_only_fake(
     return top_p_sample(probs, top_p)
 
 
-class Sampler(VLLMSampler):
+class RBLNSampler(VLLMSampler):
 
     def __init__(self, seed):
         super().__init__()
