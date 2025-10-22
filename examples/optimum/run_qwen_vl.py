@@ -258,15 +258,15 @@ def entry_point(
     num_input_prompt: int = 1,
     model_id: str = "/qwen2_5-vl-7b-32k-b4-kv16k",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             batch_size=batch_size,
             max_seq_len=max_seq_len,
             kvcache_partition_len=kvcache_partition_len,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":

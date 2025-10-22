@@ -100,14 +100,14 @@ def entry_point(
     num_input_prompt: int = 10,
     model_id: str = "/blip2-opt-2.7b-2k-b4",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             batch_size=batch_size,
             max_seq_len=max_seq_len,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":

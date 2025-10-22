@@ -114,15 +114,15 @@ def entry_point(
     truncate_prompt_tokens: int = 200,
     model_id: str = "/t5-3b-b4",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             batch_size=batch_size,
             max_seq_len=max_seq_len,
             num_input_prompt=num_input_prompt,
             truncate_prompt_tokens=truncate_prompt_tokens,
             model_id=model_id,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":

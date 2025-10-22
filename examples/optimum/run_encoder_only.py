@@ -112,8 +112,7 @@ def entry_point(
     p_prompt_txt: str = "/prompts/p_prompts.txt",
     golden_json: str = "/golden/golden_bge_m3_result_qp_prompts.json",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             max_seq_len=max_seq_len,
             batch_size=batch_size,
@@ -122,7 +121,8 @@ def entry_point(
             q_prompt_txt=q_prompt_txt,
             p_prompt_txt=p_prompt_txt,
             golden_json=golden_json,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":
