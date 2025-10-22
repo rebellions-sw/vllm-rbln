@@ -153,9 +153,6 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
 
                 multi_modal_inputs_list.append(mm_kwargs)
 
-            if len(seq_group_metadata.token_type_ids) > 0:
-                token_type_ids.append(seq_group_metadata.token_type_ids)
-
             request_id = seq_group_metadata.request_id
             running_requests_ids.append(request_id)
 

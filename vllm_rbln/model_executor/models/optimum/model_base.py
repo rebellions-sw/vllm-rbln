@@ -147,7 +147,8 @@ class RBLNOptimumModelBase(nn.Module):
         logger.info("model_name = %s, model_cls_name = %s, model_path = %s",
                     model_name, model_cls_name, compiled_path)
 
-        self.supports_transcription_only = (model_cls_name == "RBLNOptimumWhisperForConditionalGeneration")
+        self.supports_transcription_only = (
+            model_cls_name == "RBLNOptimumWhisperForConditionalGeneration")
 
         # huggingface model class
         model_cls = getattr(optimum.rbln, model_cls_name)
