@@ -101,12 +101,11 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[int],
-               BatchedTensorInputs, torch.Tensor, List[int]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, List[int], BatchedTensorInputs,
+               torch.Tensor, List[int]]:
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
-        token_type_ids: List[List[int]] = []
 
         seq_lens: List[int] = []
         multi_modal_inputs_list: List[MultiModalKwargs] = []

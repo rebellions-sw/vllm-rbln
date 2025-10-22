@@ -327,7 +327,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         """
         :return: ModelInputForRBLN[
             input_tokens: Token IDs,
-            input_positions: Potision IDs,
+            input_positions: Position IDs,
             sampling_metadata, pooling_metadata: It is `None` in V1,
             multi_modal_kwargs: Batched multi-modal data,
             block_tables: [num_reqs, num_blocks_per_req] shaped tensor,
@@ -1060,6 +1060,3 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.transfer_event.record()
         # self.transfer_event.synchronize()
         return pinned.tolist()
-
-
-    def 
