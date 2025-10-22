@@ -74,6 +74,10 @@ class RblnPlatform(Platform):
         return False
 
     @classmethod
+    def get_punica_wrapper(cls) -> str:
+        return "vllm_rbln.lora.punica_wrapper.punica_rbln.PunicaWrapperRBLN"
+
+    @classmethod
     def use_all_gather(cls) -> bool:
         """
         Whether to use allgather in LogitsProcessor to gather the logits.
@@ -94,6 +98,7 @@ class RblnPlatform(Platform):
                 import vllm_rbln.v1.attention.layer  # noqa
             else:
                 import vllm_rbln.attention.layer  # noqa
+            import vllm_rbln.lora.layers  # noqa
             import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
             import vllm_rbln.model_executor.layers.logits_processor  # noqa
             import vllm_rbln.model_executor.layers.rotary_embedding  # noqa
@@ -149,6 +154,9 @@ class RblnPlatform(Platform):
         model_config.dtype = torch.float
         assert model_config.dtype == torch.float
         logger.info("RBLN model_config.dtype = %s", model_config.dtype)
+        lora_config = vllm_config.lora_config
+        if lora_config is not None:
+            lora_config.lora_dtype = torch.float32
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
@@ -174,6 +182,8 @@ class RblnPlatform(Platform):
                     RblnPlatform.device_type))
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
+                if lora_config is not None:
+                    lora_config.lora_dtype = torch.float16
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
@@ -247,3 +257,7 @@ class RblnPlatform(Platform):
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
         return True
+
+    @classmethod
+    def can_update_inplace(cls) -> bool:
+        return False

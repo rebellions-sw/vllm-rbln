@@ -54,6 +54,7 @@ from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.utils import bind_kv_cache
 from vllm.v1.worker.block_table import BlockTable
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 from vllm.v1.worker.utils import initialize_kv_cache_for_kv_sharing
 
 import vllm_rbln.rbln_envs as envs
@@ -65,11 +66,13 @@ else:
     xgr = LazyLoader("xgr", globals(), "xgrammar")
 
 from vllm_rbln.logger import init_logger
+from vllm_rbln.lora.inputs import LoRAInputs
+from vllm_rbln.lora.mask import LoRAMask
 
 logger = init_logger(__name__)
 
 
-class RBLNModelRunner:
+class RBLNModelRunner(LoRAModelRunnerMixin):
 
     def __init__(
         self,
@@ -654,8 +657,8 @@ class RBLNModelRunner:
             # logits_indices = spec_decode_metadata.logits_indices
 
         # Hot-Swap lora model
-        # if self.lora_config:
-        #     self.set_active_loras(self.input_batch, num_scheduled_tokens)
+        if self.lora_config:
+            self.set_active_loras(self.input_batch, num_scheduled_tokens)
         logger.debug("num_reqs: %s", num_reqs)
         logger.debug("token_indices: %s", token_indices)
         logger.debug("input_batch: %s", vars(self.input_batch))
@@ -757,7 +760,10 @@ class RBLNModelRunner:
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: Optional[SamplingMetadata] = None,
+        sampler_indices_padded: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if sampler_indices_padded is not None:
+            LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
 
         return self.model.compute_logits(hidden_states, sampling_metadata)
 
@@ -1000,11 +1006,30 @@ class RBLNModelRunner:
                                device=self.device),
                 ])
 
+            lora_mask = None
+            sampler_indices_padded = None
+            if self.lora_config:
+                lora_ids = [
+                    self.requests[req_id].lora_request.lora_int_id
+                    if self.requests[req_id].lora_request is not None else 0
+                    for req_id in self.input_batch.req_ids
+                ]
+
+                lora_mask = self.model.create_lora_mask(
+                    input_ids, lora_ids,
+                    self.lora_manager._adapter_manager.lora_index_to_id)
+                sampler_indices_padded = \
+                    self.model.create_sampler_indices_padded(
+                        lora_ids,
+                        self.lora_manager._adapter_manager.lora_index_to_id,
+                        self.max_num_seqs, is_prefills[0])
+
             model_output = self.model_executable(
                 input_ids=input_ids,
                 positions=positions,
                 intermediate_tensors=intermediate_tensors,
                 inputs_embeds=inputs_embeds,
+                lora_mask=lora_mask,
             )
 
             self.maybe_wait_for_kv_save()
@@ -1038,11 +1063,22 @@ class RBLNModelRunner:
         else:
             if is_prefills[0]:  # prefill
                 sample_hidden_states = hidden_states[logits_indices]
-                logits = self.compute_logits(sample_hidden_states, None)
+                logits = self.compute_logits(
+                    sample_hidden_states,
+                    None,
+                    sampler_indices_padded=sampler_indices_padded,
+                )
             else:  # decode
-                logits = self.compute_logits(hidden_states, None)
+                logits = self.compute_logits(
+                    hidden_states,
+                    None,
+                    sampler_indices_padded=sampler_indices_padded,
+                )
                 logits = logits[logits_indices]
             logits = self.logits_processor._gather_logits(logits)
+            # [NOTE] Why is it needed?
+            # logits = logits[..., :self.logits_processor.
+            #                 org_vocab_size]  # remove paddings in vocab
             logits = logits.view(-1, logits.size(-1))
 
         if broadcast_pp_output:
@@ -1361,14 +1397,19 @@ class RBLNModelRunner:
             ).logits_processor
         else:
             self.logits_processor = self.model.logits_processor
-        # if self.lora_config:
-        #     self.model = self.load_lora_model(
-        #         self.model,
-        #         self.model_config,
-        #         self.scheduler_config,
-        #         self.lora_config,
-        #         self.device,
-        #     )
+        if self.lora_config:
+            self.model = LoRAModelWrapper(
+                self.load_lora_model(
+                    self.model,
+                    self.model_config,
+                    self.scheduler_config,
+                    self.lora_config,
+                    self.device,
+                ),
+                self.lora_config.max_loras,
+                self.lora_config.max_lora_rank,
+                self.lora_config.lora_dtype,
+            )
         # if hasattr(self, "drafter"):
         #     logger.info("Loading drafter model...")
         #     self.drafter.load_model(self.model)
@@ -1817,3 +1858,71 @@ class RBLNModelRunner:
                     f"Unknown attention type: {attn_module.attn_type}")
 
         return kv_cache_spec
+
+
+class LoRAModelWrapper(nn.Module):
+
+    def __init__(self, model: nn.Module, max_loras: int, max_lora_rank: int,
+                 lora_dtype: torch.dtype):
+        super().__init__()
+        self.model = model
+        self.compute_logits = model.compute_logits
+        self.max_loras = max_loras
+        self.max_lora_rank = max_lora_rank
+        self.lora_dtype = lora_dtype
+
+    def forward(self, *args, **kwargs):
+        if 'lora_mask' in kwargs:
+            lora_mask = kwargs['lora_mask']
+            LoRAMask.set_lora_mask(lora_mask)
+            kwargs.pop('lora_mask')
+
+        return self.model(*args, **kwargs)
+
+    def create_lora_mask(
+        self,
+        input_ids: torch.Tensor,
+        lora_ids: list[int],
+        lora_index_to_id: list[
+            int]  #, input_batch: InputBatch, is_prefill: bool
+    ) -> torch.Tensor:
+        lora_mask = torch.zeros(input_ids.shape[0] * input_ids.shape[1],
+                                self.max_loras * self.max_lora_rank,
+                                dtype=self.lora_dtype)
+        ones = torch.ones(input_ids.shape[1],
+                          self.max_lora_rank,
+                          dtype=self.lora_dtype)
+
+        for i in range(len(lora_ids)):
+            if lora_ids[i] == 0:
+                continue
+
+            lora_index = lora_index_to_id.index(lora_ids[i])
+            start_row = i * input_ids.shape[1]
+            start_col = lora_index * self.max_lora_rank
+            lora_mask[start_row:start_row + input_ids.shape[1],
+                      start_col:start_col + self.max_lora_rank] = ones
+
+        return lora_mask
+
+    def create_sampler_indices_padded(self, lora_ids: list[int],
+                                      lora_index_to_id: list[int],
+                                      max_num_seqs: int,
+                                      is_prefill: bool) -> None:
+        if is_prefill:
+            assert len(lora_ids) == 1
+
+        prompt_mapping: list[int] = [
+            lora_index_to_id.index(lora_ids[i])
+            if i < len(lora_ids) and lora_ids[i] > 0 else -1
+            for i in range(len(lora_ids) if is_prefill else max_num_seqs)
+        ]
+        sampler_indices_padded = torch.tensor(prompt_mapping, dtype=torch.long)
+        sampler_indices_padded = torch.where(sampler_indices_padded == -1,
+                                             self.max_loras,
+                                             sampler_indices_padded)
+        sampler_indices_padded = torch.arange(
+            0, len(sampler_indices_padded), dtype=torch.long) + (
+                sampler_indices_padded * len(sampler_indices_padded))
+
+        return sampler_indices_padded
