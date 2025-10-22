@@ -92,7 +92,7 @@ def entry_point(
     batch_size: int = 4,
     max_seq_len: int = 448,
     num_input_prompt: int = 1,
-    model_id: str = "/home/eunji.lee/nas_data/1017/whisper-tiny-b4",
+    model_id: str = "/whisper-base-b4-wo-token-timestamps",
 ):
     loop = asyncio.get_event_loop()
     loop.run_until_complete(
