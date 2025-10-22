@@ -450,7 +450,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
                                     else "./cache_dir")
         if envs.RBLN_COMPILE_STRICT_MODE:
-            options["strict"] = True
+            options["mode"] = "strict"
         compiled_model = torch.compile(
             model,
             backend="rbln",
