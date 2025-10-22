@@ -9,6 +9,7 @@ from vllm.model_executor.layers.utils import apply_penalties
 from vllm.utils import make_tensor_with_pad
 
 
+@torch.compiler.disable
 def apply_all_penalties(
     logits: torch.Tensor,
     prompt_token_ids: torch.Tensor,

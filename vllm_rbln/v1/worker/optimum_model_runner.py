@@ -38,8 +38,7 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
-from vllm_rbln.v1.sample.sampler import WARM_UP_CONFIGS
-from vllm_rbln.v1.sample.sampler import Sampler as RBLNSampler
+from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
 logger = init_logger(__name__)
@@ -97,11 +96,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         # Sampler
         self.use_rbln_sampler = envs.RBLN_SAMPLER
-        logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
-        sampler = RBLNSampler() if self.use_rbln_sampler else Sampler()
         if self.use_rbln_sampler:
-            # Use torch.compile for optimized RBLN sampler
+            logger.info("Using RBLN sampler: Sampler executes on RBLN device")
+            sampler = RBLNSampler(seed=model_config.seed)
             sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
+        else:
+            logger.info("Using default VLLM sampler: Sampler executes on CPU")
+            sampler = Sampler()
 
         self.sampler = sampler
         """
@@ -665,6 +666,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def dummy_sampler_run(self):
         if not self.use_rbln_sampler:
+            logger.info("Skip dummy sampler run since "
+                        "it is only used in RBLN_SAMPLER=1")
             return
 
         def set_sampling_tensors(input_batch, **params):
