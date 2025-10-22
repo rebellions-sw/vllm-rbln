@@ -43,7 +43,7 @@ from vllm.v1.sample.sampler import Sampler
 from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
-from vllm.v1.worker.utils import AttentionGroup, MultiModalBudget
+from vllm.v1.worker.utils import AttentionGroup
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -104,18 +104,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.hidden_size = model_config.get_hidden_size()
 
         # Multi-modal data support
+        # NOTE There is a bug in vLLM MM registry internally in v0.10.X.
+        # As a workaround, VLLM_WORKER_MULTIPROC_METHOD should be set "spawn"
+        # in case of multi-modal encoder-decoder models.
         self.mm_registry = MULTIMODAL_REGISTRY
         self.uses_mrope = model_config.uses_mrope
         self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
             model_config)
-
-        if self.model_config.is_encoder_decoder:
-            # Maximum length of the encoder input, only for encoder-decoder
-            # models.
-            self.max_encoder_len = self.mm_registry.\
-                get_encdec_max_encoder_len(model_config)
-        else:
-            self.max_encoder_len = 0
 
         # Sampler
         self.use_rbln_sampler = envs.RBLN_SAMPLER
@@ -144,9 +139,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.attn_groups: list[list[AttentionGroup]] = []
         # self.kv_cache_config: KVCacheConfig
 
-        # mm_hash ->  encoder_output
-        self.encoder_cache: dict[str, torch.Tensor] = {}
-
         self.use_aux_hidden_state_outputs = False
 
         # Request states.
@@ -165,7 +157,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             max_num_reqs=self.max_num_reqs,
             # We need to use the encoder length for encoder-decoer
             # because of KV cache for cross-attention.
-            max_model_len=max(self.max_model_len, self.max_encoder_len),
+            max_model_len=self.max_model_len,
             max_num_batched_tokens=self.max_num_tokens,
             device=self.device,
             pin_memory=self.pin_memory,
@@ -183,23 +175,17 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self._init_device_properties()
 
         # NOTE The shape of input_ids, positions are modified for optimum
-        self.input_ids = self._make_buffer(self.max_num_reqs,
-                                           self.max_num_tokens,
-                                           dtype=torch.int64)
-        self.positions = self._make_buffer(self.max_num_reqs,
-                                           self.max_num_tokens,
-                                           dtype=torch.int32)
-        self.seq_lens = self._make_buffer(self.max_num_reqs, dtype=torch.int32)
-        # None in the first PP rank. The rest are set after load_model.
-        # TODO(eunji) It will be implemented for PP
-        # self.intermediate_tensors: Optional[IntermediateTensors] = None
-        self.uniform_decode_query_len = 1
+        self.input_ids = torch.zeros(self.max_num_reqs,
+                                     self.max_num_tokens,
+                                     dtype=torch.int64,
+                                     device=self.device)
+        self.positions = torch.zeros(self.max_num_reqs,
+                                     self.max_num_tokens,
+                                     dtype=torch.int32,
+                                     device=self.device)
+        self.seq_lens = np.zeros(self.max_num_reqs, dtype=np.int32)
 
-        self.mm_budget = MultiModalBudget(
-            self.model_config,
-            self.scheduler_config,
-            self.mm_registry,
-        ) if self.supports_mm_inputs else None
+        self.uniform_decode_query_len = 1
 
         # Attention layers that are only in the KVCacheConfig of the runner
         # (e.g., KV sharing, encoder-only attention), but not in the
@@ -389,14 +375,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             self.set_active_loras(self.input_batch, is_prefill)
 
         # Set seq_lens
-        self.seq_lens.np[:num_reqs] = (
+        self.seq_lens[:num_reqs] = (
             self.input_batch.num_computed_tokens_cpu[:num_reqs] +
             num_scheduled_tokens)
-        # Fill unused with 0 for full cuda graph mode.
-        # self.seq_lens.np[num_reqs:].fill(0)
-        # self.seq_lens.copy_to_gpu()
-        # seq_lens = self.seq_lens.cpu[:num_reqs]
-        # max_seq_len = self.seq_lens.np[:num_reqs].max().item()
 
         # TODO interemediate_tensor should be set
         model_input = ModelInputForRBLN(
@@ -584,10 +565,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # and handling the second as a new request.
         for req_id in scheduler_output.finished_req_ids:
             self.input_batch.remove_request(req_id)
-
-        # Free the cached encoder outputs.
-        for mm_hash in scheduler_output.free_encoder_mm_hashes:
-            self.encoder_cache.pop(mm_hash, None)
 
         # Remove the unscheduled requests from the persistent batch.
         # NOTE(woosuk): The unscheduled requests are either preempted requests
@@ -875,15 +852,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         pooling_metadata = self.input_batch.get_pooling_metadata()
         pooling_metadata.build_pooling_cursor(num_scheduled_tokens_np.tolist(),
                                               device=hidden_states.device)
-        seq_lens_cpu = self.seq_lens.cpu[:self.input_batch.num_reqs]
-
+        seq_lens = self.seq_lens[:self.input_batch.num_reqs]
         # Pooling models D2H & synchronize occurs in pooler.py:build_output
         raw_pooler_output = self.model.pooler(
             hidden_states=hidden_states, pooling_metadata=pooling_metadata)
 
         pooler_output: list[Optional[torch.Tensor]] = []
         for raw_output, seq_len, prompt_len in zip(
-                raw_pooler_output, seq_lens_cpu, pooling_metadata.prompt_lens):
+                raw_pooler_output, seq_lens, pooling_metadata.prompt_lens):
 
             output = raw_output.data if seq_len == prompt_len else None
             pooler_output.append(output)
@@ -900,6 +876,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def _update_states_after_model_execute(
             self, output_token_ids: torch.Tensor) -> None:
         pass
+        # This is used for MTP/EAGLE for hybrid models originally.
+        # But it is not used in RBLN.
 
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],

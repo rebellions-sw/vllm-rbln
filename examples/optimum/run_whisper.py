@@ -43,7 +43,7 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
                        skip_special_tokens=True,
                        stop_token_ids=[tokenizer.eos_token_id],
                        max_tokens=448),
-        request_id,
+        str(request_id),
     )
 
     final_output = None
