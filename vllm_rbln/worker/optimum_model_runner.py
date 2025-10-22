@@ -178,16 +178,9 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             device=self.device,
         ).to(torch.int16) if len(block_tables) > 0 else None
 
-        token_type_ids = make_tensor_with_pad(
-            token_type_ids,
-            max_len=max_seq_len,
-            pad=0,
-            dtype=torch.long,
-            device=self.device) if len(token_type_ids) > 0 else None
-
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_inputs_list)
         return (input_tokens, input_positions, seq_lens, multi_modal_kwargs,
-                block_tables, token_type_ids, running_requests_ids)
+                block_tables, running_requests_ids)
 
     def _prepare_decode(
         self,
@@ -280,14 +273,13 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         # Prepare input tensors.
         if is_prompt:
             (input_tokens, input_positions, seq_lens, multi_modal_kwargs,
-             block_tables, type_token_ids, running_requests_ids
+             block_tables, running_requests_ids
              ) = self._prepare_prompt(seq_group_metadata_list)
 
         else:
             (input_tokens, input_positions, block_tables, running_requests_ids
              ) = self._prepare_decode(seq_group_metadata_list)
             seq_lens = None
-            type_token_ids = None
 
         sampling_metadata = SamplingMetadata.prepare(
             seq_group_metadata_list,
@@ -319,7 +311,6 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             sampling_metadata=sampling_metadata,
             multi_modal_kwargs=multi_modal_kwargs,
             block_tables=block_tables,
-            token_type_ids=type_token_ids,
             pooling_metadata=None,  # Pooling is deprecated in V0
             running_requests_ids=running_requests_ids,
             finished_requests_ids=finished_requests_ids,

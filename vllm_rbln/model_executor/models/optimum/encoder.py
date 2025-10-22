@@ -56,7 +56,6 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
     def preprocess(
         self,
         input_ids: torch.Tensor,
-        type_token_ids: torch.Tensor,
         positions: torch.Tensor,
     ):
         batch_size, seq_len = input_ids.shape
@@ -86,15 +85,13 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
 
         return (
             pad_if_needed(input_ids),
-            pad_if_needed(type_token_ids),
             pad_if_needed(positions),
         )
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
-        input_ids, token_type_ids, positions = self.preprocess(
+        input_ids, positions = self.preprocess(
             model_input.input_tokens,
-            model_input.token_type_ids,
             model_input.input_positions,
         )
 
@@ -108,16 +105,13 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
             "attention_mask": attention_mask,
         }
 
-        if token_type_ids:
-            kwargs["token_type_ids"] = token_type_ids
-        else:
-            model_input_names = getattr(self.rbln_model_config,
-                                        "model_input_names", None)
-            if model_input_names is not None:
-                rbln_model_input_names = \
-                    self.rbln_model_config.model_input_names
-                if "token_type_ids" in rbln_model_input_names:
-                    kwargs["token_type_ids"] = torch.zeros_like(input_ids)
+        model_input_names = getattr(self.rbln_model_config,
+                                    "model_input_names", None)
+        if model_input_names is not None:
+            rbln_model_input_names = \
+                self.rbln_model_config.model_input_names
+            if "token_type_ids" in rbln_model_input_names:
+                kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
         embeds = self.model.forward(**kwargs)
 

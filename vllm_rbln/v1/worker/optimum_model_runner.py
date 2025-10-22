@@ -334,7 +334,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             running_requests_ids: RUNNING request IDs,
             finished_requests_ids: FINISHED request IDs in between
                 the previous and the current steps,
-            token_type_ids: Not used,
             is_prompt: It is used only in V1
         ]
         """
@@ -388,7 +387,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             block_tables=block_tables,
             running_requests_ids=running_request_ids,
             finished_requests_ids=list(finished_requests_ids),
-            token_type_ids=None,
             pooling_metadata=None,  # FIXME
             is_prompt=is_prefill)
         return model_input, num_scheduled_tokens
