@@ -188,6 +188,11 @@ class RblnPlatform(Platform):
                 scheduler_config.scheduler_cls = \
                     "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
 
+                if envs.RBLN_SAMPLER:
+                    logger.warning("RBLN Sampler is only supported on v1. "
+                                   "V0 will be deprecated soon.")
+                    envs.RBLN_SAMPLER = False
+
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
             logger.warning(
