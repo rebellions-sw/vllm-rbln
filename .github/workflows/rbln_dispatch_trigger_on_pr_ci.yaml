@@ -82,7 +82,7 @@ jobs:
   cleanup:
     runs-on: runner-vllm-ci
     needs: [sync-and-call, check_code_quaility, check_device_run]
-    if: always() && needs.sync-and-call.outputs.sync_branch
+    if: always()
     permissions:
       contents: write
     steps:
@@ -99,6 +99,8 @@ jobs:
           
           git config --unset-all http.https://github.com/.extraheader || true
           git remote set-url origin "https://x-access-token:${{ secrets.GIT_PAT }}@github.com/${{ github.repository }}.git"
-          
-          echo "Deleting branch: $SYNC_BRANCH"
-          git push origin --delete "$SYNC_BRANCH" || echo "Branch $SYNC_BRANCH may have already been deleted"
+
+          if [ -n "$SYNC_BRANCH" ]; then
+            echo "Deleting branch: $SYNC_BRANCH"
+            git push origin --delete "$SYNC_BRANCH" || echo "Branch $SYNC_BRANCH may have already been deleted"
+          fi
