@@ -106,8 +106,7 @@ def entry_point(
             max_seq_len=max_seq_len,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
-        )
-    )
+        ))
 
 
 if __name__ == "__main__":

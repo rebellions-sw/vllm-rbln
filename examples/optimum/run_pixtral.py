@@ -123,8 +123,7 @@ def entry_point(
             kvcache_partition_len=kvcache_partition_len,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
-        )
-    )
+        ))
 
 
 if __name__ == "__main__":

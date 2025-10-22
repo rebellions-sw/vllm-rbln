@@ -193,6 +193,8 @@ class RblnPlatform(Platform):
                 "Tensor parallelism is set when compiled in optimum-rbln.")
             assert vllm_config.parallel_config.pipeline_parallel_size == 1, (
                 "Pipeline parallelism is not supported in optimum-rbln.")
+            assert vllm_config.speculative_config is None, (
+                "Speculative decoding is not supported in vLLM RBLN.")
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):

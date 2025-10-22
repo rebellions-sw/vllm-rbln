@@ -121,8 +121,7 @@ def entry_point(
             num_input_prompt=num_input_prompt,
             truncate_prompt_tokens=truncate_prompt_tokens,
             model_id=model_id,
-        )
-    )
+        ))
 
 
 if __name__ == "__main__":

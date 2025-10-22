@@ -140,8 +140,7 @@ def entry_point(
             model_id=model_id,
             prompt_txt=prompt_txt,
             golden_json=golden_json,
-        )
-    )
+        ))
 
 
 if __name__ == "__main__":

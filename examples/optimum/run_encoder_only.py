@@ -121,8 +121,7 @@ def entry_point(
             q_prompt_txt=q_prompt_txt,
             p_prompt_txt=p_prompt_txt,
             golden_json=golden_json,
-        )
-    )
+        ))
 
 
 if __name__ == "__main__":
