@@ -163,7 +163,7 @@ jobs:
           else
             CONSTRAINT="optimum-rbln @ git+${REPO_URL}@${REF}"
           fi
-          pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "$CONSTRAINT")
+          pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "$CONSTRAINT")
           echo "optimum-rbln installed: $REF"
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
