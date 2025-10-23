@@ -20,15 +20,12 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig, set_current_vllm_config
-from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import (BatchedTensorInputs, MultiModalKwargs,
-                                    MultiModalKwargsItem)
-from vllm.multimodal.utils import group_mm_kwargs_by_modality
+from vllm.multimodal.inputs import BatchedTensorInputs, MultiModalKwargs
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
@@ -41,7 +38,7 @@ from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsLists,
                              LogprobsTensors, ModelRunnerOutput, SamplerOutput)
 from vllm.v1.sample.logits_processor import build_logitsprocs
 from vllm.v1.sample.sampler import Sampler
-from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
+from vllm.v1.utils import record_function_or_nullcontext
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 from vllm.v1.worker.utils import AttentionGroup
@@ -94,7 +91,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.is_multimodal_raw_input_only_model = True
 
         self.max_model_len = model_config.max_model_len
-        self.dcp_world_size = self.parallel_config.decode_context_parallel_size
+        self.dcp_world_size = 1
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
         self.max_num_reqs = scheduler_config.max_num_seqs
 
@@ -125,13 +122,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             logger.info("Using default vLLM sampler.")
             sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
         self.sampler = sampler
-
-        self.eplb_state: Optional[EplbState] = None
-        """
-        State of the expert parallelism load balancer.
-
-        Will be lazily initialized when the model is loaded.
-        """
 
         # Lazy initializations
         # self.model: nn.Module  # Set after load_model
@@ -416,28 +406,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 use_mla=False,
             )
         return kv_cache_spec
-
-    def _extract_mm_kwargs(
-        self,
-        scheduler_output: "SchedulerOutput",
-    ) -> BatchedTensorInputs:
-        if not scheduler_output or not self.is_multimodal_raw_input_only_model:
-            return {}
-
-        mm_kwargs = list[MultiModalKwargsItem]()
-        for req in scheduler_output.scheduled_new_reqs:
-            mm_kwargs.extend(req.mm_kwargs)
-
-        # Input all modalities at once
-        mm_kwargs_combined: BatchedTensorInputs = {}
-        for _, _, mm_kwargs_group in group_mm_kwargs_by_modality(
-                mm_kwargs,
-                device=self.device,
-                pin_memory=self.pin_memory,
-        ):
-            mm_kwargs_combined.update(mm_kwargs_group)
-
-        return mm_kwargs_combined
 
     def _prepare_prefill(
         self,
@@ -873,19 +841,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         pass
         # This is used for MTP/EAGLE for hybrid models originally.
         # But it is not used in RBLN.
-
-    def _make_buffer(self,
-                     *size: Union[int, torch.SymInt],
-                     dtype: torch.dtype,
-                     numpy: bool = True) -> CpuGpuBuffer:
-        # Bfloat16 torch tensors cannot be directly cast to a numpy array, so
-        # if a bfloat16 buffer is needed without a corresponding numpy array,
-        # don't bother instantiating the numpy array.
-        return CpuGpuBuffer(*size,
-                            dtype=dtype,
-                            device=self.device,
-                            pin_memory=self.pin_memory,
-                            with_numpy=numpy)
 
     def get_supported_pooling_tasks(self) -> list[PoolingTask]:
         model = self.get_model()
