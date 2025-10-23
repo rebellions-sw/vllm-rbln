@@ -21,13 +21,14 @@ jobs:
         shell: bash
         run: |
           OPTIMUM_RBLN_LINE=$(grep -E '^optimum-rbln|optimum-rbln.git' requirements.txt)
+          REPO_URL="https://github.com/rebellions-sw/optimum-rbln.git"
           if [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*@[[:space:]] ]]; then
             REF="${OPTIMUM_RBLN_LINE##*@}"
-            OPTIMUM_RBLN_VERSION="${REF%%[#[:space:]]*}"
+            OPTIMUM_RBLN_VERSION="git+${REPO_URL}@${REF%%[#[:space:]]*}"
 
           elif [[ "$OPTIMUM_RBLN_LINE" =~ ^git\+ ]]; then
             REF="${OPTIMUM_RBLN_LINE##*@}"
-            OPTIMUM_RBLN_VERSION="${REF%%[#[:space:]]*}"
+            OPTIMUM_RBLN_VERSION="git+${REPO_URL}@${REF%%[#[:space:]]*}"
           elif [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*(==|>=)[[:space:]]* ]]; then
             OPTIMUM_RBLN_VERSION="$(echo "$OPTIMUM_RBLN_LINE" \
               | sed -E 's/^optimum-rbln[[:space:]]*(==|>=)[[:space:]]*//')"

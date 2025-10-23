@@ -157,11 +157,10 @@ jobs:
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
           VERSION=${{ inputs.optimum_rbln_version }}
-          REPO_URL="https://github.com/rebellions-sw/optimum-rbln"
           if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([A-Za-z0-9.+-]+)?$ ]]; then
             CONSTRAINT="optimum-rbln==${VERSION}"
           else
-            CONSTRAINT="optimum-rbln @ git+${REPO_URL}@${VERSION}"
+            CONSTRAINT="optimum-rbln @ ${VERSION}"
           fi
           pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "$CONSTRAINT")
           echo "optimum-rbln installed: $VERSION"
