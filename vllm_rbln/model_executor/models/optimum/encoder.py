@@ -37,7 +37,6 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
         super().__init__(vllm_config=vllm_config)
         pooler_config = vllm_config.model_config.pooler_config
         assert pooler_config is not None
-        # self.pooler = Pooler.for_embed(pooler_config)
         self.pooler = DispatchPooler(
             {
                 "encode": Pooler.for_encode(pooler_config),

@@ -83,10 +83,11 @@ jobs:
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire
           VERSION=${{ inputs.optimum_rbln_version }}
+          REPO_URL="https://github.com/rebellions-sw/optimum-rbln"
           if [[ "$REF" =~ ^[0-9]+(\.[0-9]+)*([A-Za-z0-9.+-]+)?$ ]]; then
             CONSTRAINT="optimum-rbln==${REF}"
           else
-            CONSTRAINT="optimum-rbln @ ${REF}"
+            CONSTRAINT="optimum-rbln @ git+${REPO_URL}@${REF}"
           fi
           pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "$CONSTRAINT")
           echo "optimum-rbln installed: $REF"

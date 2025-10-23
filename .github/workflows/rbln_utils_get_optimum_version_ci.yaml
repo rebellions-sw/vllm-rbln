@@ -20,10 +20,23 @@ jobs:
         id: get_target_optimum_version
         run: |
           OPTIMUM_RBLN_LINE=$(grep -E '^optimum-rbln|optimum-rbln.git' requirements.txt)
-          if [[ "$OPTIMUM_RBLN_LINE" == git+* ]]; then
-          OPTIMUM_RBLN_VERSION=$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/.*@([a-f0-9]{7,}).*/\1/')
+          if [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*@[[:space:]] ]]; then
+            REF="${OPTIMUM_RBLN_LINE##*@}"
+            OPTIMUM_RBLN_VERSION="${REF%%[#[:space:]]*}"
+
+          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^git\+ ]]; then
+            REF="${OPTIMUM_RBLN_LINE##*@}"
+            OPTIMUM_RBLN_VERSION="${REF%%[#[:space:]]*}"
+
+          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*== ]]; then
+            OPTIMUM_RBLN_VERSION="$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/^optimum-rbln[[:space:]]*==[[:space:]]*//')"
+
+          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*>[=] ]]; then
+            OPTIMUM_RBLN_VERSION="$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/^optimum-rbln[[:space:]]*>=[[:space:]]*//')"
+
           else
-          OPTIMUM_RBLN_VERSION=$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/optimum-rbln[[:space:]]*[>=]*//')
+            echo "Unrecognized optimum-rbln spec: $OPTIMUM_RBLN_LINE" >&2
+            exit 1
           fi
           echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
           echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT

@@ -112,7 +112,7 @@ class RBLNOptimumScheduler(Scheduler):
             enable_kv_cache_events=False,
             dcp_world_size=1,
         )
-        self.use_pp = self.parallel_config.pipeline_parallel_size > 1
+        self.use_pp = False
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
