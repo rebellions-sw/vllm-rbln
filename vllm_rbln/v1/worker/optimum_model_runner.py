@@ -26,7 +26,8 @@ from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import BatchedTensorInputs, MultiModalKwargsItem, MultiModalKwargs
+from vllm.multimodal.inputs import (BatchedTensorInputs, MultiModalKwargs,
+                                    MultiModalKwargsItem)
 from vllm.multimodal.utils import group_mm_kwargs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
