@@ -272,7 +272,11 @@ class RblnPlatform(Platform):
                     if kvcache_block_size is not None:
                         break
 
-        # encoder, encoder-decoder model
+        # encoder-decoder model
+        if kvcache_block_size is None and "dec_dec_max_seq_len" in rbln_config:
+            kvcache_block_size = rbln_config["dec_dec_max_seq_len"]
+
+        # encoder
         if kvcache_block_size is None and "enc_max_seq_len" in rbln_config:
             kvcache_block_size = rbln_config["enc_max_seq_len"]
 
