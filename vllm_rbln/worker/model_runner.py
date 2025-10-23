@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import time
 import dataclasses
 import math
 import weakref
@@ -46,6 +46,9 @@ if TYPE_CHECKING:
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
+from vllm_rbln.worker.metrics import PerformanceTracker
+
+
 
 logger = init_logger(__name__)
 
@@ -441,6 +444,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(
                 cast(RBLNModelRunner, weakref.proxy(self)))
+        if envs.RBLN_METRICS:
+            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker.register_cleanup()
 
     def compile_model(self, model):
         TP = get_tp_group()
@@ -620,9 +626,19 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         is_prompt = seq_group_metadata_list[
             0].is_prompt if seq_group_metadata_list else None
-        logger.debug("[RBLN] num_requests = %d", len(seq_group_metadata_list))
-        logger.debug("[RBLN] input_ids = %s", model_input.input_tokens)
-        logger.debug("[RBLN] positions = %s", model_input.input_positions)
+        if is_prompt:
+            logger.debug("[RBLN] Prefill step - requests: %s", [
+                seq_group_metadata.request_id
+                for seq_group_metadata in seq_group_metadata_list
+            ])
+        else:
+            logger.debug("[RBLN] Decode step - requests: %s", [
+                seq_group_metadata.request_id
+                for seq_group_metadata in seq_group_metadata_list
+            ])
+        logger.info("[RBLN] num_requests = %d", len(seq_group_metadata_list))
+        logger.info("[RBLN] input_ids = %s", model_input.input_tokens)
+        logger.info("[RBLN] positions = %s", model_input.input_positions)
         return dataclasses.replace(model_input,
                                    sampling_metadata=sampling_metadata,
                                    virtual_engine=virtual_engine,
@@ -670,7 +686,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # RBLN compile context is much similar to vLLM forward context
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
-
+            
+            start_time = time.perf_counter()
             logits_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
@@ -678,6 +695,20 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 selected_token_indices=token_indices,
                 **execute_model_kwargs,
             )
+            end_time = time.perf_counter()
+            if envs.RBLN_METRICS:
+                # Record performance metrics
+                execution_time = end_time - start_time
+                if model_input.is_prompt:
+                    total_tokens = sum(model_input.query_lens
+                                       ) if model_input.query_lens else 0
+                    self.performance_tracker.record_prefill(
+                        execution_time, total_tokens)
+                else:
+                    num_seqs = len(
+                        model_input.seq_lens) if model_input.seq_lens else 0
+                    self.performance_tracker.record_decode(
+                        execution_time, num_seqs)
 
         if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
             # Gather logits for TP
