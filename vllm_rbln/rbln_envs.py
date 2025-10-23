@@ -68,6 +68,9 @@ environment_variables = {
     # Number of Ray nodes
     "RBLN_NUM_RAY_NODES":
     lambda: int(os.environ.get("NUM_RAY_NODES", 1)),
+    "RBLN_METRICS":
+    (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
+     ("true", "1")),
 }
 
 
