@@ -416,18 +416,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         mm_kwargs = list[MultiModalKwargsItem]()
         for req in scheduler_output.scheduled_new_reqs:
-            for feature in req.mm_features:
-                if feature.data is not None:
-                    mm_kwargs.append(feature.data)
+            mm_kwargs.extend(req.mm_kwargs)
 
         # Input all modalities at once
-        model = cast(SupportsMultiModal, self.model)
         mm_kwargs_combined: BatchedTensorInputs = {}
         for _, _, mm_kwargs_group in group_mm_kwargs_by_modality(
-            mm_kwargs,
-            device=self.device,
-            pin_memory=self.pin_memory,
-            merge_by_field_config=model.merge_by_field_config,
+                mm_kwargs,
+                device=self.device,
+                pin_memory=self.pin_memory,
         ):
             mm_kwargs_combined.update(mm_kwargs_group)
 
