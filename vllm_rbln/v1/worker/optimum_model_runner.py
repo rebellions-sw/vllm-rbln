@@ -512,7 +512,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         req_ids = self.input_batch.req_ids
 
-        # FIXME indexing with np
         for req_id in req_ids:
             req_index = self.input_batch.req_id_to_index[req_id]
             input_position = int(

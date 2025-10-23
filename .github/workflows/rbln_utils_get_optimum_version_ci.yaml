@@ -21,9 +21,9 @@ jobs:
         run: |
           OPTIMUM_RBLN_LINE=$(grep -E '^optimum-rbln|optimum-rbln.git' requirements.txt)
           if [[ "$OPTIMUM_RBLN_LINE" == git+* ]]; then
-          OPTIMUM_RBLN_VERSION=$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/.*@([a-f0-9]+).*/\1/')
+          OPTIMUM_RBLN_VERSION=$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/.*@([a-f0-9]{7,}).*/\1/')
           else
-          OPTIMUM_RBLN_VERSION=$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/optimum-rbln[>=]*//')
+          OPTIMUM_RBLN_VERSION=$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/optimum-rbln[[:space:]]*[>=]*//')
           fi
           echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
           echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
