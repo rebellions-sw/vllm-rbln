@@ -3,4 +3,5 @@ setuptools-scm>=8
 pyyaml
 datasets
 qwen_vl_utils
+vllm==0.10.2
 optimum-rbln @ git+https://github.com/rebellions-sw/optimum-rbln.git@438f753aebb0f21505bf9f9fc2beb8d9aeba948a
