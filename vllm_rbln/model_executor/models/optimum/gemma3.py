@@ -254,7 +254,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
 
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             pixel_values = pixel_values.squeeze(1)
         else:
             pixel_values = pixel_values.squeeze(0)

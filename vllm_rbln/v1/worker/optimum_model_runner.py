@@ -26,7 +26,7 @@ from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.inputs import BatchedTensorInputs, MultiModalKwargsItem
+from vllm.multimodal.inputs import BatchedTensorInputs, MultiModalKwargsItem, MultiModalKwargs
 from vllm.multimodal.utils import group_mm_kwargs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
@@ -51,7 +51,6 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
-from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 
 logger = init_logger(__name__)
 
@@ -117,7 +116,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
             sampler = RBLNSampler(
-                logprobs_mode=self.model_config.logprobs_mode)
+                logprobs_mode=self.model_config.logprobs_mode,
+                seed=self.vllm_config.model_config.seed,
+            )
             sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         else:
             logger.info("Using default vLLM sampler.")
@@ -441,7 +442,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self,
         scheduler_output: "SchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor,
-               Optional[RBLNOptimumMultiModalKwargs], list[str]]:
+               Optional[MultiModalKwargs], list[str]]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
         running_request_ids = []
@@ -723,7 +724,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             optional_keys = [
                 ("top_p", input_batch.top_p_cpu_tensor, input_batch.top_p),
                 ("top_k", input_batch.top_k_cpu_tensor, input_batch.top_k),
-                ("min_p", input_batch.min_p_cpu_tensor, input_batch.min_p),
                 ("frequency_penalties",
                  input_batch.frequency_penalties_cpu_tensor,
                  input_batch.frequency_penalties),
@@ -814,7 +814,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 temperature=config["temperature"],
                 top_p=config.get("top_p"),
                 top_k=config.get("top_k"),
-                min_p=config.get("min_p"),
                 frequency_penalties=config.get("frequency_penalties"),
                 repetition_penalties=config.get("repetition_penalties"),
                 presence_penalties=config.get("presence_penalties"),

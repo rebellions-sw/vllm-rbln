@@ -14,9 +14,10 @@
 from typing import List, Optional, Union
 
 import torch
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-import vllm.envs as envs
+
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 

@@ -172,19 +172,6 @@ class RBLNOptimumScheduler(Scheduler):
                 if req_index > 0:
                     break
 
-                # KVTransfer: skip request if still waiting for remote kvs.
-                if request.status == RequestStatus.WAITING_FOR_REMOTE_KVS:
-                    is_ready = self._update_waiting_for_remote_kv(request)
-                    if is_ready:
-                        request.status = RequestStatus.WAITING
-                    else:
-                        logger.debug(
-                            "%s is still in WAITING_FOR_REMOTE_KVS state.",
-                            request.request_id)
-                        self.waiting.pop_request()
-                        skipped_waiting_requests.prepend_request(request)
-                        continue
-
                 # Skip request if the structured output request is still waiting
                 # for FSM compilation.
                 if request.status == RequestStatus.WAITING_FOR_FSM:
@@ -209,24 +196,15 @@ class RBLNOptimumScheduler(Scheduler):
                 num_external_computed_tokens = 0
                 load_kv_async = False
 
-                # Get already-cached tokens.
-                if request.num_computed_tokens == 0:
-                    # Get locally-cached tokens.
-                    new_computed_blocks, num_new_local_computed_tokens = \
-                        self.kv_cache_manager.get_computed_blocks(
-                            request)
+                assert request.num_computed_tokens == 0
+                # Get locally-cached tokens.
+                new_computed_blocks, num_new_local_computed_tokens = \
+                    self.kv_cache_manager.get_computed_blocks(
+                        request)
 
-                    num_external_computed_tokens = 0
-                    # Total computed tokens (local + external).
-                    num_computed_tokens = (num_new_local_computed_tokens +
-                                           num_external_computed_tokens)
-                # KVTransfer: WAITING reqs have num_computed_tokens > 0
-                # after async KV recvs are completed.
-                else:
-                    new_computed_blocks = (
-                        self.kv_cache_manager.create_empty_block_list())
-                    num_new_local_computed_tokens = 0
-                    num_computed_tokens = request.num_computed_tokens
+                # Total computed tokens (local + external).
+                num_computed_tokens = (num_new_local_computed_tokens +
+                                       num_external_computed_tokens)
 
                 # Number of tokens to be scheduled.
                 # We use `request.num_tokens` instead of
@@ -258,12 +236,6 @@ class RBLNOptimumScheduler(Scheduler):
                 # Request was already popped from self.waiting
                 # unless it was re-added above due to new_blocks being None.
                 request = self.waiting.pop_request()
-                if load_kv_async:
-                    # If loading async, allocate memory and put request
-                    # into the WAITING_FOR_REMOTE_KV state.
-                    skipped_waiting_requests.prepend_request(request)
-                    request.status = RequestStatus.WAITING_FOR_REMOTE_KVS
-                    continue
 
                 req_index += 1
                 self.running.append(request)
