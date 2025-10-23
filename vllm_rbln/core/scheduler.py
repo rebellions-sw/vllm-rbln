@@ -295,19 +295,20 @@ class RBLNScheduler(Scheduler):
                 )
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
+                self.remove_seq_from_computed_blocks_tracker(
+                    seq_group, SequenceStatus.FINISHED_IGNORED)
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
                 continue
 
             num_lookahead_slots: int = 0
-            if self.scheduler_config.is_multi_step and enable_chunking:
-                num_lookahead_slots = self._get_num_lookahead_slots(
-                    True, enable_chunking)
 
             # If the sequence group cannot be allocated, stop.
             can_allocate = self.block_manager.can_allocate(
                 seq_group, num_lookahead_slots=num_lookahead_slots)
             if can_allocate == AllocStatus.LATER:
+                self.remove_seq_from_computed_blocks_tracker(
+                    seq_group, SequenceStatus.WAITING)
                 break
             elif can_allocate == AllocStatus.NEVER:
                 logger.warning(
@@ -318,7 +319,20 @@ class RBLNScheduler(Scheduler):
                 )
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
+                self.remove_seq_from_computed_blocks_tracker(
+                    seq_group, SequenceStatus.FINISHED_IGNORED)
                 ignored_seq_groups.append(seq_group)
+                waiting_queue.popleft()
+                continue
+
+            # We cannot mix sequence groups that use prompt embeds and
+            # those that do not.
+            if len(seq_groups) == 0:
+                using_prompt_embeds = seq_group.uses_prompt_embeds()
+            if using_prompt_embeds != seq_group.uses_prompt_embeds():
+                self.remove_seq_from_computed_blocks_tracker(
+                    seq_group, SequenceStatus.WAITING)
+                leftover_waiting_sequences.appendleft(seq_group)
                 waiting_queue.popleft()
                 continue
 
@@ -332,6 +346,8 @@ class RBLNScheduler(Scheduler):
                         and len(curr_loras) >= self.lora_config.max_loras):
                     # We don't have a space for another LoRA, so
                     # we ignore this request for now.
+                    self.remove_seq_from_computed_blocks_tracker(
+                        seq_group, SequenceStatus.WAITING)
                     leftover_waiting_sequences.appendleft(seq_group)
                     waiting_queue.popleft()
                     continue
@@ -341,6 +357,8 @@ class RBLNScheduler(Scheduler):
                 # We've reached the budget limit - since there might be
                 # continuous prefills in the running queue, we should break
                 # to avoid scheduling any new prefills.
+                self.remove_seq_from_computed_blocks_tracker(
+                    seq_group, SequenceStatus.WAITING)
                 break
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
@@ -348,6 +366,8 @@ class RBLNScheduler(Scheduler):
                     num_new_tokens=num_new_tokens_uncached,
                     num_new_seqs=num_new_seqs,
             ):
+                self.remove_seq_from_computed_blocks_tracker(
+                    seq_group, SequenceStatus.WAITING)
                 break
 
             # Can schedule this request.
@@ -359,24 +379,6 @@ class RBLNScheduler(Scheduler):
             if partial_prefill_metadata is not None:
                 partial_prefill_metadata.maybe_increment_partial_prefills(
                     seq_group)
-
-            if enable_chunking and self.scheduler_config.is_multi_step:
-                blocks_to_copy: List[Tuple[int, int]] = []
-                # init_multi_step_from_lookahead_slots happens in append_slots
-                self._append_slots(seq_group, blocks_to_copy, enable_chunking)
-                # This assert will trip when a copy-on-write happens. This is
-                # not a concern as the very first sequence-group block
-                # allocation happens above. Still, we have the assert to
-                # catch any edge-cases.
-                assert not blocks_to_copy
-            else:
-                seq_group.init_multi_step_from_lookahead_slots(
-                    num_lookahead_slots,
-                    num_scheduler_steps=self.scheduler_config.
-                    num_scheduler_steps,
-                    is_multi_step=self.scheduler_config.is_multi_step,
-                    enable_chunking=enable_chunking,
-                )
 
             seq_groups.append(
                 ScheduledSequenceGroup(seq_group=seq_group,
@@ -518,14 +520,6 @@ class RBLNScheduler(Scheduler):
         num_prefill_groups = (len(prefills.seq_groups) +
                               len(swapped_in.prefill_seq_groups) +
                               len(running_scheduled.prefill_seq_groups))
-        # If all prompts, then we set num_lookahead_slots to 0
-        # this allows us to go through the `no_spec` path in
-        # `spec_decode_worker.py`
-        all_prefills = len(scheduled_seq_groups) == num_prefill_groups
-        num_lookahead_slots = (0 if
-                               (all_prefills
-                                and not self.scheduler_config.is_multi_step)
-                               else running_scheduled.num_lookahead_slots)
         return SchedulerOutputs(
             scheduled_seq_groups=scheduled_seq_groups,
             num_prefill_groups=num_prefill_groups,
@@ -537,7 +531,7 @@ class RBLNScheduler(Scheduler):
             swapped_in.blocks_to_copy,
             ignored_seq_groups=prefills.ignored_seq_groups +
             swapped_in.infeasible_seq_groups,
-            num_lookahead_slots=num_lookahead_slots,
+            num_lookahead_slots=0,
             running_queue_size=len(self.running),
             preempted=(len(running_scheduled.preempted) +
                        len(running_scheduled.swapped_out)),
@@ -584,11 +578,6 @@ class RBLNScheduler(Scheduler):
         is_prefill = seq_group.is_prefill()
         num_lookahead_slots = self._get_num_lookahead_slots(
             is_prefill, enable_chunking)
-
-        if is_prefill and num_lookahead_slots > 0:
-            # Appending prefill slots only happens multi-step and
-            # chunked-prefill are enabled together.
-            assert self.scheduler_config.is_multi_step and enable_chunking
 
         return self.block_manager.can_append_slots(
             seq_group=seq_group, num_lookahead_slots=num_lookahead_slots)
