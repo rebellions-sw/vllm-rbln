@@ -18,6 +18,7 @@ jobs:
 
       - name: Get optimum version from requirements.txt
         id: get_target_optimum_version
+        shell: bash
         run: |
           OPTIMUM_RBLN_LINE=$(grep -E '^optimum-rbln|optimum-rbln.git' requirements.txt)
           if [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*@[[:space:]] ]]; then
@@ -27,12 +28,9 @@ jobs:
           elif [[ "$OPTIMUM_RBLN_LINE" =~ ^git\+ ]]; then
             REF="${OPTIMUM_RBLN_LINE##*@}"
             OPTIMUM_RBLN_VERSION="${REF%%[#[:space:]]*}"
-
-          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*== ]]; then
-            OPTIMUM_RBLN_VERSION="$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/^optimum-rbln[[:space:]]*==[[:space:]]*//')"
-
-          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*>[=] ]]; then
-            OPTIMUM_RBLN_VERSION="$(echo "$OPTIMUM_RBLN_LINE" | sed -E 's/^optimum-rbln[[:space:]]*>=[[:space:]]*//')"
+          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*(==|>=)[[:space:]]* ]]; then
+            OPTIMUM_RBLN_VERSION="$(echo "$OPTIMUM_RBLN_LINE" \
+              | sed -E 's/^optimum-rbln[[:space:]]*(==|>=)[[:space:]]*//')"
 
           else
             echo "Unrecognized optimum-rbln spec: $OPTIMUM_RBLN_LINE" >&2
