@@ -158,13 +158,13 @@ jobs:
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
           VERSION=${{ inputs.optimum_rbln_version }}
           REPO_URL="https://github.com/rebellions-sw/optimum-rbln"
-          if [[ "$REF" =~ ^[0-9]+(\.[0-9]+)*([A-Za-z0-9.+-]+)?$ ]]; then
-            CONSTRAINT="optimum-rbln==${REF}"
+          if [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([A-Za-z0-9.+-]+)?$ ]]; then
+            CONSTRAINT="optimum-rbln==${VERSION}"
           else
-            CONSTRAINT="optimum-rbln @ git+${REPO_URL}@${REF}"
+            CONSTRAINT="optimum-rbln @ git+${REPO_URL}@${VERSION}"
           fi
           pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "$CONSTRAINT")
-          echo "optimum-rbln installed: $REF"
+          echo "optimum-rbln installed: $VERSION"
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
         env:
