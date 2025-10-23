@@ -53,6 +53,7 @@ TModelInputForRebel = TypeVar("TModelInputForRebel",
                               bound="ModelInputForRebel")
 _PAD_SLOT_ID = -1
 
+
 @dataclass(frozen=True)
 class ModelInputForRebel(ModelRunnerInputBase):
     """
@@ -555,13 +556,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     model_output = model_output[:, selected_token_indices]
                 logits = self.compute_logits_model.compute_logits(
                     model_output, None)
-                if envs.RBLN_LOGITS_ALL_GATHER:
-                    logits = self.compute_logits_model.logits_processor._gather_logits(logits)
+                logits = logits.view(-1, logits.size(-1))
             else:
                 # non last rank create intermediate tensors, bypass it
                 logits = model_output
-            if envs.RBLN_LOGITS_ALL_GATHER:
-                logits = logits.view(-1, logits.size(-1))
             return logits
 
         if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
@@ -684,8 +682,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
             # Gather logits for TP
             logits_processor = self.compute_logits_model.logits_processor
+            logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(0)
             logits = logits_processor._gather_logits(logits_or_intermediate_states)
-            logits = logits.view(-1, logits.size(-1))
+            logits = logits.squeeze(0)
         else:
             intermediate_states = logits_or_intermediate_states
             assert isinstance(intermediate_states, IntermediateTensors)
