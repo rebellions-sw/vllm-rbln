@@ -468,6 +468,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_id = scheduled.req_id
             req_index = self.input_batch.req_id_to_index[req_id]
             prompt_tokens = np.array(scheduled.prompt_token_ids)
+            block_ids = scheduled.block_ids[0]
+            num_computed_tokens = scheduled.num_computed_tokens
         elif scheduler_output.scheduled_cached_reqs.num_reqs == 1:
             # Preempted request resumed
             req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
@@ -476,6 +478,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_token = int(self.input_batch.num_tokens[req_index])
             prompt_tokens = self.input_batch.token_ids_cpu[
                 req_index][:num_token]
+            block_ids = scheduler_output.scheduled_cached_reqs.new_block_ids[0]
+            num_computed_tokens = \
+                scheduler_output.scheduled_cached_reqs.num_computed_tokens[0]
         else:
             raise RuntimeError(
                 "Prefill stage request cannot processed with other requests.")
@@ -488,14 +493,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.prefix_cache_manager.get_block_table_with_cache(
                     req_id,
                     0,  # num_allocated_tokens
-                    scheduled.num_computed_tokens,
-                    scheduled.block_ids[0])
+                    num_computed_tokens,
+                    block_ids)
             logger.debug(
                 "Request %s is now scheduled. Prompt tokens: %s, "
                 "Already generated tokens: %s, Allocated block(s): %s", req_id,
                 len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids),
-                scheduled.block_ids[0])
+                len(self.requests[req_id].output_token_ids), block_ids)
             total_cached_length = sum(cached_length)
             if total_cached_length > 0:
                 prompt_tokens = prompt_tokens[total_cached_length:]
