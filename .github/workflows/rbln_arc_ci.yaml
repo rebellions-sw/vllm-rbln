@@ -117,6 +117,31 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
           submodules: recursive
 
+      - name: Determine vLLM upstream version
+        id: vllm_version
+        run: |
+          if [ -n "${{ inputs.vllm_upstream_tag }}" ]; then
+            VERSION="${{ inputs.vllm_upstream_tag }}"
+            echo "Using vLLM version from workflow input: $VERSION"
+          else
+            VERSION=$(grep '^vllm==' requirements.txt | sed 's/vllm==\(.*\)/v\1/')
+            echo "Using vLLM version from requirements.txt: $VERSION"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Final vLLM version to use: $VERSION"
+
+      - name: Clone vLLM upstream for tests
+        run: |
+          echo "Cloning vLLM upstream version: ${{ steps.vllm_version.outputs.version }}"
+          git clone --depth 1 --branch ${{ steps.vllm_version.outputs.version }} \
+            https://github.com/vllm-project/vllm.git /tmp/vllm-upstream
+          echo "Clone completed successfully"
+
+      - name: Merge upstream tests with vllm-rbln tests
+        run: |
+          echo "Copying upstream tests to vllm-rbln..."
+          cp -r /tmp/vllm-upstream/tests/* tests/
+
       - name: Install vLLM-RBLN from PR source
         run: |
           source /workspace/.venv/bin/activate
@@ -126,4 +151,5 @@ jobs:
       - name: Run Python Tests
         run: |
           source /workspace/.venv/bin/activate
-          pytest tests/v1/core -vv --durations 0
+          pytest tests/v1/core tests/basic_correctness/test_basic_correctness.py -vv --durations 0
+          
