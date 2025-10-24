@@ -26,10 +26,20 @@ from .utils import (create_model_runner_output, create_requests,
     "exp_new_req0_blocks, exp_new_req1_blocks, "
     "exp_cached0_new, exp_cached1_new",
     [
-        pytest.param(
-            2, 16, 64, 9, 32, [1, 2], [3, 4], [5], [6], id="16bsize-32len"),
-        pytest.param(
-            2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [], id="8bsize-17len")
+        pytest.param(2,
+                     16,
+                     64,
+                     9,
+                     32, [1, 2], [3, 4], ([5], ), ([6], ),
+                     id="16bsize-32len"),
+        pytest.param(2,
+                     8,
+                     24,
+                     7,
+                     17, [1, 2, 3], [4, 5, 6],
+                     None,
+                     None,
+                     id="8bsize-17len")
     ],
 )
 def test_schedule_alloc_block(
@@ -83,8 +93,8 @@ def test_schedule_alloc_block(
     # can be scheduled with decode phase.
     scheduler_output2 = scheduler.schedule()
     scheduled_cached_reqs = scheduler_output2.scheduled_cached_reqs
-    assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached0_new
-    assert scheduled_cached_reqs[1].new_block_ids[0] == exp_cached1_new
+    assert scheduled_cached_reqs.new_block_ids[0] == exp_cached0_new
+    assert scheduled_cached_reqs.new_block_ids[1] == exp_cached1_new
 
 
 @pytest.mark.parametrize(

@@ -22,8 +22,7 @@ from vllm.distributed import (ensure_model_parallel_initialized,
 from vllm.logger import init_logger
 from vllm.model_executor import set_random_seed
 from vllm.sequence import ExecuteModelRequest
-from vllm.worker.worker_base import (LocalOrDistributedWorkerBase,
-                                     LoRANotSupportedWorkerBase, WorkerBase,
+from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
 
 from vllm_rbln.worker.optimum_model_runner import RBLNOptimumModelRunner
@@ -31,8 +30,7 @@ from vllm_rbln.worker.optimum_model_runner import RBLNOptimumModelRunner
 logger = init_logger(__name__)
 
 
-class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
-                        LocalOrDistributedWorkerBase):
+class RBLNOptimumWorker(LocalOrDistributedWorkerBase):
     """A worker class that executes the model on RBLN NPUs via optimum-rbln.
     """
 
@@ -76,6 +74,7 @@ class RBLNOptimumWorker(LoRANotSupportedWorkerBase,
         num_gpu_blocks = adapter.get_available_num_blocks()
         # Swap not yet supported with RBLN backend.
         num_cpu_blocks = 0
+        # We do not support cross-layer KV cache sharing.
         return num_gpu_blocks, num_cpu_blocks
 
     def initialize_cache(self, num_gpu_blocks: int,

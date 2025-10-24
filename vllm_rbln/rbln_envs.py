@@ -18,36 +18,40 @@ from typing import TYPE_CHECKING
 from vllm.envs import environment_variables as vllm_envs
 
 if TYPE_CHECKING:
-    RBLN_COMPILE_MODEL: bool = True
-    RBLN_TP_SIZE: int = 1
-    RBLN_SAMPLER: bool = False
-    RBLN_ENABLE_WARM_UP: bool = False
-    RBLN_USE_VLLM_MODEL: bool = False
-    RBLN_FLASH_CAUSAL_ATTN: bool = True
+    VLLM_RBLN_COMPILE_MODEL: bool = True
+    VLLM_RBLN_TP_SIZE: int = 1
+    VLLM_RBLN_SAMPLER: bool = True
+    VLLM_RBLN_ENABLE_WARM_UP: bool = True
+    VLLM_RBLN_USE_VLLM_MODEL: bool = False
+    VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
 
 # extended environments
 environment_variables = {
     **vllm_envs,
     # If true, will compile models using torch.compile.
     # Otherwise, run the CPU eager mode, if possible.
-    "RBLN_COMPILE_MODEL":
-    (lambda: os.environ.get("COMPILE_MODEL", "True").lower() in ("true", "1")),
+    "VLLM_RBLN_COMPILE_MODEL":
+    (lambda: os.environ.get("VLLM_RBLN_COMPILE_MODEL", "True").lower() in
+     ("true", "1")),
     # TP Size for RSD.
-    "RBLN_TP_SIZE":
-    lambda: int(os.environ.get("TP_SIZE", 1)),
+    "VLLM_RBLN_TP_SIZE":
+    lambda: int(os.environ.get("VLLM_RBLN_TP_SIZE", 1)),
     # Use customized sampler
-    "RBLN_SAMPLER":
+    "VLLM_RBLN_SAMPLER":
     (lambda: os.environ.get("VLLM_RBLN_SAMPLER", "True").lower() in
      ("true", "1")),
     # Enable warmup
-    "RBLN_ENABLE_WARM_UP":
-    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in
+    "VLLM_RBLN_ENABLE_WARM_UP":
+    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "True").lower() in
      ("true", "1")),
-    "RBLN_USE_VLLM_MODEL":
-    (lambda: os.environ.get("USE_VLLM_MODEL", "False").lower() in
+    # If true, it uses the natively compiled vLLM model
+    # rather than the optimum-rbln compiled model.
+    "VLLM_RBLN_USE_VLLM_MODEL":
+    (lambda: os.environ.get("VLLM_RBLN_USE_VLLM_MODEL", "False").lower() in
      ("true", "1")),
-    "RBLN_FLASH_CAUSAL_ATTN":
-    (lambda: os.environ.get("FLASH_CAUSAL_ATTN", "True").lower() in
+    # Use flash attention for causal attention
+    "VLLM_RBLN_FLASH_CAUSAL_ATTN":
+    (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
      ("true", "1")),
 }
 
