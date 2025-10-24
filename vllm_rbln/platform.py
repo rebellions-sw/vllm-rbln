@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -28,6 +31,8 @@ from vllm.utils import FlexibleArgumentParser, _StreamPlaceholder
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
+from vllm_rbln.utils.optimum.registry import (is_enc_dec_arch, is_multi_modal,
+                                              is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -189,12 +194,14 @@ class RblnPlatform(Platform):
                     logger.warning("RBLN Sampler is only supported on v1. "
                                    "V0 will be deprecated soon.")
                     envs.VLLM_RBLN_SAMPLER = False
+
             assert vllm_config.parallel_config.tensor_parallel_size == 1, (
                 "Tensor parallelism is set when compiled in optimum-rbln.")
             assert vllm_config.parallel_config.pipeline_parallel_size == 1, (
                 "Pipeline parallelism is not supported in optimum-rbln.")
             assert vllm_config.speculative_config is None, (
                 "Speculative decoding is not supported in vLLM RBLN.")
+            cls.sync_with_rbln_config(vllm_config)
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -207,11 +214,9 @@ class RblnPlatform(Platform):
         assert (not vllm_config.speculative_config
                 ), "Speculative decoding not yet supported for RBLN backend."
 
-        cache_config = vllm_config.cache_config
-        if cache_config:
-            assert vllm_config.cache_config.block_size is not None, (
-                "block_size must be configured for RBLN backend")
-            cache_config.enable_prefix_caching = False
+        if vllm_config.cache_config.enable_prefix_caching:
+            assert envs.VLLM_USE_V1 is True, (
+                "Prefix caching is only supported on v1 with RBLN model.")
 
         if envs.VLLM_USE_V1 and envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
@@ -255,3 +260,95 @@ class RblnPlatform(Platform):
     @classmethod
     def supports_v1(cls, model_config: "ModelConfig") -> bool:
         return True
+
+    @classmethod
+    def _disable_prefix_caching(cls, vllm_config: VllmConfig,
+                                reason: str) -> None:
+        """Disable prefix caching with warning message."""
+        logger.warning(
+            "Prefix caching is not available for %s. "
+            "It has been automatically disabled.", reason)
+        vllm_config.cache_config.enable_prefix_caching = None
+
+    def get_rbln_params(rbln_config: dict) -> tuple[int, int, int]:
+        kvcache_block_size = rbln_config.get("kvcache_block_size")
+        if kvcache_block_size is None:
+            submodules = ["language_model", "text_model"]
+            for submodule in submodules:
+                if submodule in rbln_config:
+                    kvcache_block_size = rbln_config[submodule].get(
+                        "kvcache_block_size", None)
+                    if kvcache_block_size is not None:
+                        break
+                    batch_size = rbln_config[submodule].get("batch_size", None)
+                    max_seq_len = rbln_config[submodule].get(
+                        "max_seq_len", None)
+        else:
+            batch_size = rbln_config.get("batch_size")
+            max_seq_len = rbln_config.get("max_seq_len")
+
+        # encoder-decoder model
+        if kvcache_block_size is None and "dec_max_seq_len" in rbln_config:
+            max_seq_len = rbln_config.get("dec_max_seq_len")
+            kvcache_block_size = max_seq_len
+
+        # encoder
+        if kvcache_block_size is None and "enc_max_seq_len" in rbln_config:
+            max_seq_len = rbln_config.get("enc_max_seq_len")
+            kvcache_block_size = max_seq_len
+
+        # embedding model
+        if kvcache_block_size is None and "max_seq_len" in rbln_config:
+            kvcache_block_size = rbln_config.get("max_seq_len")
+            max_seq_len = rbln_config.get("max_seq_len")
+
+        assert kvcache_block_size is not None, (
+            "kvcache_block_size must be specified in rbln_config.json")
+        assert batch_size is not None, (
+            "batch_size must be specified in rbln_config.json")
+        assert max_seq_len is not None, (
+            "max_seq_len must be specified in rbln_config.json")
+
+        return kvcache_block_size, batch_size, max_seq_len
+
+    @classmethod
+    def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
+        rbln_config_path = Path(
+            os.path.join(vllm_config.model_config.model, "rbln_config.json"))
+        if not rbln_config_path.exists():
+            logger.warning(
+                "rbln_config.json not found in model directory: %s. "
+                "Using `block_size` from vllm_config.cache_config instead.",
+                rbln_config_path)
+            rbln_config = {}
+            kvcache_block_size = vllm_config.cache_config.block_size
+        else:
+            with open(rbln_config_path, encoding='utf-8') as f:
+                rbln_config = json.load(f)
+            kvcache_block_size, batch_size, max_model_len = cls.get_rbln_params(
+                rbln_config)
+            vllm_config.scheduler_config.max_num_seqs = batch_size
+            vllm_config.scheduler_config.max_num_batched_tokens = max_model_len
+            vllm_config.model_config.max_model_len = max_model_len
+
+        if vllm_config.cache_config.enable_prefix_caching:
+            if is_enc_dec_arch(vllm_config.model_config.hf_config):
+                cls._disable_prefix_caching(vllm_config,
+                                            "encoder-decoder models")
+            elif is_multi_modal(vllm_config.model_config.hf_config):
+                cls._disable_prefix_caching(vllm_config, "multimodal models")
+            elif is_pooling_arch(vllm_config.model_config.hf_config):
+                cls._disable_prefix_caching(vllm_config, "pooling models")
+            elif getattr(vllm_config.model_config.hf_config, "sliding_window",
+                         None) is not None and getattr(
+                             vllm_config.model_config.hf_config,
+                             "use_sliding_window", True):
+                cls._disable_prefix_caching(vllm_config,
+                                            "sliding window models")
+
+        if vllm_config.cache_config.enable_prefix_caching:
+            vllm_config.cache_config.block_size = 128
+            vllm_config.additional_config[
+                "attn_block_size"] = kvcache_block_size
+        else:
+            vllm_config.cache_config.block_size = kvcache_block_size
