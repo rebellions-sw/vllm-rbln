@@ -484,7 +484,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             seq_len = len(prompt_tokens)
             input_positions = list(range(seq_len))
             num_blocks = num_blocks_per_req[req_index]
-            # TODO How to log the block table?
             if self.enable_prefix_caching:
                 block_table, cached_block_table, cached_length = \
                     self.prefix_cache_manager.get_block_table_with_cache(
