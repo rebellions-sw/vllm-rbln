@@ -427,18 +427,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_blocks = num_blocks_per_req[req_index]
             # TODO How to log the block table?
             if self.enable_prefix_caching:
-                # TODO fix the position calling
-                num_new_ob = self.prefix_cache_manager.get_num_new_ob(
-                    scheduled.block_ids[0])
-                self.prefix_cache_manager.ensure_free_blocks(num_new_ob)
-                cached_block_table, cached_length = \
-                    self.prefix_cache_manager.get_cached_origin_blocks(
+                block_table, cached_block_table, cached_length = \
+                    self.prefix_cache_manager.get_block_table_with_cache(
                         req_id,
-                        scheduled.num_computed_tokens, scheduled.block_ids[0]
-                    )
-                self.prefix_cache_manager.allocate_blocks(
-                    req_id, num_new_ob, scheduled.block_ids[0])
-                block_table = self.prefix_cache_manager.get_blocks(req_id)
+                        0,  # num_allocated_tokens
+                        scheduled.num_computed_tokens,
+                        scheduled.block_ids[0])
                 logger.debug(
                     "Request %s is now scheduled. Prompt tokens: %s, "
                     "Already generated tokens: %s, Allocated block(s): %s",
@@ -498,13 +492,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
-                if len(new_blocks_ids[req_id]) > 0:
-                    num_new_ob = self.prefix_cache_manager.get_num_new_ob(
-                        new_blocks_ids[req_id], num_computed_tokens[req_id])
-                    self.prefix_cache_manager.ensure_free_blocks(num_new_ob)
-                    self.prefix_cache_manager.allocate_blocks(
-                        req_id, num_new_ob, new_blocks_ids[req_id])
-                block_table = self.prefix_cache_manager.get_blocks(req_id)
+                block_table, _, _ = \
+                    self.prefix_cache_manager.get_block_table_with_cache(
+                        req_id,
+                        num_computed_tokens[req_id],
+                        num_computed_tokens[req_id],
+                        new_blocks_ids[req_id])
             else:
                 block_table = block_tables_cpu[req_index]
                 block_table = self.mask_block_table(block_table, num_blocks)

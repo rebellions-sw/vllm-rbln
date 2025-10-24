@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -101,16 +101,13 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     block_tables: torch.Tensor
     running_requests_ids: List[str]
     finished_requests_ids: List[str]
-    cached_block_tables: List[str]  # for prefix caching
-    cached_lengths: List[str]  # for prefix caching
     is_prompt: bool = False  # for V1
     sampling_metadata: "SamplingMetadata" = None,  # for V0
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     token_type_ids: Optional[torch.Tensor] = None
     pooling_metadata: Optional[PoolingMetadata] = None  # for V0
-    lora_requests: Optional[List[LoRARequest]] = None  # for V0
-    lora_mapping: Optional["LoRAMapping"] = None  # for V0
-
+    cached_block_tables: List[str] = field(default_factory=list)  # for prefix caching
+    cached_lengths: List[str] = field(default_factory=list)  # for prefix caching
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
         raise NotImplementedError("ModelInputForRBLN cannot be broadcast.")
