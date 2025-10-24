@@ -474,8 +474,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         for scheduled in reqs:
             req_id = scheduled.req_id
             req_index = self.input_batch.req_id_to_index[req_id]
-            # TODO the prompt tokens in the prefix cached blocks
-            # must be excluded.
             if is_preempted:
                 logger.warning("Request %s is resumed.", req_id)
                 num_token = int(self.input_batch.num_tokens[req_index])
