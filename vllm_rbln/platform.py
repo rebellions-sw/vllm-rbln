@@ -325,8 +325,7 @@ class RblnPlatform(Platform):
             kvcache_block_size, batch_size, max_seq_len = cls.get_rbln_params(
                 rbln_config)
             vllm_config.scheduler_config.max_num_seqs = batch_size
-            vllm_config.scheduler_config.max_num_batched_tokens \
-                = max_seq_len * batch_size
+            vllm_config.scheduler_config.max_num_batched_tokens = max_seq_len
             vllm_config.model_config.max_seq_len = max_seq_len
 
         if vllm_config.cache_config.enable_prefix_caching:
