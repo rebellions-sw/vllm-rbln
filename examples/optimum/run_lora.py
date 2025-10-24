@@ -111,10 +111,6 @@ async def main(batch_size: int, max_seq_len: int, kvcache_block_size: int,
                num_input_prompt: int, model_id: str, lora_paths: list[str],
                lora_names: list[str], lora_int_ids: list[int]):
     engine_args = AsyncEngineArgs(model=model_id,
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  max_model_len=max_seq_len,
-                                  block_size=kvcache_block_size,
                                   enable_lora=True,
                                   max_lora_rank=64,
                                   max_loras=2)
