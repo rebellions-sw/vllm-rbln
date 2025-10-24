@@ -93,7 +93,11 @@ async def main(
     prompt_txt: str,
     golden_json: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id)
+    engine_args = AsyncEngineArgs(model=model_id,
+                                  max_num_seqs=batch_size,
+                                  max_num_batched_tokens=max_seq_len,
+                                  max_model_len=max_seq_len,
+                                  block_size=kvcache_block_size)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt = get_input_prompts(prompt_txt)

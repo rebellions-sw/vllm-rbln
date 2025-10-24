@@ -60,6 +60,10 @@ async def main(
     model_id: str,
 ):
     engine_args = AsyncEngineArgs(model=model_id,
+                                  max_num_seqs=batch_size,
+                                  max_num_batched_tokens=max_seq_len,
+                                  max_model_len=max_seq_len,
+                                  block_size=max_seq_len,
                                   limit_mm_per_prompt={"audio": 1})
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
