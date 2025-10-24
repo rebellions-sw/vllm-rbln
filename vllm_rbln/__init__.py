@@ -31,8 +31,10 @@ def register_model():
             "T5ForConditionalGeneration",
             "vllm_rbln.model_executor.models.optimum.t5:RBLNT5ForConditionalGeneration"
         )
-        ModelRegistry.register_model("T5EncoderModel",
-                                     "optimum.rbln:RBLNT5EncoderModel")
+        ModelRegistry.register_model(
+            "T5EncoderModel",
+            "vllm_rbln.model_executor.models.optimum.encoder:RBLNOptimumForEncoderModel"
+        )
         ModelRegistry.register_model(
             "Gemma3ForConditionalGeneration",
             "vllm_rbln.model_executor.models.optimum.gemma3:RBLNOptimumGemma3ForConditionalGeneration"

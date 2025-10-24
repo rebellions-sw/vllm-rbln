@@ -130,8 +130,8 @@ class RblnPlatform(Platform):
             is_pooling = task in pooling_tasks
             is_generate = task == "generate"
 
-        if is_pooling and envs.VLLM_USE_V1:
-            raise ValueError("Pooling models are only supported on v0.")
+        if is_pooling and not envs.VLLM_USE_V1:
+            raise ValueError("Pooling models are only supported on V1.")
 
         if is_generate and cls.supports_v1(
                 model_config
