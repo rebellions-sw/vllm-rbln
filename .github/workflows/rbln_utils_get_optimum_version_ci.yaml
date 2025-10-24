@@ -18,24 +18,7 @@ jobs:
 
       - name: Get optimum version from requirements.txt
         id: get_target_optimum_version
-        shell: bash
         run: |
-          OPTIMUM_RBLN_LINE=$(grep -E '^optimum-rbln|optimum-rbln.git' requirements.txt)
-          REPO_URL="https://github.com/rebellions-sw/optimum-rbln.git"
-          if [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*@[[:space:]] ]]; then
-            REF="${OPTIMUM_RBLN_LINE##*@}"
-            OPTIMUM_RBLN_VERSION="git+${REPO_URL}@${REF%%[#[:space:]]*}"
-
-          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^git\+ ]]; then
-            REF="${OPTIMUM_RBLN_LINE##*@}"
-            OPTIMUM_RBLN_VERSION="git+${REPO_URL}@${REF%%[#[:space:]]*}"
-          elif [[ "$OPTIMUM_RBLN_LINE" =~ ^optimum-rbln[[:space:]]*(==|>=)[[:space:]]* ]]; then
-            OPTIMUM_RBLN_VERSION="$(echo "$OPTIMUM_RBLN_LINE" \
-              | sed -E 's/^optimum-rbln[[:space:]]*(==|>=)[[:space:]]*//')"
-
-          else
-            echo "Unrecognized optimum-rbln spec: $OPTIMUM_RBLN_LINE" >&2
-            exit 1
-          fi
+          OPTIMUM_RBLN_VERSION=$(grep '^optimum-rbln' requirements.txt | sed 's/optimum-rbln>=//')
           echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
           echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
