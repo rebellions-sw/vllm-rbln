@@ -305,8 +305,6 @@ class RblnPlatform(Platform):
                 rbln_config = json.load(f)
             kvcache_block_size = cls.get_kvcache_block_size(rbln_config)
 
-        # NOTE The logic is different with models/optimum/__init__.py
-        # to prevent circular import.
         if vllm_config.cache_config.enable_prefix_caching:
             if is_enc_dec_arch(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config,
