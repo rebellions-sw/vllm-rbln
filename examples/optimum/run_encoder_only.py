@@ -72,11 +72,7 @@ async def get_result(engine, model_id, prompt, num_input_prompt):
 async def main(model_id: str, max_seq_len: int, batch_size: int,
                num_input_prompt: int, q_prompt_txt: str, p_prompt_txt: str,
                golden_json: str):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  block_size=max_seq_len,
-                                  max_model_len=max_seq_len)
+    engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     q_prompt = get_input_prompts(q_prompt_txt)

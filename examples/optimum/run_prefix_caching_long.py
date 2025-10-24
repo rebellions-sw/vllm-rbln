@@ -98,9 +98,6 @@ def main():
 
     regular_llm = LLM(
         model=MODEL,
-        max_num_seqs=BATCH_SIZE,
-        max_num_batched_tokens=MAX_SEQ_LEN,
-        max_model_len=MAX_SEQ_LEN,
         enable_prefix_caching=False,
     )
 
@@ -131,9 +128,6 @@ def main():
     # Create an LLM with prefix caching enabled.
     prefix_cached_llm = LLM(
         model=MODEL,
-        max_num_seqs=BATCH_SIZE,
-        max_num_batched_tokens=MAX_SEQ_LEN,
-        max_model_len=MAX_SEQ_LEN,
         enable_prefix_caching=True,
     )
 
