@@ -47,6 +47,8 @@ class ModelInputForRBLN(ModelRunnerInputBase):
         default_factory=list)  # for prefix caching
     cached_lengths: List[int] = field(
         default_factory=list)  # for prefix caching
+    lora_requests: Optional[List[LoRARequest]] = None  # for V0
+    lora_mapping: Optional["LoRAMapping"] = None  # for V0
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
