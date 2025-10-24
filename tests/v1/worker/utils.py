@@ -13,7 +13,8 @@
 # limitations under the License.
 from types import SimpleNamespace
 from typing import Optional
-
+from collections.abc import Callable
+from vllm.multimodal.inputs import PlaceholderRange
 import torch
 import torch.nn as nn
 from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
@@ -27,7 +28,7 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
 from vllm.v1.worker.gpu_input_batch import InputBatch
-
+from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 MAX_NUM_SEQ = 2
@@ -51,35 +52,42 @@ def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
     )
 
 
-def make_request(request_id,
-                 prompt_token_ids,
-                 mm_positions=None,
-                 mm_hashes=None,
-                 prompt_logprobs: Optional[int] = None,
-                 cache_salt: Optional[str] = None):
-    if mm_positions is None:
-        multi_modal_inputs = None
-    else:
-        multi_modal_inputs = [MultiModalKwargs({})] * len(mm_positions)
+def make_request(
+    request_id: str,
+    prompt_token_ids: list[int],
+    block_size: int,
+    hash_fn: Callable,
+    mm_positions: Optional[list[PlaceholderRange]] = None,
+    mm_hashes: Optional[list[str]] = None,
+    prompt_logprobs: Optional[int] = None,
+    cache_salt: Optional[str] = None,
+):
+    mm_features = []
+    if mm_positions is not None:
+        for j, position in enumerate(mm_positions):
+            identifier = mm_hashes[j] if mm_hashes else f"hash_{j}"
+            mm_feature = MultiModalFeatureSpec(
+                data=MultiModalKwargsItem.dummy("dummy_m"),
+                mm_position=position,
+                identifier=identifier,
+                modality="image")
+            mm_features.append(mm_feature)
 
-    return Request(
-        request_id=request_id,
-        prompt_token_ids=prompt_token_ids,
-        multi_modal_inputs=multi_modal_inputs,
-        multi_modal_hashes=mm_hashes,
-        multi_modal_placeholders=mm_positions,
-        sampling_params=SamplingParams(max_tokens=17,
-                                       prompt_logprobs=prompt_logprobs),
-        eos_token_id=100,
-        lora_request=None,
-        cache_salt=cache_salt,
-    )
+    return Request(request_id=request_id,
+                   prompt_token_ids=prompt_token_ids,
+                   mm_features=mm_features if mm_features else None,
+                   sampling_params=SamplingParams(
+                       max_tokens=17, prompt_logprobs=prompt_logprobs),
+                   pooling_params=None,
+                   eos_token_id=100,
+                   lora_request=None,
+                   cache_salt=cache_salt,
+                   block_hasher=get_request_block_hasher(block_size, hash_fn))
 
 
 def finish_request(manager: KVCacheManager, request: Request):
     request.status = RequestStatus.FINISHED_ABORTED
     manager.free(request)
-    manager.free_block_hashes(request)
 
 
 def initialize_kv_cache(runner: RBLNOptimumModelRunner):
@@ -162,10 +170,11 @@ def _schedule_new_request(
             NewRequestData(
                 req_id=req_id,
                 prompt_token_ids=token_ids,
-                mm_inputs=[],
+                mm_kwargs=[],
                 mm_hashes=[],
                 mm_positions=[],
                 sampling_params=SamplingParams(),
+                pooling_params=None,
                 block_ids=block_ids,
                 num_computed_tokens=new_computed_tokens,
                 lora_request=None,
@@ -175,14 +184,14 @@ def _schedule_new_request(
 
     return SchedulerOutput(
         scheduled_new_reqs=new_reqs,
-        scheduled_cached_reqs=[],
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
         num_scheduled_tokens=num_scheduled_tokens,
         total_num_scheduled_tokens=total_num_scheduled_tokens,
         scheduled_spec_decode_tokens={},
         scheduled_encoder_inputs={},
         num_common_prefix_blocks=0,
         finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
-        free_encoder_input_ids=[],
+        free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
     )
@@ -194,33 +203,40 @@ def _schedule_cached_reqs(
     finished_req_ids: Optional[list[str]] = None,
     resumed_from_preemption: bool = False,
 ) -> SchedulerOutput:
-    cached_reqs = []
+    req_ids = []
+    resumed_from_preemption = []
+    arr_new_token_ids = []
+    arr_num_computed_tokens = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
     for req in reqs:
         num_computed_tokens = req.num_computed_tokens
         new_token_ids = req.all_token_ids[num_computed_tokens:]
-        cached_reqs.append(
-            CachedRequestData(
-                req_id=req.request_id,
-                resumed_from_preemption=resumed_from_preemption,
-                new_token_ids=new_token_ids,
-                new_block_ids=new_block_ids[0],
-                num_computed_tokens=num_computed_tokens,
-            ))
+        req_ids.append(req.request_id)
+        resumed_from_preemption.append(False)
+        arr_new_token_ids.append(new_token_ids)
+        arr_num_computed_tokens.append(num_computed_tokens)
         num_scheduled_tokens[req.request_id] = len(new_token_ids)
         total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
+    
+    cached_req_data = CachedRequestData(
+        req_ids=req_ids,
+        resumed_from_preemption=resumed_from_preemption,
+        new_token_ids=arr_new_token_ids,
+        new_block_ids=new_block_ids,
+        num_computed_tokens=arr_num_computed_tokens,
+    )
 
     return SchedulerOutput(
         scheduled_new_reqs=[],
-        scheduled_cached_reqs=cached_reqs,
+        scheduled_cached_reqs=cached_req_data,
         num_scheduled_tokens=num_scheduled_tokens,
         total_num_scheduled_tokens=total_num_scheduled_tokens,
         scheduled_spec_decode_tokens={},
         scheduled_encoder_inputs={},
         num_common_prefix_blocks=0,
         finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
-        free_encoder_input_ids=[],
+        free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
     )

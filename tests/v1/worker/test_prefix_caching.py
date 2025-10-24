@@ -11,14 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import tempfile
 import pytest
 import torch
+from vllm.utils import sha256
 from vllm.platforms import current_platform
+from vllm.distributed import (ensure_model_parallel_initialized,
+                              init_distributed_environment)
 from vllm.v1.core.kv_cache_manager import KVCacheManager
-
+from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
+                         set_current_vllm_config)
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
+from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 from .utils import (MockModelWrapper, _schedule_cached_reqs,
@@ -31,12 +36,24 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1  # 9
 DEVICE = current_platform.device_type
-
+HASH_FN = sha256
 
 @pytest.fixture
 def model_runner():
     vllm_config = get_vllm_config()
-
+    with set_current_vllm_config(vllm_config, check_compile=False):
+        temp_file = tempfile.mkstemp()[1]
+        init_distributed_environment(
+            world_size=1,
+            rank=0,
+            local_rank=0,
+            distributed_init_method=f"file://{temp_file}",
+            backend="gloo",
+        )
+        ensure_model_parallel_initialized(
+            1,
+            1,
+        )
     runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
     runner.model = MockModelWrapper()
     runner.prefix_cache_manager = RBLNPrefixKVCacheManager(
@@ -50,6 +67,7 @@ def model_runner():
 
 
 def test_prefill(model_runner):
+    init_none_hash(HASH_FN)
     """
     Check the prefix caching works as expected during prefill.
 
@@ -76,7 +94,7 @@ def test_prefill(model_runner):
     unique_token_ids = [3] * 10
     all_token_ids = common_token_ids + unique_token_ids
     req_id = "0"
-    req0 = make_request(req_id, all_token_ids)
+    req0 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
     assert not computed_blocks.blocks[0]
     assert num_computed_tokens == 0
@@ -91,7 +109,7 @@ def test_prefill(model_runner):
         block_ids=blocks.get_block_ids(),
         new_computed_tokens=num_computed_tokens)
     model_runner._update_states(scheduler_output)
-    inputs = model_runner._prepare_inputs(scheduler_output)
+    inputs, _ = model_runner._prepare_inputs(scheduler_output)
     assert torch.allclose(inputs.block_tables[0],
                           torch.tensor([0, 1, 2, -1], dtype=torch.int32))
     assert inputs.cached_block_tables == []
@@ -100,8 +118,9 @@ def test_prefill(model_runner):
     unique_token_ids = [1] * 10
     all_token_ids = common_token_ids + unique_token_ids
     req_id = "1"
-    req1 = make_request(req_id, all_token_ids)
+    req1 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
+    print("num_computed_tokens", num_computed_tokens)
     assert len(computed_blocks.blocks[0]) == 8
     assert num_computed_tokens == 32
     blocks = manager.allocate_slots(req1, len(unique_token_ids),
@@ -118,7 +137,7 @@ def test_prefill(model_runner):
         block_ids=total_allocated_blocks,
         new_computed_tokens=num_computed_tokens)
     model_runner._update_states(scheduler_output)
-    inputs = model_runner._prepare_inputs(scheduler_output)
+    inputs, _ = model_runner._prepare_inputs(scheduler_output)
 
     assert torch.allclose(inputs.block_tables[0],
                           torch.tensor([3, 4, 5, -1], dtype=torch.int32))
@@ -132,7 +151,7 @@ def test_prefill(model_runner):
     common_token_ids = [i for i in range(20)]
     unique_token_ids = [2] * 30
     all_token_ids = common_token_ids + unique_token_ids
-    req2 = make_request(req_id, all_token_ids)
+    req2 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req2)
     assert len(computed_blocks.blocks[0]) == 5
     assert num_computed_tokens == 20
@@ -153,7 +172,7 @@ def test_prefill(model_runner):
         new_computed_tokens=num_computed_tokens,
         finished_req_ids=[finished_req.request_id])
     model_runner._update_states(scheduler_output)
-    inputs = model_runner._prepare_inputs(scheduler_output)
+    inputs, _ = model_runner._prepare_inputs(scheduler_output)
 
     # Check the allocated outer blocks
     assert torch.allclose(inputs.block_tables[0],
@@ -165,7 +184,7 @@ def test_decode(model_runner):
     """
     Check the prefix caching works as expected during decode.
     """
-
+    init_none_hash(HASH_FN)
     manager = KVCacheManager(
         make_kv_cache_config(
             block_size=IB_SIZE,
@@ -179,7 +198,7 @@ def test_decode(model_runner):
     all_token_ids = [i for i in range(OB_SIZE)]
 
     req_id = "0"
-    req0 = make_request(req_id, all_token_ids)
+    req0 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
     assert not computed_blocks.blocks[0]
     assert num_computed_tokens == 0
@@ -193,7 +212,7 @@ def test_decode(model_runner):
         block_ids=blocks.get_block_ids(),
         new_computed_tokens=num_computed_tokens)
     model_runner._update_states(scheduler_output)
-    inputs = model_runner._prepare_inputs(scheduler_output)
+    inputs, _ = model_runner._prepare_inputs(scheduler_output)
     assert torch.allclose(inputs.block_tables[0],
                           torch.tensor([0, -1, -1, -1], dtype=torch.int32))
     assert inputs.cached_block_tables == []
@@ -213,7 +232,7 @@ def test_decode(model_runner):
         [blocks.get_block_ids()],
     )
     model_runner._update_states(scheduler_output)
-    inputs = model_runner._prepare_inputs(scheduler_output)
+    inputs, _ = model_runner._prepare_inputs(scheduler_output)
     assert torch.allclose(
         inputs.block_tables[0],
         torch.tensor(outer_blocks_allocated, dtype=torch.int32))
@@ -227,6 +246,7 @@ def test_simple_eviction():
     finish req0
     req2: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated (evict req0)
     """
+    init_none_hash(HASH_FN)
     num_ib = NUM_BLOCKS * (OB_SIZE // IB_SIZE)
     manager = KVCacheManager(
         make_kv_cache_config(
@@ -249,7 +269,7 @@ def test_simple_eviction():
     num_tokens = 64
     num_allocated_tokens = 0
     all_token_ids = list(range(num_tokens))
-    req0 = make_request(req_id, all_token_ids)
+    req0 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
     assert not computed_blocks.blocks[0]
     assert num_computed_tokens == 0
@@ -270,7 +290,7 @@ def test_simple_eviction():
     req_id = "1"
     all_token_ids = list(
         range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
-    req1 = make_request(req_id, all_token_ids)
+    req1 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
     blocks = manager.allocate_slots(req1, len(all_token_ids),
                                     len(computed_blocks.blocks[0]) * IB_SIZE,
@@ -292,8 +312,7 @@ def test_simple_eviction():
     req_id = "2"
     all_token_ids = list(
         range(all_token_ids[-1] + 1, all_token_ids[-1] + 1 + num_tokens))
-    print("all_token_ids", len(all_token_ids))
-    req2 = make_request(req_id, all_token_ids)
+    req2 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req2)
     blocks = manager.allocate_slots(req2, len(all_token_ids),
                                     len(computed_blocks.blocks[0]) * IB_SIZE,
