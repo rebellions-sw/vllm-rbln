@@ -270,7 +270,7 @@ class RblnPlatform(Platform):
             "It has been automatically disabled.", reason)
         vllm_config.cache_config.enable_prefix_caching = None
 
-    def get_kvcache_block_size(rbln_config: dict) -> int:
+    def get_rbln_params(rbln_config: dict) -> tuple[int, int, int]:
         kvcache_block_size = rbln_config.get("kvcache_block_size")
         if kvcache_block_size is None:
             submodules = ["language_model", "text_model"]
@@ -280,23 +280,33 @@ class RblnPlatform(Platform):
                         "kvcache_block_size", None)
                     if kvcache_block_size is not None:
                         break
+                    batch_size = rbln_config[submodule].get("batch_size", None)
+        else:
+            batch_size = rbln_config.get("batch_size")
 
         # encoder-decoder model
-        if kvcache_block_size is None and "dec_max_seq_len" in rbln_config:
-            kvcache_block_size = rbln_config["dec_max_seq_len"]
+        if kvcache_block_size is None and "dec_dec_max_seq_len" in rbln_config:
+            max_seq_len = rbln_config["dec_dec_max_seq_len"]
+            kvcache_block_size = max_seq_len
 
         # encoder
         if kvcache_block_size is None and "enc_max_seq_len" in rbln_config:
-            kvcache_block_size = rbln_config["enc_max_seq_len"]
+            max_seq_len = rbln_config["enc_max_seq_len"]
+            kvcache_block_size = max_seq_len
 
         # embedding model
         if kvcache_block_size is None and "max_seq_len" in rbln_config:
             kvcache_block_size = rbln_config["max_seq_len"]
+            max_seq_len = rbln_config["max_seq_len"]
 
         assert kvcache_block_size is not None, (
             "kvcache_block_size must be specified in rbln_config.json")
+        assert batch_size is not None, (
+            "batch_size must be specified in rbln_config.json")
+        assert max_seq_len is not None, (
+            "max_seq_len must be specified in rbln_config.json")
 
-        return kvcache_block_size
+        return kvcache_block_size, batch_size, max_seq_len
 
     @classmethod
     def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
@@ -312,7 +322,12 @@ class RblnPlatform(Platform):
         else:
             with open(rbln_config_path, encoding='utf-8') as f:
                 rbln_config = json.load(f)
-            kvcache_block_size = cls.get_kvcache_block_size(rbln_config)
+            kvcache_block_size, batch_size, max_seq_len = cls.get_rbln_params(
+                rbln_config)
+            vllm_config.scheduler_config.max_num_seqs = batch_size
+            vllm_config.scheduler_config.max_num_batched_tokens \
+                = max_seq_len * batch_size
+            vllm_config.model_config.max_seq_len = max_seq_len
 
         if vllm_config.cache_config.enable_prefix_caching:
             if is_enc_dec_arch(vllm_config.model_config.hf_config):
