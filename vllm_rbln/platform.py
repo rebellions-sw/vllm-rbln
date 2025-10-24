@@ -285,8 +285,8 @@ class RblnPlatform(Platform):
             batch_size = rbln_config.get("batch_size")
 
         # encoder-decoder model
-        if kvcache_block_size is None and "dec_dec_max_seq_len" in rbln_config:
-            max_seq_len = rbln_config["dec_dec_max_seq_len"]
+        if kvcache_block_size is None and "dec_max_seq_len" in rbln_config:
+            max_seq_len = rbln_config["dec_max_seq_len"]
             kvcache_block_size = max_seq_len
 
         # encoder
