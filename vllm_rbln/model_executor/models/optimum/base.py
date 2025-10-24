@@ -101,6 +101,8 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     block_tables: torch.Tensor
     running_requests_ids: List[str]
     finished_requests_ids: List[str]
+    cached_block_tables: List[str]  # for prefix caching
+    cached_lengths: List[str]  # for prefix caching
     is_prompt: bool = False  # for V1
     sampling_metadata: "SamplingMetadata" = None,  # for V0
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
@@ -108,8 +110,6 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     pooling_metadata: Optional[PoolingMetadata] = None  # for V0
     lora_requests: Optional[List[LoRARequest]] = None  # for V0
     lora_mapping: Optional["LoRAMapping"] = None  # for V0
-    cached_block_tables: Optional[list[int]] = None  # for prefix caching
-    cached_len: Optional[list[int]] = None  # for prefix caching
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
