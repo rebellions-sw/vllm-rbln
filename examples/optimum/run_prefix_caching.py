@@ -67,7 +67,6 @@ def main():
         max_num_seqs=BATCH_SIZE,
         max_num_batched_tokens=MAX_SEQ_LEN,
         max_model_len=MAX_SEQ_LEN,
-        device="auto",
         enable_prefix_caching=False,
     )
 
@@ -101,7 +100,6 @@ def main():
         max_num_seqs=BATCH_SIZE,
         max_num_batched_tokens=MAX_SEQ_LEN,
         max_model_len=MAX_SEQ_LEN,
-        device="auto",
         enable_prefix_caching=True,
     )
 
