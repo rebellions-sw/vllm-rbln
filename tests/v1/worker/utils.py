@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+from collections.abc import Callable
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -13,22 +14,23 @@
 # limitations under the License.
 from types import SimpleNamespace
 from typing import Optional
-from collections.abc import Callable
-from vllm.multimodal.inputs import PlaceholderRange
+
 import torch
 import torch.nn as nn
 from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
-from vllm.multimodal.inputs import MultiModalKwargs
+from vllm.multimodal.inputs import (MultiModalFeatureSpec,
+                                    MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
+from vllm.v1.core.kv_cache_utils import get_request_block_hasher
 from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
                                        SchedulerOutput)
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
 from vllm.v1.worker.gpu_input_batch import InputBatch
-from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
+
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 MAX_NUM_SEQ = 2
@@ -218,7 +220,7 @@ def _schedule_cached_reqs(
         arr_num_computed_tokens.append(num_computed_tokens)
         num_scheduled_tokens[req.request_id] = len(new_token_ids)
         total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
-    
+
     cached_req_data = CachedRequestData(
         req_ids=req_ids,
         resumed_from_preemption=resumed_from_preemption,

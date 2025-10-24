@@ -12,18 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import tempfile
+
 import pytest
 import torch
-from vllm.utils import sha256
-from vllm.platforms import current_platform
+from vllm.config import set_current_vllm_config
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
+from vllm.platforms import current_platform
+from vllm.utils import sha256
 from vllm.v1.core.kv_cache_manager import KVCacheManager
-from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
-                         set_current_vllm_config)
+from vllm.v1.core.kv_cache_utils import init_none_hash
+
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
-from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 from .utils import (MockModelWrapper, _schedule_cached_reqs,
@@ -37,6 +38,7 @@ IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1  # 9
 DEVICE = current_platform.device_type
 HASH_FN = sha256
+
 
 @pytest.fixture
 def model_runner():

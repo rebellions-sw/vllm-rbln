@@ -542,13 +542,18 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             0].num_blocks_per_row
 
         if self.enable_prefix_caching:
+            scheduled_cached_reqs = scheduler_output.scheduled_cached_reqs
             new_blocks_ids = {
-                req.req_id: req.new_block_ids[0]
-                for req in scheduler_output.scheduled_cached_reqs
+                req_id: new_block_ids[0] if new_block_ids is not None else []
+                for req_id, new_block_ids in zip(
+                    scheduled_cached_reqs.req_ids,
+                    scheduled_cached_reqs.new_block_ids)
             }
             num_computed_tokens = {
-                req.req_id: req.num_computed_tokens
-                for req in scheduler_output.scheduled_cached_reqs
+                req_id: num_computed_tokens
+                for req_id, num_computed_tokens in zip(
+                    scheduled_cached_reqs.req_ids,
+                    scheduled_cached_reqs.num_computed_tokens)
             }
 
         req_ids = self.input_batch.req_ids
