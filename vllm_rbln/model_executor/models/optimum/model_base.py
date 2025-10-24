@@ -21,9 +21,9 @@ from typing import Any, Optional
 import optimum.rbln
 import torch
 import torch.nn as nn
+import vllm.envs as envs
 from optimum.rbln.transformers.models.decoderonly import (
     decoderonly_runtime_utils as runtime_utils)
-import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor

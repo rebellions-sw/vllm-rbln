@@ -51,7 +51,6 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
-from vllm_rbln.v1.worker.multimodal import RBLNOptimumMultiModalKwargs
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 
 logger = init_logger(__name__)
@@ -449,8 +448,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def _prepare_prefill(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], list[int],
-               list[int], Optional[RBLNOptimumMultiModalKwargs], list[str]]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], list[int],
+               Optional[MultiModalKwargs], list[str]]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
         running_request_ids = []
@@ -554,7 +553,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 req.req_id: req.num_computed_tokens
                 for req in scheduler_output.scheduled_cached_reqs
             }
-        
+
         req_ids = self.input_batch.req_ids
         for req_id in req_ids:
             req_index = self.input_batch.req_id_to_index[req_id]

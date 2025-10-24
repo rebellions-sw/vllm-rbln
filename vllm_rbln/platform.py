@@ -189,18 +189,19 @@ class RblnPlatform(Platform):
                         "vllm_rbln.worker.optimum_worker.RBLNOptimumWorker"
                 scheduler_config.scheduler_cls = \
                     "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
-            cls.sync_with_rbln_config(vllm_config)
 
                 if envs.VLLM_RBLN_SAMPLER:
                     logger.warning("RBLN Sampler is only supported on v1. "
                                    "V0 will be deprecated soon.")
                     envs.VLLM_RBLN_SAMPLER = False
+
             assert vllm_config.parallel_config.tensor_parallel_size == 1, (
                 "Tensor parallelism is set when compiled in optimum-rbln.")
             assert vllm_config.parallel_config.pipeline_parallel_size == 1, (
                 "Pipeline parallelism is not supported in optimum-rbln.")
             assert vllm_config.speculative_config is None, (
                 "Speculative decoding is not supported in vLLM RBLN.")
+            cls.sync_with_rbln_config(vllm_config)
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):

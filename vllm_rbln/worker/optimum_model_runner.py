@@ -34,7 +34,7 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
 from vllm_rbln.model_executor.models.optimum import (  # noqa
     ModelInputForRBLN, RBLNOptimumForEncoderModel)
 from vllm_rbln.utils.optimum.registry import (get_rbln_model_info,
-                                              is_enc_dec_arch, is_pooling_arch)
+                                              is_enc_dec_arch)
 
 logger = init_logger(__name__)
 
