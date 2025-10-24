@@ -952,8 +952,6 @@ class RBLNModelRunner:
             if attn_metadata is not None:
                 for attn_metadatum in attn_metadata.values():
                     attn_metadatum.kv_caches = self.kv_caches
-            for i, kv_cache in enumerate(self.kv_caches):
-                self.compile_context.mark_static_address(kv_cache, f"kv_cache_{i}")
 
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
