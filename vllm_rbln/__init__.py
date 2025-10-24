@@ -21,7 +21,7 @@ def register():
 
 
 def register_model():
-    if not envs.RBLN_USE_VLLM_MODEL:
+    if not envs.VLLM_RBLN_USE_VLLM_MODEL:
         from vllm import ModelRegistry
         ModelRegistry.register_model(
             "T5WithLMHeadModel",

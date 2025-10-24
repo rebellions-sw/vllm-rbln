@@ -78,7 +78,6 @@ async def main(
     model_id: str,
 ):
     engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
                                   max_num_seqs=batch_size,
                                   max_num_batched_tokens=max_seq_len,
                                   max_model_len=max_seq_len,
@@ -115,8 +114,7 @@ def entry_point(
     truncate_prompt_tokens: int = 200,
     model_id: str = "/t5-3b-b4",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             batch_size=batch_size,
             max_seq_len=max_seq_len,

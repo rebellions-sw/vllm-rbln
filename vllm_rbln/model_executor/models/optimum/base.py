@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 import torch
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
-from vllm.model_executor.pooling_metadata import PoolingMetadata
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import BatchedTensorInputs
+from vllm.v1.pool.metadata import PoolingMetadata
 from vllm.worker.model_runner_base import ModelRunnerInputBase
 
 if TYPE_CHECKING:
@@ -39,14 +39,13 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     running_requests_ids: List[str]
     finished_requests_ids: List[str]
     is_prompt: bool = False  # for V1
-    sampling_metadata: "SamplingMetadata" = None,  # for V0
-    multi_modal_kwargs: Optional[BatchedTensorInputs] = None
-    token_type_ids: Optional[torch.Tensor] = None
-    pooling_metadata: Optional[PoolingMetadata] = None  # for V0
     cached_block_tables: List[int] = field(
         default_factory=list)  # for prefix caching
     cached_lengths: List[int] = field(
         default_factory=list)  # for prefix caching
+    sampling_metadata: "SamplingMetadata" = None,  # for V0
+    multi_modal_kwargs: Optional[BatchedTensorInputs] = None
+    pooling_metadata: Optional[PoolingMetadata] = None  # for V1
     lora_requests: Optional[List[LoRARequest]] = None  # for V0
     lora_mapping: Optional["LoRAMapping"] = None  # for V0
 

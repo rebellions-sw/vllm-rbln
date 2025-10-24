@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 import torch
-import vllm.envs as env
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.qwen2_5_vl import (
@@ -140,7 +140,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
 
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0

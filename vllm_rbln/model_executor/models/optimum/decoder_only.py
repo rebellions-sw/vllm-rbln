@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import torch
-import vllm.envs as env
+import vllm.envs as envs
 from vllm.config import VllmConfig
 
 from vllm_rbln.logger import init_logger
@@ -46,7 +46,7 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         block_tables = model_input.block_tables
 
         request_nums = input_ids.shape[0]
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0

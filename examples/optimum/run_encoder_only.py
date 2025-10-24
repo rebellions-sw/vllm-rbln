@@ -45,7 +45,7 @@ def compare_copy_prompt_task_result(scores: list[float], golden_json: str):
 
 
 async def encode(engine, prompt, request_id):
-    pooling_params = PoolingParams()
+    pooling_params = PoolingParams(task="embed")
     results_generator = engine.encode(prompt=prompt,
                                       pooling_params=pooling_params,
                                       request_id=str(request_id))
@@ -73,7 +73,6 @@ async def main(model_id: str, max_seq_len: int, batch_size: int,
                num_input_prompt: int, q_prompt_txt: str, p_prompt_txt: str,
                golden_json: str):
     engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
                                   max_num_seqs=batch_size,
                                   max_num_batched_tokens=max_seq_len,
                                   block_size=max_seq_len,
@@ -113,8 +112,7 @@ def entry_point(
     p_prompt_txt: str = "/prompts/p_prompts.txt",
     golden_json: str = "/golden/golden_bge_m3_result_qp_prompts.json",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             max_seq_len=max_seq_len,
             batch_size=batch_size,

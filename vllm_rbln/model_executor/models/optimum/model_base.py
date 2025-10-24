@@ -21,9 +21,9 @@ from typing import Any, Optional
 import optimum.rbln
 import torch
 import torch.nn as nn
-import vllm.envs as env
 from optimum.rbln.transformers.models.decoderonly import (
     decoderonly_runtime_utils as runtime_utils)
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
@@ -55,7 +55,7 @@ class KVCacheBlockAdapter:
     ):
         self.vllm_config = vllm_config
         self.estimated_kvcache_num_blocks = estimated_kvcache_num_blocks
-        self.use_v1 = env.VLLM_USE_V1
+        self.use_v1 = envs.VLLM_USE_V1
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -167,6 +167,9 @@ class RBLNOptimumModelBase(nn.Module):
         # huggingface model class name
         logger.info("model_name = %s, model_cls_name = %s, model_path = %s",
                     model_name, model_cls_name, compiled_path)
+
+        self.supports_transcription_only = (
+            model_cls_name == "RBLNOptimumWhisperForConditionalGeneration")
 
         # huggingface model class
         model_cls = getattr(optimum.rbln, model_cls_name)
