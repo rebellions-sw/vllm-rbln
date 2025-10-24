@@ -15,9 +15,11 @@
 from typing import Optional
 
 import torch
+import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import DispatchPooler, Pooler
+from vllm.model_executor.models import VllmModelForPooling
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
@@ -25,7 +27,7 @@ from .model_base import RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
+class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
     PAD_TOKEN_ID = 0
     is_pooling_model = True
     pooler: Pooler
@@ -36,12 +38,24 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
     ) -> None:
         super().__init__(vllm_config=vllm_config)
         pooler_config = vllm_config.model_config.pooler_config
+        hf_config = vllm_config.model_config.hf_config
         assert pooler_config is not None
+        self.score = nn.Linear(
+            hf_config.hidden_size,
+            hf_config.num_labels,
+            bias=False,
+            dtype=vllm_config.model_config.head_dtype,
+        )
         self.pooler = DispatchPooler(
             {
-                "encode": Pooler.for_encode(pooler_config),
-                "embed": Pooler.for_embed(pooler_config),
-                # classify, score is not supported for now
+                "encode":
+                Pooler.for_encode(pooler_config),
+                "embed":
+                Pooler.for_embed(pooler_config),
+                "classify":
+                Pooler.for_classify(pooler_config, classifier=self.score),
+                "score":
+                Pooler.for_classify(pooler_config, classifier=self.score),
             }, )
 
     def is_classification_arch(self):
