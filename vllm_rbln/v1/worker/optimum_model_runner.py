@@ -6,12 +6,12 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import logging
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 from typing import Optional, Union
 
 import numpy as np
@@ -153,12 +153,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # None in the first PP rank. The rest are set after load_model.
         # TODO(eunji) It will be implemented for PP
         self.intermediate_tensors: Optional[IntermediateTensors] = None
-        self.enable_caching = cache_config.enable_caching
-        if self.enable_caching:
-            self.prefix_cache_manager = RBLNPrefixKVCacheManager(
-                ob_size=vllm_config.additional_config.attn_block_size,
-                ib_size=vllm_config.cache_config.block_size,
-                num_ob=self.model.kv_block_adapter.get_available_num_blocks())
+        self.enable_prefix_caching = cache_config.enable_prefix_caching
 
     def load_model(self) -> None:
         self.model = get_optimum_model(vllm_config=self.vllm_config)
@@ -175,6 +170,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if self.use_optimum_lora:
             self.valid_lora_ids = list(
                 range(len(self.model.rbln_model_config.lora_config.adapters)))
+        if self.enable_prefix_caching:
+            self.prefix_cache_manager = RBLNPrefixKVCacheManager(
+                ob_size=self.vllm_config.additional_config["attn_block_size"],
+                ib_size=self.vllm_config.cache_config.block_size,
+                num_ob=self.model.kv_block_adapter.get_available_num_blocks())
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -416,7 +416,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions = list(range(seq_len))
             num_blocks = num_blocks_per_req[req_index]
             # TODO How to log the block table?
-            if self.enable_caching:
+            if self.enable_prefix_caching:
                 self.prefix_cache_manager.allocate_blocks(
                     req_id, scheduled.num_computed_tokens,
                     scheduled.block_ids[0])
@@ -443,7 +443,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_tokens = torch.tensor(prompt_tokens).unsqueeze(0)
         input_positions = torch.tensor(input_positions).unsqueeze(0)
         block_table = block_table.unsqueeze(0)
-        cached_block_table = cached_block_table.unsqueeze(0)
+        cached_block_table = cached_block_table.unsqueeze(0) if cached_block_table is not None else None    
 
         return input_tokens, input_positions, block_table, cached_block_table, \
             batched_mm_inputs, running_request_ids
@@ -470,7 +470,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
             # TODO how to log the block ids?
-            if self.enable_caching:
+            if self.enable_prefix_caching:
                 if len(scheduled.new_block_ids) > 0:
                     self.prefix_cache_manager.allocate_blocks(
                         req_id, scheduled.new_computed_tokens,

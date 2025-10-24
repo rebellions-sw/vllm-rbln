@@ -1,3 +1,16 @@
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 from collections import deque
 
 import torch
@@ -23,6 +36,7 @@ class RBLNPrefixKVCacheManager:
 
     def __init__(self, ob_size, ib_size, num_ob):
         self.req_to_outer_blocks: dict[str, list[int]] = {}
+        self.pooled_tensor = torch.zeros(1, num_ob, dtype=torch.int32)
         # Check the inner block is oudated or not
         self.inner_to_request_id: dict[int, str] = {}
         self.inner_to_outer_block: dict[int, int] = {}
@@ -109,12 +123,18 @@ class RBLNPrefixKVCacheManager:
         for ib_id in cached_ib:
             ob_id = self.inner_to_outer_block[ib_id]
             if ob_id != last_cached_outer_block:
-                cached_outer_blocks.append(ob_id)
+                cached_outer_blocks.append(ob_id)   
                 last_cached_outer_block = ob_id
-        return torch.tensor(cached_outer_blocks)
+        if cached_outer_blocks:
+            return torch.tensor(cached_outer_blocks, dtype=torch.int32)
+        else:
+            return None
 
     def get_blocks(self, request_id: str) -> torch.Tensor:
         """
         Get all the outer blocks allocated to the given request.
         """
-        return torch.tensor(self.req_to_outer_blocks[request_id])
+        self.pooled_tensor.fill_(-1)
+        value =  torch.tensor(self.req_to_outer_blocks[request_id], dtype=torch.int16)
+        self.pooled_tensor[0, :len(value)].copy_(value)
+        return self.pooled_tensor
