@@ -204,9 +204,12 @@ class RblnPlatform(Platform):
             assert vllm_config.cache_config.block_size is not None, (
                 "block_size must be configured for RBLN backend")
             if cache_config.enable_prefix_caching:
-                attn_block_size = getattr(vllm_config.additional_config, "attn_block_size", None)
-                assert cache_config.block_size == 128, "The block size must be 128 for prefix caching."
+                attn_block_size = getattr(vllm_config.additional_config,
+                                          "attn_block_size", None)
+                assert cache_config.block_size == 128, \
+                    "The block size must be 128 for prefix caching."
                 assert attn_block_size is not None
+                assert attn_block_size % cache_config.block_size == 0
 
         if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
