@@ -68,8 +68,7 @@ async def main(
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  task="embed")
+    engine_args = AsyncEngineArgs(model=model_id, task="embed")
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt_list = get_input_prompts()
