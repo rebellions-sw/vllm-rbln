@@ -1,0 +1,129 @@
+name: vLLM-RBLN ARC CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "ref to checkout"
+        required: false
+        type: string
+      python_version:
+        description: "Python version to use"
+        required: false
+        type: string
+        default: "3.10.12"
+      vllm_upstream_tag:
+        description: "vLLM upstream tag/version to use for tests (e.g., v0.9.1)"
+        required: false
+        type: string
+
+jobs:
+  build:
+    name: Build Container Image
+    runs-on: vllm-rbln-runner-atom
+    outputs:
+      image_name: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
+    steps:
+      - name: Checkout Repository with Submodules
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GIT_PAT }}
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+
+      - name: Calculate dependency hash
+        id: dep_hash
+        run: |
+          HASH=$(grep -E '^ARG (ATOM_DRIVER_VERSION|RBLN_CCL_VERSION|BCM_DRIVER_VERSION|BCM_LIBBNXT_RE_VERSION|LLVM_VERSION|OPTIMUM_RBLN_VERSION|RAY_VERSION|REBEL_COMPILER_VERSION|TORCHVISION_VERSION|TORCH_VERSION|TRITON_VERSION|PYTHON_VERSION)=' Dockerfile.ubi.ci | sort | sha256sum | cut -c1-8)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "Dependency hash: $HASH"
+
+      - name: Set image tag
+        id: image_tag
+        run: |
+          TAG="env-${{ steps.dep_hash.outputs.hash }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $TAG"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if image exists
+        id: check_image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}"
+          if docker manifest inspect $IMAGE > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image already exists: $IMAGE"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Image does not exist, will build: $IMAGE"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check_image.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: kubernetes
+
+      - name: Build and push Container image
+        if: steps.check_image.outputs.exists == 'false'
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.ubi.ci
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:buildcache,mode=max
+          build-args: |
+            PYTHON_VERSION=${{ inputs.python_version || '3.10.12' }}
+          secrets: |
+            E2E_REPOSITORY_URL=${{ secrets.E2E_REPOSITORY_URL }}
+            E2E_REPOSITORY_ID=${{ secrets.E2E_REPOSITORY_ID }}
+            E2E_REPOSITORY_PWD=${{ secrets.E2E_REPOSITORY_PWD }}
+
+      - name: Image info
+        run: |
+          echo "Using image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}"
+          echo "Image exists: ${{ steps.check_image.outputs.exists }}"
+          echo "Build skipped: ${{ steps.check_image.outputs.exists }}"
+
+  test:
+    if: github.repository_owner == 'rebellions-sw'
+    name: Run Tests
+    runs-on: vllm-rbln-runner-atom
+    needs: build
+    timeout-minutes: 1440
+    container:
+      image: ${{ needs.build.outputs.image_name }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GIT_PAT }}
+          ref: ${{ inputs.ref || github.ref }}
+          submodules: recursive
+
+      - name: Install vLLM-RBLN from PR source
+        run: |
+          source /workspace/.venv/bin/activate
+          pip install -e .
+          pip list | grep vllm
+
+      - name: Run Python Tests
+        run: |
+          source /workspace/.venv/bin/activate
+          pytest tests/v1/core -vv --durations 0
