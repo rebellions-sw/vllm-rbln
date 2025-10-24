@@ -15,10 +15,9 @@
 from typing import Optional
 
 import torch
-from vllm.config import PoolerConfig, VllmConfig
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.layers.pooler import Pooler, PoolingType
-from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
+from vllm.model_executor.layers.pooler import DispatchPooler, Pooler
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
@@ -28,13 +27,22 @@ logger = init_logger(__name__)
 
 class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
     PAD_TOKEN_ID = 0
+    is_pooling_model = True
+    pooler: Pooler
 
     def __init__(
         self,
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__(vllm_config=vllm_config)
-        self._pooler = self._build_pooler(self.model_config.pooler_config)
+        pooler_config = vllm_config.model_config.pooler_config
+        assert pooler_config is not None
+        self.pooler = DispatchPooler(
+            {
+                "encode": Pooler.for_encode(pooler_config),
+                "embed": Pooler.for_embed(pooler_config),
+                # classify, score is not supported for now
+            }, )
 
     def is_classification_arch(self):
         architectures = getattr(
@@ -47,7 +55,6 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
     def preprocess(
         self,
         input_ids: torch.Tensor,
-        type_token_ids: torch.Tensor,
         positions: torch.Tensor,
     ):
         batch_size, seq_len = input_ids.shape
@@ -60,6 +67,14 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
 
             if tensor.size(1) > self.rbln_model_config.max_seq_len:
                 tensor = tensor[:, :self.rbln_model_config.max_seq_len]
+            elif tensor.size(1) < self.rbln_model_config.max_seq_len:
+                padded_tensor = torch.zeros(
+                    batch_size,
+                    self.rbln_model_config.max_seq_len,
+                    dtype=tensor.dtype,
+                )
+                padded_tensor[:, :tensor.size(1)] = tensor
+                tensor = padded_tensor
 
             if tensor.size(0) >= target_batch_size:
                 return tensor
@@ -69,35 +84,13 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
 
         return (
             pad_if_needed(input_ids),
-            pad_if_needed(type_token_ids),
             pad_if_needed(positions),
         )
 
-    def pool(self, hidden_states, pooling_metadata):
-        if self._pooler:
-            return self._pooler(hidden_states, pooling_metadata)
-        else:
-            # FIXME: ad-hoc for RBLNXLMRobertaForSequenceClassification
-            outputs = [
-                PoolingSequenceGroupOutput(data) for data in hidden_states
-            ]
-            return PoolerOutput(outputs=outputs)
-
-    def _build_pooler(self, pooler_config: PoolerConfig) -> Optional[Pooler]:
-        if not self.is_classification_arch():
-            return Pooler.from_config_with_defaults(
-                pooler_config,
-                pooling_type=PoolingType.CLS,
-                normalize=True,
-                softmax=False,
-            )
-        return None
-
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
-        input_ids, token_type_ids, positions = self.preprocess(
+        input_ids, positions = self.preprocess(
             model_input.input_tokens,
-            model_input.token_type_ids,
             model_input.input_positions,
         )
 
@@ -111,16 +104,13 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase):
             "attention_mask": attention_mask,
         }
 
-        if token_type_ids:
-            kwargs["token_type_ids"] = token_type_ids
-        else:
-            model_input_names = getattr(self.rbln_model_config,
-                                        "model_input_names", None)
-            if model_input_names is not None:
-                rbln_model_input_names = \
-                    self.rbln_model_config.model_input_names
-                if "token_type_ids" in rbln_model_input_names:
-                    kwargs["token_type_ids"] = torch.zeros_like(input_ids)
+        model_input_names = getattr(self.rbln_model_config,
+                                    "model_input_names", None)
+        if model_input_names is not None:
+            rbln_model_input_names = \
+                self.rbln_model_config.model_input_names
+            if "token_type_ids" in rbln_model_input_names:
+                kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
         embeds = self.model.forward(**kwargs)
 

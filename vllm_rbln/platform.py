@@ -24,7 +24,7 @@ else:
 import rebel
 from torch._dynamo import register_backend
 from vllm.platforms import Platform, PlatformEnum, _Backend
-from vllm.utils import FlexibleArgumentParser
+from vllm.utils import FlexibleArgumentParser, _StreamPlaceholder
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -52,6 +52,7 @@ class RblnPlatform(Platform):
     ray_device_key: str = "RBLN"
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
+    current_stream = _StreamPlaceholder
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
@@ -84,7 +85,7 @@ class RblnPlatform(Platform):
     def pre_register_and_update(cls,
                                 parser: Optional[FlexibleArgumentParser] = None
                                 ) -> None:
-        if envs.RBLN_USE_VLLM_MODEL:
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
             # patches
             if envs.VLLM_USE_V1:
                 # FIXME(jiwoo.park):disable timeout for RBLN
@@ -117,10 +118,6 @@ class RblnPlatform(Platform):
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
-        if vllm_config.scheduler_config.is_multi_step:
-            raise NotImplementedError(
-                "Multi-step execution is not supported for RBLN")
-
         model_config = vllm_config.model_config
         task = model_config.task
         supported_tasks = set(model_config.supported_tasks)
@@ -152,7 +149,7 @@ class RblnPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
-        if envs.RBLN_USE_VLLM_MODEL:
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
@@ -188,10 +185,16 @@ class RblnPlatform(Platform):
                 scheduler_config.scheduler_cls = \
                     "vllm_rbln.core.optimum_scheduler.RBLNOptimumScheduler"
 
-                if envs.RBLN_SAMPLER:
+                if envs.VLLM_RBLN_SAMPLER:
                     logger.warning("RBLN Sampler is only supported on v1. "
                                    "V0 will be deprecated soon.")
-                    envs.RBLN_SAMPLER = False
+                    envs.VLLM_RBLN_SAMPLER = False
+            assert vllm_config.parallel_config.tensor_parallel_size == 1, (
+                "Tensor parallelism is set when compiled in optimum-rbln.")
+            assert vllm_config.parallel_config.pipeline_parallel_size == 1, (
+                "Pipeline parallelism is not supported in optimum-rbln.")
+            assert vllm_config.speculative_config is None, (
+                "Speculative decoding is not supported in vLLM RBLN.")
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -210,7 +213,7 @@ class RblnPlatform(Platform):
                 "block_size must be configured for RBLN backend")
             cache_config.enable_prefix_caching = False
 
-        if envs.VLLM_USE_V1 and envs.RBLN_USE_VLLM_MODEL:
+        if envs.VLLM_USE_V1 and envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
 
             if (vllm_config.compilation_config.level

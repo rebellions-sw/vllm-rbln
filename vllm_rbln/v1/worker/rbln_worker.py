@@ -113,7 +113,7 @@ class RBLNWorker(WorkerBase):
         world_size = self.parallel_config.world_size
         env_var = current_platform.device_control_env_var
 
-        total_device_count = world_size * envs.RBLN_TP_SIZE
+        total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
         if env_var not in os.environ:
             device_ids = [str(i) for i in range(total_device_count)]
@@ -129,8 +129,8 @@ class RBLNWorker(WorkerBase):
             raise RuntimeError(f"{env_var} has devices {device_ids}"
                                f" but required {total_device_count}")
 
-        start_idx = self.local_rank * envs.RBLN_TP_SIZE
-        end_idx = start_idx + envs.RBLN_TP_SIZE
+        start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
+        end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
         selected_devices = ",".join(device_ids[start_idx:end_idx])
 
         os.environ[env_var] = selected_devices

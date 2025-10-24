@@ -12,9 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import tempfile
+
 import pytest
 import torch
-from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
+from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
+                         set_current_vllm_config)
+from vllm.distributed import (ensure_model_parallel_initialized,
+                              init_distributed_environment)
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
@@ -95,6 +100,19 @@ def get_vllm_config(async_scheduling=False):
 @pytest.fixture
 def model_runner():
     vllm_config = get_vllm_config()
+    with set_current_vllm_config(vllm_config, check_compile=False):
+        temp_file = tempfile.mkstemp()[1]
+        init_distributed_environment(
+            world_size=1,
+            rank=0,
+            local_rank=0,
+            distributed_init_method=f"file://{temp_file}",
+            backend="gloo",
+        )
+        ensure_model_parallel_initialized(
+            1,
+            1,
+        )
     runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
     initialize_kv_cache(runner)
     return runner
@@ -109,10 +127,11 @@ def _schedule_new_request(*req_ids: str) -> SchedulerOutput:
             NewRequestData(
                 req_id=req_id,
                 prompt_token_ids=[1, 2, 3],
-                mm_inputs=[],
+                mm_kwargs=[],
                 mm_hashes=[],
                 mm_positions=[],
                 sampling_params=SamplingParams(),
+                pooling_params=None,
                 block_ids=([0], ),
                 num_computed_tokens=0,
                 lora_request=None,
@@ -122,14 +141,14 @@ def _schedule_new_request(*req_ids: str) -> SchedulerOutput:
 
     return SchedulerOutput(
         scheduled_new_reqs=new_reqs,
-        scheduled_cached_reqs=[],
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
         num_scheduled_tokens=num_scheduled_tokens,
         total_num_scheduled_tokens=total_num_scheduled_tokens,
         scheduled_spec_decode_tokens={},
         scheduled_encoder_inputs={},
         num_common_prefix_blocks=0,
         finished_req_ids=set(),
-        free_encoder_input_ids=[],
+        free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
     )
@@ -188,14 +207,14 @@ def test_update_states_request_finished(model_runner):
     # finish request
     scheduler_output = SchedulerOutput(
         scheduled_new_reqs=[],
-        scheduled_cached_reqs=[],
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
         num_scheduled_tokens={},
         total_num_scheduled_tokens=0,
         scheduled_spec_decode_tokens={},
         scheduled_encoder_inputs={},
         num_common_prefix_blocks=0,
         finished_req_ids={req_id},
-        free_encoder_input_ids=[],
+        free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
     )
@@ -220,14 +239,14 @@ def test_update_states_request_resumed(model_runner):
     # unschedule request
     scheduler_output = SchedulerOutput(
         scheduled_new_reqs=[],
-        scheduled_cached_reqs=[],
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
         num_scheduled_tokens={},
         total_num_scheduled_tokens=0,
         scheduled_spec_decode_tokens={},
         scheduled_encoder_inputs={},
         num_common_prefix_blocks=0,
         finished_req_ids=set(),
-        free_encoder_input_ids=[],
+        free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
     )
@@ -238,23 +257,23 @@ def test_update_states_request_resumed(model_runner):
 
     # resume request
     cached_req_data = CachedRequestData(
-        req_id=req_id,
-        resumed_from_preemption=False,
+        req_ids=[req_id],
+        resumed_from_preemption=[False],
         new_token_ids=[],
-        new_block_ids=([0], ),
-        num_computed_tokens=0,
+        new_block_ids=[([0], )],
+        num_computed_tokens=[0],
     )
 
     scheduler_output = SchedulerOutput(
         scheduled_new_reqs=[],
-        scheduled_cached_reqs=[cached_req_data],
+        scheduled_cached_reqs=cached_req_data,
         num_scheduled_tokens={req_id: 1},
         total_num_scheduled_tokens=1,
         scheduled_spec_decode_tokens={},
         scheduled_encoder_inputs={},
         num_common_prefix_blocks=0,
         finished_req_ids=set(),
-        free_encoder_input_ids=[],
+        free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
     )
@@ -284,14 +303,14 @@ def test_update_states_request_unscheduled(model_runner):
     # unschedule request_1 (only schedule the request_0)
     scheduler_output = SchedulerOutput(
         scheduled_new_reqs=[],
-        scheduled_cached_reqs=[],
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
         num_scheduled_tokens={req_ids[0]: 1},
         total_num_scheduled_tokens=1,
         scheduled_spec_decode_tokens={},
         scheduled_encoder_inputs={},
         num_common_prefix_blocks=0,
         finished_req_ids=set(),
-        free_encoder_input_ids=[],
+        free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
     )

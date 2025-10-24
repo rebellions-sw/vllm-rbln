@@ -70,7 +70,7 @@ def test_schedule_single_seq():
     # Test initial scheduling
     output = scheduler.schedule()
     assert len(output.scheduled_new_reqs) == 1
-    assert len(output.scheduled_cached_reqs) == 0
+    assert output.scheduled_cached_reqs.num_reqs == 0
     assert len(output.finished_req_ids) == 0
 
     # Verify all tokens in the request are scheduled.
@@ -98,7 +98,7 @@ def test_schedule_multi_seq():
     for _ in range(scheduler.max_num_running_reqs):
         output = scheduler.schedule()
         assert len(output.scheduled_new_reqs) == 1
-        assert len(output.scheduled_cached_reqs) == 0
+        assert output.scheduled_cached_reqs.num_reqs == 0
         assert len(output.finished_req_ids) == 0
 
     # Verify all tokens in the request are scheduled.
@@ -146,6 +146,7 @@ def test_schedule_alloc_block_policy(
     requests = create_requests(
         num_requests=max_num_seqs,
         num_tokens=num_tokens_per_batch,
+        block_size=block_size,
     )
 
     # [Prefill] Schedule the first request.
@@ -162,7 +163,7 @@ def test_schedule_alloc_block_policy(
     # [Decode] Schedule again the first request.
     scheduler_output1 = scheduler.schedule()
     scheduled_cached_reqs = scheduler_output1.scheduled_cached_reqs
-    assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached0_new
+    assert scheduled_cached_reqs.new_block_ids[0][0] == exp_cached0_new
 
     # finish the first request
     scheduler.finish_requests(requests[0].request_id,
@@ -182,4 +183,4 @@ def test_schedule_alloc_block_policy(
     # [Decode] Schedule again the first request.
     scheduler_output3 = scheduler.schedule()
     scheduled_cached_reqs = scheduler_output3.scheduled_cached_reqs
-    assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached1_new
+    assert scheduled_cached_reqs.new_block_ids[0][0] == exp_cached1_new

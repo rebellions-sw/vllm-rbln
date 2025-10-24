@@ -13,10 +13,12 @@
 # limitations under the License.
 # isort: off
 import torch
+from typing import Optional
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
+from vllm.config import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
 
@@ -102,29 +104,58 @@ def top_p_only_fake(
 
 class RBLNSampler(VLLMSampler):
 
-    def __init__(self, seed):
+    def __init__(self,
+                 logprobs_mode: LogprobsMode = "raw_logprobs",
+                 seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
-        self.apply_topp_sampler = torch.compile(top_p_only,
-                                                dynamic=False,
-                                                fullgraph=True,
-                                                backend="rbln")
+        self._compiled_rbln_topp_sampler = torch.compile(
+            self._rbln_topp_sampler_impl,
+            dynamic=False,
+            fullgraph=True,
+            backend="rbln")
+        self.logprobs_mode = logprobs_mode
 
-    @torch.compiler.disable
-    def apply_topp_sampler(self, logits: torch.Tensor,
-                           top_p: torch.Tensor) -> torch.Tensor:
-        return self.rbln_topp_sampler(logits, top_p)
+    def apply_topp_sampler(
+            self, logits: torch.Tensor, top_p: torch.Tensor
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        sampled = self.rbln_topp_sampler(logits, top_p)
+        logits_to_return = None
+        if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
+            logits_to_return = logits
+        elif self.logprobs_mode == LogprobsMode.PROCESSED_LOGPROBS:
+            logits_to_return = logits.log_softmax(dim=-1, dtype=torch.float32)
+        return sampled, logits_to_return
 
-    def rbln_topp_sampler(self, logits: torch.Tensor,
-                          top_p: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _rbln_topp_sampler_impl(logits: torch.Tensor,
+                                top_p: torch.Tensor) -> torch.Tensor:
+        """
+        Implementation of RBLN top-p sampling.
+        To avoid self parameter issues when torch.compile is used,
+        we define this as a static method.
+        """
         # Apply top-p sampling using RBLN custom op.
         # It requires softmax prior to calling the op.
         probs = torch.nn.functional.softmax(logits, dim=-1)
         sampled = torch.ops.rbln.top_p_only(probs, top_p)
         return sampled
 
-    def sample(self, logits: torch.Tensor,
-               sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    @torch.compiler.disable
+    def rbln_topp_sampler(self, logits: torch.Tensor,
+                          top_p: torch.Tensor) -> torch.Tensor:
+        """
+        Wrapper for the compiled RBLN top-p sampler.
+        To avoid recompile on runtime, we decorate this method with
+        `torch.compiler.disable` and call the pre-compiled function.
+        """
+        return self._compiled_rbln_topp_sampler(logits, top_p)
+
+    def sample(
+        self,
+        logits: torch.Tensor,
+        sampling_metadata: SamplingMetadata,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Sample logits based on sampling metadata.
 
         The various logits processing functions called in this method
@@ -138,31 +169,35 @@ class RBLNSampler(VLLMSampler):
         else:
             greedy_sampled = self.greedy_sample(logits)
             if sampling_metadata.all_greedy:
-                return greedy_sampled
+                processed_logprobs = None
+                if sampling_metadata.max_num_logprobs is not None:
+                    if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
+                        processed_logprobs = logits
+                    elif self.logprobs_mode == LogprobsMode.PROCESSED_LOGPROBS:
+                        processed_logprobs = self.compute_logprobs(logits)
+                return greedy_sampled, processed_logprobs
 
         assert sampling_metadata.temperature is not None
 
         # Apply temperature.
         logits = self.apply_temperature(logits, sampling_metadata.temperature)
 
-        # Apply min_p.
-        if sampling_metadata.min_p is not None:
-            logits = self.apply_min_p(logits, sampling_metadata.min_p)
+        # Apply logits processors that only apply to random sampling
+        # (argmax invariant)
+        for processor in sampling_metadata.logitsprocs.argmax_invariant:
+            logits = processor.apply(logits)
 
         # Currently, RBLN only supports top_p sampling.
         # Covering other cases with RBLN is work in progress.
         if (sampling_metadata.top_p is not None
                 and sampling_metadata.top_k is None):
-            # Apply temperature scaling if needed
-            if sampling_metadata.temperature is not None:
-                logits = logits / sampling_metadata.temperature.unsqueeze(-1)
 
-            random_sampled = self.apply_topp_sampler(logits,
-                                                     sampling_metadata.top_p)
+            random_sampled, processed_logprobs = self.apply_topp_sampler(
+                logits, sampling_metadata.top_p)
 
-        elif sampling_metadata.top_k is not None:
+        else:
             # Apply top_k and/or top_p.
-            random_sampled = self.topk_topp_sampler(
+            random_sampled, processed_logprobs = self.topk_topp_sampler(
                 logits,
                 sampling_metadata.generators,
                 sampling_metadata.top_k,
@@ -170,7 +205,7 @@ class RBLNSampler(VLLMSampler):
             )
 
         if greedy_sampled is None:
-            return random_sampled
+            return random_sampled, processed_logprobs
 
         sampled = torch.where(
             sampling_metadata.temperature < _SAMPLING_EPS,
@@ -178,8 +213,7 @@ class RBLNSampler(VLLMSampler):
             random_sampled,
             out=greedy_sampled,  # Reuse tensor
         )
-
-        return sampled
+        return sampled, processed_logprobs
 
     def apply_penalties(
         self,
