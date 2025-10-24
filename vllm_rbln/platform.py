@@ -281,25 +281,26 @@ class RblnPlatform(Platform):
                     if kvcache_block_size is not None:
                         break
                     batch_size = rbln_config[submodule].get("batch_size", None)
-                    max_seq_len = rbln_config[submodule].get("max_seq_len", None)
+                    max_seq_len = rbln_config[submodule].get(
+                        "max_seq_len", None)
         else:
-            batch_size = rbln_config.get("batch_size", None)
-            max_seq_len = rbln_config.get("max_seq_len", None)
+            batch_size = rbln_config.get("batch_size")
+            max_seq_len = rbln_config.get("max_seq_len")
 
         # encoder-decoder model
         if kvcache_block_size is None and "dec_max_seq_len" in rbln_config:
-            max_seq_len = rbln_config.get("dec_max_seq_len", None)
+            max_seq_len = rbln_config.get("dec_max_seq_len")
             kvcache_block_size = max_seq_len
 
         # encoder
         if kvcache_block_size is None and "enc_max_seq_len" in rbln_config:
-            max_seq_len = rbln_config.get("enc_max_seq_len", None)
+            max_seq_len = rbln_config.get("enc_max_seq_len")
             kvcache_block_size = max_seq_len
 
         # embedding model
         if kvcache_block_size is None and "max_seq_len" in rbln_config:
-            kvcache_block_size = rbln_config.get("max_seq_len", None)
-            max_seq_len = rbln_config.get("max_seq_len", None)
+            kvcache_block_size = rbln_config.get("max_seq_len")
+            max_seq_len = rbln_config.get("max_seq_len")
 
         assert kvcache_block_size is not None, (
             "kvcache_block_size must be specified in rbln_config.json")
