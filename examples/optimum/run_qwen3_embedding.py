@@ -68,7 +68,12 @@ async def main(
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id, task="embed")
+    engine_args = AsyncEngineArgs(model=model_id,
+                                  max_num_seqs=batch_size,
+                                  max_num_batched_tokens=max_seq_len,
+                                  max_model_len=max_seq_len,
+                                  block_size=kvcache_block_size,
+                                  task="embed")
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt_list = get_input_prompts()
