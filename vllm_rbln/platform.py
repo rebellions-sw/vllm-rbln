@@ -322,11 +322,11 @@ class RblnPlatform(Platform):
         else:
             with open(rbln_config_path, encoding='utf-8') as f:
                 rbln_config = json.load(f)
-            kvcache_block_size, batch_size, max_seq_len = cls.get_rbln_params(
+            kvcache_block_size, batch_size, max_model_len = cls.get_rbln_params(
                 rbln_config)
             vllm_config.scheduler_config.max_num_seqs = batch_size
-            vllm_config.scheduler_config.max_num_batched_tokens = max_seq_len
-            vllm_config.model_config.max_seq_len = max_seq_len
+            vllm_config.scheduler_config.max_num_batched_tokens = max_model_len
+            vllm_config.model_config.max_model_len = max_model_len
 
         if vllm_config.cache_config.enable_prefix_caching:
             if is_enc_dec_arch(vllm_config.model_config.hf_config):
