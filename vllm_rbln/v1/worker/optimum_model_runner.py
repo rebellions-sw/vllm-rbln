@@ -454,16 +454,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_positions: list[list[int]] = []
         running_request_ids = []
         batched_mm_inputs: Optional[BatchedTensorInputs] = None
-        is_preempted = False
-
-        if len(scheduler_output.scheduled_new_reqs) == 1:
-            reqs = scheduler_output.scheduled_new_reqs
-        elif scheduler_output.scheduled_cached_reqs.num_reqs == 1:
-            reqs = scheduler_output.scheduled_cached_reqs
-            is_preempted = True
-        else:
-            raise RuntimeError(
-                "Prefill stage request cannot processed with other requests.")
 
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
@@ -471,50 +461,59 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             0].get_cpu_tensor()
         cached_block_table = []
         cached_length = []
-        for scheduled in reqs:
+
+        if len(scheduler_output.scheduled_new_reqs) == 1:
+            # New request started
+            scheduled = scheduler_output.scheduled_new_reqs[0]
             req_id = scheduled.req_id
             req_index = self.input_batch.req_id_to_index[req_id]
-            if is_preempted:
-                logger.warning("Request %s is resumed.", req_id)
-                num_token = int(self.input_batch.num_tokens[req_index])
-                prompt_tokens = self.input_batch.token_ids_cpu[
-                    req_index][:num_token]
-            else:
-                prompt_tokens = np.array(scheduled.prompt_token_ids)
-            seq_len = len(prompt_tokens)
-            input_positions = list(range(seq_len))
-            num_blocks = num_blocks_per_req[req_index]
-            if self.enable_prefix_caching:
-                block_table, cached_block_table, cached_length = \
-                    self.prefix_cache_manager.get_block_table_with_cache(
-                        req_id,
-                        0,  # num_allocated_tokens
-                        scheduled.num_computed_tokens,
-                        scheduled.block_ids[0])
-                logger.debug(
-                    "Request %s is now scheduled. Prompt tokens: %s, "
-                    "Already generated tokens: %s, Allocated block(s): %s",
-                    req_id, len(self.requests[req_id].prompt_token_ids),
-                    len(self.requests[req_id].output_token_ids),
-                    scheduled.block_ids[0])
-                total_cached_length = sum(cached_length)
-                if total_cached_length > 0:
-                    prompt_tokens = prompt_tokens[total_cached_length:]
-                    input_positions = input_positions[total_cached_length:]
-                    assert len(prompt_tokens) > 0, (
-                        "The prompt tokens is empty after removing the "
-                        "cached tokens.")
-            else:
-                block_table = block_tables_cpu[req_index]
-                block_table = self.mask_block_table(block_table, num_blocks)
-                logger.debug(
-                    "Request %s is now scheduled. Prompt tokens: %s, "
-                    "Already generated tokens: %s, Allocated block(s): %s",
-                    req_id, len(self.requests[req_id].prompt_token_ids),
-                    len(self.requests[req_id].output_token_ids),
-                    block_table.tolist())
+            prompt_tokens = np.array(scheduled.prompt_token_ids)
+        elif scheduler_output.scheduled_cached_reqs.num_reqs == 1:
+            # Preempted request resumed
+            req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
+            req_index = self.input_batch.req_id_to_index[req_id]
+            logger.warning("Request %s is resumed.", req_id)
+            num_token = int(self.input_batch.num_tokens[req_index])
+            prompt_tokens = self.input_batch.token_ids_cpu[
+                req_index][:num_token]
+        else:
+            raise RuntimeError(
+                "Prefill stage request cannot processed with other requests.")
 
-            running_request_ids.append(req_id)
+        seq_len = len(prompt_tokens)
+        input_positions = list(range(seq_len))
+        num_blocks = num_blocks_per_req[req_index]
+        if self.enable_prefix_caching:
+            block_table, cached_block_table, cached_length = \
+                self.prefix_cache_manager.get_block_table_with_cache(
+                    req_id,
+                    0,  # num_allocated_tokens
+                    scheduled.num_computed_tokens,
+                    scheduled.block_ids[0])
+            logger.debug(
+                "Request %s is now scheduled. Prompt tokens: %s, "
+                "Already generated tokens: %s, Allocated block(s): %s", req_id,
+                len(self.requests[req_id].prompt_token_ids),
+                len(self.requests[req_id].output_token_ids),
+                scheduled.block_ids[0])
+            total_cached_length = sum(cached_length)
+            if total_cached_length > 0:
+                prompt_tokens = prompt_tokens[total_cached_length:]
+                input_positions = input_positions[total_cached_length:]
+                assert len(prompt_tokens) > 0, (
+                    "The prompt tokens is empty after removing the "
+                    "cached tokens.")
+        else:
+            block_table = block_tables_cpu[req_index]
+            block_table = self.mask_block_table(block_table, num_blocks)
+            logger.debug(
+                "Request %s is now scheduled. Prompt tokens: %s, "
+                "Already generated tokens: %s, Allocated block(s): %s", req_id,
+                len(self.requests[req_id].prompt_token_ids),
+                len(self.requests[req_id].output_token_ids),
+                block_table.tolist())
+
+        running_request_ids.append(req_id)
 
         if self.supports_mm_inputs:
             batched_mm_inputs = self._extract_mm_kwargs(scheduler_output)
