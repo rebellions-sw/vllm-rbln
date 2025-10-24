@@ -26,32 +26,6 @@ class PrefixKVCacheManager:
         self.inner_num_blks = num_blocks * self.blk_ratio
         
         self.free_block_queue = RBLNPrefixBlockQueue(self.outer_num_blks)
-
-    def get_cached_origin_blocks(self, cached_len, inner_blocks: list[int]) -> list[int]:
-        cached_outer_blocks = []
-        last_cached_outer_block = None
-
-        num_cached_ib = cached_len // self.inner_blk_size
-        target_ibs = inner_blocks[:num_cached_ib]
-
-        for ib_idx in target_ibs:
-            ib_id = inner_blocks[ib_idx]
-            ob_id = self.inner_to_outer_block[ib_id]
-            cached_outer_blocks.append(ob_id)
-            last_cached_outer_block = ob_id
-        return cached_outer_blocks
-
-    def free_blocks_of_finished_requests(self, cached_len, inner_blocks: list[int]):
-        # 해당 inner block은 그 사이에 free되고 새로 할당되었다
-        # 이에 맞추어 outer block도 해제
-        num_cached_ib = cached_len // self.inner_blk_size
-        target_ibs = inner_blocks[num_cached_ib:]
-        for ib_idx in target_ibs:
-            ib_id = inner_blocks[ib_idx]
-            if ib_id in self.inner_to_request_id:
-                request_id = self.inner_to_request_id.pop(ib_id)
-                if request_id in self.req_to_outer_blocks:
-                    self.free_blocks(request_id)
         
     def allocate_blocks(self, request_id:str, cached_len: int, new_inner_blocks: list[int] = []) -> None:
         """
@@ -86,10 +60,36 @@ class PrefixKVCacheManager:
                 self.inner_to_outer_block[new_ib_id] = new_ob.block_id
             ob_idx += 1
 
-    def get_blocks(self, request_id: str) -> torch.Tensor:
-        return torch.tensor(self.req_to_outer_blocks[request_id])
-
     def free_blocks(self, request_id: str) -> None:
         outer_blocks = self.req_to_outer_blocks.pop(request_id)
         for ob in outer_blocks:
             self.free_block_queue.append(ob)
+
+    def free_blocks_of_finished_requests(self, cached_len, inner_blocks: list[int]):
+        # 해당 inner block은 그 사이에 free되고 새로 할당되었다
+        # 이에 맞추어 outer block도 해제
+        num_cached_ib = cached_len // self.inner_blk_size
+        target_ibs = inner_blocks[num_cached_ib:]
+        for ib_idx in target_ibs:
+            ib_id = inner_blocks[ib_idx]
+            if ib_id in self.inner_to_request_id:
+                request_id = self.inner_to_request_id.pop(ib_id)
+                if request_id in self.req_to_outer_blocks:
+                    self.free_blocks(request_id)
+
+    def get_cached_origin_blocks(self, cached_len, inner_blocks: list[int]) -> torch.Tensor:
+        cached_outer_blocks = []
+        last_cached_outer_block = None
+
+        num_cached_ib = cached_len // self.inner_blk_size
+        target_ibs = inner_blocks[:num_cached_ib]
+
+        for ib_idx in target_ibs:
+            ib_id = inner_blocks[ib_idx]
+            ob_id = self.inner_to_outer_block[ib_id]
+            cached_outer_blocks.append(ob_id)
+            last_cached_outer_block = ob_id
+        return torch.tensor(cached_outer_blocks)
+
+    def get_blocks(self, request_id: str) -> torch.Tensor:
+        return torch.tensor(self.req_to_outer_blocks[request_id])
