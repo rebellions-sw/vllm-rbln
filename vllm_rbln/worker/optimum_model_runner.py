@@ -328,7 +328,6 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                  lora_requests=lora_requests,
                                  lora_mapping=lora_mapping)
 
-
     def _prepare_pooling(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
