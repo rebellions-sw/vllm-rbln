@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import time
 from collections import OrderedDict
 
 from vllm_rbln.logger import init_logger
@@ -63,7 +62,7 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
 
     def register_block(self, block_id: int) -> None:
         assert block_id not in self._allocation_order
-        self._allocation_order[block_id] = time.time()
+        self._allocation_order[block_id] = True
 
     def unregister_block(self, block_id: int) -> None:
         self._allocation_order.pop(block_id, None)
@@ -109,13 +108,12 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
 
     def touch(self, block_id: int) -> None:
         """Mark a block as recently accessed"""
-        self._access_order[block_id] = time.time()
         # Move to the end to mark as most recently used
         self._access_order.move_to_end(block_id)
 
     def register_block(self, block_id: int) -> None:
         assert block_id not in self._access_order
-        self._access_order[block_id] = time.time()
+        self._access_order[block_id] = True
 
     def unregister_block(self, block_id: int) -> None:
         self._access_order.pop(block_id, None)

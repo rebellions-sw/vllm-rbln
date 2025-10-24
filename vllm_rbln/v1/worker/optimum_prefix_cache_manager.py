@@ -72,7 +72,7 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
 
     def __init__(self, num_blocks: int):
         self._free_blocks = deque([RBLNBlock(i) for i in range(num_blocks)])
-        # 실제 할당된 블록 객체들을 추적
+        # Keep track of allocated blocks for validation
         self._allocated_blocks: dict[int, RBLNBlock] = {}
 
     def allocate(self, count: int) -> list[RBLNBlock]:
@@ -96,12 +96,11 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
             logger.warning("Attempting to deallocate unallocated block: %d",
                            block.block_id)
 
-    def get_allocated_block(self, block_id: int) -> Optional[RBLNBlock]:
-        """할당된 블록 객체 반환"""
-        return self._allocated_blocks.get(block_id)
-
     def get_free_count(self) -> int:
         return len(self._free_blocks)
+
+    def get_allocated_block(self, block_id: int) -> Optional[RBLNBlock]:
+        return self._allocated_blocks.get(block_id)
 
 
 class CacheSearchManager:
@@ -258,9 +257,9 @@ class RBLNPrefixKVCacheManager:
         logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id,
                      block_ids, inner_blocks)
 
-    def get_num_new_ob(self,
-                       inner_blocks: list[int],
-                       num_allocated_tokens: int = 0) -> int:
+    def compute_num_blocks_to_allocate(self,
+                                       inner_blocks: list[int],
+                                       num_allocated_tokens: int = 0) -> int:
         """
         If there are not enough free blocks,
         evict some blocks based on the eviction policy.
@@ -378,3 +377,28 @@ class RBLNPrefixKVCacheManager:
 
         block_ids = self._mapping_manager.get_request_blocks(request_id)
         return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
+
+    def get_block_table_with_cache(
+            self, request_id: str, num_allocated_tokens: int,
+            num_computed_tokens: int, inner_blocks: list[int]
+    ) -> tuple[torch.Tensor, list[int], list[int]]:
+        """
+        Get the block table with cache for a given request.
+        1. Find cached blocks
+        2. Allocate new blocks if needed
+        3. Return the block table tensor, cached block IDs, and cached lengths
+
+        num_allocated_tokens: Number of tokens already allocated (for DECODE phase)
+        num_computed_tokens: Number of tokens computed so far (for cache search)
+        inner_blocks: List of inner block IDs corresponding to the request
+        """
+        if len(inner_blocks) == 0:
+            return self.get_blocks(request_id), [], []
+
+        num_new_ob = self.compute_num_blocks_to_allocate(
+            inner_blocks, num_allocated_tokens)
+        self.ensure_free_blocks(num_new_ob)
+        cached_block_table, cached_length = self.get_cached_origin_blocks(
+            request_id, num_computed_tokens, inner_blocks)
+        self.allocate_blocks(request_id, num_new_ob, inner_blocks)
+        return self.get_blocks(request_id), cached_block_table, cached_length

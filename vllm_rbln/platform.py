@@ -205,7 +205,7 @@ class RblnPlatform(Platform):
                 "block_size must be configured for RBLN backend")
             if cache_config.enable_prefix_caching:
                 if not envs.VLLM_USE_V1:
-                    raise ValueError(
+                    raise RuntimeError(
                         "Prefix caching is only supported on v1 for RBLN.")
                 attn_block_size = vllm_config.additional_config.get(
                     "attn_block_size", None)
