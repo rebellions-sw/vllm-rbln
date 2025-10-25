@@ -115,11 +115,10 @@ def entry_point(
     num_input_prompt: int = 10,
     model_id: str = "/llava-v1.6-mistral-7b-hf-32k-b4-kv16k",
 ):
-    asyncio.run(
-        main(
-            num_input_prompt=num_input_prompt,
-            model_id=model_id,
-        ))
+    asyncio.run(main(
+        num_input_prompt=num_input_prompt,
+        model_id=model_id,
+    ))
 
 
 if __name__ == "__main__":
