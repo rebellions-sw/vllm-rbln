@@ -143,6 +143,14 @@ class RblnPlatform(Platform):
         ) and not envs.VLLM_USE_V1 and not model_config.is_encoder_decoder:
             logger.warning("V0 support for decoder models is deprecated.")
 
+        if envs.VLLM_USE_V1:
+            architectures = getattr(vllm_config.model_config.hf_config,
+                                    "architectures", [])
+            if "T5ForConditionalGeneration" in architectures:
+                raise NotImplementedError(
+                    "T5 encoder-decoder model is not supported on V1. "
+                    "Set `VLLM_USE_V1=0` to run T5 models in V0")
+
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
             logger.warning("bfloat16 is not supported on RBLN.")
