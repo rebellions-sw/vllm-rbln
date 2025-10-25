@@ -297,6 +297,8 @@ class RblnPlatform(Platform):
 
         elif is_pooling_arch(vllm_config.model_config.hf_config):
             max_seq_len = rbln_config.get("enc_max_seq_len")
+            if max_seq_len is None:
+                max_seq_len = rbln_config.get("max_seq_len")
             kvcache_block_size = max_seq_len
             batch_size = rbln_config.get("batch_size")
         else:
