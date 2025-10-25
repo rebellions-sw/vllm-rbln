@@ -115,20 +115,13 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 4,
-    max_seq_len: int = 32768,
-    kvcache_partition_len: int = 16384,
     num_input_prompt: int = 10,
     model_id: str = "/llava-v1.6-mistral-7b-hf-32k-b4-kv16k",
 ):
-    asyncio.run(
-        main(
-            batch_size=batch_size,
-            max_seq_len=max_seq_len,
-            kvcache_partition_len=kvcache_partition_len,
-            num_input_prompt=num_input_prompt,
-            model_id=model_id,
-        ))
+    asyncio.run(main(
+        num_input_prompt=num_input_prompt,
+        model_id=model_id,
+    ))
 
 
 if __name__ == "__main__":

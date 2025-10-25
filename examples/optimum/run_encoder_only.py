@@ -69,9 +69,8 @@ async def get_result(engine, model_id, prompt, num_input_prompt):
     return results
 
 
-async def main(model_id: str, max_seq_len: int, batch_size: int,
-               num_input_prompt: int, q_prompt_txt: str, p_prompt_txt: str,
-               golden_json: str):
+async def main(model_id: str, num_input_prompt: int, q_prompt_txt: str,
+               p_prompt_txt: str, golden_json: str):
     engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -100,8 +99,6 @@ async def main(model_id: str, max_seq_len: int, batch_size: int,
 
 
 def entry_point(
-    max_seq_len: int = 4096,
-    batch_size: int = 4,
     num_input_prompt: int = 3,
     model_id: str = "/bge-m3-1k-batch4",
     q_prompt_txt: str = "/prompts/q_prompts.txt",
@@ -110,8 +107,6 @@ def entry_point(
 ):
     asyncio.run(
         main(
-            max_seq_len=max_seq_len,
-            batch_size=batch_size,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
             q_prompt_txt=q_prompt_txt,
