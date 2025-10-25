@@ -272,17 +272,18 @@ class RblnPlatform(Platform):
 
     def get_rbln_params(rbln_config: dict) -> tuple[int, int, int]:
         kvcache_block_size = rbln_config.get("kvcache_block_size")
+        # multi-modal
         if kvcache_block_size is None:
             submodules = ["language_model", "text_model"]
             for submodule in submodules:
                 if submodule in rbln_config:
                     kvcache_block_size = rbln_config[submodule].get(
                         "kvcache_block_size", None)
-                    if kvcache_block_size is not None:
-                        break
                     batch_size = rbln_config[submodule].get("batch_size", None)
                     max_seq_len = rbln_config[submodule].get(
                         "max_seq_len", None)
+                    if kvcache_block_size is not None:
+                        break
         else:
             batch_size = rbln_config.get("batch_size")
             max_seq_len = rbln_config.get("max_seq_len")
