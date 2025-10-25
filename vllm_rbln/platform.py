@@ -277,16 +277,24 @@ class RblnPlatform(Platform):
             kvcache_block_size = max_seq_len
             batch_size = rbln_config.get("batch_size")
         elif is_multi_modal(vllm_config.model_config.hf_config):
-            submodules = ["language_model", "text_model"]
-            for submodule in submodules:
-                if submodule in rbln_config:
-                    kvcache_block_size = rbln_config[submodule].get(
-                        "kvcache_block_size", None)
-                    batch_size = rbln_config[submodule].get("batch_size", None)
-                    max_seq_len = rbln_config[submodule].get(
-                        "max_seq_len", None)
-                    if kvcache_block_size is not None:
-                        break
+            # Get configurations from main module (e.g. Qwen2.5-VL)
+            kvcache_block_size = rbln_config.get("kvcache_block_size")
+            batch_size = rbln_config.get("batch_size")
+            max_seq_len = rbln_config.get("max_seq_len")
+            # Get configurations from submodule
+            if kvcache_block_size is None:
+                submodules = ["language_model", "text_model"]
+                for submodule in submodules:
+                    if submodule in rbln_config:
+                        kvcache_block_size = rbln_config[submodule].get(
+                            "kvcache_block_size", None)
+                        batch_size = rbln_config[submodule].get(
+                            "batch_size", None)
+                        max_seq_len = rbln_config[submodule].get(
+                            "max_seq_len", None)
+                        if kvcache_block_size is not None:
+                            break
+
         elif is_pooling_arch(vllm_config.model_config.hf_config):
             max_seq_len = rbln_config.get("enc_max_seq_len")
             kvcache_block_size = max_seq_len
