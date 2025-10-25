@@ -72,8 +72,6 @@ def compare(result):
 
 
 async def main(
-    batch_size: int,
-    max_seq_len: int,
     num_input_prompt: int,
     model_id: str,
 ):
@@ -99,18 +97,13 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 2,
-    max_seq_len: int = 512,
     num_input_prompt: int = 10,
     model_id: str = "/rbln_bart-small_batch2",
 ):
-    asyncio.run(
-        main(
-            batch_size=batch_size,
-            max_seq_len=max_seq_len,
-            num_input_prompt=num_input_prompt,
-            model_id=model_id,
-        ))
+    asyncio.run(main(
+        num_input_prompt=num_input_prompt,
+        model_id=model_id,
+    ))
 
 
 if __name__ == "__main__":

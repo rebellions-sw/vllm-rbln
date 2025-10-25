@@ -54,8 +54,6 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
 
 
 async def main(
-    batch_size: int,
-    max_seq_len: int,
     num_input_prompt: int,
     model_id: str,
 ):
@@ -85,18 +83,13 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 4,
-    max_seq_len: int = 448,
     num_input_prompt: int = 1,
     model_id: str = "/whisper-base-b4-wo-token-timestamps",
 ):
-    asyncio.run(
-        main(
-            batch_size=batch_size,
-            max_seq_len=max_seq_len,
-            num_input_prompt=num_input_prompt,
-            model_id=model_id,
-        ))
+    asyncio.run(main(
+        num_input_prompt=num_input_prompt,
+        model_id=model_id,
+    ))
 
 
 if __name__ == "__main__":

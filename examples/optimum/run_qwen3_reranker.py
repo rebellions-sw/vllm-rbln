@@ -124,9 +124,7 @@ def compute_logits(outputs, true_token, false_token):
 
 
 async def main(
-    batch_size: int,
     max_seq_len: int,
-    kvcache_block_size: int,
     num_input_prompt: int,
     model_id: str,
 ):
@@ -162,17 +160,13 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 1,
     max_seq_len: int = 32768,
-    kvcache_block_size: int = 32768,
     num_input_prompt: int = 2,
     model_id: str = "/qwen3-0.6b-b1",
 ):
     asyncio.run(
         main(
-            batch_size=batch_size,
             max_seq_len=max_seq_len,
-            kvcache_block_size=kvcache_block_size,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
         ))

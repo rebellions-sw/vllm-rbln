@@ -71,8 +71,6 @@ def show_result(result):
 
 
 async def main(
-    batch_size: int,
-    max_seq_len: int,
     num_input_prompt: int,
     truncate_prompt_tokens: int,
     model_id: str,
@@ -104,16 +102,12 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 4,
-    max_seq_len: int = 512,
     num_input_prompt: int = 1,
     truncate_prompt_tokens: int = 200,
     model_id: str = "/t5-3b-b4",
 ):
     asyncio.run(
         main(
-            batch_size=batch_size,
-            max_seq_len=max_seq_len,
             num_input_prompt=num_input_prompt,
             truncate_prompt_tokens=truncate_prompt_tokens,
             model_id=model_id,

@@ -143,6 +143,14 @@ class RblnPlatform(Platform):
         ) and not envs.VLLM_USE_V1 and not model_config.is_encoder_decoder:
             logger.warning("V0 support for decoder models is deprecated.")
 
+        if envs.VLLM_USE_V1:
+            architectures = getattr(vllm_config.model_config.hf_config,
+                                    "architectures", [])
+            if "T5ForConditionalGeneration" in architectures:
+                raise NotImplementedError(
+                    "T5 encoder-decoder model is not supported on V1. "
+                    "Set `VLLM_USE_V1=0` to run T5 models in V0")
+
         logger.info("original model_config.dtype = %s", model_config.dtype)
         if model_config.dtype == torch.bfloat16:
             logger.warning("bfloat16 is not supported on RBLN.")
@@ -270,36 +278,42 @@ class RblnPlatform(Platform):
             "It has been automatically disabled.", reason)
         vllm_config.cache_config.enable_prefix_caching = None
 
-    def get_rbln_params(rbln_config: dict) -> tuple[int, int, int]:
-        kvcache_block_size = rbln_config.get("kvcache_block_size")
-        if kvcache_block_size is None:
-            submodules = ["language_model", "text_model"]
-            for submodule in submodules:
-                if submodule in rbln_config:
-                    kvcache_block_size = rbln_config[submodule].get(
-                        "kvcache_block_size", None)
-                    if kvcache_block_size is not None:
-                        break
-                    batch_size = rbln_config[submodule].get("batch_size", None)
-                    max_seq_len = rbln_config[submodule].get(
-                        "max_seq_len", None)
-        else:
-            batch_size = rbln_config.get("batch_size")
-            max_seq_len = rbln_config.get("max_seq_len")
-
-        # encoder-decoder model
-        if kvcache_block_size is None and "dec_max_seq_len" in rbln_config:
+    def get_rbln_params(vllm_config: VllmConfig,
+                        rbln_config: dict) -> tuple[int, int, int]:
+        if is_enc_dec_arch(vllm_config.model_config.hf_config):
             max_seq_len = rbln_config.get("dec_max_seq_len")
             kvcache_block_size = max_seq_len
+            batch_size = rbln_config.get("batch_size")
+        elif is_multi_modal(vllm_config.model_config.hf_config):
+            # Get configurations from main module (e.g. Qwen2.5-VL)
+            kvcache_block_size = rbln_config.get("kvcache_block_size")
+            batch_size = rbln_config.get("batch_size")
+            max_seq_len = rbln_config.get("max_seq_len")
+            # Get configurations from submodule
+            if kvcache_block_size is None:
+                submodules = ["language_model", "text_model"]
+                for submodule in submodules:
+                    if submodule in rbln_config:
+                        kvcache_block_size = rbln_config[submodule].get(
+                            "kvcache_block_size", None)
+                        batch_size = rbln_config[submodule].get(
+                            "batch_size", None)
+                        max_seq_len = rbln_config[submodule].get(
+                            "max_seq_len", None)
+                        if kvcache_block_size is not None:
+                            break
 
-        # encoder
-        if kvcache_block_size is None and "enc_max_seq_len" in rbln_config:
+        elif is_pooling_arch(vllm_config.model_config.hf_config):
             max_seq_len = rbln_config.get("enc_max_seq_len")
+            if max_seq_len is None:
+                # e.g. bge-reranker case
+                max_seq_len = rbln_config.get("max_seq_len")
             kvcache_block_size = max_seq_len
-
-        # embedding model
-        if kvcache_block_size is None and "max_seq_len" in rbln_config:
-            kvcache_block_size = rbln_config.get("max_seq_len")
+            batch_size = rbln_config.get("batch_size")
+        else:
+            # decoder
+            kvcache_block_size = rbln_config.get("kvcache_block_size")
+            batch_size = rbln_config.get("batch_size")
             max_seq_len = rbln_config.get("max_seq_len")
 
         assert kvcache_block_size is not None, (
@@ -326,7 +340,7 @@ class RblnPlatform(Platform):
             with open(rbln_config_path, encoding='utf-8') as f:
                 rbln_config = json.load(f)
             kvcache_block_size, batch_size, max_model_len = cls.get_rbln_params(
-                rbln_config)
+                vllm_config, rbln_config)
             vllm_config.scheduler_config.max_num_seqs = batch_size
             vllm_config.scheduler_config.max_num_batched_tokens = max_model_len
             vllm_config.model_config.max_model_len = max_model_len

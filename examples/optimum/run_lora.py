@@ -107,8 +107,7 @@ def get_secalign_requests(
     return conversation, lora_requests
 
 
-async def main(batch_size: int, max_seq_len: int, kvcache_block_size: int,
-               num_input_prompt: int, model_id: str, lora_paths: list[str],
+async def main(num_input_prompt: int, model_id: str, lora_paths: list[str],
                lora_names: list[str], lora_int_ids: list[int]):
     engine_args = AsyncEngineArgs(model=model_id,
                                   enable_lora=True,
@@ -159,9 +158,6 @@ async def main(batch_size: int, max_seq_len: int, kvcache_block_size: int,
 
 
 def entry_point(
-    batch_size: int = 4,
-    max_seq_len: int = 8192,
-    kvcache_block_size: int = 8192,
     num_input_prompt: int = 3,
     model_id: str = "./llama3.1-8b-ab-sec-b4",
     lora_paths: list[str] = None,
@@ -178,9 +174,6 @@ def entry_point(
 
     asyncio.run(
         main(
-            batch_size=batch_size,
-            max_seq_len=max_seq_len,
-            kvcache_block_size=kvcache_block_size,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
             lora_paths=lora_paths,
