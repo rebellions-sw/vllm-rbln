@@ -51,6 +51,7 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
+from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 
 logger = init_logger(__name__)
@@ -59,6 +60,21 @@ logger = init_logger(__name__)
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
+        # FIXME: For RBLN support Enc-only model which based on enc-dec config.
+        # When using an encoder-only model (such as T5EncoderModel)
+        # with a config designed for enc-dec architectures,
+        # it’s important to set the is_encoder_decoder flag to False.
+        # This prevents the scheduler from applying text generation settings.
+        _, model_cls_name = get_rbln_model_info(vllm_config.model_config)
+        if model_cls_name in ["RBLNQwen3ForCausalLM"
+                              ] and vllm_config.model_config.task == "embed":
+            # NOTE The architecture of Qwen3-Embedding model in huggingface
+            # is `Qwen3ForCausalLM`. But it have to be mapped to `Qwen3Model`
+            # for optimum-rbln.
+            vllm_config.model_config.hf_config.__dict__["architectures"] = [
+                "Qwen3Model"
+            ]
+
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -286,8 +302,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
             sampled_token_ids=valid_sampled_token_ids,
-            logprobs=None,
-            prompt_logprobs_dict={},
+            logprobs=logprobs_lists,
+            prompt_logprobs_dict=prompt_logprobs_dict,
             pooler_output=[],
             kv_connector_output=None,
             num_nans_in_logits={},
