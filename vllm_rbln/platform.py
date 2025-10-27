@@ -53,7 +53,12 @@ class RblnPlatform(Platform):
     device_type: str = "cpu"
     dispatch_key: str = "CPU"
     ray_device_key: str = "RBLN"
-    simple_compile_backend = "bypass"
+    # Disables torch.compile when using vLLM’s original functions
+    # (e.g., batched_count_greater_than in the sampler).
+    if envs.VLLM_RBLN_USE_VLLM_MODEL:
+        simple_compile_backend = "bypass"
+    else:
+        simple_compile_backend = "eager"
     device_control_env_var: str = "RBLN_DEVICES"
     current_stream = _StreamPlaceholder
 
