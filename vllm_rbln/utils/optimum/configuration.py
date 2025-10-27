@@ -90,7 +90,6 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
             logger.warning(
                 "The block size is set to 128 for prefix caching in RBLN.")
         vllm_config.cache_config.block_size = 128
-        # Check if attn_block_size is set and matches kvcache_block_size
         if ("attn_block_size" in vllm_config.additional_config
                 and vllm_config.additional_config["attn_block_size"]
                 != kvcache_block_size):
