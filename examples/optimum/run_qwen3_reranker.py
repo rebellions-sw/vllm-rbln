@@ -150,7 +150,7 @@ async def main(
                 generate(engine,
                          prompt_tokens=p,
                          model=model_id,
-                         requst_id=i,
+                         request_id=i,
                          true_token=true_token,
                          false_token=false_token)))
 
