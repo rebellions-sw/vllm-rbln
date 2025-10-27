@@ -143,7 +143,11 @@ def get_rbln_config(vllm_config: VllmConfig) -> Optional[dict]:
 
 
 def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
-    rbln_config = get_rbln_config(vllm_config)
+    try:
+        rbln_config = get_rbln_config(vllm_config)
+    except Exception as e:
+        raise RuntimeError("Failed to get RBLN config: %s", e)
+
     if rbln_config is None:
         kvcache_block_size = vllm_config.cache_config.block_size
         batch_size = vllm_config.scheduler_config.max_num_seqs
