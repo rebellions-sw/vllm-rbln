@@ -1,5 +1,5 @@
 ARG BASE_UBI_IMAGE_TAG=9.5
-ARG PYTHON_VERSION=3.10.12
+ARG PYTHON_VERSION=3.12.9
 
 ## Base Layer ##################################################################
 FROM registry.access.redhat.com/ubi9/ubi:${BASE_UBI_IMAGE_TAG} AS base
@@ -173,8 +173,6 @@ RUN PYTHONUNBUFFERED=1 dnf -y update && \
     dnf install -y \
         wget \
         rsync \
-        openssh-server \
-        openssh-clients \
         git \
         ca-certificates && \
     dnf clean all && \
