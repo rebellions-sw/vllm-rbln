@@ -5,7 +5,7 @@ ARG PYTHON_VERSION=3.10.12
 FROM registry.access.redhat.com/ubi9/ubi:${BASE_UBI_IMAGE_TAG} AS base
 
 ARG WORKDIR=/workspace
-WORKDIR "$WORKDIR"
+WORKDIR "${WORKDIR}"
 
 ARG ATOM_DRIVER_VERSION=2.0.1-2
 ARG RBLN_CCL_VERSION="2.0.0"
@@ -21,22 +21,24 @@ ARG TRITON_VERSION=3.2.0+rbln.git47ee49fe
 ARG VLLM_RBLN_VERSION=0.8.0rc0
 ARG VLLM_VERSION=0.9.1
 
-LABEL ATOM_DRIVER_VERSION="$ATOM_DRIVER_VERSION"
-LABEL RBLN_CCL_VERSION="$RBLN_CCL_VERSION"
-LABEL BCM_DRIVER_VERSION="$BCM_DRIVER_VERSION"
-LABEL BCM_LIBBNXT_RE_VERSION="$BCM_LIBBNXT_RE_VERSION"
-LABEL LLVM_VERSION="$LLVM_VERSION"
-LABEL OPTIMUM_RBLN_VERSION="$OPTIMUM_RBLN_VERSION"
-LABEL RAY_VERSION="$RAY_VERSION"
-LABEL REBEL_COMPILER_VERSION="$REBEL_COMPILER_VERSION"
-LABEL TORCHVISION_VERSION="$TORCHVISION_VERSION"
-LABEL TORCH_VERSION="$TORCH_VERSION"
-LABEL VLLM_RBLN_VERSION="$VLLM_RBLN_VERSION"
+LABEL ATOM_DRIVER_VERSION="${ATOM_DRIVER_VERSION}"
+LABEL RBLN_CCL_VERSION="${RBLN_CCL_VERSION}"
+LABEL BCM_DRIVER_VERSION="${BCM_DRIVER_VERSION}"
+LABEL BCM_LIBBNXT_RE_VERSION="${BCM_LIBBNXT_RE_VERSION}"
+LABEL LLVM_VERSION="${LLVM_VERSION}"
+LABEL OPTIMUM_RBLN_VERSION="${OPTIMUM_RBLN_VERSION}"
+LABEL RAY_VERSION="${RAY_VERSION}"
+LABEL REBEL_COMPILER_VERSION="${REBEL_COMPILER_VERSION}"
+LABEL TORCHVISION_VERSION="${TORCHVISION_VERSION}"
+LABEL TORCH_VERSION="${TORCH_VERSION}"
+LABEL VLLM_RBLN_VERSION="${VLLM_RBLN_VERSION}"
+LABEL VLLM_VERSION="${VLLM_VERSION}"
+LABEL TRITON_VERSION="${TRITON_VERSION}"
 
 ################################################################################
 FROM base AS atom
 
-RUN dnf install -y rpm && \
+RUN PYTHONUNBUFFERED=1 dnf install -y rpm && \
     dnf clean all && \
     rm -rf /var/cache/dnf
 
@@ -49,59 +51,61 @@ RUN --mount=type=secret,id=E2E_REPOSITORY_URL,env=E2E_REPOSITORY_URL \
     --mount=type=secret,id=E2E_REPOSITORY_PWD,env=E2E_REPOSITORY_PWD \
     curl -u "${E2E_REPOSITORY_ID}:${E2E_REPOSITORY_PWD}" \
        -o "/atom/${ATOM_DRIVER_PACKAGE}" \
-       "http://${E2E_REPOSITORY_URL}/repository/yum/${ATOM_DRIVER_PACKAGE}" \
-    && rpm -ivh --nodeps --nosignature --noscripts \
+       "http://${E2E_REPOSITORY_URL}/repository/yum/${ATOM_DRIVER_PACKAGE}" && \
+    rpm -ivh --nodeps --nosignature --noscripts \
        --root /atom \
-       "/atom/${ATOM_DRIVER_PACKAGE}" \
-    && rm -f "/atom/${ATOM_DRIVER_PACKAGE}"
+       "/atom/${ATOM_DRIVER_PACKAGE}" && \
+    rm -f "/atom/${ATOM_DRIVER_PACKAGE}"
 
 ################################################################################
 FROM base AS bnxt
 RUN PYTHONUNBUFFERED=1 dnf install -y \
-      autoconf automake \
-      gcc gcc-c++ make \
-      iproute kmod \
-      libibverbs-devel librdmacm-devel librdmacm \
-      libtool pciutils \
-      python3 systemd wget \
-    && dnf clean all \
-    && rm -rf /var/cache/dnf
+    autoconf automake \
+    gcc gcc-c++ make \
+    iproute kmod \
+    libibverbs-devel librdmacm-devel librdmacm \
+    libtool pciutils \
+    python systemd wget && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
 
-RUN wget "https://docs.broadcom.com/docs-and-downloads/ethernet-network-adapters/NXE/BRCM_$BCM_DRIVER_VERSION/bcm_$BCM_DRIVER_VERSION.tar.gz" && \
-  tar -xvzf "bcm_$BCM_DRIVER_VERSION.tar.gz" && \
-  tar -C /tmp -xf "$WORKDIR/bcm_$BCM_DRIVER_VERSION/drivers_linux/bnxt_rocelib/libbnxt_re-$BCM_LIBBNXT_RE_VERSION.tar.gz" && \
-  cd "/tmp/libbnxt_re-$BCM_LIBBNXT_RE_VERSION" && \
-  sh autogen.sh && \
-  ./configure && \
-  make clean && \
-  make && \
-  make install
+RUN wget "https://docs.broadcom.com/docs-and-downloads/ethernet-network-adapters/NXE/BRCM_${BCM_DRIVER_VERSION}/bcm_${BCM_DRIVER_VERSION}.tar.gz" && \
+    tar -xvzf "bcm_${BCM_DRIVER_VERSION}.tar.gz" && \
+    tar -C /tmp -xf "${WORKDIR}/bcm_${BCM_DRIVER_VERSION}/drivers_linux/bnxt_rocelib/libbnxt_re-${BCM_LIBBNXT_RE_VERSION}.tar.gz" && \
+    cd "/tmp/libbnxt_re-${BCM_LIBBNXT_RE_VERSION}" && \
+    sh autogen.sh && \
+    ./configure && \
+    make clean && \
+    make && \
+    make install
   
 ################################################################################
 FROM base AS driver
 
-RUN dnf install -y wget rpm \
- && dnf clean all
+RUN PYTHONUNBUFFERED=1 dnf install -y wget rpm && \
+    dnf clean all
 
 # Add Oracle Linux RDMA repo to install rdma-core and libibverbs-utils
-RUN echo -e "[ol9-rdma]\n\
-name=Oracle Linux \$releasever RDMA Packages\n\
-baseurl=http://yum.oracle.com/repo/OracleLinux/OL9/RDMA/x86_64/\n\
-enabled=1\n\
-gpgcheck=0" > /etc/yum.repos.d/oracle_rdma.repo
+RUN cat <<'EOF' > /etc/yum.repos.d/oracle_rdma.repo
+[ol9-rdma]
+name=Oracle Linux $releasever RDMA Packages
+baseurl=http://yum.oracle.com/repo/OracleLinux/OL9/RDMA/x86_64/
+enabled=1
+gpgcheck=0
+EOF
 
-RUN dnf install -y dnf-plugins-core && \
+RUN PYTHONUNBUFFERED=1 dnf install -y dnf-plugins-core && \
     dnf clean all && \
     dnf makecache && \
     dnf install -y \
-      bzip2-libs \
-      libdrm \
-      libibverbs \
-      librdmacm \
-      rdma-core \
-      libibverbs-utils \
-      kmod \
-      pciutils && \
+        bzip2-libs \
+        libdrm \
+        libibverbs \
+        librdmacm \
+        rdma-core \
+        libibverbs-utils \
+        kmod \
+        pciutils && \
     dnf clean all && \
     rm -rf /var/cache/dnf && \
     ln -sf /usr/lib64/libbz2.so.1 /usr/lib64/libbz2.so.1.0 && \
@@ -133,33 +137,32 @@ RUN PYTHONUNBUFFERED=1 dnf install -y \
     xz-devel \
     sqlite-devel \
     wget \
-    tar \
-    && dnf clean all
+    tar && \
+    dnf clean all
 
 ARG PYTHON_VERSION
 RUN cd /tmp && \
-    wget https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz && \
-    tar -xzf Python-${PYTHON_VERSION}.tgz && \
-    cd Python-${PYTHON_VERSION} && \
+    wget "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz" && \
+    tar -xzf "Python-${PYTHON_VERSION}.tgz" && \
+    cd "Python-${PYTHON_VERSION}" && \
     ./configure --enable-optimizations --with-ensurepip=install && \
-    make -j $(nproc) && \
+    make && \
     make altinstall && \
     cd / && \
-    rm -rf /tmp/Python-${PYTHON_VERSION}*
+    rm -rf "/tmp/Python-${PYTHON_VERSION}"*
 
 # Create symbolic links for versioned and unversioned commands
-RUN ln -sf /usr/local/bin/python3.10 /usr/local/bin/python3 && \
-    ln -sf /usr/local/bin/python3.10 /usr/local/bin/python && \
-    ln -sf /usr/local/bin/pip3.10 /usr/local/bin/pip3 && \
-    ln -sf /usr/local/bin/pip3.10 /usr/local/bin/pip
+RUN ln -sf "/usr/local/bin/python${PYTHON_VERSION%.*}" /usr/local/bin/python3 && \
+    ln -sf "/usr/local/bin/python${PYTHON_VERSION%.*}" /usr/local/bin/python && \
+    ln -sf "/usr/local/bin/pip${PYTHON_VERSION%.*}" /usr/local/bin/pip3 && \
+    ln -sf "/usr/local/bin/pip${PYTHON_VERSION%.*}" /usr/local/bin/pip
 
 # Upgrade pip and install setuptools, wheel without version pinning
 # Python's bundled pip already knows which versions are compatible
-RUN python3.10 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Verify installation
 RUN python --version && \
-    python3 --version && \
     pip --version && \
     python -m pip list
 
@@ -181,19 +184,19 @@ RUN PYTHONUNBUFFERED=1 dnf -y update && \
 RUN --mount=type=secret,id=E2E_REPOSITORY_URL,env=E2E_REPOSITORY_URL \
     --mount=type=secret,id=E2E_REPOSITORY_ID,env=E2E_REPOSITORY_ID \
     --mount=type=secret,id=E2E_REPOSITORY_PWD,env=E2E_REPOSITORY_PWD \
-    python3 -m venv $WORKDIR/.venv && . $WORKDIR/.venv/bin/activate \
-    && pip install --no-cache --upgrade pip setuptools wheel \
-    && pip install --no-cache rebel_compiler=="$REBEL_COMPILER_VERSION" --extra-index-url "http://${E2E_REPOSITORY_ID}:${E2E_REPOSITORY_PWD}@${E2E_REPOSITORY_URL}/repository/pypi/simple" --trusted-host ${E2E_REPOSITORY_URL} \
-    && pip install --no-cache triton=="$TRITON_VERSION" --extra-index-url "http://${E2E_REPOSITORY_ID}:${E2E_REPOSITORY_PWD}@${E2E_REPOSITORY_URL}/repository/pypi/simple" --trusted-host ${E2E_REPOSITORY_URL} \
-    && pip install --no-cache torch=="$TORCH_VERSION" --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache torchvision=="$TORCHVISION_VERSION" --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache "numpy<2" \
-    && pip install --no-cache-dir pytest pytest-asyncio pytest-xdist
+    python -m venv "${WORKDIR}/.venv" && . "${WORKDIR}/.venv/bin/activate" && \
+    pip install --no-cache --upgrade pip setuptools wheel && \
+    pip install --no-cache rebel_compiler=="${REBEL_COMPILER_VERSION}" --extra-index-url "http://${E2E_REPOSITORY_ID}:${E2E_REPOSITORY_PWD}@${E2E_REPOSITORY_URL}/repository/pypi/simple" --trusted-host "${E2E_REPOSITORY_URL}" && \
+    pip install --no-cache triton=="${TRITON_VERSION}" --extra-index-url "http://${E2E_REPOSITORY_ID}:${E2E_REPOSITORY_PWD}@${E2E_REPOSITORY_URL}/repository/pypi/simple" --trusted-host "${E2E_REPOSITORY_URL}" && \
+    pip install --no-cache torch=="${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache torchvision=="${TORCHVISION_VERSION}" --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache "numpy<2" && \
+    pip install --no-cache-dir pytest pytest-asyncio pytest-xdist
 
-# REBEL SDK ENV
-ENV VIRTUAL_ENV="$WORKDIR/.venv"
-ENV PATH="$WORKDIR/.venv/bin:$PATH"
-ENV PYTHONPATH="$WORKDIR/.venv/lib/python3.10/site-packages"
+# RBLN SDK ENV
+ENV VIRTUAL_ENV="${WORKDIR}/.venv"
+ENV PATH="${WORKDIR}/.venv/bin:${PATH}"
+ENV PYTHONPATH="${WORKDIR}/.venv/lib/python${PYTHON_VERSION%.*}/site-packages"
 
 # vLLM-RBLN ENV
 ENV RBLN_KERNEL_MODE="triton" \
@@ -202,7 +205,7 @@ ENV RBLN_KERNEL_MODE="triton" \
     VLLM_DISABLE_COMPILE_CACHE="1"
 
 COPY ./entrypoint.sh /entrypoint.sh
-RUN chmod o+x /entrypoint.sh
-ENTRYPOINT [ "/bin/bash", "-c", "/entrypoint.sh || true; exec \"$@\"", "--" ]
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT [ "/entrypoint.sh" ]
 
 CMD ["/bin/bash"]
