@@ -80,21 +80,21 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
                                         kvcache_block_size: int) -> None:
     if vllm_config.scheduler_config.max_num_seqs != batch_size:
         logger.warning(
-            "Updating scheduler_config.max_num_seqs from %d to %d "
+            "Updating scheduler_config.max_num_seqs from %s to %s "
             "based on rbln_config.json",
             vllm_config.scheduler_config.max_num_seqs, batch_size)
         vllm_config.scheduler_config.max_num_seqs = batch_size
 
     if vllm_config.scheduler_config.max_num_batched_tokens != (max_model_len):
         logger.warning(
-            "Updating scheduler_config.max_num_batched_tokens from %d to "
+            "Updating scheduler_config.max_num_batched_tokens from %s to "
             "%d based on rbln_config.json",
             vllm_config.scheduler_config.max_num_batched_tokens, max_model_len)
         vllm_config.scheduler_config.max_num_batched_tokens = (max_model_len)
 
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.warning(
-            "Updating model_config.max_model_len from %d to %d "
+            "Updating model_config.max_model_len from %s to %s "
             "based on rbln_config.json",
             vllm_config.model_config.max_model_len, max_model_len)
         vllm_config.model_config.max_model_len = max_model_len
@@ -108,7 +108,7 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
                 and vllm_config.additional_config["attn_block_size"]
                 != kvcache_block_size):
             logger.warning(
-                "Updating attention block_size from %d to %d "
+                "Updating attention block_size from %s to %s "
                 "based on rbln_config.json",
                 vllm_config.additional_config["attn_block_size"],
                 kvcache_block_size)
@@ -116,7 +116,7 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
     else:
         if vllm_config.cache_config.block_size != kvcache_block_size:
             logger.warning(
-                "Updating model_cache_config.block_size from %d to %d "
+                "Updating model_cache_config.block_size from %s to %s "
                 "based on rbln_config.json",
                 vllm_config.cache_config.block_size, kvcache_block_size)
             vllm_config.cache_config.block_size = kvcache_block_size
