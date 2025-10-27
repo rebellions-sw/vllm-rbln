@@ -28,7 +28,8 @@ from vllm.utils import FlexibleArgumentParser, _StreamPlaceholder
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
-from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
+from vllm_rbln.utils.optimum import (get_qwen3_pooling, get_rbln_config,
+                                     is_enc_dec_arch, is_multi_modal,
                                      is_pooling_arch, sync_with_rbln_config)
 
 logger = init_logger(__name__)
@@ -206,8 +207,11 @@ class RblnPlatform(Platform):
                 "Pipeline parallelism is not supported in optimum-rbln.")
             assert vllm_config.speculative_config is None, (
                 "Speculative decoding is not supported in vLLM RBLN.")
-            cls.disable_unsupported_prefix_caching(vllm_config)
-            sync_with_rbln_config(vllm_config)
+            rbln_config = get_rbln_config(vllm_config)
+            is_qwen3_pooling = get_qwen3_pooling(rbln_config)
+            cls.disable_unsupported_prefix_caching(is_qwen3_pooling,
+                                                   vllm_config)
+            sync_with_rbln_config(vllm_config, rbln_config)
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -277,7 +281,7 @@ class RblnPlatform(Platform):
         vllm_config.cache_config.enable_prefix_caching = None
 
     @classmethod
-    def disable_unsupported_prefix_caching(cls,
+    def disable_unsupported_prefix_caching(cls, is_qwen3_pooling: bool,
                                            vllm_config: VllmConfig) -> None:
         """
         Currently, prefix caching is supported only for decoder-only models.
