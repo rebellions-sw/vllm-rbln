@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 else:
     VllmConfig = None
 from vllm_rbln.logger import init_logger
-from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
-                                     is_pooling_arch)
+
+from .registry import is_enc_dec_arch, is_multi_modal, is_pooling_arch
 
 logger = init_logger(__name__)
 
