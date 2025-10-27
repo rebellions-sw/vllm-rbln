@@ -12,9 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import os
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -31,8 +28,9 @@ from vllm.utils import FlexibleArgumentParser, _StreamPlaceholder
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
-from vllm_rbln.utils.optimum.registry import (is_enc_dec_arch, is_multi_modal,
-                                              is_pooling_arch)
+from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
+                                     is_pooling_arch)
+from vllm_rbln.utils.optimum.configuration import sync_with_rbln_config
 
 logger = init_logger(__name__)
 
@@ -209,7 +207,8 @@ class RblnPlatform(Platform):
                 "Pipeline parallelism is not supported in optimum-rbln.")
             assert vllm_config.speculative_config is None, (
                 "Speculative decoding is not supported in vLLM RBLN.")
-            cls.sync_with_rbln_config(vllm_config)
+            cls.disable_unsupported_prefix_caching(vllm_config)
+            sync_with_rbln_config(vllm_config)
 
         if (parallel_config.distributed_executor_backend is not None
                 and parallel_config.distributed_executor_backend != "mp"):
@@ -278,105 +277,11 @@ class RblnPlatform(Platform):
             "It has been automatically disabled.", reason)
         vllm_config.cache_config.enable_prefix_caching = None
 
-    def _get_rbln_params(vllm_config: VllmConfig,
-                         rbln_config: dict) -> tuple[int, int, int]:
-        if is_enc_dec_arch(vllm_config.model_config.hf_config):
-            max_seq_len = rbln_config.get("dec_max_seq_len")
-            kvcache_block_size = max_seq_len
-            batch_size = rbln_config.get("batch_size")
-        elif is_multi_modal(vllm_config.model_config.hf_config):
-            # Get configurations from main module (e.g. Qwen2.5-VL)
-            kvcache_block_size = rbln_config.get("kvcache_block_size")
-            batch_size = rbln_config.get("batch_size")
-            max_seq_len = rbln_config.get("max_seq_len")
-            # Get configurations from submodule
-            if kvcache_block_size is None:
-                submodules = ["language_model", "text_model"]
-                for submodule in submodules:
-                    if submodule in rbln_config:
-                        kvcache_block_size = rbln_config[submodule].get(
-                            "kvcache_block_size", None)
-                        batch_size = rbln_config[submodule].get(
-                            "batch_size", None)
-                        max_seq_len = rbln_config[submodule].get(
-                            "max_seq_len", None)
-                        if kvcache_block_size is not None:
-                            break
-
-        elif is_pooling_arch(vllm_config.model_config.hf_config):
-            max_seq_len = rbln_config.get("enc_max_seq_len")
-            if max_seq_len is None:
-                # e.g. bge-reranker case
-                max_seq_len = rbln_config.get("max_seq_len")
-            kvcache_block_size = max_seq_len
-            batch_size = rbln_config.get("batch_size")
-        else:
-            # decoder
-            kvcache_block_size = rbln_config.get("kvcache_block_size")
-            batch_size = rbln_config.get("batch_size")
-            max_seq_len = rbln_config.get("max_seq_len")
-
-        assert kvcache_block_size is not None, (
-            "kvcache_block_size must be specified in rbln_config.json")
-        assert batch_size is not None, (
-            "batch_size must be specified in rbln_config.json")
-        assert max_seq_len is not None, (
-            "max_seq_len must be specified in rbln_config.json")
-
-        return kvcache_block_size, batch_size, max_seq_len
 
     @classmethod
-    def _update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
-                                             batch_size: int,
-                                             max_model_len: int,
-                                             kvcache_block_size: int) -> None:
-        if vllm_config.scheduler_config.max_num_seqs != batch_size:
-            logger.warning(
-                "Updating scheduler_config.max_num_seqs from %d to %d "
-                "based on rbln_config.json",
-                vllm_config.scheduler_config.max_num_seqs, batch_size)
-            vllm_config.scheduler_config.max_num_seqs = batch_size
-
-        if vllm_config.scheduler_config.max_num_batched_tokens != (
-                max_model_len):
-            logger.warning(
-                "Updating scheduler_config.max_num_batched_tokens from %d to "
-                "%d based on rbln_config.json",
-                vllm_config.scheduler_config.max_num_batched_tokens,
-                max_model_len)
-            vllm_config.scheduler_config.max_num_batched_tokens = (
-                max_model_len)
-
-        if vllm_config.model_config.max_model_len != max_model_len:
-            logger.warning(
-                "Updating model_config.max_model_len from %d to %d "
-                "based on rbln_config.json",
-                vllm_config.model_config.max_model_len, max_model_len)
-            vllm_config.model_config.max_model_len = max_model_len
-
-    @classmethod
-    def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
-        rbln_config_path = Path(
-            os.path.join(vllm_config.model_config.model, "rbln_config.json"))
-        if not rbln_config_path.exists():
-            logger.warning(
-                "rbln_config.json not found in model directory: %s. "
-                "Using `block_size` from vllm_config.cache_config instead.",
-                rbln_config_path)
-            rbln_config = {}
-            kvcache_block_size = vllm_config.cache_config.block_size
-        else:
-            with open(rbln_config_path, encoding='utf-8') as f:
-                rbln_config = json.load(f)
-            kvcache_block_size, batch_size, max_model_len = \
-                cls._get_rbln_params(rbln_config)
-            cls._update_vllm_config_with_rbln_params(vllm_config, batch_size,
-                                                     max_model_len,
-                                                     kvcache_block_size)
-            vllm_config.scheduler_config.max_num_seqs = batch_size
-            vllm_config.scheduler_config.max_num_batched_tokens = max_model_len
-            vllm_config.model_config.max_model_len = max_model_len
-
+    def disable_unsupported_prefix_caching(cls,
+                                             vllm_config: VllmConfig) -> None:
+        """Currently, prefix caching is not supported for decoder-only models."""
         if vllm_config.cache_config.enable_prefix_caching:
             if is_enc_dec_arch(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config,
@@ -391,10 +296,3 @@ class RblnPlatform(Platform):
                              "use_sliding_window", True):
                 cls._disable_prefix_caching(vllm_config,
                                             "sliding window models")
-
-        if vllm_config.cache_config.enable_prefix_caching:
-            vllm_config.cache_config.block_size = 128
-            vllm_config.additional_config[
-                "attn_block_size"] = kvcache_block_size
-        else:
-            vllm_config.cache_config.block_size = kvcache_block_size
