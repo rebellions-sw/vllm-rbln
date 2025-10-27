@@ -288,8 +288,9 @@ class RblnPlatform(Platform):
         """
         if vllm_config.cache_config.enable_prefix_caching:
             if is_qwen3_pooling:
-                # Qwen3 does not support prefix caching for now.
-                cls._disable_prefix_caching(vllm_config, "Qwen3 models")
+                # Qwen3 pooling model does not support prefix caching for now.
+                cls._disable_prefix_caching(vllm_config,
+                                            "Qwen3 pooling models")
             elif is_enc_dec_arch(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config,
                                             "encoder-decoder models")
