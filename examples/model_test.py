@@ -67,7 +67,7 @@ from vllm import LLM, SamplingParams
 from vllm.transformers_utils.config import get_hf_text_config
 
 hf_overrides_kw = {
-    "num_hidden_layers": 1,
+    "num_hidden_layers": 2,
 }
 
 # update config of multi-modal language model num_hidden_layers
@@ -80,13 +80,27 @@ def custom_hf_overrides_kw(hf_config):
     return hf_config
 
 prompts = [
-    #"Hello, my name is",
-    #"The president of the United States is",
-    #"The financial minister of the United States is",
-    #"The future of AI is",
-    "The capital of France is",
+    # "Hello, my name is",
+    "The president of the United States is",
+    "The financial minister of the United States is",
+    "The future of AI is",
+    # "The capital of France is",
     #"The capital of UK is",
+    # " a b c d e f g"
 ]
+
+
+
+from transformers import AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-30B-A3B-Thinking-2507")
+# prompts = ["""You are an advanced reasoning assistant built for precise and structured thinking. Your task is to analyse user input carefully, decompose it into logical steps, identify assumptions, and provide a clear final answer. Use step-by-step reasoning when needed. Present your reasoning in numbered or bulleted form if helpful, then summarise your conclusion clearly. If the user’s request is ambiguous, ask a clarifying question instead of guessing. Use code blocks or tables when presenting structured information. At the end ask the user whether they’d like follow-up help or more detail.""" + " no pad" * 9]
+# prompts = ["You are a world-class knowledge assistant focused on clear and accurate responses. Carefully read the user’s request, ask clarifying questions if needed, then reason step by step. Use bullet points, numbered steps or headings to organise your answer when helpful. Provide examples, code snippets or diagrams if they improve understanding. At conclusion, summarise your key points in one concise paragraph, and offer to dive deeper if the user wishes. Begin by acknowledging the request. Begin by acknowledging the request. Begin by acknowledging the request. Begin by acknowledging the request. Begin by acknowledging the request. Begin by acknowledging the request. Begin by acknowledging the request. go"]
+
+# tokens = tokenizer(prompts[0])["input_ids"]
+# print(len(tokens))
+# exit()
+# import pdb; pdb.set_trace()
 
 
 import os
@@ -94,19 +108,22 @@ import os
 profile_dir = './profile/' + model_id.replace('/', '_')
 os.environ['VLLM_TORCH_PROFILER_DIR'] = profile_dir
 
+max_token = 3
+batch_size = 1
+n_iter = 4
 # Create a sampling params object.
-sampling_params = SamplingParams(temperature=0.0)
+sampling_params = SamplingParams(temperature=0.0, max_tokens=max_token, logprobs=5)
 warmup_sampling_params = SamplingParams(temperature=0.0, max_tokens=2)
 llm = LLM(
     model=model_id,
-    #hf_overrides=hf_overrides_kw,
+    hf_overrides=hf_overrides_kw,
     #hf_overrides=custom_hf_overrides_kw,
-    # max_model_len=40 * 1024,
-    max_model_len=8 * 1024,
-    block_size=1024,
+    max_model_len=40 * 1024,
+    # max_model_len=4 * 1024,
+    block_size=8192,
     enable_chunked_prefill=True,
     max_num_batched_tokens=128,
-    max_num_seqs=1,
+    max_num_seqs=batch_size,
     trust_remote_code=True,
     tensor_parallel_size=tensor_parallel_size,
     pipeline_parallel_size=pipeline_parallel_size,
@@ -116,17 +133,27 @@ llm = LLM(
 
 # 1. warmup -  The first run initializes the compiled models.
 # warmup will remove compilation time from profile results.
-llm.generate(".", warmup_sampling_params)
+# llm.generate(".", warmup_sampling_params)
 
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.
 
 # 2. vllm torch profiler will capture model inference time into profile directory
-llm.start_profile()
-outputs = llm.generate(prompts, sampling_params)
-llm.stop_profile()
-# Print the outputs.
-for output in outputs:
-    prompt = output.prompt
-    generated_text = output.outputs[0].text
-    print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+# llm.start_profile()
+all_outputs = []
+for i in range(n_iter):
+    outputs0 = llm.generate(prompts, sampling_params)
+    all_outputs.append(outputs0)
+# llm.stop_profile()
+    
+for outputs in all_outputs:
+    print(len(outputs[0].prompt_token_ids))
+    for j in range(batch_size):
+        print('batch : ', j)
+        for i in range(max_token):
+            print(outputs[j].outputs[0].logprobs[i])
+# # Print the outputs.
+# for output in outputs:
+#     prompt = output.prompt
+#     generated_text = output.outputs[0].text
+#     print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")

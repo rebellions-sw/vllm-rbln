@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from typing import Callable, Optional
-
+import os
 import torch
 import torch.nn.functional as F
 from vllm.distributed import get_dp_group
@@ -185,13 +185,25 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
 
     # selected_experts: (batch * sequence_length, top_k)
     _, selected_experts = torch.topk(routing_weights, k=top_k, dim=-1)
+        
+
+
+    # # (yhboo wa)
+    # s = torch.tensor([[i for i in range(top_k)]], dtype = torch.int64)
+    # selected_experts = selected_experts * 0 + s
+    # routing_weights = torch.ones_like(routing_weights)
 
     # masked_routing_weights == selected_weights w/ zeros for non selected indicies
     # selected_weights      = [..., top_k]
     # masked_routing_weights= [..., n_experts], selected_experts index has only value
+
     mask = torch.zeros_like(routing_weights, dtype=torch.float)
     un_mask = torch.ones_like(selected_experts, dtype=torch.float)
     mask = torch.scatter(mask, dim=1, index=selected_experts, src=un_mask)
+    
+    one_hot_expert_indices = torch.zeros_like(routing_weights, dtype=torch.int32) # [T, E]
+    un_mask = torch.ones_like(selected_experts, dtype = torch.int32)
+    one_hot_expert_indices.scatter_(1, selected_experts, un_mask)
 
     masked_routing_weights = routing_weights * mask
     if renormalize:  # only diff with mixtral sparse moe block!
@@ -202,7 +214,48 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     zeros = torch.zeros(n_expert, dtype=torch.int32)
     ones = torch.ones_like(selected_experts.view(-1), dtype=torch.int32)
     expert_select_count = torch.scatter_add(zeros, dim=0, index=selected_experts.view(-1), src=ones)
+    # expert_select_count = torch.scatter(zeros, dim=0, index=selected_experts.view(-1), src=ones)
 
+    c_list = []
+
+    # (test) if bound is 127, output differs when 127'th expert (P3 31th) is not selected
+    # (test) if bound is 126, output differs when 64~96'th experts (P2 ?) are not selected
+    # (test) if bound is 126, output same when 64~80'th experts (P2 ?) are not selected
+    # (test) if bound is 126, output same when 80~96'th experts (P2 ?) are not selected
+
+    # for i, one_pos in enumerate([30, 30, 30, 30]):
+    #     if i == 0:
+    #         c_list.append(torch.ones([one_pos], dtype = torch.int32))
+    #         c_list.append(torch.ones([1], dtype = torch.int32))
+    #         c_list.append(torch.zeros([32-one_pos-1], dtype = torch.int32))
+    #     elif i == 3:
+    #         c_list.append(torch.ones([one_pos], dtype = torch.int32))
+    #         c_list.append(torch.ones([1], dtype = torch.int32))
+    #         c_list.append(torch.ones([32-one_pos-1], dtype = torch.int32))
+    #     else:
+    #         c_list.append(torch.ones([one_pos], dtype = torch.int32))
+    #         c_list.append(torch.ones([1], dtype = torch.int32))
+    #         c_list.append(torch.ones([32-one_pos-1], dtype = torch.int32))
+    
+    # for i, one_pos in enumerate([13, 13, 13, 13]):
+    #     if i == 0:
+    #         c_list.append(torch.ones([one_pos], dtype = torch.int32))
+    #         c_list.append(torch.ones([1], dtype = torch.int32))
+    #         c_list.append(torch.zeros([15-one_pos-1], dtype = torch.int32))
+    #     elif i == 3:
+    #         c_list.append(torch.ones([one_pos], dtype = torch.int32))
+    #         c_list.append(torch.ones([1], dtype = torch.int32))
+    #         c_list.append(torch.ones([15-one_pos-1], dtype = torch.int32))
+    #     else:
+    #         c_list.append(torch.ones([one_pos], dtype = torch.int32))
+    #         c_list.append(torch.ones([1], dtype = torch.int32))
+    #         c_list.append(torch.ones([15-one_pos-1], dtype = torch.int32))
+
+    # c = torch.concat(c_list)
+    # expert_select_count = expert_select_count*0 + 1
+    # expert_select_count = expert_select_count * c
+
+    # print(os.getpid(), expert_map)
     # apply EP expert_map sharding into masked_routing_weights
     # E = n_exoerts
     # E'= E / ep_size
@@ -210,7 +263,7 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     if expert_map is not None:
         # expert_map out of bounds values is mapped into index(=n_expert-1) beyond E'
         # torch.scatter index dtype SHOULD be torch.int64
-        expert_map_within_bounds = torch.where(expert_map < 0, n_expert-1, expert_map).to(torch.int64)
+        expert_map_within_bounds = torch.where(expert_map < 0, n_expert-10, expert_map).to(torch.int64)
 
         # scatter routing weight
         zeros = torch.zeros_like(masked_routing_weights)
@@ -221,7 +274,48 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
         zeros = torch.zeros_like(expert_select_count, dtype=torch.int32)
         expert_select_count = torch.scatter(zeros, dim=0, index=expert_map_within_bounds, src=expert_select_count)
 
-    return masked_routing_weights, expert_select_count
+        ## TODO(jangys): migrate to custom op
+        T = masked_routing_weights.shape[0]
+        zeros = torch.zeros_like(masked_routing_weights, dtype = torch.int32)
+        one_hot_expert_indices = torch.scatter(zeros, dim=1, index=expert_map_within_bounds_, src=one_hot_expert_indices)
+        range = torch.arange(0, T, dtype=torch.int32).unsqueeze(1) # [T, 1]
+        updates = one_hot_expert_indices * range # [T, E]
+        pos = torch.cumsum(one_hot_expert_indices, dim=0) - one_hot_expert_indices # [T, E]
+        expert_indices = torch.zeros_like(updates, dtype=torch.int32).scatter_(dim=0, index=pos, src=updates)
+
+        # masked_routing_weights = masked_routing_weights[:, :32]
+        # expert_select_count = expert_select_count[:32]
+        # expert_indices = expert_indices[:, 32]
+        # masked_routing_weights[:, 32:] = 0
+        # expert_select_count[32:] = 0
+       
+        # wa
+        # expert_map += 1
+        # nonzero_indices = torch.nonzero(expert_map).squeeze(1)
+        # nonzero_begin = nonzero_indices[0]
+        # if expert_map[0] == 0:
+        #     nonzero_begin = 0
+        # elif expert_map[32] == 0:
+        #     nonzero_begin = 32
+        # elif expert_map[64] == 0:
+        #     nonzero_begin = 64
+        # else:
+        #     nonzero_begin = 96
+        # nonzero_begin = torch.nonzero(expert_map+1)[0,0]
+        # n_nonzero = nonzero_indices.shape[0]
+        
+        # nonzero_begin = 0
+        # n_nonzero = 32
+        # mr = masked_routing_weights[:, nonzero_begin:nonzero_begin+n_nonzero]        
+        # mrz = torch.zeros([masked_routing_weights.shape[0], 96])
+        # masked_routing_weights = torch.concat([mr, mrz], dim=1)
+
+        # me = expert_select_count[nonzero_begin:nonzero_begin+n_nonzero]
+        # mez = torch.zeros([95], dtype = torch.int32)
+        # mez2 = torch.ones([1], dtype = torch.int32)
+        # expert_select_count = torch.concat([me, mez, mez2], dim=0)
+
+    return masked_routing_weights, expert_select_count, expert_indices
 
 def unquantized_fused_moe_method_forward_rbln_custom(
     self,
@@ -261,15 +355,28 @@ def unquantized_fused_moe_method_forward_rbln_custom(
     hidden_states = x.reshape(num_tokens, -1)
     router_logits = router_logits.reshape(num_tokens, -1)
 
-    # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/qwen3_moe_architecture.py
-    masked_routing_weights, expert_select_count = get_masked_routing_weights(router_logits, top_k, renormalize, expert_map)
+    masked_routing_weights, expert_select_count, ei = get_masked_routing_weights(router_logits, top_k, renormalize, expert_map)
+    
+    # topk_v, topk_ids = torch.topk(router_logits, k=8, dim=1)
+    # print('########################')
+    # print('expert map : ')
+    # print('0 : ', expert_select_count[:32], ', ', torch.sum(expert_select_count[:32]))
+    # # print('1 : ', expert_select_count[32:64])
+    # # print('2 : ', expert_select_count[64:96])
+    # # print('3 : ', expert_select_count[96:])
+    # # print('########################')
+    # # print('########################')
+    # # print('########################')
+    # print('########################')
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
         hidden_states,
         gate_proj_weight,
         up_proj_weight,
         down_proj_weight,
         masked_routing_weights,
-        expert_select_count)
+        expert_select_count,
+        ei
+        )
     return final_hidden_states.reshape(orig_shape)
 
 
