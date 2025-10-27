@@ -355,7 +355,7 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
             type="pixel_values_videos",
             pixel_values_videos=pixel_values_videos,
             video_grid_thw=video_grid_thw,
-            second_per_grid_ts=second_per_grid_ts.squeeze(0))
+            second_per_grid_ts=second_per_grid_ts.squeeze(1))
 
     def _create_video_embedding_inputs(self, video_embeds, video_grid_thw):
         return Qwen2_5_VLVideoEmbeddingInputs(type="video_embeds",
