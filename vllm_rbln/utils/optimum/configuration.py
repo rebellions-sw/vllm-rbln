@@ -35,7 +35,7 @@ def get_rbln_params(vllm_config: VllmConfig,
         kvcache_block_size = max_seq_len
         batch_size = rbln_config.get("batch_size")
     elif is_multi_modal(vllm_config.model_config.hf_config):
-        # Get configurations from main module (e.g. Qwen2.5-VL, Whissper)
+        # Get configurations from main module (e.g. Qwen2.5-VL, Whisper)
         kvcache_block_size = rbln_config.get("kvcache_block_size")
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
