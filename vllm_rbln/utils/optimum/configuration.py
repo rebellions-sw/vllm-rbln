@@ -132,6 +132,8 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
             rbln_config_path)
         rbln_config = {}
         kvcache_block_size = vllm_config.cache_config.block_size
+        batch_size = vllm_config.scheduler_config.max_num_seqs
+        max_model_len = vllm_config.model_config.max_model_len
     else:
         with open(rbln_config_path, encoding='utf-8') as f:
             rbln_config = json.load(f)
