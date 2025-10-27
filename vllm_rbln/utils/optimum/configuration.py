@@ -1,22 +1,21 @@
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
-
-import torch
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vllm.config import ModelConfig, VllmConfig
+    from vllm.config import VllmConfig
 else:
     VllmConfig = None
-from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
-                                              is_pooling_arch)
 from vllm_rbln.logger import init_logger
+from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
+                                     is_pooling_arch)
 
 logger = init_logger(__name__)
 
+
 def get_rbln_params(vllm_config: VllmConfig,
-                        rbln_config: dict) -> tuple[int, int, int]:
+                    rbln_config: dict) -> tuple[int, int, int]:
     if is_enc_dec_arch(vllm_config.model_config.hf_config):
         max_seq_len = rbln_config.get("dec_max_seq_len")
         kvcache_block_size = max_seq_len
@@ -33,8 +32,7 @@ def get_rbln_params(vllm_config: VllmConfig,
                 if submodule in rbln_config:
                     kvcache_block_size = rbln_config[submodule].get(
                         "kvcache_block_size", None)
-                    batch_size = rbln_config[submodule].get(
-                        "batch_size", None)
+                    batch_size = rbln_config[submodule].get("batch_size", None)
                     max_seq_len = rbln_config[submodule].get(
                         "max_seq_len", None)
                     if kvcache_block_size is not None:
@@ -62,10 +60,10 @@ def get_rbln_params(vllm_config: VllmConfig,
 
     return kvcache_block_size, batch_size, max_seq_len
 
+
 def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
-                                            batch_size: int,
-                                            max_model_len: int,
-                                            kvcache_block_size: int) -> None:
+                                        batch_size: int, max_model_len: int,
+                                        kvcache_block_size: int) -> None:
     if vllm_config.scheduler_config.max_num_seqs != batch_size:
         logger.warning(
             "Updating scheduler_config.max_num_seqs from %d to %d "
@@ -73,15 +71,12 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
             vllm_config.scheduler_config.max_num_seqs, batch_size)
         vllm_config.scheduler_config.max_num_seqs = batch_size
 
-    if vllm_config.scheduler_config.max_num_batched_tokens != (
-            max_model_len):
+    if vllm_config.scheduler_config.max_num_batched_tokens != (max_model_len):
         logger.warning(
             "Updating scheduler_config.max_num_batched_tokens from %d to "
             "%d based on rbln_config.json",
-            vllm_config.scheduler_config.max_num_batched_tokens,
-            max_model_len)
-        vllm_config.scheduler_config.max_num_batched_tokens = (
-            max_model_len)
+            vllm_config.scheduler_config.max_num_batched_tokens, max_model_len)
+        vllm_config.scheduler_config.max_num_batched_tokens = (max_model_len)
 
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.warning(
@@ -93,16 +88,17 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
     if vllm_config.cache_config.enable_prefix_caching:
         if vllm_config.cache_config.block_size != 128:
             logger.warning(
-                "The block size is set to 128 for prefix caching in RBLN."
-            )
+                "The block size is set to 128 for prefix caching in RBLN.")
         vllm_config.cache_config.block_size = 128
         # Check if attn_block_size is set and matches kvcache_block_size
-        if ("attn_block_size" in vllm_config.additional_config and 
-            vllm_config.additional_config["attn_block_size"] != kvcache_block_size):
+        if ("attn_block_size" in vllm_config.additional_config
+                and vllm_config.additional_config["attn_block_size"]
+                != kvcache_block_size):
             logger.warning(
                 "Updating attention block_size from %d to %d "
                 "based on rbln_config.json",
-                vllm_config.additional_config["attn_block_size"], kvcache_block_size)
+                vllm_config.additional_config["attn_block_size"],
+                kvcache_block_size)
         vllm_config.additional_config["attn_block_size"] = kvcache_block_size
     else:
         if vllm_config.cache_config.block_size != kvcache_block_size:
@@ -128,8 +124,6 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
             rbln_config = json.load(f)
         kvcache_block_size, batch_size, max_model_len = \
             get_rbln_params(vllm_config, rbln_config)
-    
-    
-    update_vllm_config_with_rbln_params(vllm_config, batch_size,
-                                                    max_model_len,
-                                                    kvcache_block_size)
+
+    update_vllm_config_with_rbln_params(vllm_config, batch_size, max_model_len,
+                                        kvcache_block_size)

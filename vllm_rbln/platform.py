@@ -29,8 +29,7 @@ from vllm.utils import FlexibleArgumentParser, _StreamPlaceholder
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
-                                     is_pooling_arch)
-from vllm_rbln.utils.optimum.configuration import sync_with_rbln_config
+                                     is_pooling_arch, sync_with_rbln_config)
 
 logger = init_logger(__name__)
 
@@ -277,11 +276,12 @@ class RblnPlatform(Platform):
             "It has been automatically disabled.", reason)
         vllm_config.cache_config.enable_prefix_caching = None
 
-
     @classmethod
     def disable_unsupported_prefix_caching(cls,
-                                             vllm_config: VllmConfig) -> None:
-        """Currently, prefix caching is not supported for decoder-only models."""
+                                           vllm_config: VllmConfig) -> None:
+        """
+        Currently, prefix caching is supported only for decoder-only models.
+        """
         if vllm_config.cache_config.enable_prefix_caching:
             if is_enc_dec_arch(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config,
