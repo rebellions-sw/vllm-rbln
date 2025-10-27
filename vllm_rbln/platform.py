@@ -35,8 +35,8 @@ from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
 logger = init_logger(__name__)
 
 
-def bypass_backend(graph_module: "torch.fx.GraphModule"):
-    return graph_module.forward
+def bypass_backend(gm: torch.fx.GraphModule, example_inputs):
+    return gm.forward
 
 
 register_backend(name="bypass", compiler_fn=bypass_backend)
@@ -55,10 +55,7 @@ class RblnPlatform(Platform):
     ray_device_key: str = "RBLN"
     # Disables torch.compile when using vLLM’s original functions
     # (e.g., batched_count_greater_than in the sampler).
-    if envs.VLLM_RBLN_USE_VLLM_MODEL:
-        simple_compile_backend = "bypass"
-    else:
-        simple_compile_backend = "eager"
+    simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
     current_stream = _StreamPlaceholder
 
