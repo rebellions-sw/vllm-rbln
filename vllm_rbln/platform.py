@@ -278,8 +278,8 @@ class RblnPlatform(Platform):
             "It has been automatically disabled.", reason)
         vllm_config.cache_config.enable_prefix_caching = None
 
-    def get_rbln_params(vllm_config: VllmConfig,
-                        rbln_config: dict) -> tuple[int, int, int]:
+    def _get_rbln_params(vllm_config: VllmConfig,
+                         rbln_config: dict) -> tuple[int, int, int]:
         if is_enc_dec_arch(vllm_config.model_config.hf_config):
             max_seq_len = rbln_config.get("dec_max_seq_len")
             kvcache_block_size = max_seq_len
@@ -326,6 +326,35 @@ class RblnPlatform(Platform):
         return kvcache_block_size, batch_size, max_seq_len
 
     @classmethod
+    def _update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
+                                             batch_size: int,
+                                             max_model_len: int,
+                                             kvcache_block_size: int) -> None:
+        if vllm_config.scheduler_config.max_num_seqs != batch_size:
+            logger.warning(
+                "Updating scheduler_config.max_num_seqs from %d to %d "
+                "based on rbln_config.json",
+                vllm_config.scheduler_config.max_num_seqs, batch_size)
+            vllm_config.scheduler_config.max_num_seqs = batch_size
+
+        if vllm_config.scheduler_config.max_num_batched_tokens != (
+                max_model_len):
+            logger.warning(
+                "Updating scheduler_config.max_num_batched_tokens from %d to "
+                "%d based on rbln_config.json",
+                vllm_config.scheduler_config.max_num_batched_tokens,
+                max_model_len)
+            vllm_config.scheduler_config.max_num_batched_tokens = (
+                max_model_len)
+
+        if vllm_config.model_config.max_model_len != max_model_len:
+            logger.warning(
+                "Updating model_config.max_model_len from %d to %d "
+                "based on rbln_config.json",
+                vllm_config.model_config.max_model_len, max_model_len)
+            vllm_config.model_config.max_model_len = max_model_len
+
+    @classmethod
     def sync_with_rbln_config(cls, vllm_config: VllmConfig) -> None:
         rbln_config_path = Path(
             os.path.join(vllm_config.model_config.model, "rbln_config.json"))
@@ -339,8 +368,11 @@ class RblnPlatform(Platform):
         else:
             with open(rbln_config_path, encoding='utf-8') as f:
                 rbln_config = json.load(f)
-            kvcache_block_size, batch_size, max_model_len = cls.get_rbln_params(
-                vllm_config, rbln_config)
+            kvcache_block_size, batch_size, max_model_len = \
+                cls._get_rbln_params(rbln_config)
+            cls._update_vllm_config_with_rbln_params(vllm_config, batch_size,
+                                                     max_model_len,
+                                                     kvcache_block_size)
             vllm_config.scheduler_config.max_num_seqs = batch_size
             vllm_config.scheduler_config.max_num_batched_tokens = max_model_len
             vllm_config.model_config.max_model_len = max_model_len
