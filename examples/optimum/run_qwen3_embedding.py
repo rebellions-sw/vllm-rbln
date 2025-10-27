@@ -82,7 +82,7 @@ async def main(
                     engine,
                     prompt=p,
                     model=model_id,
-                    requst_id=i,
+                    request_id=i,
                 )))
 
     outputs = await asyncio.gather(*futures)
