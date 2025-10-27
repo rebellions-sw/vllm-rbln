@@ -283,7 +283,10 @@ class RblnPlatform(Platform):
         Currently, prefix caching is supported only for decoder-only models.
         """
         if vllm_config.cache_config.enable_prefix_caching:
-            if is_enc_dec_arch(vllm_config.model_config.hf_config):
+            if is_qwen3_pooling:
+                # Qwen3 does not support prefix caching for now.
+                cls._disable_prefix_caching(vllm_config, "Qwen3 models")
+            elif is_enc_dec_arch(vllm_config.model_config.hf_config):
                 cls._disable_prefix_caching(vllm_config,
                                             "encoder-decoder models")
             elif is_multi_modal(vllm_config.model_config.hf_config):

@@ -75,13 +75,13 @@ def get_input_prompts(model_id, max_length, suffix_tokens,
 
 
 async def generate(engine: AsyncLLMEngine, prompt_tokens: list[int],
-                   model: str, requst_id: int, true_token: int,
+                   model: str, request_id: int, true_token: int,
                    false_token: int):
-    print(f"generate request_id={requst_id}, prompt_tokens={prompt_tokens}")
+    print(f"generate request_id={request_id}, prompt_tokens={prompt_tokens}")
     example_input = {
         "stream": True,
         "temperature": 0.0,
-        "request_id": str(requst_id),
+        "request_id": str(request_id),
     }
 
     sampling_params = SamplingParams(

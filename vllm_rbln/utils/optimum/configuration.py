@@ -35,10 +35,12 @@ def get_rbln_params(vllm_config: VllmConfig,
         kvcache_block_size = max_seq_len
         batch_size = rbln_config.get("batch_size")
     elif is_multi_modal(vllm_config.model_config.hf_config):
-        # Get configurations from main module (e.g. Qwen2.5-VL)
+        # Get configurations from main module (e.g. Qwen2.5-VL, Whissper)
         kvcache_block_size = rbln_config.get("kvcache_block_size")
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
+        if max_seq_len is None:  # Whisper FIXME to be moved to enc-dec
+            max_seq_len = rbln_config.get("dec_max_seq_len")
         # Get configurations from submodule
         if kvcache_block_size is None:
             submodules = ["language_model", "text_model"]
