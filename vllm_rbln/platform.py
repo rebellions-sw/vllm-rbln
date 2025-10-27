@@ -35,8 +35,8 @@ from vllm_rbln.utils.optimum import (is_enc_dec_arch, is_multi_modal,
 logger = init_logger(__name__)
 
 
-def bypass_backend(gm: torch.fx.GraphModule, example_inputs):
-    return gm.forward
+def bypass_backend(graph_module: torch.fx.GraphModule, example_inputs):
+    return graph_module.forward
 
 
 register_backend(name="bypass", compiler_fn=bypass_backend)
