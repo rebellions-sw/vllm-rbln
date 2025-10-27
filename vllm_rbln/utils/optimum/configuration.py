@@ -23,7 +23,8 @@ else:
     VllmConfig = None
 from vllm_rbln.logger import init_logger
 
-from .registry import is_enc_dec_arch, is_multi_modal, is_pooling_arch
+from .registry import (get_rbln_model_info, is_enc_dec_arch, is_multi_modal,
+                       is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -121,11 +122,10 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
             vllm_config.cache_config.block_size = kvcache_block_size
 
 
-def get_qwen3_pooling(rbln_config: Optional[dict]) -> bool:
-    if rbln_config is None:
-        return False
-    is_qwen3_pooling = rbln_config.get("cls_name") == "RBLNQwen3ModelConfig"
-    return is_qwen3_pooling
+def is_qwen3_pooling(vllm_config: VllmConfig, ) -> bool:
+    _, model_cls_name = get_rbln_model_info(vllm_config.model_config)
+    return model_cls_name in ["RBLNQwen3ForCausalLM"
+                              ] and vllm_config.model_config.task == "embed"
 
 
 def get_rbln_config(vllm_config: VllmConfig) -> Optional[dict]:
@@ -142,9 +142,8 @@ def get_rbln_config(vllm_config: VllmConfig) -> Optional[dict]:
     return rbln_config
 
 
-def sync_with_rbln_config(vllm_config: VllmConfig,
-                          rbln_config: Optional[dict]) -> None:
-
+def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
+    rbln_config = get_rbln_config(vllm_config)
     if rbln_config is None:
         kvcache_block_size = vllm_config.cache_config.block_size
         batch_size = vllm_config.scheduler_config.max_num_seqs
