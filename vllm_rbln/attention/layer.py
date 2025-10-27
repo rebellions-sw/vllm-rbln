@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import importlib.util
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -30,12 +30,14 @@ from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
 
+from vllm_rbln.attention.backends.flash_attention import RBLNAttentionMetadata
+
 # @FIXME(RBLN): We hope to remove the Custom Attention forward.
 # The original vLLM forward function will be used in the future.
 
 
 def __custom_init__(
-    self,
+    self: Attention,
     num_heads: int,
     head_size: int,
     scale: float,
@@ -206,7 +208,7 @@ def __custom_init__(
 
 
 def custom_attention_forward(
-    self,
+    self: Attention,
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -252,6 +254,7 @@ def custom_attention_forward(
             attn_metadata = forward_context.attn_metadata
             if isinstance(attn_metadata, dict):
                 attn_metadata = attn_metadata[self.layer_name]
+            assert isinstance(attn_metadata, RBLNAttentionMetadata)
             """
             NOTE(jiwoo.park) - To represent kv cache as model input,
             modify attention
@@ -282,6 +285,7 @@ def custom_attention_forward(
             attn_metadata = forward_context.attn_metadata
             if isinstance(attn_metadata, dict):
                 attn_metadata = attn_metadata[self.layer_name]
+            assert isinstance(attn_metadata, RBLNAttentionMetadata)
             """
             NOTE(jiwoo.park) - To represent kv cache as model input,
             modify attention
