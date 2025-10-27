@@ -45,13 +45,13 @@ def get_input_prompts() -> list[str]:
 
 
 async def embed(engine: AsyncLLMEngine, prompt: str, model: str,
-                requst_id: int):
-    print(f"embed request_id={requst_id}, prompt={prompt}")
-    pooling_params = PoolingParams()
+                request_id: int):
+    print(f"embed request_id={request_id}, prompt={prompt}")
+    pooling_params = PoolingParams(task="embed")
     results_generator = engine.encode(
         prompt,
         pooling_params,
-        str(requst_id),
+        str(request_id),
     )
 
     # get the results
@@ -82,7 +82,7 @@ async def main(
                     engine,
                     prompt=p,
                     model=model_id,
-                    requst_id=i,
+                    request_id=i,
                 )))
 
     outputs = await asyncio.gather(*futures)

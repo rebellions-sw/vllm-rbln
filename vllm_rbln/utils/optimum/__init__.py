@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from vllm_rbln.utils.optimum.configuration import sync_with_rbln_config
+from vllm_rbln.utils.optimum.configuration import (is_qwen3_pooling,
+                                                   sync_with_rbln_config)
 from vllm_rbln.utils.optimum.registry import (is_enc_dec_arch, is_multi_modal,
                                               is_pooling_arch)
 
@@ -20,5 +21,6 @@ __all__ = [
     "is_enc_dec_arch",
     "is_multi_modal",
     "is_pooling_arch",
+    "is_qwen3_pooling",
     "sync_with_rbln_config",
 ]

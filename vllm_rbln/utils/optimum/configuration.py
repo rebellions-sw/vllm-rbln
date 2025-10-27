@@ -15,7 +15,7 @@
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
@@ -23,7 +23,8 @@ else:
     VllmConfig = None
 from vllm_rbln.logger import init_logger
 
-from .registry import is_enc_dec_arch, is_multi_modal, is_pooling_arch
+from .registry import (get_rbln_model_info, is_enc_dec_arch, is_multi_modal,
+                       is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -35,10 +36,12 @@ def get_rbln_params(vllm_config: VllmConfig,
         kvcache_block_size = max_seq_len
         batch_size = rbln_config.get("batch_size")
     elif is_multi_modal(vllm_config.model_config.hf_config):
-        # Get configurations from main module (e.g. Qwen2.5-VL)
+        # Get configurations from main module (e.g. Qwen2.5-VL, Whisper)
         kvcache_block_size = rbln_config.get("kvcache_block_size")
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
+        if max_seq_len is None:  # Whisper FIXME to be moved to enc-dec
+            max_seq_len = rbln_config.get("dec_max_seq_len")
         # Get configurations from submodule
         if kvcache_block_size is None:
             submodules = ["language_model", "text_model"]
@@ -119,21 +122,37 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
             vllm_config.cache_config.block_size = kvcache_block_size
 
 
-def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
+def is_qwen3_pooling(vllm_config: VllmConfig, ) -> bool:
+    _, model_cls_name = get_rbln_model_info(vllm_config.model_config)
+    return model_cls_name in ["RBLNQwen3ForCausalLM"
+                              ] and vllm_config.model_config.task == "embed"
+
+
+def get_rbln_config(vllm_config: VllmConfig) -> Optional[dict]:
     rbln_config_path = Path(
         os.path.join(vllm_config.model_config.model, "rbln_config.json"))
-    if not rbln_config_path.exists():
+    if not rbln_config_path.exists():  # for pytest
         logger.warning(
             "rbln_config.json not found in model directory: %s. "
             "Using `block_size` from vllm_config.cache_config instead.",
             rbln_config_path)
-        rbln_config = {}
+        return None
+    with open(rbln_config_path, encoding='utf-8') as f:
+        rbln_config = json.load(f)
+    return rbln_config
+
+
+def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
+    try:
+        rbln_config = get_rbln_config(vllm_config)
+    except Exception as e:
+        raise RuntimeError("Failed to get RBLN config: %s", e) from e
+
+    if rbln_config is None:
         kvcache_block_size = vllm_config.cache_config.block_size
         batch_size = vllm_config.scheduler_config.max_num_seqs
         max_model_len = vllm_config.model_config.max_model_len
     else:
-        with open(rbln_config_path, encoding='utf-8') as f:
-            rbln_config = json.load(f)
         kvcache_block_size, batch_size, max_model_len = \
             get_rbln_params(vllm_config, rbln_config)
 

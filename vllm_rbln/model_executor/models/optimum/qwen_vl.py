@@ -351,11 +351,17 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
         if second_per_grid_ts is None:
             raise ValueError(
                 "second_per_grid_ts is required for Qwen2.5-VL video inputs.")
+        if envs.VLLM_USE_V1:
+            # [num_videos, 1] -> [num_videos]
+            second_per_grid_ts = second_per_grid_ts.squeeze(1)
+        else:
+            # [1, num_videos] -> [num_videos]
+            second_per_grid_ts = second_per_grid_ts.squeeze(0)
         return Qwen2_5_VLVideoPixelInputs(
             type="pixel_values_videos",
             pixel_values_videos=pixel_values_videos,
             video_grid_thw=video_grid_thw,
-            second_per_grid_ts=second_per_grid_ts.squeeze(0))
+            second_per_grid_ts=second_per_grid_ts)
 
     def _create_video_embedding_inputs(self, video_embeds, video_grid_thw):
         return Qwen2_5_VLVideoEmbeddingInputs(type="video_embeds",
