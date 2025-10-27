@@ -16,8 +16,9 @@ from typing import Optional, Tuple
 
 import torch
 from vllm.model_executor.layers.rotary_embedding import (
-    DeepseekScalingRotaryEmbedding, RotaryEmbedding, _rotate_gptj,
-    _rotate_neox)
+    DeepseekScalingRotaryEmbedding, RotaryEmbedding)
+from vllm.model_executor.layers.rotary_embedding.common import (rotate_gptj,
+                                                                rotate_neox)
 
 rope_original__init__ = RotaryEmbedding.__init__
 
@@ -71,7 +72,7 @@ def rope_forward_oot(
     positions = positions.flatten()
     num_tokens = positions.shape[0]
 
-    rotate_fn = _rotate_neox if self.is_neox_style else _rotate_gptj
+    rotate_fn = rotate_neox if self.is_neox_style else rotate_gptj
 
     cos = self.cos_cache.index_select(0, positions)
     sin = self.sin_cache.index_select(0, positions)
@@ -139,7 +140,7 @@ def deepseek_scaling_rope_forward(
         sin = torch.stack([sin, sin],
                           dim=-1).reshape(cos_sin.shape).unsqueeze(-2)
 
-    rotate_fn = _rotate_neox if self.is_neox_style else _rotate_gptj
+    rotate_fn = rotate_neox if self.is_neox_style else rotate_gptj
     query_rot = query_rot * cos + rotate_fn(query_rot) * sin
     key_rot = key_rot * cos + rotate_fn(key_rot) * sin
 

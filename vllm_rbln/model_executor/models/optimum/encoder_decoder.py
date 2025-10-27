@@ -14,6 +14,7 @@
 from typing import List, Optional, Union
 
 import torch
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
@@ -116,8 +117,13 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
                 **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
-        is_prompt = model_input.sampling_metadata.num_prompts > 0
         block_tables = model_input.block_tables
+
+        if envs.VLLM_USE_V1:
+            is_prompt = model_input.is_prompt
+        else:
+            is_prompt = model_input.sampling_metadata.num_prompts > 0
+
         valid_block_ids = [
             block_table[0].item() for block_table in block_tables
         ]

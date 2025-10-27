@@ -77,12 +77,7 @@ async def main(
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  max_model_len=max_seq_len,
-                                  block_size=max_seq_len)
+    engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt = get_input_prompts(num_prompts=num_input_prompt)
@@ -109,8 +104,7 @@ def entry_point(
     num_input_prompt: int = 10,
     model_id: str = "/rbln_bart-small_batch2",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             batch_size=batch_size,
             max_seq_len=max_seq_len,

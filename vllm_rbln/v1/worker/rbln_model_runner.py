@@ -674,14 +674,14 @@ class RBLNModelRunner:
     def _compile_model(self, model):
         options = {
             "compile_context": self.compile_context,
-            "tensor_parallel_size": envs.RBLN_TP_SIZE,
+            "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
                         "the cached compiled binary will be reused.")
-            options["cache_dir"] = ("./rsd_cache_dir" if envs.RBLN_TP_SIZE > 1
-                                    else "./cache_dir")
-        if envs.RBLN_COMPILE_STRICT_MODE:
+            options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
+                                    > 1 else "./cache_dir")
+        if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
         # compile compute_logits
@@ -1451,7 +1451,7 @@ class RBLNModelRunner:
         prepare_communication_buffer_for_model(self.model)
 
         self.model.eval()
-        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+        if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
             self.model_executable = self.model
         else:
             # NOTE - refer to pytorch 2.5 release notes
@@ -1791,7 +1791,7 @@ class RBLNModelRunner:
             self.kv_caches,
         )
 
-        if not self.model_config.enforce_eager and envs.RBLN_COMPILE_MODEL:
+        if not self.model_config.enforce_eager and envs.VLLM_RBLN_COMPILE_MODEL:
             for kv_cache in self.kv_caches:
                 self.compile_context.mark_static_address(kv_cache)
 

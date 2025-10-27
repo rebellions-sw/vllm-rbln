@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
+import os
 
 import fire
 from datasets import load_dataset
@@ -43,7 +44,7 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
                        skip_special_tokens=True,
                        stop_token_ids=[tokenizer.eos_token_id],
                        max_tokens=448),
-        request_id,
+        str(request_id),
     )
 
     final_output = None
@@ -59,11 +60,6 @@ async def main(
     model_id: str,
 ):
     engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  max_model_len=max_seq_len,
-                                  block_size=max_seq_len,
                                   limit_mm_per_prompt={"audio": 1})
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -94,8 +90,7 @@ def entry_point(
     num_input_prompt: int = 1,
     model_id: str = "/whisper-base-b4-wo-token-timestamps",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
             batch_size=batch_size,
             max_seq_len=max_seq_len,
@@ -105,4 +100,9 @@ def entry_point(
 
 
 if __name__ == "__main__":
+    # NOTE To avoid multiprocessing issues
+    # `VLLM_WORKER_MULTIPROC_METHOD` must be set to "spawn".
+    # for both V0 and V1.
+    # https://github.com/vllm-project/vllm/issues/26581
+    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     fire.Fire(entry_point)

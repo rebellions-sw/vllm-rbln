@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 from vllm import SamplingParams, TextPrompt
 from vllm.config import (CacheConfig, LoRAConfig, ModelConfig, SchedulerConfig,
-                         VllmConfig)
+                         VllmConfig, set_current_vllm_config)
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.entrypoints.openai.api_server import (
     build_async_engine_client_from_engine_args)
@@ -169,14 +169,15 @@ class MockModelWrapper(nn.Module):
 
 
 def fake_load_model(self):
-    self.model = MockModelWrapper()
-    self.use_optimum_lora = True
-    self.valid_lora_ids = list(range(NUM_LORAS + 1))
-    self.model.kv_block_adapter = KVCacheBlockAdapter(
-        vllm_config=get_vllm_config(),
-        estimated_kvcache_num_blocks=NUM_BLOCKS + 1,
-    )
-    self.valid_lora_ids = list(range(NUM_LORAS + 1))
+    with set_current_vllm_config(self.vllm_config, check_compile=False):
+        self.model = MockModelWrapper()
+        self.use_optimum_lora = True
+        self.valid_lora_ids = list(range(NUM_LORAS + 1))
+        self.model.kv_block_adapter = KVCacheBlockAdapter(
+            vllm_config=get_vllm_config(),
+            estimated_kvcache_num_blocks=NUM_BLOCKS + 1,
+        )
+        self.valid_lora_ids = list(range(NUM_LORAS + 1))
 
 
 def clear_global_vars():
@@ -229,6 +230,7 @@ async def list_loras():
 @pytest.mark.asyncio
 async def test_add_lora_v0(monkeypatch):
     clear_global_vars()
+    monkeypatch.setenv("VLLM_USE_V1", "0")
     monkeypatch.setattr(V0_PATH, fake_load_model)
     await add_lora()
     validate_vars()

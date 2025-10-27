@@ -23,11 +23,11 @@ from typing import Any, Optional, Union
 
 from vllm import LLM, EngineArgs
 
-from vllm_rbln.rbln_envs import RBLN_USE_VLLM_MODEL
+from vllm_rbln.rbln_envs import VLLM_RBLN_USE_VLLM_MODEL
 
 
 def get_llm_instance(engine_args: EngineArgs) -> LLM:
-    if not RBLN_USE_VLLM_MODEL:
+    if not VLLM_RBLN_USE_VLLM_MODEL:
         compiled_model_path = engine_args.model
         if not os.path.exists(compiled_model_path):
             raise ValueError(

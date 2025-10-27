@@ -90,12 +90,7 @@ async def main(
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  max_model_len=max_seq_len,
-                                  block_size=kvcache_partition_len)
+    engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -126,13 +121,14 @@ def entry_point(
     num_input_prompt: int = 10,
     model_id: str = "/gemma3-4b-conditional-b4-flash",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
-        main(batch_size=batch_size,
-             max_seq_len=max_seq_len,
-             kvcache_partition_len=kvcache_partition_len,
-             num_input_prompt=num_input_prompt,
-             model_id=model_id))
+    asyncio.run(
+        main(
+            batch_size=batch_size,
+            max_seq_len=max_seq_len,
+            kvcache_partition_len=kvcache_partition_len,
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        ))
 
 
 if __name__ == "__main__":
