@@ -26,13 +26,14 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForTextGeneration)
+from vllm.model_executor.models.utils import flatten_bn
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 from .optimum_attention import (HybridAttentionImageManager,
                                 HybridAttentionImageStrategy)
-from vllm.model_executor.models.utils import flatten_bn
+
 logger = init_logger(__name__)
 
 

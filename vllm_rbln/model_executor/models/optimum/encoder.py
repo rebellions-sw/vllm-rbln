@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -20,11 +20,38 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import DispatchPooler, Pooler
 from vllm.model_executor.models import VllmModelForPooling
+from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
+from vllm.tasks import PoolingTask
+from vllm.v1.pool.metadata import PoolingMetadata
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
 
 logger = init_logger(__name__)
+
+
+class RBLNClassifierPooler(Pooler):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def get_supported_tasks(self) -> set[PoolingTask]:
+        return {"classify", "score"}
+
+    @staticmethod
+    def _build_output(
+        all_data: Union[torch.Tensor, list[torch.Tensor]], ) -> PoolerOutput:
+
+        all_outputs = [PoolingSequenceGroupOutput(data) for data in all_data]
+        return PoolerOutput(outputs=all_outputs)
+
+    def forward(
+        self,
+        hidden_states: Union[torch.Tensor, list[torch.Tensor]],
+        pooling_metadata: PoolingMetadata,
+    ) -> PoolerOutput:
+        # Classification models return the classified results directly.
+        return self._build_output(hidden_states)
 
 
 class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
@@ -48,14 +75,10 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         )
         self.pooler = DispatchPooler(
             {
-                "encode":
-                Pooler.for_encode(pooler_config),
-                "embed":
-                Pooler.for_embed(pooler_config),
-                "classify":
-                Pooler.for_classify(pooler_config, classifier=self.score),
-                "score":
-                Pooler.for_classify(pooler_config, classifier=self.score),
+                "encode": Pooler.for_encode(pooler_config),
+                "embed": Pooler.for_embed(pooler_config),
+                "classify": RBLNClassifierPooler(),
+                "score": RBLNClassifierPooler(),
             }, )
 
     def is_classification_arch(self):
@@ -127,6 +150,8 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
                 kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
         embeds = self.model.forward(**kwargs)
+        print("embeds:", embeds[0].shape)
+        print(embeds)
 
         hidden_states = embeds[0]
         if isinstance(hidden_states, tuple):

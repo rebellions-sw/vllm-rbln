@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import vllm.envs as envs
@@ -139,9 +139,10 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
         return logits
 
     def _parse_and_validate_image_input(
-            self, **kwargs: Any) -> Optional[LlavaImageInputs]:
+            self, **kwargs: object) -> Optional[LlavaImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
+        config = self.vllm_config.model_config.hf_config
 
         if pixel_values is None and image_embeds is None:
             return None
@@ -151,16 +152,20 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
-            # Pixtral
-            if hasattr(self.model.rbln_config.vision_tower, "max_image_size"):
+            if config.vision_config.model_type == "pixtral":
                 return PixtralHFImagePixelInputs(
                     type="pixel_values_pixtral",
                     pixel_values=flatten_bn(pixel_values),
                 )
 
+            expected_h = expected_w = config.vision_config.image_size
             return LlavaImagePixelInputs(
                 type="pixel_values",
                 pixel_values=flatten_bn(pixel_values, concat=True),
+                resolve_bindings={
+                    "h": expected_h,
+                    "w": expected_w
+                },
             )
 
         if image_embeds is not None:
@@ -168,7 +173,7 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
                 raise ValueError("Incorrect type of image embeddings. "
                                  f"Got type: {type(image_embeds)}")
 
-            if self.config.vision_config.model_type == "pixtral":
+            if config.vision_config.model_type == "pixtral":
                 raise ValueError("Pixtral-HF does not support image_embeds.")
 
             return LlavaImageEmbeddingInputs(
