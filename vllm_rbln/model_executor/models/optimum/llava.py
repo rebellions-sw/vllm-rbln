@@ -17,8 +17,7 @@ import torch
 import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.llava import (LlavaImageEmbeddingInputs,
-                                              LlavaImageInputs,
+from vllm.model_executor.models.llava import (LlavaImageInputs,
                                               LlavaImagePixelInputs,
                                               PixtralHFImagePixelInputs)
 from vllm.model_executor.models.utils import flatten_bn
@@ -170,15 +169,9 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
 
         if image_embeds is not None:
             if not isinstance(image_embeds, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of image embeddings. "
+                raise ValueError("Incorrect type of image embeds. "
                                  f"Got type: {type(image_embeds)}")
 
-            if config.vision_config.model_type == "pixtral":
-                raise ValueError("Pixtral-HF does not support image_embeds.")
-
-            return LlavaImageEmbeddingInputs(
-                type="image_embeds",
-                data=flatten_bn(image_embeds, concat=True),
-            )
-
+            raise NotImplementedError(
+                "Image embeds are not supported in this version for RBLN")
         raise AssertionError("This line should be unreachable.")
