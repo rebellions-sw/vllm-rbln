@@ -247,7 +247,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         num_crops = kwargs.pop("num_crops", None)
         image_embeds = kwargs.pop("image_embeds", None)
         config = self.vllm_config.model_config.hf_config
-        
+
         assert image_embeds is None, "Gemma3 does not support image_embeds."
         if pixel_values is None:
             return None
