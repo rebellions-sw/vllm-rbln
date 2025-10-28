@@ -155,8 +155,6 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
                 kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
         embeds = self.model.forward(**kwargs)
-        print("embeds:", embeds[0].shape)
-        print(embeds)
 
         hidden_states = embeds[0]
         if isinstance(hidden_states, tuple):
