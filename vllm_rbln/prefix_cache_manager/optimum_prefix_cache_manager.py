@@ -350,12 +350,12 @@ class RBLNPrefixKVCacheManager:
 
     def get_matched_outer_blocks(
             self, request_id: str,
-            cached_blocks: list[int]) -> tuple[list[int], list[int]]:
+            inner_blocks: list[int]) -> tuple[list[int], list[int]]:
         """
         Get the matched outer blocks using inner blocks.
         """
         result = self._cache_search_manager.find_cached_blocks(
-            request_id, cached_blocks, self._mapping_manager)
+            request_id, inner_blocks, self._mapping_manager)
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):
