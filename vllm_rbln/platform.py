@@ -89,18 +89,11 @@ class RblnPlatform(Platform):
                                 parser: Optional[FlexibleArgumentParser] = None
                                 ) -> None:
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
-            # patches
-            if envs.VLLM_USE_V1:
-                # FIXME(jiwoo.park):disable timeout for RBLN
-                import vllm.v1.executor.multiproc_executor as mp
-                mp.EXECUTE_MODEL_TIMEOUT_S = None
-
-                import vllm_rbln.v1.attention.layer  # noqa
-            else:
-                import vllm_rbln.attention.layer  # noqa
+            import vllm_rbln.attention.layer  # noqa
             import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
             import vllm_rbln.model_executor.layers.logits_processor  # noqa
-            import vllm_rbln.model_executor.layers.rotary_embedding  # noqa
+            import vllm_rbln.model_executor.layers.rotary_embedding.base  # noqa
+            import vllm_rbln.model_executor.layers.rotary_embedding.deepseek_scaling_rope  # noqa
             import vllm_rbln.model_executor.layers.vocab_parallel_embedding  # noqa
             import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
             import vllm_rbln.models.deepseek_v2  # noqa
@@ -253,6 +246,7 @@ class RblnPlatform(Platform):
         block_size: int,
         use_v1: bool,
         use_mla: bool,
+        has_sink: bool,
     ) -> str:
         if envs.VLLM_USE_V1:
             attn_backend_cls = ("vllm_rbln.v1.attention.backends."
