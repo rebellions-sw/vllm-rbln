@@ -274,6 +274,199 @@ def _(
     return torch.empty_like(q)
 
 
+@torch.library.custom_op("rbln_custom_ops::sliding_window_attention_prefill",
+                         mutates_args=["k_cache", "v_cache"])
+def sliding_window_attention_prefill_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    cache_seq_len: torch.Tensor,
+    cache_offset: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Expected tensor shapes:
+    - q: [batch, n_heads, n_groups, seq_len, head_dim]
+      Query states for multiple tokens
+    - k: [batch, n_heads, 1, seq_len, head_dim]
+      Key states for current input
+    - v: [batch, n_heads, 1, seq_len, head_dim]
+      Value states for current input
+    - k_cache: [num_blocks, n_heads, 1, window_size, head_dim]
+      Key cache
+    - v_cache: [num_blocks, n_heads, 1, window_size, head_dim]
+      Value cache
+    - cache_seq_len: [batch, 1]
+      number of tokens already cached
+    - cache_offset: [batch, 1]
+      ending position after insertion (cache_seq_len + query_len)
+    - scale: []. Attention scale factor
+
+    Returns:
+        Tensor: attn_output: [batch, n_heads, n_groups, seq_len, head_dim]
+
+    batch size is assumed to be 1 for prefill.
+    """
+
+    if not envs.RBLN_COMPILE_MODEL:
+        # Naive implementation matching triton kernel semantics
+        # cache_seq_len: starting position in window (how many tokens already cached)
+        # cache_offset: ending position after insertion (cache_seq_len + query_len)
+        window_size = k_cache.size(-2)
+        seq_len = q.size(-2)
+
+        cache_start = cache_seq_len[0][0]
+        cache_end = cache_offset[0][0]
+        block = block_tables[0].to(torch.int32)
+
+        # Load base cache
+        k_base = k_cache[block].unsqueeze(0)
+        v_base = v_cache[block].unsqueeze(0)
+
+        # Window insert
+        if cache_end > window_size:
+            # Slide the window
+            k_updated = torch.cat([k_base, k], dim=3)
+            v_updated = torch.cat([v_base, v], dim=3)
+            k_window = k_updated[:, :, :, -window_size:, :]
+            v_window = v_updated[:, :, :, -window_size:, :]
+        else:
+            # Append
+            k_updated = k_base.slice_scatter(k,
+                                             dim=3,
+                                             start=cache_start,
+                                             end=cache_end)
+            v_updated = v_base.slice_scatter(v,
+                                             dim=3,
+                                             start=cache_start,
+                                             end=cache_end)
+            k_window = k_updated[:, :, :, :cache_end, :]
+            v_window = v_updated[:, :, :, :cache_end, :]
+        k_cache[block] = k_updated.squeeze(0)
+        v_cache[block] = v_updated.squeeze(0)
+
+        # Perform attention on windowed KV
+        k_t = k_window.transpose(3, 4)
+        attn_weights = torch.matmul(q, k_t) * scale
+
+        causal_mask = torch.triu(torch.ones(1, 1, 1, window_size, window_size),
+                                 diagonal=1)
+        causal_mask = causal_mask[:, :, :, cache_start:cache_end, :]
+        causal_mask = torch.where(causal_mask > 0, float('-inf'), 0.0)
+        attn_weights = attn_weights + causal_mask
+
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+        attn_output = torch.matmul(attn_weights, v_window)
+
+        return attn_output
+    else:
+        return torch.empty_like(q)
+
+
+@torch.library.register_fake(
+    "rbln_custom_ops::sliding_window_attention_prefill")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    cache_seq_len: torch.Tensor,
+    cache_offset: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+
+@torch.library.custom_op("rbln_custom_ops::sliding_window_attention_decode",
+                         mutates_args=["k_cache", "v_cache"])
+def sliding_window_attention_decode_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    cache_seq_len: torch.Tensor,
+    cache_offset: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    if not envs.RBLN_COMPILE_MODEL:
+        # Decode: q_len = 1, support batched decode
+        window_size = k_cache.size(-2)
+        batch_size = q.size(0)
+
+        outputs = []
+        for r in range(batch_size):
+            cache_start = cache_seq_len[r][0]
+            cache_end = cache_offset[r][0]
+            block = block_tables[r][0].to(torch.int32)
+
+            q_r = q[r:r + 1]
+            k_r = k[r:r + 1]
+            v_r = v[r:r + 1]
+
+            # Load base cache
+            k_base = k_cache[block].unsqueeze(0)
+            v_base = v_cache[block].unsqueeze(0)
+
+            # Window insert
+            if cache_end > window_size:
+                # Slide window
+                k_updated = torch.cat([k_base, k_r], dim=3)
+                v_updated = torch.cat([v_base, v_r], dim=3)
+                k_window = k_updated[:, :, :, -window_size:, :]
+                v_window = v_updated[:, :, :, -window_size:, :]
+            else:
+                k_updated = k_base.slice_scatter(k_r,
+                                                 dim=3,
+                                                 start=cache_start,
+                                                 end=cache_end)
+                v_updated = v_base.slice_scatter(v_r,
+                                                 dim=3,
+                                                 start=cache_start,
+                                                 end=cache_end)
+                k_window = k_updated[:, :, :, :cache_end, :]
+                v_window = v_updated[:, :, :, :cache_end, :]
+            k_cache[block] = k_updated.squeeze(0)
+            v_cache[block] = v_updated.squeeze(0)
+
+            # Attention
+            k_t = k_window.transpose(3, 4)
+            attn_weights = torch.matmul(q_r, k_t) * scale
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            attn_output = torch.matmul(attn_weights, v_window)
+            outputs.append(attn_output)
+
+        return torch.cat(outputs, dim=0)
+    else:
+        return torch.empty_like(q)
+
+
+@torch.library.register_fake(
+    "rbln_custom_ops::sliding_window_attention_decode")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    cache_seq_len: torch.Tensor,
+    cache_offset: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+
 # RBLN custom op (cache update)
 # NYI, custom op interface is only registered for test
 # inputs = {cache, state, batch, seq}
@@ -358,6 +551,9 @@ class RBLNAttentionBackend(AttentionBackend):
 class RBLNAttentionMetadata(AttentionMetadata, PagedAttentionMetadata):
     attn_masks: Optional[torch.Tensor]
     kv_caches: Optional[List[torch.Tensor]]
+    # for sliding window attention
+    cache_seq_lens: Optional[torch.Tensor]
+    cache_offsets: Optional[torch.Tensor]
 
 
 class RBLNAttentionMetadataBuilder(
@@ -370,6 +566,29 @@ class RBLNAttentionMetadataBuilder(
 
         self.partition_len = input_builder.block_size
         self.max_seq_len = input_builder.max_model_len
+        assert input_builder.sliding_window is None or isinstance(
+            input_builder.sliding_window, int)
+        self.sliding_window = input_builder.sliding_window
+        print(
+            f"RBLNAttentionMetadataBuilder: sliding_window = {self.sliding_window}"
+        )
+        # TODO: for gemma3, where sliding window attention is interleaved,
+        # self.hf_text_config.sliding_window is removed, and
+        # self.hf_text_config.interleaved_sliding_window is added.
+        # > for a model with interleaved attention,
+        # > the scheduler and the model treat it as full attention
+        # > (i.e., not dropping any tokens outside the window).
+        # > only the attention layer itself is aware of the sliding
+        # > window, and use the window size to compute the attention.
+        #
+        # TODO: Q: Then is it compatible with our custom op?
+        # - Check what optimum does.
+        # - The custom op itself updates the kv cache..
+        #
+        # NOTE: As of c49848396d34a1059fbec2a197394484acf5a903 (in 0.10.1),
+        # interleaved_sliding_window is removed.
+        # Instead, it checks config.layer_types[layer_idx] == "sliding_attention".
+        # where config: Gemma3TextConfig.
 
         self.device = get_current_vllm_config().device_config.device
         self.enforce_eager = (
@@ -412,6 +631,45 @@ class RBLNAttentionMetadataBuilder(
         # RBLN - block_tables tensor dtype SHOULD be int16
         block_tables = input_block_ids.to(torch.int32)
 
+        # Build cache_seq_lens and cache_offsets for sliding window
+        cache_seq_lens = None
+        cache_offsets = None
+        if self.sliding_window is not None:
+            print(f"  seq_lens: {seq_lens}")
+            print(f"  query_lens: {seq_lens}")
+            max_cache_len = self.sliding_window
+            # TODO: code written by copilot
+            # - what happens if sliding_window size is different per layer?
+
+            # Get the current sequence length from input positions
+            # For prefill: steps = [[0]] (start of sequence)
+            # For decode: steps = [[seq_len]] (current position)
+
+            # Determine query length
+            if input_data.num_prefills:
+                # Prefill: query_len from seq_lens
+                query_lens_list = input_data.seq_lens
+            else:
+                # Decode: query_len = 1
+                query_lens_list = [1] * len(steps)
+
+            cache_seq_lens_list = []
+            cache_offsets_list = []
+
+            for step, query_len in zip(steps, query_lens_list):
+                position = step[0]
+                # cache_seq_len is the current position (how many tokens seen)
+                cache_seq_len = position
+                # cache_offset is position after inserting current query
+                cache_offset = position + query_len
+
+                cache_seq_lens_list.append([cache_seq_len])
+                cache_offsets_list.append([cache_offset])
+
+            cache_seq_lens = torch.tensor(cache_seq_lens_list,
+                                          dtype=torch.int32)
+            cache_offsets = torch.tensor(cache_offsets_list, dtype=torch.int32)
+
         # For multi-modal models
         placeholder_index_maps = None
         if len(input_data.multi_modal_inputs_list) != 0:
@@ -424,7 +682,7 @@ class RBLNAttentionMetadataBuilder(
         # RBLN attention mask
         # prefill attention mask vs decode attention mask
         attn_masks = None
-        if not envs.RBLN_FLASH_CAUSAL_ATTN:
+        if not envs.RBLN_FLASH_CAUSAL_ATTN and self.sliding_window is None:
             if input_data.num_prefills:
                 step = steps[0][0]
                 assert input_data.num_prefills == 1
@@ -477,16 +735,21 @@ class RBLNAttentionMetadataBuilder(
             block_tables=block_tables.to(self.device),
             attn_masks=attn_masks,
             kv_caches=None,
+            cache_seq_lens=cache_seq_lens.to(self.device)
+            if cache_seq_lens is not None else None,
+            cache_offsets=cache_offsets.to(self.device)
+            if cache_offsets is not None else None,
         )
         logger.debug("RBLNAttentionMetadata = %s", attn_metadata)
         logger.debug("\tslot_mapping size = %s", slot_mapping.size())
         logger.debug("\tblock_tables size = %s", block_tables.size())
-        if not envs.RBLN_FLASH_CAUSAL_ATTN and attn_masks is not None:
+        logger.debug("\tseq_lens_tensor size= %s", seq_lens_tensor.size())
+        if attn_masks is not None:
             logger.debug("\tattn_masks size = %s", attn_masks.size())
             logger.debug("\tattn_masks = %s", attn_masks[:, :, :, :, :32])
-        else:
-            assert attn_masks is None
-        logger.debug("\tseq_lens_tensor size= %s", seq_lens_tensor.size())
+        if cache_seq_lens is not None:
+            logger.debug("\tcache_seq_lens = %s", cache_seq_lens)
+            logger.debug("\tcache_offsets = %s", cache_offsets)
         return attn_metadata
 
 
@@ -524,7 +787,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
         self.need_mask = (self.alibi_slopes is not None
-                          or self.sliding_window is not None)
+                          and self.sliding_window is None)
 
         supported_head_sizes = RBLNAttentionBackend.get_supported_head_sizes()
         if head_size not in supported_head_sizes:
@@ -629,8 +892,37 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         # attn_output = [batch,H,4,L,D]
         assert kv_cache is not None
 
+        if self.sliding_window is not None:
+            k_cache, v_cache = self.split_kv_cache(kv_cache, self.num_kv_heads,
+                                                   self.head_size)
+            if q_len == 1:
+                attn_output = torch.ops.rbln_custom_ops.sliding_window_attention_decode(  # noqa: E501
+                    query,
+                    key,
+                    value,
+                    k_cache,
+                    v_cache,
+                    attn_metadata.cache_seq_lens.to(torch.int16),
+                    attn_metadata.cache_offsets.to(torch.int16),
+                    self.scale,
+                    attn_metadata.block_tables.to(torch.int16),
+                    self.scale,  # dummy
+                )
+            else:
+                attn_output = torch.ops.rbln_custom_ops.sliding_window_attention_prefill(  # noqa: E501
+                    query,
+                    key,
+                    value,
+                    k_cache,
+                    v_cache,
+                    attn_metadata.cache_seq_lens.to(torch.int16),
+                    attn_metadata.cache_offsets.to(torch.int16),
+                    self.scale,
+                    attn_metadata.block_tables.to(torch.int16),
+                    self.scale,  # dummy
+                )
         # actually non-flash paged attention DOES NOT use slot_mapping
-        if envs.RBLN_FLASH_CAUSAL_ATTN:
+        elif envs.RBLN_FLASH_CAUSAL_ATTN:
             if q_len == 1:
                 attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode(  # noqa: E501
                     query,

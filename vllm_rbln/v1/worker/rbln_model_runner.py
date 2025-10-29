@@ -103,7 +103,7 @@ class RBLNModelRunner:
             self.kv_cache_dtype = STR_DTYPE_TO_TORCH_DTYPE[
                 cache_config.cache_dtype]
 
-        self.is_multimodal_model = model_config.is_multimodal_model
+        self.is_multimodal_model = False  # model_config.is_multimodal_model
         self.max_model_len = model_config.max_model_len
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
         self.max_num_reqs = scheduler_config.max_num_seqs
@@ -1788,6 +1788,8 @@ class RBLNModelRunner:
             # TODO: Support other attention modules, e.g., cross-attention
             if attn_module.attn_type == AttentionType.DECODER:
                 if attn_module.sliding_window is not None:
+                    assert attn_module.sliding_window == block_size, \
+                        "Only sliding window equal to block size is supported."
                     kv_cache_spec[layer_name] = SlidingWindowSpec(
                         block_size=block_size,
                         num_kv_heads=attn_module.num_kv_heads,
