@@ -14,6 +14,7 @@
 
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Optional
 
 from vllm.config import VllmConfig
@@ -32,6 +33,13 @@ from vllm.v1.structured_output import StructuredOutputManager
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+@dataclass
+class RBLNSchedulerOutput(SchedulerOutput):
+    # new_computed_blocks, num_new_local_computed_tokens
+    new_computed_blocks: list[int] = field(default_factory=list)
+    preempted_req_ids: list[str] = field(default_factory=list)
 
 
 class RBLNOptimumScheduler(Scheduler):
@@ -114,7 +122,7 @@ class RBLNOptimumScheduler(Scheduler):
         )
         self.use_pp = False
 
-    def schedule(self) -> SchedulerOutput:
+    def schedule(self) -> RBLNSchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
         # Each request just has the num_computed_tokens and
@@ -148,6 +156,8 @@ class RBLNOptimumScheduler(Scheduler):
         #   In the vLLM, requests are scheduled RUNNING -> WAITING.
 
         req_index = 0
+        # It is always empty in decode phase.
+        new_computed_blocks = KVCacheBlocks(blocks=([],))
         # Record the LoRAs in scheduled_running_reqs
         # It is for checking the max_loras constraint.
         scheduled_loras: set[int] = set()
@@ -210,20 +220,16 @@ class RBLNOptimumScheduler(Scheduler):
                 # We use `request.num_tokens` instead of
                 # `request.num_prompt_tokens` to consider the resumed
                 # requests, which have output tokens.
-                num_new_tokens = request.num_tokens - num_computed_tokens
-                if (0 < self.scheduler_config.long_prefill_token_threshold <
-                        num_new_tokens):
-                    num_new_tokens = (
-                        self.scheduler_config.long_prefill_token_threshold)
+                num_new_tokens = request.num_tokens
 
                 num_new_tokens = min(num_new_tokens, token_budget)
                 assert num_new_tokens > 0
 
                 new_blocks = self.kv_cache_manager.allocate_slots(
                     request,
-                    num_new_tokens + num_external_computed_tokens,
-                    num_new_local_computed_tokens,
-                    new_computed_blocks,
+                    num_new_tokens,
+                    0,
+                    None,
                     num_lookahead_tokens=0,
                     delay_cache_blocks=load_kv_async,
                     num_encoder_tokens=0,
@@ -257,10 +263,13 @@ class RBLNOptimumScheduler(Scheduler):
                 num_scheduled_tokens[request.request_id] = num_new_tokens
                 token_budget -= num_new_tokens
                 request.status = RequestStatus.RUNNING
-                request.num_computed_tokens = num_computed_tokens
+                # NOTE Setting num_computed_tokens to the number of tokens hit
+                # by prefix caching may cause incorrect computation
+                # of new_blocks during the decode phase.
+                request.num_computed_tokens = 0
                 # Count the number of prefix cached tokens.
-                if request.num_cached_tokens < 0:
-                    request.num_cached_tokens = num_computed_tokens
+                # if request.num_cached_tokens < 0:
+                #     request.num_cached_tokens = num_computed_tokens
 
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
@@ -270,22 +279,7 @@ class RBLNOptimumScheduler(Scheduler):
         if req_index == 0:
             while req_index < len(self.running) and token_budget > 0:
                 request = self.running[req_index]
-
-                num_new_tokens = (request.num_tokens_with_spec +
-                                  request.num_output_placeholders -
-                                  request.num_computed_tokens)
-                if (0 < self.scheduler_config.long_prefill_token_threshold <
-                        num_new_tokens):
-                    num_new_tokens = (
-                        self.scheduler_config.long_prefill_token_threshold)
-                num_new_tokens = min(num_new_tokens, token_budget)
-
-                # Make sure the input position
-                # does not exceed the max model len.
-                # This is necessary when using spec decoding.
-                num_new_tokens = min(
-                    num_new_tokens,
-                    self.max_model_len - 1 - request.num_computed_tokens)
+                num_new_tokens = 1
 
                 if num_new_tokens == 0:
                     # The request cannot be scheduled
@@ -397,7 +391,7 @@ class RBLNOptimumScheduler(Scheduler):
             req_to_new_blocks,
         )
 
-        scheduler_output = SchedulerOutput(
+        scheduler_output = RBLNSchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=cached_reqs_data,
             num_scheduled_tokens=num_scheduled_tokens,
@@ -413,6 +407,8 @@ class RBLNOptimumScheduler(Scheduler):
             free_encoder_mm_hashes=[],
             structured_output_request_ids={},
             grammar_bitmask=None,
+            new_computed_blocks=new_computed_blocks.get_block_ids()[0],
+            preempted_req_ids=[req.request_id for req in preempted_reqs],
         )
 
         self._update_after_schedule(scheduler_output)
