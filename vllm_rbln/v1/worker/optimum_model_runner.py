@@ -464,7 +464,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def _prepare_prefill(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], list[int],
                Optional[MultiModalKwargs], list[str]]:
         input_tokens: list[list[int]] = []
@@ -491,6 +491,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # Preempted request resumed
             req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
             req_index = self.input_batch.req_id_to_index[req_id]
+            logger.warning("Request %s is resumed.", req_id)
             num_token = int(self.input_batch.num_tokens[req_index])
             prompt_tokens = self.input_batch.token_ids_cpu[
                 req_index][:num_token]

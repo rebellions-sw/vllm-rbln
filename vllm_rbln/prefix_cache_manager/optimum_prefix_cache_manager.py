@@ -387,7 +387,7 @@ class RBLNPrefixKVCacheManager:
         cached_block_table, cached_length = self.get_matched_outer_blocks(
             request_id, cached_blocks)
         if sum(cached_length) < num_cached_tokens:
-            logger.warning(
+            logger.debug(
                 "The blocks %s is not in RBLN prefix cache manager. "
                 "Falling back to full attention", cached_blocks)
         self.allocate_blocks(request_id, num_new_ob, inner_blocks)

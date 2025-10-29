@@ -247,8 +247,6 @@ class RBLNOptimumScheduler(Scheduler):
                     scheduled_new_reqs.append(request)
                 elif request.status == RequestStatus.PREEMPTED:
                     scheduled_resumed_reqs.append(request)
-                    logger.warning("Request %s is resumed.",
-                                   request.request_id)
                 else:
                     raise RuntimeError(
                         f"Invalid request status: {request.status}")
@@ -277,6 +275,14 @@ class RBLNOptimumScheduler(Scheduler):
             while req_index < len(self.running) and token_budget > 0:
                 request = self.running[req_index]
                 num_new_tokens = 1
+                num_new_tokens = min(num_new_tokens, token_budget)
+
+                # Make sure the input position
+                # does not exceed the max model len.
+                # This is necessary when using spec decoding.
+                num_new_tokens = min(
+                    num_new_tokens,
+                    self.max_model_len - 1 - request.num_computed_tokens)
 
                 if num_new_tokens == 0:
                     # The request cannot be scheduled

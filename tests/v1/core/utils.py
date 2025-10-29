@@ -22,7 +22,6 @@ from vllm.sampling_params import SamplingParams
 from vllm.utils import sha256
 from vllm.v1.core.kv_cache_utils import (get_request_block_hasher,
                                          init_none_hash)
-from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.outputs import ModelRunnerOutput
@@ -30,7 +29,8 @@ from vllm.v1.request import Request
 from vllm.v1.structured_output import StructuredOutputManager
 
 from vllm_rbln.core.scheduler import RBLNScheduler
-from vllm_rbln.v1.core.optimum_scheduler import RBLNOptimumScheduler
+from vllm_rbln.v1.core.optimum_scheduler import (RBLNOptimumScheduler,
+                                                 RBLNSchedulerOutput)
 
 EOS_TOKEN_ID = 50256
 _none_hash_initialized = False
@@ -157,7 +157,23 @@ def create_requests(
 
 
 def create_model_runner_output(
-    scheduler_output: SchedulerOutput, ) -> ModelRunnerOutput:
+    scheduler_output: RBLNSchedulerOutput, ) -> ModelRunnerOutput:
+    req_ids = list(scheduler_output.num_scheduled_tokens.keys())
+    return ModelRunnerOutput(
+        req_ids=req_ids,
+        req_id_to_index={
+            req_id: i
+            for i, req_id in enumerate(req_ids)
+        },
+        sampled_token_ids=[[i] for i in range(len(req_ids))],
+        logprobs=None,
+        prompt_logprobs_dict={},
+        pooler_output=[],
+    )
+
+
+def _make_model_runner_output(
+    scheduler_output: RBLNSchedulerOutput, ) -> ModelRunnerOutput:
     req_ids = list(scheduler_output.num_scheduled_tokens.keys())
     return ModelRunnerOutput(
         req_ids=req_ids,

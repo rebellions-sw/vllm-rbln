@@ -109,7 +109,9 @@ def test_prefill(model_runner):
         req_id,
         token_ids=all_token_ids,
         block_ids=blocks.get_block_ids(),
-        new_computed_tokens=num_computed_tokens)
+        new_computed_tokens=num_computed_tokens,
+        new_computed_blocks=computed_blocks.get_block_ids()[0],
+    )
     model_runner._update_states(scheduler_output)
     inputs, _ = model_runner._prepare_inputs(scheduler_output)
     assert torch.allclose(inputs.block_tables[0],
@@ -122,7 +124,6 @@ def test_prefill(model_runner):
     req_id = "1"
     req1 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
     computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
-    print("num_computed_tokens", num_computed_tokens)
     assert len(computed_blocks.blocks[0]) == 8
     assert num_computed_tokens == 32
     blocks = manager.allocate_slots(req1, len(unique_token_ids),
@@ -137,7 +138,9 @@ def test_prefill(model_runner):
         req_id,
         token_ids=all_token_ids,
         block_ids=total_allocated_blocks,
-        new_computed_tokens=num_computed_tokens)
+        new_computed_tokens=num_computed_tokens,
+        new_computed_blocks=computed_blocks.get_block_ids()[0],
+    )
     model_runner._update_states(scheduler_output)
     inputs, _ = model_runner._prepare_inputs(scheduler_output)
 
@@ -172,7 +175,9 @@ def test_prefill(model_runner):
         token_ids=all_token_ids,
         block_ids=total_allocated_blocks,
         new_computed_tokens=num_computed_tokens,
-        finished_req_ids=[finished_req.request_id])
+        finished_req_ids=[finished_req.request_id],
+        new_computed_blocks=computed_blocks.get_block_ids()[0],
+    )
     model_runner._update_states(scheduler_output)
     inputs, _ = model_runner._prepare_inputs(scheduler_output)
 
@@ -281,10 +286,9 @@ def test_simple_eviction():
     golden_inner_block_ids = list(range(1, 17))
     assert blocks.get_block_ids() == (golden_inner_block_ids, )
 
-    obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
+    obs = prefix_cache_manager.get_block_table_decode(
         req_id,
         num_allocated_tokens=num_allocated_tokens,
-        num_computed_tokens=num_computed_tokens,
         inner_blocks=blocks.get_block_ids()[0],
     )
     assert torch.allclose(obs, torch.tensor([0, 1, 2, 3], dtype=torch.int32))
@@ -299,10 +303,9 @@ def test_simple_eviction():
                                     computed_blocks)
     golden_inner_block_ids = list(range(17, 33))
     assert blocks.get_block_ids() == (golden_inner_block_ids, )
-    obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
+    obs = prefix_cache_manager.get_block_table_decode(
         req_id,
         num_allocated_tokens=num_allocated_tokens,
-        num_computed_tokens=num_computed_tokens,
         inner_blocks=blocks.get_block_ids()[0],
     )
     assert torch.allclose(obs, torch.tensor([4, 5, 6, 7], dtype=torch.int32))
@@ -326,10 +329,9 @@ def test_simple_eviction():
     golden_inner_block_ids = remained_blocks + list(
         reversed(range(len(remained_blocks) + 1, 17)))
     assert blocks.get_block_ids() == (golden_inner_block_ids, )
-    obs, _, _ = prefix_cache_manager.get_block_table_with_cache(
+    obs = prefix_cache_manager.get_block_table_decode(
         req_id,
         num_allocated_tokens=num_allocated_tokens,
-        num_computed_tokens=num_computed_tokens,
         inner_blocks=blocks.get_block_ids()[0],
     )
     assert torch.allclose(obs, torch.tensor([0, 1, 2, 3], dtype=torch.int32))
