@@ -111,7 +111,21 @@ class CacheSearchManager:
     def __init__(self, config: BlockConfiguration):
         self._config = config
 
-    def find_cached_blocks(
+    def find_cached_blocks_prefill(
+            self, request_id: str, cached_ib: list[int],
+            mapping_manager: BlockMappingManager) -> CacheSearchResult:
+        """
+        Find cached outer blocks that match the given inner blocks.
+        """
+        best_match = self._try_match_request(cached_ib, mapping_manager)
+
+        if best_match.has_cache_hit:
+            logger.debug("[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
+                         request_id, best_match.cached_outer_blocks, cached_ib)
+
+        return best_match
+
+    def find_cached_blocks_decode(
             self, request_id: str, num_computed_tokens: int,
             inner_blocks: list[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
@@ -346,10 +360,7 @@ class RBLNPrefixKVCacheManager:
         outer_blocks = self._mapping_manager.remove_request(request_id)
 
         for block_id in outer_blocks:
-            mapping = self._mapping_manager.get_mapping(block_id)
-            if mapping:
-                mapping.is_active = False
-                mapping.request_id = None
+            self._evict_block(block_id)
 
     def get_cached_origin_blocks(
             self, request_id: str, num_computed_tokens: int,
@@ -357,7 +368,7 @@ class RBLNPrefixKVCacheManager:
         """
         Get cached outer blocks and their lengths for a given request.
         """
-        result = self._cache_search_manager.find_cached_blocks(
+        result = self._cache_search_manager.find_cached_blocks_decode(
             request_id, num_computed_tokens, inner_blocks,
             self._mapping_manager)
 
@@ -405,5 +416,55 @@ class RBLNPrefixKVCacheManager:
         # But it will be already evicted in ensure_free_blocks.
         cached_block_table, cached_length = self.get_cached_origin_blocks(
             request_id, num_computed_tokens, inner_blocks)
+        self.allocate_blocks(request_id, num_new_ob, inner_blocks)
+        return self.get_blocks(request_id), cached_block_table, cached_length
+
+    def get_matched_outer_blocks(
+            self, request_id: str,
+            cached_blocks: list[int]) -> tuple[list[int], list[int]]:
+        """
+        Get the matched outer blocks using inner blocks.
+        """
+        result = self._cache_search_manager.find_cached_blocks_prefill(
+            request_id, cached_blocks, self._mapping_manager)
+
+        if result.has_cache_hit and isinstance(self._eviction_policy,
+                                               LRUEvictionPolicy):
+            for ob_id in result.cached_outer_blocks:
+                self._eviction_policy.touch(ob_id)
+
+        return result.cached_outer_blocks, result.cached_lengths
+
+    def get_block_table(
+            self, request_id: str, num_allocated_tokens: int,
+            cached_blocks: list[int], num_cached_tokens: int,
+            inner_blocks: list[int]
+    ) -> tuple[torch.Tensor, list[int], list[int]]:
+        """
+        Get the block table with cache for a given request.
+        1. Find cached blocks
+        2. Allocate new blocks if needed
+        3. Return the block table tensor
+
+        num_allocated_tokens: Number of tokens already allocated
+        (for DECODE phase)
+        num_computed_tokens: Number of tokens computed so far (for cache search)
+        inner_blocks: List of inner block IDs corresponding to the request
+        """
+        if len(inner_blocks) == 0:
+            return self.get_blocks(request_id), [], []
+
+        num_new_ob = self.compute_num_blocks_to_allocate(
+            inner_blocks, num_allocated_tokens)
+        # self.ensure_free_blocks(num_new_ob)
+        # TODO In PREFILL phase, we can figure out the re-allocated blocks
+        # using num_computed_tokens, so we can evict them too.
+        # But it will be already evicted in ensure_free_blocks.
+        cached_block_table, cached_length = self.get_matched_outer_blocks(
+            request_id, cached_blocks)
+        if sum(cached_length) < num_cached_tokens:
+            logger.warning(
+                "The blocks %s is not in RBLN prefix cache manager. "
+                "Falling back to full attention", cached_blocks)
         self.allocate_blocks(request_id, num_new_ob, inner_blocks)
         return self.get_blocks(request_id), cached_block_table, cached_length

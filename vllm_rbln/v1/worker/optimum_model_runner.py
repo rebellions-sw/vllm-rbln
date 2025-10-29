@@ -52,6 +52,7 @@ from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
+from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 
 logger = init_logger(__name__)
@@ -506,11 +507,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_blocks = num_blocks_per_req[req_index]
         if self.enable_prefix_caching:
             block_table, cached_block_table, cached_length = \
-                self.prefix_cache_manager.get_block_table_with_cache(
+                self.prefix_cache_manager.get_block_table(
                     req_id,
                     0,  # num_allocated_tokens
+                    scheduler_output.new_computed_blocks,
                     num_computed_tokens,
-                    block_ids)
+                    block_ids
+                )
             logger.debug(
                 "Request %s is now scheduled. Prompt tokens: %s, "
                 "Already generated tokens: %s, Allocated block(s): %s", req_id,
@@ -603,7 +606,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         return input_tokens, input_positions, block_tables, running_request_ids
 
-    def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
+    def _update_states(self, scheduler_output: "RBLNSchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler
         output.
 
@@ -613,6 +616,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         The SamplingMetadata is updated and copied to the NPU if there is a
         new/resumed/paused/finished request in the batch.
         """
+        # Update prefix_cache_manager if preemption happened
+        if self.enable_prefix_caching:
+            for req_id in scheduler_output.preempted_req_ids:
+                self.prefix_cache_manager.free_request(req_id)
+
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             if logger.isEnabledFor(logging.DEBUG):
