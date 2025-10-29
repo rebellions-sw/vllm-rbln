@@ -126,39 +126,20 @@ COPY --from=atom /atom/lib/ /usr/
 ################################################################################
 FROM driver AS python
 
-RUN PYTHONUNBUFFERED=1 dnf install -y \
-    gcc \
-    gcc-c++ \
-    make \
-    openssl-devel \
-    bzip2-devel \
-    libffi-devel \
-    zlib-devel \
-    xz-devel \
-    sqlite-devel \
-    wget \
-    tar && \
-    dnf clean all
-
 ARG PYTHON_VERSION
-RUN cd /tmp && \
-    wget "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz" && \
-    tar -xzf "Python-${PYTHON_VERSION}.tgz" && \
-    cd "Python-${PYTHON_VERSION}" && \
-    ./configure --enable-optimizations --with-ensurepip=install && \
-    make && \
-    make altinstall && \
-    cd / && \
-    rm -rf "/tmp/Python-${PYTHON_VERSION}"*
+
+# Install Python from dnf repository
+RUN PYTHONUNBUFFERED=1 dnf install -y \
+    python${PYTHON_VERSION%.*} \
+    python${PYTHON_VERSION%.*}-pip
 
 # Create symbolic links for versioned and unversioned commands
-RUN ln -sf "/usr/local/bin/python${PYTHON_VERSION%.*}" /usr/local/bin/python3 && \
-    ln -sf "/usr/local/bin/python${PYTHON_VERSION%.*}" /usr/local/bin/python && \
-    ln -sf "/usr/local/bin/pip${PYTHON_VERSION%.*}" /usr/local/bin/pip3 && \
-    ln -sf "/usr/local/bin/pip${PYTHON_VERSION%.*}" /usr/local/bin/pip
+RUN ln -sf "/usr/bin/python${PYTHON_VERSION%.*}" /usr/bin/python3 && \
+    ln -sf "/usr/bin/python${PYTHON_VERSION%.*}" /usr/bin/python && \
+    ln -sf "/usr/bin/pip${PYTHON_VERSION%.*}" /usr/bin/pip3 && \
+    ln -sf "/usr/bin/pip${PYTHON_VERSION%.*}" /usr/bin/pip
 
-# Upgrade pip and install setuptools, wheel without version pinning
-# Python's bundled pip already knows which versions are compatible
+# Upgrade pip and install setuptools, wheel
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Verify installation
