@@ -112,16 +112,17 @@ class CacheSearchManager:
         self._config = config
 
     def find_cached_blocks(
-            self, request_id: str, cached_ib: list[int],
+            self, request_id: str, inner_blocks: list[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Find cached outer blocks that match the given inner blocks.
         """
-        best_match = self._try_match_request(cached_ib, mapping_manager)
+        best_match = self._try_match_request(inner_blocks, mapping_manager)
 
         if best_match.has_cache_hit:
             logger.debug("[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
-                         request_id, best_match.cached_outer_blocks, cached_ib)
+                         request_id, best_match.cached_outer_blocks,
+                         inner_blocks)
 
         return best_match
 
@@ -347,17 +348,6 @@ class RBLNPrefixKVCacheManager:
                 if preemption:
                     self._evict_block(block_id)
 
-    def get_blocks(self, request_id: str) -> torch.Tensor:
-        """
-        Get the tensor of outer block IDs for a given request.
-        """
-        if not self._mapping_manager.is_request_registered(request_id):
-            logger.warning("Request %s not found in mappings", request_id)
-            return self._memory_pool_manager.get_tensor_for_blocks([])
-
-        block_ids = self._mapping_manager.get_request_blocks(request_id)
-        return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
-
     def get_matched_outer_blocks(
             self, request_id: str,
             cached_blocks: list[int]) -> tuple[list[int], list[int]]:
@@ -373,6 +363,17 @@ class RBLNPrefixKVCacheManager:
                 self._eviction_policy.touch(ob_id)
 
         return result.cached_outer_blocks, result.cached_lengths
+
+    def get_blocks(self, request_id: str) -> torch.Tensor:
+        """
+        Get the tensor of outer block IDs for a given request.
+        """
+        if not self._mapping_manager.is_request_registered(request_id):
+            logger.warning("Request %s not found in mappings", request_id)
+            return self._memory_pool_manager.get_tensor_for_blocks([])
+
+        block_ids = self._mapping_manager.get_request_blocks(request_id)
+        return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
 
     def get_block_table_prefill(
             self, request_id: str, cached_blocks: list[int],
