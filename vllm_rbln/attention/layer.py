@@ -107,7 +107,7 @@ def __custom_init__(
 
     # The output scale on host memory. This should be the input scale of
     # the quant op after this attention layer.
-    self._o_scale_float: Optional[float] = None
+    self._o_scale_float: Optional[float] = None  # type: ignore[misc]
 
     self.use_mla = use_mla
     self.num_heads = num_heads
