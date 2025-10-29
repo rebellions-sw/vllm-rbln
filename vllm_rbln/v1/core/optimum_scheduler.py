@@ -157,7 +157,7 @@ class RBLNOptimumScheduler(Scheduler):
 
         req_index = 0
         # It is always empty in decode phase.
-        new_computed_blocks = KVCacheBlocks(blocks=([],))
+        new_computed_blocks = KVCacheBlocks(blocks=([], ))
         # Record the LoRAs in scheduled_running_reqs
         # It is for checking the max_loras constraint.
         scheduled_loras: set[int] = set()
@@ -203,7 +203,6 @@ class RBLNOptimumScheduler(Scheduler):
                     skipped_waiting_requests.prepend_request(request)
                     continue
 
-                num_external_computed_tokens = 0
                 load_kv_async = False
 
                 assert request.num_computed_tokens == 0
@@ -211,10 +210,6 @@ class RBLNOptimumScheduler(Scheduler):
                 new_computed_blocks, num_new_local_computed_tokens = \
                     self.kv_cache_manager.get_computed_blocks(
                         request)
-
-                # Total computed tokens (local + external).
-                num_computed_tokens = (num_new_local_computed_tokens +
-                                       num_external_computed_tokens)
 
                 # Number of tokens to be scheduled.
                 # We use `request.num_tokens` instead of

@@ -295,6 +295,22 @@ class RBLNPrefixKVCacheManager:
         for block_id in blocks_to_evict:
             self._evict_block(block_id)
 
+    def _evict_block(self, block_id: int) -> None:
+        """
+        Evict a block and free its resources.
+        """
+        mapping = self._mapping_manager.remove_mapping(block_id)
+        if mapping:
+            block = self._allocator.get_allocated_block(block_id)
+            if block:
+                self._allocator.deallocate(block)
+                self._eviction_policy.unregister_block(block_id)
+                logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", block_id,
+                             mapping.inner_block_ids)
+            else:
+                logger.error("Block %d not found in allocator during eviction",
+                             block_id)
+
     def _append_to_existing_block(self, outer_block_id: int,
                                   inner_blocks: list[int]) -> None:
         """

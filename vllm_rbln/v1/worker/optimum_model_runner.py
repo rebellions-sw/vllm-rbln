@@ -507,9 +507,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_blocks = num_blocks_per_req[req_index]
         if self.enable_prefix_caching:
             block_table, cached_block_table, cached_length = \
-                self.prefix_cache_manager.get_block_table(
+                self.prefix_cache_manager.get_block_table_prefill(
                     req_id,
-                    0,  # num_allocated_tokens
                     scheduler_output.new_computed_blocks,
                     num_computed_tokens,
                     block_ids
@@ -588,10 +587,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
-                block_table, _, _ = \
-                    self.prefix_cache_manager.get_block_table_with_cache(
+                block_table = \
+                    self.prefix_cache_manager.get_block_table_decode(
                         req_id,
-                        num_computed_tokens[req_id],
                         num_computed_tokens[req_id],
                         new_blocks_ids[req_id])
             else:
@@ -619,7 +617,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # Update prefix_cache_manager if preemption happened
         if self.enable_prefix_caching:
             for req_id in scheduler_output.preempted_req_ids:
-                self.prefix_cache_manager.free_request(req_id)
+                self.prefix_cache_manager.free_request(req_id, preemption=True)
 
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
