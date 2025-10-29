@@ -21,6 +21,8 @@ import torch
 from vllm_rbln.logger import init_logger
 from vllm_rbln.prefix_cache_manager.optimum_block_mapping_manager import (
     BlockMappingManager, RBLNBlock)
+from vllm_rbln.prefix_cache_manager.optimum_eviction_policy import (
+    FIFOEvictionPolicy, LRUEvictionPolicy)
 
 logger = init_logger(__name__)
 
@@ -109,33 +111,12 @@ class CacheSearchManager:
     def __init__(self, config: BlockConfiguration):
         self._config = config
 
-    def find_cached_blocks_prefill(
+    def find_cached_blocks(
             self, request_id: str, cached_ib: list[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Find cached outer blocks that match the given inner blocks.
         """
-        best_match = self._try_match_request(cached_ib, mapping_manager)
-
-        if best_match.has_cache_hit:
-            logger.debug("[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
-                         request_id, best_match.cached_outer_blocks, cached_ib)
-
-        return best_match
-
-    def find_cached_blocks_decode(
-            self, request_id: str, num_computed_tokens: int,
-            inner_blocks: list[int],
-            mapping_manager: BlockMappingManager) -> CacheSearchResult:
-        """
-        Find cached outer blocks that match the given inner blocks.
-        """
-        num_cached_ib = self._calculate_cached_inner_blocks(
-            num_computed_tokens)
-        if num_cached_ib == 0:
-            return CacheSearchResult([], [])
-
-        cached_ib = inner_blocks[:num_cached_ib]
         best_match = self._try_match_request(cached_ib, mapping_manager)
 
         if best_match.has_cache_hit:
@@ -208,6 +189,7 @@ class RBLNPrefixKVCacheManager:
         self._mapping_manager = BlockMappingManager()
         self._cache_search_manager = CacheSearchManager(self._config)
         self._memory_pool_manager = MemoryPoolManager(max_model_len, ob_size)
+        self._eviction_policy = FIFOEvictionPolicy()
 
     def allocate_blocks(self, request_id: str, num_new_ob: int,
                         inner_blocks: list[int]) -> None:
@@ -262,6 +244,7 @@ class RBLNPrefixKVCacheManager:
 
             self._mapping_manager.create_mapping(block, block_inner_blocks,
                                                  request_id)
+            self._eviction_policy.register_block(block.block_id)
             block_ids.append(block.block_id)
 
         logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id,
@@ -293,24 +276,24 @@ class RBLNPrefixKVCacheManager:
         evict some blocks based on the eviction policy.
         """
         free_count = self._allocator.get_free_count()
-        assert free_count >= num_new_blocks, (
-            f"Insufficient free blocks. Needed: {num_new_blocks}, "
-            f"Available: {free_count}")
+        if free_count >= num_new_blocks:
+            return
 
-    def _evict_block(self, block_id: int) -> None:
-        """
-        Evict a block and free its resources.
-        """
-        mapping = self._mapping_manager.remove_mapping(block_id)
-        if mapping:
-            block = self._allocator.get_allocated_block(block_id)
-            if block:
-                self._allocator.deallocate(block)
-                logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", block_id,
-                             mapping.inner_block_ids)
-            else:
-                logger.error("Block %d not found in allocator during eviction",
-                             block_id)
+        evict_count = num_new_blocks - free_count
+        blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
+            self._mapping_manager, evict_count)
+
+        # Check if we could evict enough blocks
+        if len(blocks_to_evict) < evict_count:
+            raise RuntimeError(
+                f"Cannot evict enough blocks. Need {evict_count}, "
+                f"can evict {len(blocks_to_evict)}")
+        # NOTE: In vLLM, the blocks are returned
+        # to the free block queue in reversed order.
+        # It is for preventing memory fragmentation.
+        # But here, we don't need to reverse the order.
+        for block_id in blocks_to_evict:
+            self._evict_block(block_id)
 
     def _append_to_existing_block(self, outer_block_id: int,
                                   inner_blocks: list[int]) -> None:
@@ -332,15 +315,21 @@ class RBLNPrefixKVCacheManager:
         # Update the inner to outer mapping
         self._mapping_manager.add_new_inner_to_outer(ib_id, outer_block_id)
 
-    def free_request(self, request_id: str) -> None:
+    def free_request(self, request_id: str, preemption: bool = False) -> None:
         """
+        Called when a request is completed or preempted.
         Free all blocks associated with a given request.
-        But keep the mappings for potential future reuse.
+        If it is not preemption, keep the mappings for potential future reuse.
         """
         outer_blocks = self._mapping_manager.remove_request(request_id)
 
         for block_id in outer_blocks:
-            self._evict_block(block_id)
+            mapping = self._mapping_manager.get_mapping(block_id)
+            if mapping:
+                mapping.is_active = False
+                mapping.request_id = None
+                if preemption:
+                    self._evict_block(block_id)
 
     def get_blocks(self, request_id: str) -> torch.Tensor:
         """
@@ -359,8 +348,13 @@ class RBLNPrefixKVCacheManager:
         """
         Get the matched outer blocks using inner blocks.
         """
-        result = self._cache_search_manager.find_cached_blocks_prefill(
+        result = self._cache_search_manager.find_cached_blocks(
             request_id, cached_blocks, self._mapping_manager)
+
+        if result.has_cache_hit and isinstance(self._eviction_policy,
+                                               LRUEvictionPolicy):
+            for ob_id in result.cached_outer_blocks:
+                self._eviction_policy.touch(ob_id)
 
         return result.cached_outer_blocks, result.cached_lengths
 
