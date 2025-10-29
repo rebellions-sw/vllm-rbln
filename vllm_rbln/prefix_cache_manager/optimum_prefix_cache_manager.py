@@ -112,23 +112,17 @@ class CacheSearchManager:
         self._config = config
 
     def find_cached_blocks(
-            self, request_id: str, num_computed_tokens: int,
-            inner_blocks: list[int],
+            self, request_id: str, inner_blocks: list[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Find cached outer blocks that match the given inner blocks.
         """
-        num_cached_ib = self._calculate_cached_inner_blocks(
-            num_computed_tokens)
-        if num_cached_ib == 0:
-            return CacheSearchResult([], [])
-
-        cached_ib = inner_blocks[:num_cached_ib]
-        best_match = self._try_match_request(cached_ib, mapping_manager)
+        best_match = self._try_match_request(inner_blocks, mapping_manager)
 
         if best_match.has_cache_hit:
             logger.debug("[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
-                         request_id, best_match.cached_outer_blocks, cached_ib)
+                         request_id, best_match.cached_outer_blocks,
+                         inner_blocks)
 
         return best_match
 
@@ -338,10 +332,11 @@ class RBLNPrefixKVCacheManager:
         # Update the inner to outer mapping
         self._mapping_manager.add_new_inner_to_outer(ib_id, outer_block_id)
 
-    def free_request(self, request_id: str) -> None:
+    def free_request(self, request_id: str, preemption: bool = False) -> None:
         """
+        Called when a request is completed or preempted.
         Free all blocks associated with a given request.
-        But keep the mappings for potential future reuse.
+        If it is not preemption, keep the mappings for potential future reuse.
         """
         outer_blocks = self._mapping_manager.remove_request(request_id)
 
@@ -350,16 +345,17 @@ class RBLNPrefixKVCacheManager:
             if mapping:
                 mapping.is_active = False
                 mapping.request_id = None
+                if preemption:
+                    self._evict_block(block_id)
 
-    def get_cached_origin_blocks(
-            self, request_id: str, num_computed_tokens: int,
+    def get_matched_outer_blocks(
+            self, request_id: str,
             inner_blocks: list[int]) -> tuple[list[int], list[int]]:
         """
-        Get cached outer blocks and their lengths for a given request.
+        Get the matched outer blocks using inner blocks.
         """
         result = self._cache_search_manager.find_cached_blocks(
-            request_id, num_computed_tokens, inner_blocks,
-            self._mapping_manager)
+            request_id, inner_blocks, self._mapping_manager)
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):
@@ -379,31 +375,32 @@ class RBLNPrefixKVCacheManager:
         block_ids = self._mapping_manager.get_request_blocks(request_id)
         return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
 
-    def get_block_table_with_cache(
-            self, request_id: str, num_allocated_tokens: int,
-            num_computed_tokens: int, inner_blocks: list[int]
+    def get_block_table_prefill(
+            self, request_id: str, cached_blocks: list[int],
+            num_cached_tokens: int, inner_blocks: list[int]
     ) -> tuple[torch.Tensor, list[int], list[int]]:
-        """
-        Get the block table with cache for a given request.
-        1. Find cached blocks
-        2. Allocate new blocks if needed
-        3. Return the block table tensor, cached block IDs, and cached lengths
-
-        num_allocated_tokens: Number of tokens already allocated
-        (for DECODE phase)
-        num_computed_tokens: Number of tokens computed so far (for cache search)
-        inner_blocks: List of inner block IDs corresponding to the request
-        """
         if len(inner_blocks) == 0:
             return self.get_blocks(request_id), [], []
+
+        num_new_ob = self.compute_num_blocks_to_allocate(inner_blocks, 0)
+        self.ensure_free_blocks(num_new_ob)
+        cached_block_table, cached_length = self.get_matched_outer_blocks(
+            request_id, cached_blocks)
+        if sum(cached_length) < num_cached_tokens:
+            logger.debug(
+                "The blocks %s is not in RBLN prefix cache manager. "
+                "Falling back to full attention", cached_blocks)
+        self.allocate_blocks(request_id, num_new_ob, inner_blocks)
+        return self.get_blocks(request_id), cached_block_table, cached_length
+
+    def get_block_table_decode(self, request_id: str,
+                               num_allocated_tokens: int,
+                               inner_blocks: list[int]) -> torch.Tensor:
+        if len(inner_blocks) == 0:
+            return self.get_blocks(request_id)
 
         num_new_ob = self.compute_num_blocks_to_allocate(
             inner_blocks, num_allocated_tokens)
         self.ensure_free_blocks(num_new_ob)
-        # TODO In PREFILL phase, we can figure out the re-allocated blocks
-        # using num_computed_tokens, so we can evict them too.
-        # But it will be already evicted in ensure_free_blocks.
-        cached_block_table, cached_length = self.get_cached_origin_blocks(
-            request_id, num_computed_tokens, inner_blocks)
         self.allocate_blocks(request_id, num_new_ob, inner_blocks)
-        return self.get_blocks(request_id), cached_block_table, cached_length
+        return self.get_blocks(request_id)
