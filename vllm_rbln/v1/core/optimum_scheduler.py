@@ -247,6 +247,8 @@ class RBLNOptimumScheduler(Scheduler):
                     scheduled_new_reqs.append(request)
                 elif request.status == RequestStatus.PREEMPTED:
                     scheduled_resumed_reqs.append(request)
+                    logger.warning("Request %s is resumed.",
+                                   request.request_id)
                 else:
                     raise RuntimeError(
                         f"Invalid request status: {request.status}")

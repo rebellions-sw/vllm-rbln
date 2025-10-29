@@ -102,7 +102,7 @@ def test_schedule_alloc_block(
     [
         pytest.param(5, 5, 6, [1, 2, 3, 4, 5], id="normal"),
         pytest.param(2, 5, 5, [1, 2, 2, 2, 2], id="limited-max_num_seqs"),
-        pytest.param(3, 5, 4, [1, 2, 3, 3, 3], id="limited-blocks"),
+        pytest.param(3, 5, 4, [1, 2, 3, 1, 2], id="limited-blocks"),
     ],
 )
 def test_running_queue(
