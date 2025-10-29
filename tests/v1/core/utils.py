@@ -170,19 +170,3 @@ def create_model_runner_output(
         prompt_logprobs_dict={},
         pooler_output=[],
     )
-
-
-def _make_model_runner_output(
-    scheduler_output: RBLNSchedulerOutput, ) -> ModelRunnerOutput:
-    req_ids = list(scheduler_output.num_scheduled_tokens.keys())
-    return ModelRunnerOutput(
-        req_ids=req_ids,
-        req_id_to_index={
-            req_id: i
-            for i, req_id in enumerate(req_ids)
-        },
-        sampled_token_ids=[[i] for i in range(len(req_ids))],
-        logprobs=None,
-        prompt_logprobs_dict={},
-        pooler_output=[],
-    )

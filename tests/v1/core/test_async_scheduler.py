@@ -16,8 +16,8 @@ from typing import Optional
 import pytest
 from vllm.v1.request import RequestStatus
 
-from .utils import (_make_model_runner_output, create_model_runner_output,
-                    create_requests, create_scheduler)
+from .utils import (create_model_runner_output, create_requests,
+                    create_scheduler)
 
 
 @pytest.mark.parametrize(
@@ -125,7 +125,7 @@ def test_running_queue(
 
     for _, sz in zip(requests, exp_running_sz):
         sched_output = scheduler.schedule()
-        model_runner_output = _make_model_runner_output(sched_output)
+        model_runner_output = create_model_runner_output(sched_output)
         scheduler.update_from_output(sched_output, model_runner_output)
         assert len(scheduler.running) == sz
 
