@@ -20,15 +20,14 @@ from typing import TYPE_CHECKING, Any, Optional
 import torch
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionMetadata, AttentionType)
-from vllm.config import get_current_vllm_config
-from vllm.v1.attention.backends.utils import CommonAttentionMetadata
+from vllm.config import VllmConfig, get_current_vllm_config
+from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
+                                              CommonAttentionMetadata)
 from vllm.v1.kv_cache_interface import AttentionSpec
-from vllm.v1.worker.block_table import BlockTable
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
     from vllm.v1.worker.gpu_input_batch import InputBatch
-    from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -379,31 +378,31 @@ class RBLNFlashAttentionMetadata:
     kv_caches: Optional[list[torch.Tensor]] = None
 
 
-class RBLNFlashAttentionMetadataBuilder:
+class RBLNFlashAttentionMetadataBuilder(
+        AttentionMetadataBuilder[RBLNFlashAttentionMetadata]):
 
-    def __init__(
-        self,
-        runner: "RBLNModelRunner",
-        kv_cache_spec: AttentionSpec,
-        block_tables: BlockTable,
-    ):
-        model_config = runner.model_config
+    def __init__(self, kv_cache_spec: AttentionSpec, layer_names: list[str],
+                 vllm_config: VllmConfig, device: torch.device):
+        self.model_config = vllm_config.model_config
+        self.parallel_config = vllm_config.parallel_config
+        self.cache_config = vllm_config.cache_config
+        self.compilation_config = vllm_config.compilation_config
+        self.scheduler_config = vllm_config.scheduler_config
 
-        self.runner = runner
-        self.input_batch = runner.input_batch
-        self.num_heads_q = model_config.get_num_attention_heads(
-            runner.parallel_config)
-        self.num_heads_kv = model_config.get_num_kv_heads(
-            runner.parallel_config)
-        self.headdim = model_config.get_head_size()
+        # self.runner = runner
+        # self.input_batch = runner.input_batch
+        self.num_heads_q = self.model_config.get_num_attention_heads(
+            self.parallel_config)
+        self.num_heads_kv = self.model_config.get_num_kv_heads(
+            self.parallel_config)
+        self.kv_cache_dtype = kv_cache_spec.dtype
+        self.headdim = self.model_config.get_head_size()
         self.block_size = kv_cache_spec.block_size
-        self.kv_cache_spec = kv_cache_spec
-        self.block_tables = block_tables
 
-        self.chunked_prefill = (runner.scheduler_config.chunked_prefill_enabled
-                                or runner.cache_config.enable_prefix_caching)
+        self.chunked_prefill = (self.scheduler_config.chunked_prefill_enabled
+                                or self.cache_config.enable_prefix_caching)
         self.chunked_prefill_size = (
-            runner.scheduler_config.max_num_batched_tokens)
+            self.scheduler_config.max_num_batched_tokens)
 
         self.device = get_current_vllm_config().device_config.device
         self.enforce_eager = (
@@ -415,39 +414,35 @@ class RBLNFlashAttentionMetadataBuilder:
 
     def build(
         self,
-        num_reqs: int,
-        num_actual_tokens: int,
-        max_query_len: int,
         common_prefix_len: int,
         common_attn_metadata: CommonAttentionMetadata,
+        fast_build: bool = False,
+        num_prompt_tokens=None,
+        positions=None,
     ) -> RBLNFlashAttentionMetadata:
-        query_max_seq_len = int(self.runner.seq_lens_np[:num_reqs].max())
+        num_reqs = common_attn_metadata.num_reqs
+        num_actual_tokens = common_attn_metadata.num_actual_tokens
+        max_query_len = common_attn_metadata.max_query_len
+        query_max_seq_len = common_attn_metadata.max_seq_len
         query_start_loc = common_attn_metadata.query_start_loc
         seq_lens = common_attn_metadata.seq_lens
-        block_tables = self.block_tables
-        block_tables_tensor = block_tables.get_device_tensor()[:num_reqs]
-
-        block_tables.slot_mapping[:num_actual_tokens].copy_(
-            block_tables.slot_mapping_cpu[:num_actual_tokens],
-            non_blocking=True)
-        block_tables.slot_mapping[num_actual_tokens:].fill_(-1)
-
-        slot_mapping = block_tables.slot_mapping[:num_actual_tokens]
+        block_tables_tensor = common_attn_metadata.block_table_tensor
+        slot_mapping = common_attn_metadata.slot_mapping
 
         cu_prefix_query_lens = None
         prefix_kv_lens = None
         suffix_kv_lens = None
         prefix_scheduler_metadata = None
 
-        seq_idx = self.runner.positions_cpu[:num_reqs].view(-1, 1)
+        seq_idx = positions[:num_reqs].view(-1, 1)
 
         # The length of the partition equals the block size.
         partition_len = self.block_size
         # no. of block(HW constraint) determines max sequence length.
         # max_model_len(Model constraint) determines max sequence length.
         # One of them is selected for max_seq_len.
-        block_length = self.runner.kv_cache_config.num_blocks * partition_len
-        max_seq_len = min(self.runner.model_config.max_model_len, block_length)
+        block_length = self.cache_config.num_gpu_blocks * partition_len
+        max_seq_len = min(self.model_config.max_model_len, block_length)
 
         num_partition = max_seq_len // partition_len
         cs = seq_idx.repeat(1, num_partition)
@@ -457,8 +452,11 @@ class RBLNFlashAttentionMetadataBuilder:
                                               partition_len).to(torch.int16)
         seq_lens_tensor = dyn_size_for_partitions
 
-        is_prefills = (self.input_batch.num_computed_tokens_cpu
-                       < self.input_batch.num_prompt_tokens)
+        assert num_prompt_tokens is not None, (
+            "num_prompt_tokens is required for RBLN Attention Backend")
+        is_prefills = (
+            common_attn_metadata.num_computed_tokens_cpu[:num_reqs].numpy()
+            < num_prompt_tokens[:num_reqs])
         # The prefill and decode cannot be mixed.
         assert len(is_prefills) > 0 and all(
             is_prefill == is_prefills[0]
@@ -490,7 +488,7 @@ class RBLNFlashAttentionMetadataBuilder:
         else:
             # batch padding
             batch_size = num_reqs
-            batch_padding_size = self.runner.max_num_seqs - batch_size
+            batch_padding_size = self.scheduler_config.max_num_seqs - batch_size
             seq_lens_tensor = torch.cat([
                 seq_lens_tensor,
                 torch.full(
@@ -507,7 +505,7 @@ class RBLNFlashAttentionMetadataBuilder:
                 ),
             ])
             decode_attention_mask = torch.zeros(
-                self.runner.max_num_seqs,
+                self.scheduler_config.max_num_seqs,
                 1,
                 1,
                 1,
