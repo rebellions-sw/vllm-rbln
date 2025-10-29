@@ -642,6 +642,31 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         # Refresh batch metadata with any pending updates.
         self.input_batch.refresh_metadata()
 
+    def _update_states_after_model_execute(
+            self, output_token_ids: torch.Tensor) -> None:
+        """Update the cached states after model execution.
+
+        This is used for MTP/EAGLE for hybrid models, as in linear attention,
+        only the last token's state is kept. In MTP/EAGLE, for draft tokens
+        the state are kept util we decide how many tokens are accepted for
+        each sequence, and a shifting is done during the next iteration
+        based on the number of accepted tokens.
+        """
+        if not self.model_config.is_hybrid or not self.speculative_config:
+            return
+
+        # Find the number of accepted tokens for each sequence.
+        num_accepted_tokens = (torch.cat(
+            [
+                output_token_ids,
+                torch.full((output_token_ids.size(0), 1),
+                           -1,
+                           device=output_token_ids.device),
+            ],
+            dim=1) == -1).int().argmax(-1).cpu().numpy()
+        for i, num_tokens in enumerate(num_accepted_tokens):
+            self.input_batch.num_accepted_tokens_cpu[i] = num_tokens
+
     def _get_cumsum_and_arange(
         self,
         num_tokens: np.ndarray,

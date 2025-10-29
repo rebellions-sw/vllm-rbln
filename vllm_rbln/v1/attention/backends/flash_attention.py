@@ -21,7 +21,8 @@ import torch
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionMetadata, AttentionType)
 from vllm.config import VllmConfig, get_current_vllm_config
-from vllm.v1.attention.backends.utils import CommonAttentionMetadata
+from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
+                                              CommonAttentionMetadata)
 from vllm.v1.kv_cache_interface import AttentionSpec
 
 if TYPE_CHECKING:
@@ -377,7 +378,8 @@ class RBLNFlashAttentionMetadata:
     kv_caches: Optional[list[torch.Tensor]] = None
 
 
-class RBLNFlashAttentionMetadataBuilder:
+class RBLNFlashAttentionMetadataBuilder(
+        AttentionMetadataBuilder[RBLNFlashAttentionMetadata]):
 
     def __init__(self, kv_cache_spec: AttentionSpec, layer_names: list[str],
                  vllm_config: VllmConfig, device: torch.device):
@@ -426,13 +428,6 @@ class RBLNFlashAttentionMetadataBuilder:
         seq_lens = common_attn_metadata.seq_lens
         block_tables_tensor = common_attn_metadata.block_table_tensor
         slot_mapping = common_attn_metadata.slot_mapping
-
-        # block_tables.slot_mapping[:num_actual_tokens].copy_(
-        #     block_tables.slot_mapping_cpu[:num_actual_tokens],
-        #     non_blocking=True)
-        # block_tables.slot_mapping[num_actual_tokens:].fill_(-1)
-
-        # slot_mapping = block_tables.slot_mapping[:num_actual_tokens]
 
         cu_prefix_query_lens = None
         prefix_kv_lens = None
