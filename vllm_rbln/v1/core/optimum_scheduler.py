@@ -37,7 +37,6 @@ logger = init_logger(__name__)
 
 @dataclass
 class RBLNSchedulerOutput(SchedulerOutput):
-    # new_computed_blocks, num_new_local_computed_tokens
     new_computed_blocks: list[int] = field(default_factory=list)
     preempted_req_ids: list[str] = field(default_factory=list)
 
@@ -262,9 +261,6 @@ class RBLNOptimumScheduler(Scheduler):
                 # by prefix caching may cause incorrect computation
                 # of new_blocks during the decode phase.
                 request.num_computed_tokens = 0
-                # Count the number of prefix cached tokens.
-                # if request.num_cached_tokens < 0:
-                #     request.num_cached_tokens = num_computed_tokens
 
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
