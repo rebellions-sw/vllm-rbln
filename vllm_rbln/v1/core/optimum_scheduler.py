@@ -219,6 +219,10 @@ class RBLNOptimumScheduler(Scheduler):
                 num_new_tokens = min(num_new_tokens, token_budget)
                 assert num_new_tokens > 0
 
+                # kv cache
+                if self.cache_config.enable_prefix_caching:
+                    self.process_cached_blocks(request, new_computed_blocks)
+
                 new_blocks = self.kv_cache_manager.allocate_slots(
                     request,
                     num_new_tokens,
@@ -412,3 +416,21 @@ class RBLNOptimumScheduler(Scheduler):
 
         self._update_after_schedule(scheduler_output)
         return scheduler_output
+
+    def process_cached_blocks(
+            self, request: Request,
+            new_computed_blocks: Optional[KVCacheBlocks]) -> None:
+        """
+        Originally, this process ran within kv_cache_manager.allocate_slots().
+        In vLLM RBLN, it is now executed outside of allocate_slots(),
+        since the function must be called with new_computed_blocks=None.
+        """
+        new_computed_block_list = new_computed_blocks.blocks
+
+        # Touch the computed blocks to make sure they won't be evicted.
+        self.kv_cache_manager.block_pool.touch(new_computed_block_list)
+
+        # Append the new computed blocks to the request blocks until now to
+        # avoid the case where the new blocks cannot be allocated.
+        self.kv_cache_manager.coordinator.save_new_computed_blocks(
+            request.request_id, new_computed_block_list)
