@@ -94,10 +94,13 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
 
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.info(
-            "Updating model_config.max_model_len from %s to %s "
+            "Updating model_config.max_model_len and "
+            "scheduler_config.max_model_len "
+            "from %s to %s "
             "based on rbln_config.json",
             vllm_config.model_config.max_model_len, max_model_len)
         vllm_config.model_config.max_model_len = max_model_len
+        vllm_config.scheduler_config.max_model_len = max_model_len
 
     if vllm_config.cache_config.enable_prefix_caching:
         if vllm_config.cache_config.block_size != 128:
