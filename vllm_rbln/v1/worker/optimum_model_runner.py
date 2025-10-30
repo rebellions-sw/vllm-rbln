@@ -528,12 +528,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         input_tokens = torch.tensor(prompt_tokens).unsqueeze(0)
         input_positions = torch.tensor(input_positions).unsqueeze(0)
-        print("block_table shape:", block_table.shape)
         block_table = block_table.unsqueeze(0)
-        print("block_table shape after unsqueeze:", block_table.shape)
         # NOTE The cached_block_table is not unsqueezed for convenience.
         # It is used only for prefill
-
         return input_tokens, input_positions, block_table, cached_block_table, \
         cached_length, batched_mm_inputs, running_request_ids
 
