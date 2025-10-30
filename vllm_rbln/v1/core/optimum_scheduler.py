@@ -249,7 +249,6 @@ class RBLNOptimumScheduler(Scheduler):
                 if self.cache_config.enable_prefix_caching:
                     if new_blocks is not None:
                         required_blocks = new_blocks.get_block_ids()[0]
-                        print("[PREFILL] request_id", request.request_id)  # DEBUG
                         if not self.prefix_cache_manager.is_available_free_inner_blocks(required_blocks, 0):
                             self.kv_cache_manager.free(request)
                             new_blocks = None
@@ -336,16 +335,8 @@ class RBLNOptimumScheduler(Scheduler):
                     # NOTE len of required new outer blocks in decode phase is maximum 1
                     # So preemption triggered at maximum once per request.
                     if not requires_preempt:
-                        if self.cache_config.enable_prefix_caching:
-                            cur_blocks = self.kv_cache_manager.coordinator.single_type_managers[0].req_to_blocks.get(request.request_id)
-                            if cur_blocks is not None:
-                                new_blocks = self.kv_cache_manager.allocate_slots(
-                                    request, num_new_tokens, num_lookahead_tokens=0)
-                            else:
-                                new_blocks = None
-                        else:
-                            new_blocks = self.kv_cache_manager.allocate_slots(
-                                request, num_new_tokens, num_lookahead_tokens=0)
+                        new_blocks = self.kv_cache_manager.allocate_slots(
+                            request, num_new_tokens, num_lookahead_tokens=0)
                     # new blocks is none or valid
                     if self.cache_config.enable_prefix_caching:
                         if new_blocks is not None:
