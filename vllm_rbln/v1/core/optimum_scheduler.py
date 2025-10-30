@@ -39,7 +39,7 @@ logger = init_logger(__name__)
 
 @dataclass
 class RBLNSchedulerOutput(SchedulerOutput):
-    block_table: Optional[torch.Tensor] = None
+    block_table_dict: dict[str, torch.Tensor] = None
     cached_block_table: list[int] = field(default_factory=list)
     cached_length: list[int] = field(default_factory=list)
 
@@ -157,7 +157,7 @@ class RBLNOptimumScheduler(Scheduler):
         scheduled_spec_decode_tokens = {}
         # For logging.
         scheduled_timestamp = time.monotonic()
-        block_table = None
+        block_table_dict = {}
         cached_block_table = []
         cached_length = []
 
@@ -272,6 +272,7 @@ class RBLNOptimumScheduler(Scheduler):
                             num_new_local_computed_tokens,
                             new_blocks
                         )
+                    block_table_dict[request.request_id] = block_table
 
                 # Request was already popped from self.waiting
                 # unless it was re-added above due to new_blocks being None.
@@ -307,7 +308,6 @@ class RBLNOptimumScheduler(Scheduler):
             self.waiting.prepend_requests(skipped_waiting_requests)
 
         # Next, schedule the RUNNING requests.
-        block_table_reqs = []
         if req_index == 0:
             while req_index < len(self.running) and token_budget > 0:
                 request = self.running[req_index]
@@ -359,9 +359,9 @@ class RBLNOptimumScheduler(Scheduler):
                                 self.kv_cache_manager.free(request)
                                 new_blocks = None
                             else:
-                                block_table_per_req = self.prefix_cache_manager.get_block_table_decode(
+                                block_table = self.prefix_cache_manager.get_block_table_decode(
                                     request.request_id, num_new_tokens, new_blocks)
-                                block_table_reqs.append(block_table_per_req)
+                                block_table_dict[request.request_id] = block_table
 
                     if new_blocks is None:
                         # The request cannot be scheduled.
@@ -456,11 +456,6 @@ class RBLNOptimumScheduler(Scheduler):
             req_to_new_blocks,
         )
 
-        if self.cache_config.enable_prefix_caching:
-            if block_table_reqs:
-                block_table = torch.stack(block_table_reqs, dim=0)
-        print("block_table_reqs", block_table_reqs)  # DEBUG
-        print("block_table", block_table)
         scheduler_output = RBLNSchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=cached_reqs_data,
@@ -477,7 +472,7 @@ class RBLNOptimumScheduler(Scheduler):
             free_encoder_mm_hashes=[],
             structured_output_request_ids={},
             grammar_bitmask=None,
-            block_table=block_table,
+            block_table_dict=block_table_dict,
             cached_block_table=cached_block_table,
             cached_length=cached_length,
         )
