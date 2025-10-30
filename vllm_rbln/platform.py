@@ -153,6 +153,7 @@ class RblnPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
+        vllm_config.cache_config.enable_prefix_caching = None
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
@@ -213,8 +214,6 @@ class RblnPlatform(Platform):
 
         assert (not vllm_config.speculative_config
                 ), "Speculative decoding not yet supported for RBLN backend."
-
-        vllm_config.cache_config.enable_prefix_caching = False
 
         if envs.VLLM_USE_V1 and envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
