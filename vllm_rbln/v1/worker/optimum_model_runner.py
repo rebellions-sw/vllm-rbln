@@ -476,7 +476,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_index = self.input_batch.req_id_to_index[req_id]
             prompt_tokens = np.array(scheduled.prompt_token_ids)
             block_ids = scheduled.block_ids[0]
-            num_computed_tokens = scheduled.num_computed_tokens
         elif scheduler_output.scheduled_cached_reqs.num_reqs == 1:
             # Preempted request resumed
             req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
@@ -486,8 +485,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             prompt_tokens = self.input_batch.token_ids_cpu[
                 req_index][:num_token]
             block_ids = scheduler_output.scheduled_cached_reqs.new_block_ids[0]
-            num_computed_tokens = \
-                scheduler_output.scheduled_cached_reqs.num_computed_tokens[0]
         else:
             raise RuntimeError(
                 "Prefill stage request cannot processed with other requests.")
@@ -557,7 +554,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
-                block_tables_list.append(scheduler_output.block_table_dict[req_id])
+                block_tables_list.append(
+                    scheduler_output.block_table_dict[req_id])
             else:
                 block_table = block_tables_cpu[req_index]
                 block_table = self.mask_block_table(block_table, num_blocks)

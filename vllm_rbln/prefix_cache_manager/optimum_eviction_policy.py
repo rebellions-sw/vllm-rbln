@@ -33,8 +33,11 @@ class SimpleEvictionPolicy:
         """Unregister a block (called when block is deallocated)"""
         pass
 
-    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int) -> list[int]:
+    def can_evict(self, mapping_manager: BlockMappingManager,
+                  count: int) -> bool:
+        """
+        Check if there are enough inactive blocks to evict.
+        """
         # Select blocks for eviction.
         inactive_mappings = mapping_manager.get_inactive_mappings()
         evicted_blocks = []
@@ -43,12 +46,21 @@ class SimpleEvictionPolicy:
             if len(evicted_blocks) >= count:
                 break
             evicted_blocks.append(mapping.outer_block_id)
+        return len(evicted_blocks) >= count
 
-        if len(evicted_blocks) < count:
-            logger.warning(
-                "Could not find enough inactive blocks for eviction. "
-                "Requested: %d, Found: %d", count, len(evicted_blocks))
+    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
+                                   count: int) -> list[int]:
+        """
+        Select blocks for eviction.
+        """
+        # Select blocks for eviction.
+        inactive_mappings = mapping_manager.get_inactive_mappings()
+        evicted_blocks = []
 
+        for mapping in inactive_mappings:
+            if len(evicted_blocks) >= count:
+                break
+            evicted_blocks.append(mapping.outer_block_id)
         return evicted_blocks[:count]
 
 
@@ -67,8 +79,8 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._allocation_order.pop(block_id, None)
 
-    def select_blocks_for_eviction(self, mapping_manager,
-                                   count: int) -> list[int]:
+    def can_evict(self, mapping_manager: BlockMappingManager,
+                  count: int) -> bool:
         # NOTE If the cached block is evicted, we should also evict its mapping
         # How about exclude the cached blocks from eviction?
         # AS-IS: Eviction -> Cache check -> Allocation
@@ -79,19 +91,16 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         if not inactive_block_ids:
             return []
 
+        # TODO reduce duplication
+        # when calculating the number of evictable blocks
+        # and selecting blocks for eviction
         evictable_blocks = [
             block_id for block_id in self._allocation_order
             if block_id in inactive_block_ids
         ]
 
         selected = evictable_blocks[:count]
-
-        if len(selected) < count:
-            logger.warning(
-                "Could not find enough inactive blocks for eviction. "
-                "Requested: %d, Found: %d", count, len(selected))
-
-        return selected
+        return selected >= count
 
 
 class LRUEvictionPolicy(SimpleEvictionPolicy):
@@ -114,8 +123,8 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._access_order.pop(block_id, None)
 
-    def select_blocks_for_eviction(self, mapping_manager,
-                                   count: int) -> list[int]:
+    def can_evict(self, mapping_manager: BlockMappingManager,
+                  count: int) -> bool:
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
@@ -123,6 +132,9 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
             logger.warning("No inactive blocks available for eviction")
             return []
 
+        # TODO reduce duplication
+        # when calculating the number of evictable blocks
+        # and selecting blocks for eviction
         untouched_blocks = [
             block_id for block_id in inactive_block_ids
             if block_id not in self._access_order
@@ -136,9 +148,4 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         evictable_blocks = untouched_blocks + touched_blocks
         selected = evictable_blocks[:count]
 
-        if len(selected) < count:
-            logger.warning(
-                "Could not find enough inactive blocks for eviction. "
-                "Requested: %d, Found: %d", count, len(selected))
-
-        return selected
+        return selected >= count
