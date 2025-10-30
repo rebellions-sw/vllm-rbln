@@ -15,9 +15,10 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional
-
+from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 import torch
-
+import math
+from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm_rbln.logger import init_logger
 from vllm_rbln.prefix_cache_manager.optimum_block_mapping_manager import (
     BlockMappingManager, RBLNBlock)
@@ -169,6 +170,7 @@ class MemoryPoolManager:
     def __init__(self, max_model_len: int, ob_size: int):
         self._pooled_tensor = torch.zeros(max_model_len // ob_size,
                                           dtype=torch.int32)
+        print("_pooled_tensor", self._pooled_tensor.shape)  # DEBUG
 
     def get_tensor_for_blocks(self, block_ids: list[int]) -> torch.Tensor:
         self._pooled_tensor.fill_(-1)
@@ -183,7 +185,8 @@ class MemoryPoolManager:
 class RBLNPrefixKVCacheManager:
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
-                 num_ob: int):
+                 num_ib: int):
+        num_ob = num_ib // (ob_size // ib_size) - 1
         self._config = BlockConfiguration(ob_size, ib_size, max_model_len,
                                           num_ob)
         self._allocator = RBLNBlockAllocator(num_ob)
@@ -270,6 +273,20 @@ class RBLNPrefixKVCacheManager:
                 num_obs_needed = 0
 
         return num_obs_needed
+
+    def is_available_free_inner_blocks(self, num_new_inner_blocks: int) -> bool:
+        # 1. Check if the enough outer blocks are available
+        required_num_ob = math.ceil(num_new_inner_blocks / self._config.block_ratio)
+        free_count = self._allocator.get_free_count()
+        if free_count >= required_num_ob:
+            return True
+        # 2. Check if we can evict enough outer blocks
+        evict_count = required_num_ob - free_count
+        blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
+            self._mapping_manager, evict_count)
+        if len(blocks_to_evict) < evict_count:
+            return False
+        return True
 
     def ensure_free_blocks(self, num_new_blocks: int) -> None:
         """
@@ -376,9 +393,13 @@ class RBLNPrefixKVCacheManager:
         return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
 
     def get_block_table_prefill(
-            self, request_id: str, cached_blocks: list[int],
-            num_cached_tokens: int, inner_blocks: list[int]
+            self, request_id: str, cached_blocks: KVCacheBlocks,
+            num_cached_tokens: int, inner_blocks: KVCacheBlocks
     ) -> tuple[torch.Tensor, list[int], list[int]]:
+
+        inner_blocks = inner_blocks.get_block_ids()[0]
+        cached_blocks = cached_blocks.get_block_ids()[0]
+
         if len(inner_blocks) == 0:
             return self.get_blocks(request_id), [], []
 
@@ -395,7 +416,9 @@ class RBLNPrefixKVCacheManager:
 
     def get_block_table_decode(self, request_id: str,
                                num_allocated_tokens: int,
-                               inner_blocks: list[int]) -> torch.Tensor:
+                               inner_blocks: KVCacheBlocks) -> torch.Tensor:
+        inner_blocks = inner_blocks.get_block_ids()[0]
+
         if len(inner_blocks) == 0:
             return self.get_blocks(request_id)
 

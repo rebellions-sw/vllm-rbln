@@ -77,7 +77,6 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
         if not inactive_block_ids:
-            logger.warning("No inactive blocks available for eviction")
             return []
 
         evictable_blocks = [
