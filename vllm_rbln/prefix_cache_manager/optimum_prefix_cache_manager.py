@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import math
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,10 +16,10 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional
-from vllm.v1.core.kv_cache_manager import KVCacheBlocks
+
 import torch
-import math
-from vllm.v1.core.kv_cache_utils import KVCacheBlock
+from vllm.v1.core.kv_cache_manager import KVCacheBlocks
+
 from vllm_rbln.logger import init_logger
 from vllm_rbln.prefix_cache_manager.optimum_block_mapping_manager import (
     BlockMappingManager, RBLNBlock)
@@ -187,7 +188,7 @@ class RBLNPrefixKVCacheManager:
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
                  num_ib: int):
-        num_ob = num_ib // (ob_size // ib_size) - 1
+        num_ob = num_ib // (ob_size // ib_size)
         self._config = BlockConfiguration(ob_size, ib_size, max_model_len,
                                           num_ob)
         self._allocator = RBLNBlockAllocator(num_ob)
@@ -259,15 +260,16 @@ class RBLNPrefixKVCacheManager:
                                        inner_blocks: list[int],
                                        num_allocated_tokens: int = 0) -> int:
         """
-        If there are not enough free blocks,
-        evict some blocks based on the eviction policy.
+        Compute the number of outer blocks to allocate based on inner blocks
+        and the number of already allocated tokens.
         """
         if len(inner_blocks) == 0:
             return 0
-        
+
         if num_allocated_tokens == 0:
             # PREFILL
-            num_obs_needed = math.ceil(len(inner_blocks) / self._config.block_ratio)
+            num_obs_needed = math.ceil(
+                len(inner_blocks) / self._config.block_ratio)
         else:
             # DECODE
             num_already_allocated_ibs = \
@@ -280,44 +282,32 @@ class RBLNPrefixKVCacheManager:
 
         return num_obs_needed
 
-    def is_available_free_inner_blocks(self, new_blocks: list[int], num_computed_tokens: int) -> bool:
-        # 1. Check if the enough outer blocks are available
-        # print("is_available_free_inner_blocks called")  # DEBUG
-        # print("new_blocks", len(new_blocks))  # DEBUG
-        # print("num_computed_tokens", num_computed_tokens)  # DEBUG
-        required_num_ob = self.compute_num_blocks_to_allocate(new_blocks, num_computed_tokens)
+    def can_allocate(self, new_blocks: list[int],
+                     num_computed_tokens: int) -> bool:
+        # 1. Check if the enough outer blocks are free
+        required_num_ob = self.compute_num_blocks_to_allocate(
+            new_blocks, num_computed_tokens)
         free_count = self._allocator.get_free_count()
-        # print("required_num_ob", required_num_ob)  # DEBUG
-        # print("free_count", free_count)  # DEBUG
         if free_count >= required_num_ob:
             return True
-        # 2. Check if we can evict enough outer blocks
+        # 2. Check if we can evict enough blocks
         evict_count = required_num_ob - free_count
-        # print("evict_count", evict_count)  # DEBUG
-        blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
-            self._mapping_manager, evict_count)
-        # print("blocks_to_evict", blocks_to_evict)
-        if len(blocks_to_evict) < evict_count:
-            return False
-        return True
+        can_evict = self._eviction_policy.can_evict(self._mapping_manager,
+                                                    evict_count)
+        return can_evict
 
     def ensure_free_blocks(self, num_new_blocks: int) -> None:
         """
         If there are not enough free blocks,
         evict some blocks based on the eviction policy.
         """
-        # print("ensure_free_blocks called")  # DEBUG
-        # print("num_new_blocks", num_new_blocks)  # DEBUG
         free_count = self._allocator.get_free_count()
-        # print("free_count", free_count)  # DEBUG
         if free_count >= num_new_blocks:
             return
 
         evict_count = num_new_blocks - free_count
-        # print("evict_count", evict_count)  # DEBUG
         blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
             self._mapping_manager, evict_count)
-        # print("blocks_to_evict", blocks_to_evict)  # DEBUG
         # Check if we could evict enough blocks
         if len(blocks_to_evict) < evict_count:
             raise RuntimeError(
@@ -410,8 +400,8 @@ class RBLNPrefixKVCacheManager:
         return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
 
     def get_block_table_prefill(
-            self, request_id: str, cached_blocks: KVCacheBlocks,
-            num_cached_tokens: int, inner_blocks: KVCacheBlocks
+        self, request_id: str, cached_blocks: KVCacheBlocks,
+        num_cached_tokens: int, inner_blocks: KVCacheBlocks
     ) -> tuple[torch.Tensor, list[int], list[int]]:
 
         inner_blocks = inner_blocks.get_block_ids()[0]

@@ -103,15 +103,6 @@ class KVCacheBlockAdapter:
 
         return estimated if self.use_v1 else max(0, estimated - 1)
 
-    def get_available_num_outer_blocks(self) -> int:
-        """Number of outer blocks available for prefix caching."""
-        estimated = self._estimated_num_blocks()
-
-        if self.is_full_block_available():
-            return estimated
-
-        return estimated - 1
-
 
 class RBLNOptimumModelBase(nn.Module):
 
