@@ -86,9 +86,6 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
 
         selected = evictable_blocks[:count]
 
-        for block_id in selected:
-            self._allocation_order.pop(block_id, None)
-
         if len(selected) < count:
             logger.warning(
                 "Could not find enough inactive blocks for eviction. "
@@ -138,9 +135,6 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
 
         evictable_blocks = untouched_blocks + touched_blocks
         selected = evictable_blocks[:count]
-
-        for block_id in selected:
-            self._access_order.pop(block_id, None)
 
         if len(selected) < count:
             logger.warning(

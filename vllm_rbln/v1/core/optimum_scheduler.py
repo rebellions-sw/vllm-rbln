@@ -124,7 +124,6 @@ class RBLNOptimumScheduler(Scheduler):
         )
 
         if self.cache_config.enable_prefix_caching:
-            print("max_model_len", self.max_model_len)  # DEBUG
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=self.vllm_config.additional_config["attn_block_size"],
                 ib_size=self.cache_config.block_size,
@@ -249,14 +248,9 @@ class RBLNOptimumScheduler(Scheduler):
 
                 if self.cache_config.enable_prefix_caching:
                     if new_blocks is not None:
-                        num_blocks = len(new_blocks.get_block_ids()[0])
-                        if not self.prefix_cache_manager.is_available_free_inner_blocks(num_blocks):
-                            logger.warning(
-                                "Not enough outer blocks for prefix caching allocation. "
-                                "Requested: %d Available: %d",
-                                num_blocks,
-                                self.prefix_cache_manager._allocator.get_free_count()
-                            )
+                        required_blocks = new_blocks.get_block_ids()[0]
+                        print("[PREFILL] request_id", request.request_id)  # DEBUG
+                        if not self.prefix_cache_manager.is_available_free_inner_blocks(required_blocks, 0):
                             self.kv_cache_manager.free(request)
                             new_blocks = None
 
@@ -337,33 +331,30 @@ class RBLNOptimumScheduler(Scheduler):
                     # allow the lower-priority requests to be scheduled.
                     req_index += 1
                     continue
+                requires_preempt = False
                 while True:
-                    if self.cache_config.enable_prefix_caching:
-                        cur_blocks = self.kv_cache_manager.coordinator.single_type_managers[0].req_to_blocks.get(request.request_id)
-                        if cur_blocks is not None:
+                    # NOTE len of required new outer blocks in decode phase is maximum 1
+                    # So preemption triggered at maximum once per request.
+                    if not requires_preempt:
+                        if self.cache_config.enable_prefix_caching:
+                            cur_blocks = self.kv_cache_manager.coordinator.single_type_managers[0].req_to_blocks.get(request.request_id)
+                            if cur_blocks is not None:
+                                new_blocks = self.kv_cache_manager.allocate_slots(
+                                    request, num_new_tokens, num_lookahead_tokens=0)
+                            else:
+                                new_blocks = None
+                        else:
                             new_blocks = self.kv_cache_manager.allocate_slots(
                                 request, num_new_tokens, num_lookahead_tokens=0)
-                    else:
-                        new_blocks = self.kv_cache_manager.allocate_slots(
-                            request, num_new_tokens, num_lookahead_tokens=0)
+                    # new blocks is none or valid
                     if self.cache_config.enable_prefix_caching:
                         if new_blocks is not None:
-                            num_blocks = len(new_blocks.get_block_ids()[0])
-                            if not self.prefix_cache_manager.is_available_free_inner_blocks(num_blocks):
-                                logger.warning(
-                                    "Not enough outer blocks for prefix caching allocation. "
-                                    "Requested: %d , Available: %d",
-                                    num_blocks,
-                                    self.prefix_cache_manager._allocator.get_free_count()
-                                )
-                                self.kv_cache_manager.free(request)
-                                new_blocks = None
+                            required_blocks = new_blocks.get_block_ids()[0]
+                            if not self.prefix_cache_manager.is_available_free_inner_blocks(required_blocks, request.num_computed_tokens):
+                                requires_preempt = True
                             else:
-                                block_table = self.prefix_cache_manager.get_block_table_decode(
-                                    request.request_id, num_new_tokens, new_blocks)
-                                block_table_dict[request.request_id] = block_table
-
-                    if new_blocks is None:
+                                requires_preempt = False
+                    if new_blocks is None or requires_preempt is True:
                         # The request cannot be scheduled.
                         # Preempt the lowest-priority request.
                         if self.policy == SchedulingPolicy.PRIORITY:
@@ -410,7 +401,9 @@ class RBLNOptimumScheduler(Scheduler):
                 if not can_schedule:
                     break
                 assert new_blocks is not None
-
+                block_table = self.prefix_cache_manager.get_block_table_decode(
+                    request.request_id, request.num_computed_tokens, new_blocks)
+                block_table_dict[request.request_id] = block_table
                 # Schedule the request.
                 scheduled_running_reqs.append(request)
                 req_to_new_blocks[request.request_id] = new_blocks
@@ -497,6 +490,7 @@ class RBLNOptimumScheduler(Scheduler):
         assert request.is_finished()
 
         # NOTE free outer blocks in prefix cache manager
+        # for finished requests
         if self.cache_config.enable_prefix_caching:
             self.prefix_cache_manager.free_request(request.request_id)
 
