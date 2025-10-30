@@ -501,7 +501,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 "Already generated tokens: %s, Allocated block(s): %s", req_id,
                 len(self.requests[req_id].prompt_token_ids),
                 len(self.requests[req_id].output_token_ids), block_ids)
-            block_table = scheduler_output.block_table
+            block_table = scheduler_output.block_table_dict[req_id]
             cached_block_table = scheduler_output.cached_block_table
             cached_length = scheduler_output.cached_length
             total_cached_length = sum(cached_length)
@@ -559,7 +559,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 [self.input_batch.token_ids_cpu[req_index][input_position]])
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
-            if not self.enable_prefix_caching:
+            if self.enable_prefix_caching:
+                block_tables_list.append(scheduler_output.block_table_dict[req_id])
+            else:
                 block_table = block_tables_cpu[req_index]
                 block_table = self.mask_block_table(block_table, num_blocks)
                 block_tables_list.append(block_table)
@@ -567,10 +569,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         input_tokens = torch.tensor(input_tokens)
         input_positions = torch.tensor(input_positions)
-        if block_tables_list:
-            block_tables = torch.stack(block_tables_list)
-        else:
-            block_tables = scheduler_output.block_table
+        block_tables = torch.stack(block_tables_list)
 
         return input_tokens, input_positions, block_tables, running_request_ids
 
