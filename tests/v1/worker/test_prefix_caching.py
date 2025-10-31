@@ -11,13 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import tempfile
 
 import pytest
 import torch
-from vllm.config import set_current_vllm_config
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
 from vllm.platforms import current_platform
 from vllm.utils import sha256
 from vllm.v1.core.kv_cache_manager import KVCacheManager
@@ -25,11 +21,9 @@ from vllm.v1.core.kv_cache_utils import init_none_hash
 
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
-from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
-from .utils import (MockModelWrapper, _schedule_cached_reqs,
-                    _schedule_new_request, finish_request, get_vllm_config,
-                    initialize_kv_cache, make_kv_cache_config, make_request)
+from .utils import (_schedule_cached_reqs, _schedule_new_request,
+                    finish_request, make_kv_cache_config, make_request)
 
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
@@ -41,32 +35,28 @@ HASH_FN = sha256
 
 
 @pytest.fixture
-def model_runner():
-    vllm_config = get_vllm_config()
-    vllm_config.cache_config.enable_prefix_caching = True
-    with set_current_vllm_config(vllm_config, check_compile=False):
-        temp_file = tempfile.mkstemp()[1]
-        init_distributed_environment(
-            world_size=1,
-            rank=0,
-            local_rank=0,
-            distributed_init_method=f"file://{temp_file}",
-            backend="gloo",
-        )
-        ensure_model_parallel_initialized(
-            1,
-            1,
-        )
-    runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
-    runner.model = MockModelWrapper()
-    runner.prefix_cache_manager = RBLNPrefixKVCacheManager(
+def prefix_cache_manager():
+    manager = RBLNPrefixKVCacheManager(
         ob_size=OB_SIZE,
         ib_size=IB_SIZE,
         max_model_len=MAX_MODEL_LEN,
-        num_ob=runner.model.model.kv_block_adapter.get_available_num_blocks(),
+        num_inner_blocks=NUM_BLOCKS - 1,
+        # -1 = reserve one outer block for null block
     )
-    initialize_kv_cache(runner)
-    return runner
+    return manager
+
+
+@pytest.fixture
+def kv_cache_manager():
+    manager = KVCacheManager(
+        make_kv_cache_config(
+            block_size=IB_SIZE,
+            num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
+        ),
+        max_model_len=MAX_MODEL_LEN,
+        enable_caching=True,
+    )
+    return manager
 
 
 def test_prefill(model_runner):

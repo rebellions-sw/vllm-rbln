@@ -35,25 +35,13 @@ class SimpleEvictionPolicy:
 
     def can_evict(self, mapping_manager: BlockMappingManager,
                   count: int) -> bool:
-        """
-        Check if there are enough inactive blocks to evict.
-        """
-        # Select blocks for eviction.
-        inactive_mappings = mapping_manager.get_inactive_mappings()
-        evicted_blocks = []
-
-        for mapping in inactive_mappings:
-            if len(evicted_blocks) >= count:
-                break
-            evicted_blocks.append(mapping.outer_block_id)
-        return len(evicted_blocks) >= count
+        """Check if there are enough inactive blocks to evict."""
+        selected = self.select_blocks_for_eviction(mapping_manager, count)
+        return len(selected) >= count
 
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
                                    count: int) -> list[int]:
-        """
-        Select blocks for eviction.
-        """
-        # Select blocks for eviction.
+        """Select blocks for eviction."""
         inactive_mappings = mapping_manager.get_inactive_mappings()
         evicted_blocks = []
 
@@ -79,8 +67,8 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._allocation_order.pop(block_id, None)
 
-    def can_evict(self, mapping_manager: BlockMappingManager,
-                  count: int) -> bool:
+    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
+                                   count: int) -> list[int]:
         # NOTE If the cached block is evicted, we should also evict its mapping
         # How about exclude the cached blocks from eviction?
         # AS-IS: Eviction -> Cache check -> Allocation
@@ -100,7 +88,7 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         ]
 
         selected = evictable_blocks[:count]
-        return selected >= count
+        return selected
 
 
 class LRUEvictionPolicy(SimpleEvictionPolicy):
@@ -123,8 +111,8 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._access_order.pop(block_id, None)
 
-    def can_evict(self, mapping_manager: BlockMappingManager,
-                  count: int) -> bool:
+    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
+                                   count: int) -> list[int]:
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
@@ -148,4 +136,4 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         evictable_blocks = untouched_blocks + touched_blocks
         selected = evictable_blocks[:count]
 
-        return selected >= count
+        return selected

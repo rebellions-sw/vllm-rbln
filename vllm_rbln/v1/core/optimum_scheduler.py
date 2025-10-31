@@ -130,7 +130,8 @@ class RBLNOptimumScheduler(Scheduler):
                 ob_size=self.vllm_config.additional_config["attn_block_size"],
                 ib_size=self.cache_config.block_size,
                 max_model_len=self.max_model_len,
-                num_ib=self.kv_cache_manager.block_pool.num_gpu_blocks - 1,
+                num_inner_blocks=self.kv_cache_manager.block_pool.
+                num_gpu_blocks - 1,
             )
         self.use_pp = False
 
