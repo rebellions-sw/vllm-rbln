@@ -58,6 +58,9 @@ jobs:
 
       - name: Install rebel-compiler
         run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ build-essential
+          export CXX=$(which g++)
           python3 -m pip uninstall rebel-compiler -y
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
