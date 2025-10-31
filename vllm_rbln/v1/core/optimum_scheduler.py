@@ -40,10 +40,18 @@ logger = init_logger(__name__)
 
 @dataclass
 class RBLNSchedulerOutput(SchedulerOutput):
+    """
+    block_table_dict: dict[str, torch.Tensor]
+        Mapping from request ID to outer block table tensor
+        for both prefill and decode.
+    cached_block_table: list[int]
+        List of cached outer block table entries for prefill.
+    cached_length: list[int]
+        List of cached lengths for each outer block for prefill.
+    """
     block_table_dict: dict[str, torch.Tensor] = None
     cached_block_table: list[int] = field(default_factory=list)
     cached_length: list[int] = field(default_factory=list)
-
 
 class RBLNOptimumScheduler(Scheduler):
 
