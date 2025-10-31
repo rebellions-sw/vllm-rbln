@@ -187,8 +187,10 @@ class MemoryPoolManager:
 class RBLNPrefixKVCacheManager:
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
-                 num_ib: int):
-        num_ob = num_ib // (ob_size // ib_size)
+                 num_inner_blocks: int):
+        assert ob_size % ib_size == 0, \
+            "Outer block size must be a multiple of inner block size"
+        num_ob = math.ceil(num_inner_blocks / (ob_size // ib_size))
         self._config = BlockConfiguration(ob_size, ib_size, max_model_len,
                                           num_ob)
         self._allocator = RBLNBlockAllocator(num_ob)
