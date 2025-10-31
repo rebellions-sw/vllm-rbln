@@ -33,33 +33,79 @@ NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1  # 9
 DEVICE = current_platform.device_type
 HASH_FN = sha256
 
+# checkout output scheduler, runner in prefill, decode tests
+# not preempt + eviction test
+# preempt + eviction test
 
 @pytest.fixture
-def prefix_cache_manager():
-    manager = RBLNPrefixKVCacheManager(
-        ob_size=OB_SIZE,
-        ib_size=IB_SIZE,
+def scheduler():
+    create_scheduler(
+        max_num_seqs=MAX_NUM_SEQ,
+        max_num_batched_tokens=MAX_MODEL_LEN,
+        num_blocks=NUM_BLOCKS,
+        block_size=IB_SIZE,
         max_model_len=MAX_MODEL_LEN,
-        num_inner_blocks=NUM_BLOCKS - 1,
-        # -1 = reserve one outer block for null block
+        outer_block_size=OB_SIZE,
     )
-    return manager
+    return scheduler
 
-
-@pytest.fixture
-def kv_cache_manager():
-    manager = KVCacheManager(
-        make_kv_cache_config(
-            block_size=IB_SIZE,
-            num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
+def create_request(
+    request_id: str,
+    prompt_token_ids: list[int],
+    block_size: int,
+    hash_fn: callable,
+) -> Request:
+    block_hasher = get_request_block_hasher(block_size, hash_fn)
+    request = Request(
+        request_id=request_id,
+        prompt_token_ids=prompt_token_ids,
+        sampling_params=SamplingParams(
+            max_tokens=MAX_MODEL_LEN,
+            temperature=0.0,
         ),
-        max_model_len=MAX_MODEL_LEN,
-        enable_caching=True,
+        block_hasher=block_hasher,
     )
-    return manager
+    return request
+
+def test_prefix_cache_hit_same_prompt():
+    init_none_hash(HASH_FN)
+    """
+    Check the prefix caching works as expected
+    between two requests with the same prompt.
+
+    req0: 50 tokens -> 13 inner blocks -> 4 outer blocks allocated
+    req1: same 50 tokens
+        -> 12 cached + 1 new inner blocks allocated
+        -> 3 outer blocks cache hit
+    """
+    # 1. Generate req0: 42 tokens -> 11 inner blocks
+    common_token_ids = [i for i in range(50)]
+    req0_id = "0"
+    req0 = create_request(req0_id, common_token_ids, IB_SIZE, HASH_FN)
+
+    req1_id = "1"
+    req1 = create_request(req1_id, common_token_ids, IB_SIZE, HASH_FN)
+
+    requests = [req0, req1]
+    for request in requests:
+        scheduler.add_request(request)
+    
+    output = scheduler.schedule()
+    assert output.block_table_dict[req0_id] == [0, 1, 2, 3]
+    assert output.cached_block_table == []
+    assert output.cached_length == []
+
+    # Model output of the first request.
+    model_runner_output = create_model_runner_output(output)
+    scheduler.update_from_output(output, model_runner_output)
+
+    output = scheduler.schedule()
+    assert output.block_table_dict[req1_id] == [4, 5, 6, 7]
+    assert output.cached_block_table == [0, 1, 2]
+    assert output.cached_length == [16, 16, 16, 4]
 
 
-def test_prefill(model_runner):
+def test_prefill(scheduler, runner):
     init_none_hash(HASH_FN)
     """
     Check the prefix caching works as expected during prefill.
@@ -73,109 +119,140 @@ def test_prefill(model_runner):
         -> 5 cached + 8 new inner blocks allocated
         -> 13 outer blocks allocated
     """
-    manager = KVCacheManager(
-        make_kv_cache_config(
-            block_size=IB_SIZE,
-            num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
-        ),
-        max_model_len=MAX_MODEL_LEN,
-        enable_caching=True,
-    )
-
     # 1. Generate req0: 42 tokens -> 11 inner blocks
     common_token_ids = [i for i in range(32)]
+    req0_id = "0"
     unique_token_ids = [3] * 10
     all_token_ids = common_token_ids + unique_token_ids
-    req_id = "0"
-    req0 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
-    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req0)
-    assert not computed_blocks.blocks[0]
-    assert num_computed_tokens == 0
-    blocks = manager.allocate_slots(req0, len(all_token_ids),
-                                    len(computed_blocks.blocks[0]) * IB_SIZE,
-                                    computed_blocks)
-    assert blocks.get_block_ids() == ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], )
-    # Check the allocated blocks
-    scheduler_output = _schedule_new_request(
-        req_id,
-        token_ids=all_token_ids,
-        block_ids=blocks.get_block_ids(),
-        new_computed_tokens=num_computed_tokens,
-        new_computed_blocks=computed_blocks.get_block_ids()[0],
-    )
-    model_runner._update_states(scheduler_output)
-    inputs, _ = model_runner._prepare_inputs(scheduler_output)
-    assert torch.allclose(inputs.block_tables[0],
-                          torch.tensor([0, 1, 2, -1], dtype=torch.int32))
-    assert inputs.cached_block_tables == []
+    req0 = create_request(req0_id, all_token_ids, IB_SIZE, HASH_FN)
 
-    # 2. Generate partially cached request req1
+    req1_id = "1"
     unique_token_ids = [1] * 10
     all_token_ids = common_token_ids + unique_token_ids
-    req_id = "1"
-    req1 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
-    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
-    assert len(computed_blocks.blocks[0]) == 8
-    assert num_computed_tokens == 32
-    blocks = manager.allocate_slots(req1, len(unique_token_ids),
-                                    len(computed_blocks.blocks[0]) * IB_SIZE,
-                                    computed_blocks)
-    # [1, 2, 3, 4, 5, 6, 7, 8] are cached
-    # Allocate [12, 13, 14] for new 3 inner blocks
-    assert blocks.get_block_ids() == ([12, 13, 14], )
-    total_allocated_blocks = manager.get_block_ids(req1.request_id)
-    assert total_allocated_blocks == ([1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14], )
-    scheduler_output = _schedule_new_request(
-        req_id,
-        token_ids=all_token_ids,
-        block_ids=total_allocated_blocks,
-        new_computed_tokens=num_computed_tokens,
-        new_computed_blocks=computed_blocks.get_block_ids()[0],
-    )
-    model_runner._update_states(scheduler_output)
-    inputs, _ = model_runner._prepare_inputs(scheduler_output)
+    req1 = create_request(req1_id, all_token_ids, IB_SIZE, HASH_FN)
 
-    assert torch.allclose(inputs.block_tables[0],
-                          torch.tensor([3, 4, 5, -1], dtype=torch.int32))
-    assert inputs.cached_block_tables == [0, 1]
-    # 3. Finish req1 and schedule req2
-    finished_req = req1
-    finish_request(manager, finished_req)
-
-    # Allocate 13 inner blocks (50 tokens) for req2
-    req_id = "2"
-    common_token_ids = [i for i in range(20)]
+    req2_id = "2"
     unique_token_ids = [2] * 30
     all_token_ids = common_token_ids + unique_token_ids
-    req2 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
-    computed_blocks, num_computed_tokens = manager.get_computed_blocks(req2)
-    assert len(computed_blocks.blocks[0]) == 5
-    assert num_computed_tokens == 20
-    blocks = manager.allocate_slots(req2, len(unique_token_ids),
-                                    len(computed_blocks.blocks[0]) * IB_SIZE,
-                                    computed_blocks)
-    # [1, 2, 3, 4, 5] are cached
-    # Allocate [15, 16, 17, 18, 19, 20, 21, 22] for new 8 inner blocks
-    assert blocks.get_block_ids() == ([15, 16, 17, 18, 19, 20, 21, 22], )
-    total_allocated_blocks = manager.get_block_ids(req2.request_id)
-    assert total_allocated_blocks == ([
-        1, 2, 3, 4, 5, 15, 16, 17, 18, 19, 20, 21, 22
-    ], )
-    scheduler_output = _schedule_new_request(
-        req_id,
-        token_ids=all_token_ids,
-        block_ids=total_allocated_blocks,
-        new_computed_tokens=num_computed_tokens,
-        finished_req_ids=[finished_req.request_id],
-        new_computed_blocks=computed_blocks.get_block_ids()[0],
-    )
-    model_runner._update_states(scheduler_output)
-    inputs, _ = model_runner._prepare_inputs(scheduler_output)
+    req2 = create_request(req2_id, all_token_ids, IB_SIZE, HASH_FN)
+    requests = [req0, req1, req2]
 
-    # Check the allocated outer blocks
-    assert torch.allclose(inputs.block_tables[0],
-                          torch.tensor([6, 7, 8, 3], dtype=torch.int32))
-    assert inputs.cached_block_tables == [0, 1]
+
+    for request in requests:
+        scheduler.add_request(request)
+    
+    output = scheduler.schedule()
+    assert output.block_table_dict[req0_id] == [0, 1, 2, -1]
+    assert output.cached_block_table == []
+    assert output.cached_length == []
+    # Check model input in runner will be checked in worker directory.
+
+    # Model output of the first request.
+    model_runner_output = create_model_runner_output(output)
+    scheduler.update_from_output(output, model_runner_output)
+
+    output = scheduler.schedule()
+    assert output.block_table_dict[req1_id] == [3, 4, 5, -1]
+    assert output.cached_block_table == [0, 1]
+    assesrt output.cached_length == [16, 16]
+
+    # Model output of the second request.
+    model_runner_output = create_model_runner_output(output)
+    scheduler.update_from_output(output, model_runner_output)
+
+
+
+
+
+
+
+    # computed_blocks, num_computed_tokens = kv_cache_manager.get_computed_blocks(req0)
+    # assert not computed_blocks.blocks[0]
+    # assert num_computed_tokens == 0
+    # blocks = kv_cache_manager.allocate_slots(req0, len(all_token_ids), 0,
+    #                                 computed_blocks)
+    # assert blocks.get_block_ids() == ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], )
+    # # Check the allocated blocks
+    # scheduler_output = _schedule_new_request(
+    #     req_id,
+    #     token_ids=all_token_ids,
+    #     block_ids=blocks.get_block_ids(),
+    #     new_computed_tokens=num_computed_tokens,
+    #     new_computed_blocks=computed_blocks.get_block_ids()[0],
+    # )
+    # model_runner._update_states(scheduler_output)
+    # inputs, _ = model_runner._prepare_inputs(scheduler_output)
+    # assert torch.allclose(inputs.block_tables[0],
+    #                       torch.tensor([0, 1, 2, -1], dtype=torch.int32))
+    # assert inputs.cached_block_tables == []
+
+    # # 2. Generate partially cached request req1
+    # unique_token_ids = [1] * 10
+    # all_token_ids = common_token_ids + unique_token_ids
+    # req_id = "1"
+    # req1 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
+    # computed_blocks, num_computed_tokens = manager.get_computed_blocks(req1)
+    # assert len(computed_blocks.blocks[0]) == 8
+    # assert num_computed_tokens == 32
+    # blocks = manager.allocate_slots(req1, len(unique_token_ids),
+    #                                 len(computed_blocks.blocks[0]) * IB_SIZE,
+    #                                 computed_blocks)
+    # # [1, 2, 3, 4, 5, 6, 7, 8] are cached
+    # # Allocate [12, 13, 14] for new 3 inner blocks
+    # assert blocks.get_block_ids() == ([12, 13, 14], )
+    # total_allocated_blocks = manager.get_block_ids(req1.request_id)
+    # assert total_allocated_blocks == ([1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14], )
+    # scheduler_output = _schedule_new_request(
+    #     req_id,
+    #     token_ids=all_token_ids,
+    #     block_ids=total_allocated_blocks,
+    #     new_computed_tokens=num_computed_tokens,
+    #     new_computed_blocks=computed_blocks.get_block_ids()[0],
+    # )
+    # model_runner._update_states(scheduler_output)
+    # inputs, _ = model_runner._prepare_inputs(scheduler_output)
+
+    # assert torch.allclose(inputs.block_tables[0],
+    #                       torch.tensor([3, 4, 5, -1], dtype=torch.int32))
+    # assert inputs.cached_block_tables == [0, 1]
+    # # 3. Finish req1 and schedule req2
+    # finished_req = req1
+    # finish_request(manager, finished_req)
+
+    # # Allocate 13 inner blocks (50 tokens) for req2
+    # req_id = "2"
+    # common_token_ids = [i for i in range(20)]
+    # unique_token_ids = [2] * 30
+    # all_token_ids = common_token_ids + unique_token_ids
+    # req2 = make_request(req_id, all_token_ids, IB_SIZE, HASH_FN)
+    # computed_blocks, num_computed_tokens = manager.get_computed_blocks(req2)
+    # assert len(computed_blocks.blocks[0]) == 5
+    # assert num_computed_tokens == 20
+    # blocks = manager.allocate_slots(req2, len(unique_token_ids),
+    #                                 len(computed_blocks.blocks[0]) * IB_SIZE,
+    #                                 computed_blocks)
+    # # [1, 2, 3, 4, 5] are cached
+    # # Allocate [15, 16, 17, 18, 19, 20, 21, 22] for new 8 inner blocks
+    # assert blocks.get_block_ids() == ([15, 16, 17, 18, 19, 20, 21, 22], )
+    # total_allocated_blocks = manager.get_block_ids(req2.request_id)
+    # assert total_allocated_blocks == ([
+    #     1, 2, 3, 4, 5, 15, 16, 17, 18, 19, 20, 21, 22
+    # ], )
+    # scheduler_output = _schedule_new_request(
+    #     req_id,
+    #     token_ids=all_token_ids,
+    #     block_ids=total_allocated_blocks,
+    #     new_computed_tokens=num_computed_tokens,
+    #     finished_req_ids=[finished_req.request_id],
+    #     new_computed_blocks=computed_blocks.get_block_ids()[0],
+    # )
+    # model_runner._update_states(scheduler_output)
+    # inputs, _ = model_runner._prepare_inputs(scheduler_output)
+
+    # # Check the allocated outer blocks
+    # assert torch.allclose(inputs.block_tables[0],
+    #                       torch.tensor([6, 7, 8, 3], dtype=torch.int32))
+    # assert inputs.cached_block_tables == [0, 1]
 
 
 def test_decode(model_runner):

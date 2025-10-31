@@ -45,6 +45,7 @@ def create_scheduler(
     max_model_len: Optional[int] = None,
     async_scheduling: bool = False,
     is_torch_compile: bool = False,
+    outer_block_size: int = 0,
 ) -> Union[RBLNOptimumScheduler, RBLNScheduler]:
     """Create RBLNOptimumscheduler under test.
 
@@ -82,6 +83,9 @@ def create_scheduler(
         scheduler_config=scheduler_config,
         model_config=model_config,
         cache_config=cache_config,
+        additional_config={
+            "attn_block_size": outer_block_size,
+        },
     )
     kv_cache_config = KVCacheConfig(
         num_blocks=num_blocks,  # A large number of blocks to hold all requests
