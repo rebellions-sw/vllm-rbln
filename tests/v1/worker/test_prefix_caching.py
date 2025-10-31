@@ -43,6 +43,7 @@ HASH_FN = sha256
 @pytest.fixture
 def model_runner():
     vllm_config = get_vllm_config()
+    vllm_config.cache_config.enable_prefix_caching = True
     with set_current_vllm_config(vllm_config, check_compile=False):
         temp_file = tempfile.mkstemp()[1]
         init_distributed_environment(
