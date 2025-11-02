@@ -46,6 +46,7 @@ def create_scheduler(
     async_scheduling: bool = False,
     is_torch_compile: bool = False,
     outer_block_size: int = 0,
+    enable_prefix_caching: bool = False,
 ) -> Union[RBLNOptimumScheduler, RBLNScheduler]:
     """Create RBLNOptimumscheduler under test.
 
@@ -77,6 +78,7 @@ def create_scheduler(
         block_size=block_size,
         swap_space=0,
         cache_dtype="auto",
+        enable_prefix_caching=enable_prefix_caching,
     )
 
     vllm_config = VllmConfig(
