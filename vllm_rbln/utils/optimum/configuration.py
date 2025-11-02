@@ -158,6 +158,5 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
     else:
         kvcache_block_size, batch_size, max_model_len = \
             get_rbln_params(vllm_config, rbln_config)
-
-    update_vllm_config_with_rbln_params(vllm_config, batch_size, max_model_len,
-                                        kvcache_block_size)
+        update_vllm_config_with_rbln_params(vllm_config, batch_size,
+                                            max_model_len, kvcache_block_size)

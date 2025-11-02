@@ -186,7 +186,6 @@ def test_prefix_cache_hit_same_prompt(scheduler, token_length: int,
 #         torch.tensor(outer_blocks_allocated, dtype=torch.int32))
 #     assert inputs.cached_block_tables == []
 
-
 # def test_simple_eviction():
 #     """
 #     req0: 64 tokens -> 16 inner blocks -> 4 outer blocks allocated
