@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 
 from vllm_rbln.logger import init_logger
 
@@ -108,23 +107,39 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
 class CacheSearchManager:
     """
     Search for cached blocks that can be reused.
+    It maintains a per-request cache of search results
+    until the request is freed.
     """
 
     def __init__(self, config: BlockConfiguration):
         self._config = config
+        self._cached_blocks_per_request: dict[str, CacheSearchResult] = {}
 
     def find_cached_blocks(
-            self, request_id: str, inner_blocks: list[int],
+            self, request_id: str, cached_blocks: list[int],
+            num_new_computed_tokens: int,
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Find cached outer blocks that match the given inner blocks.
         """
-        best_match = self._try_match_request(inner_blocks, mapping_manager)
+        if request_id in self._cached_blocks_per_request:
+            return self._cached_blocks_per_request[request_id]
+
+        best_match = self._try_match_request(cached_blocks, mapping_manager)
+        self._cached_blocks_per_request[request_id] = best_match
+        final_num_cached_tokens = sum(best_match.cached_lengths)
+        if final_num_cached_tokens < num_new_computed_tokens:
+            logger.debug(
+                "The request %s cannot hit "
+                "all new computed tokens(%d). "
+                "The last tokens %d are already evicted.", request_id,
+                num_new_computed_tokens,
+                num_new_computed_tokens - final_num_cached_tokens)
 
         if best_match.has_cache_hit:
             logger.debug("[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
                          request_id, best_match.cached_outer_blocks,
-                         inner_blocks)
+                         cached_blocks)
 
         return best_match
 
@@ -163,6 +178,9 @@ class CacheSearchManager:
 
         return CacheSearchResult(cached_outer_blocks=cached_ob,
                                  cached_lengths=cached_lengths)
+
+    def remove_cached_blocks(self, request_id: str) -> None:
+        self._cached_blocks_per_request.pop(request_id, None)
 
 
 class MemoryPoolManager:
@@ -205,6 +223,9 @@ class RBLNPrefixKVCacheManager:
         Allocate blocks for a given request
         based on its phase (PREFILL or DECODE).
         """
+        if len(inner_blocks) == 0:
+            return
+
         if self._mapping_manager.is_request_registered(request_id):
             self._handle_decode_allocation(request_id, num_new_ob,
                                            inner_blocks)
@@ -259,7 +280,7 @@ class RBLNPrefixKVCacheManager:
                      block_ids, inner_blocks)
 
     def compute_num_blocks_to_allocate(self,
-                                       num_inner_blocks: list[int],
+                                       num_inner_blocks: int,
                                        num_allocated_tokens: int = 0) -> int:
         """
         Compute the number of outer blocks to allocate based on inner blocks
@@ -292,35 +313,32 @@ class RBLNPrefixKVCacheManager:
         free_count = self._allocator.get_free_count()
         if free_count >= required_num_ob:
             return True
+
         # 2. Check if we can evict enough blocks
         evict_count = required_num_ob - free_count
-        can_evict = self._eviction_policy.can_evict(self._mapping_manager,
-                                                    evict_count)
+        blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
+            self._mapping_manager, evict_count)
+
+        can_evict = len(blocks_to_evict) >= evict_count
+
+        # 3. Evict blocks if possible
+        if can_evict:
+            # NOTE: In vLLM, the blocks are returned
+            # to the free block queue in reversed order.
+            # It is for preventing memory fragmentation.
+            # But here, we don't need to reverse the order.
+            for block_id in blocks_to_evict:
+                self._evict_block(block_id)
         return can_evict
 
     def ensure_free_blocks(self, num_new_blocks: int) -> None:
         """
-        If there are not enough free blocks,
-        evict some blocks based on the eviction policy.
+        Ensure that there are enough free blocks to allocate.
         """
         free_count = self._allocator.get_free_count()
-        if free_count >= num_new_blocks:
-            return
-
-        evict_count = num_new_blocks - free_count
-        blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
-            self._mapping_manager, evict_count)
-        # Check if we could evict enough blocks
-        if len(blocks_to_evict) < evict_count:
-            raise RuntimeError(
-                f"Cannot evict enough blocks. Need {evict_count}, "
-                f"can evict {len(blocks_to_evict)}")
-        # NOTE: In vLLM, the blocks are returned
-        # to the free block queue in reversed order.
-        # It is for preventing memory fragmentation.
-        # But here, we don't need to reverse the order.
-        for block_id in blocks_to_evict:
-            self._evict_block(block_id)
+        assert free_count >= num_new_blocks, \
+            f"Free blocks ({free_count}) should be " \
+            f"greater than or equal to {num_new_blocks}"
 
     def _evict_block(self, block_id: int) -> None:
         """
@@ -365,6 +383,7 @@ class RBLNPrefixKVCacheManager:
         If it is not preemption, keep the mappings for potential future reuse.
         """
         outer_blocks = self._mapping_manager.remove_request(request_id)
+        self._cache_search_manager.remove_cached_blocks(request_id)
 
         for block_id in outer_blocks:
             mapping = self._mapping_manager.get_mapping(block_id)
@@ -375,13 +394,14 @@ class RBLNPrefixKVCacheManager:
                     self._evict_block(block_id)
 
     def get_matched_outer_blocks(
-            self, request_id: str,
-            inner_blocks: list[int]) -> tuple[list[int], list[int]]:
+            self, request_id: str, cached_blocks: list[int],
+            num_new_computed_tokens: int) -> tuple[list[int], list[int]]:
         """
         Get the matched outer blocks using inner blocks.
         """
         result = self._cache_search_manager.find_cached_blocks(
-            request_id, inner_blocks, self._mapping_manager)
+            request_id, cached_blocks, num_new_computed_tokens,
+            self._mapping_manager)
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):
@@ -400,39 +420,3 @@ class RBLNPrefixKVCacheManager:
 
         block_ids = self._mapping_manager.get_request_blocks(request_id)
         return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
-
-    def get_block_table_prefill(
-        self, request_id: str, cached_blocks: KVCacheBlocks,
-        num_cached_tokens: int, inner_blocks: KVCacheBlocks
-    ) -> tuple[torch.Tensor, list[int], list[int]]:
-
-        inner_blocks = inner_blocks.get_block_ids()[0]
-        cached_blocks = cached_blocks.get_block_ids()[0]
-        num_new_blocks = len(inner_blocks)
-        if num_new_blocks == 0:
-            return self.get_blocks(request_id), [], []
-
-        num_new_ob = self.compute_num_blocks_to_allocate(num_new_blocks, 0)
-        self.ensure_free_blocks(num_new_ob)
-        cached_block_table, cached_length = self.get_matched_outer_blocks(
-            request_id, cached_blocks)
-        if sum(cached_length) < num_cached_tokens:
-            logger.debug(
-                "The blocks %s is not in RBLN prefix cache manager. "
-                "Falling back to full attention", cached_blocks)
-        self.allocate_blocks(request_id, num_new_ob, inner_blocks)
-        return self.get_blocks(request_id), cached_block_table, cached_length
-
-    def get_block_table_decode(self, request_id: str,
-                               num_allocated_tokens: int,
-                               inner_blocks: KVCacheBlocks) -> torch.Tensor:
-        inner_blocks = inner_blocks.get_block_ids()[0]
-        num_new_blocks = len(inner_blocks)
-        if num_new_blocks == 0:
-            return self.get_blocks(request_id)
-
-        num_new_ob = self.compute_num_blocks_to_allocate(
-            num_new_blocks, num_allocated_tokens)
-        self.ensure_free_blocks(num_new_ob)
-        self.allocate_blocks(request_id, num_new_ob, inner_blocks)
-        return self.get_blocks(request_id)

@@ -240,6 +240,18 @@ class RBLNOptimumScheduler(Scheduler):
                     self.kv_cache_manager.get_computed_blocks(
                         request)
 
+                # Get the cached blocks for prefix caching.
+                # using new_computed_blocks, num_new_local_computed_tokens
+                if self.cache_config.enable_prefix_caching:
+                    (
+                        cached_block_table,
+                        cached_length,
+                    ) = self.kv_cache_manager.get_prefix_cached_blocks(
+                        request,
+                        new_computed_blocks,
+                        num_new_local_computed_tokens,
+                    )
+
                 # Number of tokens to be scheduled.
                 # We use `request.num_tokens` instead of
                 # `request.num_prompt_tokens` to consider the resumed
@@ -261,14 +273,7 @@ class RBLNOptimumScheduler(Scheduler):
                     break
 
                 if self.cache_config.enable_prefix_caching:
-                    block_table, cached_block_table, cached_length = \
-                        self.kv_cache_manager.get_prefix_cached_blocks_prefill(
-                            request,
-                            new_computed_blocks,
-                            num_new_local_computed_tokens,
-                            new_blocks
-                        )
-                    block_table_dict[request.request_id] = block_table
+                    self.update_block_table_dict(request, block_table_dict)
 
                 # Request was already popped from self.waiting
                 # unless it was re-added above due to new_blocks being None.
@@ -387,10 +392,7 @@ class RBLNOptimumScheduler(Scheduler):
                     break
                 assert new_blocks is not None
                 if self.cache_config.enable_prefix_caching:
-                    block_table = \
-                        self.kv_cache_manager.get_prefix_cached_blocks_decode(
-                        request, new_blocks)
-                    block_table_dict[request.request_id] = block_table
+                    self.update_block_table_dict(request, block_table_dict)
                 # Schedule the request.
                 scheduled_running_reqs.append(request)
                 req_to_new_blocks[request.request_id] = new_blocks
@@ -459,3 +461,10 @@ class RBLNOptimumScheduler(Scheduler):
 
         self._update_after_schedule(scheduler_output)
         return scheduler_output
+
+    def update_block_table_dict(
+            self, request: Request,
+            block_table_dict: dict[str, torch.Tensor]) -> None:
+        request_id = request.request_id
+        block_table = self.kv_cache_manager.get_block_table(request_id)
+        block_table_dict[request_id] = block_table

@@ -110,6 +110,7 @@ class RBLNKVCacheManager(KVCacheManager):
         if num_blocks_to_allocate > self.block_pool.get_num_free_blocks():
             # Cannot allocate new blocks
             return None
+
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
                     num_blocks_to_allocate,
@@ -128,6 +129,8 @@ class RBLNKVCacheManager(KVCacheManager):
 
         # Generate req_to_blocks, num_cached_block
         # in the coordinator
+        # `empty_computed_block_list` is used here to avoid
+        # saving the computed blocks to the request state
         self.coordinator.save_new_computed_blocks(
             request.request_id,
             empty_computed_block_list,
@@ -141,8 +144,20 @@ class RBLNKVCacheManager(KVCacheManager):
         if not self.enable_caching:
             return KVCacheBlocks(new_blocks)
 
-        # Allocate outer blocks for prefix caching.
-        # TODO
+        # Allocate outer blocks for prefix caching
+        # following the inner blocks allocation
+        inner_block_ids = [block.block_id for block in new_blocks[0]]
+        num_new_ib = len(inner_block_ids)
+
+        num_new_ob = self.prefix_cache_manager.compute_num_blocks_to_allocate(
+            num_new_ib, num_computed_tokens)
+
+        self.prefix_cache_manager.allocate_blocks(
+            request.request_id,
+            num_new_ob,
+            inner_block_ids,
+        )
+
         # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
         # num_new_tokens, but must exclude "non-committable" tokens (e.g.,
         # draft tokens that could be rejected). Therefore, we cap the number
@@ -152,20 +167,20 @@ class RBLNKVCacheManager(KVCacheManager):
         self.coordinator.cache_blocks(request, num_tokens_to_cache)
         return KVCacheBlocks(new_blocks)
 
-    def get_prefix_cached_blocks_prefill(
-            self, request: Request, cached_blocks: KVCacheBlocks,
-            num_cached_tokens: int,
-            inner_blocks: KVCacheBlocks) -> tuple[torch.Tensor, dict, int]:
-        """Get the block table for prefill phase.
-        """
-        return self.prefix_cache_manager.get_block_table_prefill(
-            request.request_id, cached_blocks, num_cached_tokens, inner_blocks)
+    def get_prefix_cached_blocks(
+        self,
+        request: Request,
+        new_computed_blocks: KVCacheBlocks,
+        num_new_computed_tokens: int,
+    ) -> tuple[list[int], list[int]]:
+        cached_blocks = new_computed_blocks.get_block_ids()[0]
+        cached_block_table, cached_length = \
+            self.prefix_cache_manager.get_matched_outer_blocks(
+            request.request_id, cached_blocks,
+            num_new_computed_tokens,
+        )
 
-    def get_prefix_cached_blocks_decode(
-            self, request: Request,
-            new_inner_blocks: KVCacheBlocks) -> torch.Tensor:
-        """Get the block table for decode phase.
-        """
-        num_computed_tokens = request.num_computed_tokens
-        return self.prefix_cache_manager.get_block_table_decode(
-            request.request_id, num_computed_tokens, new_inner_blocks)
+        return cached_block_table, cached_length
+
+    def get_block_table(self, request_id: str) -> torch.Tensor:
+        return self.prefix_cache_manager.get_blocks(request_id)
