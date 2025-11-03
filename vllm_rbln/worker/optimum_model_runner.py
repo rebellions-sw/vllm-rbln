@@ -15,26 +15,27 @@
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
-import torch.nn as nn
-from vllm.config import VllmConfig, set_current_vllm_config
+from vllm.config import VllmConfig
 from vllm.inputs import INPUT_REGISTRY
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import SamplingMetadata
-from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
+from vllm.model_executor.layers.sampler import SamplerOutput
+from vllm.model_executor.pooling_metadata import PoolingMetadata
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
-                             MultiModalKwargs, MultiModalPlaceholderMap)
-from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
+                             MultiModalKwargs)
+from vllm.pooling_params import PoolingParams
+from vllm.sequence import (IntermediateTensors, SequenceData,
+                           SequenceGroupMetadata)
 from vllm.utils import is_pin_memory_available, make_tensor_with_pad
 from vllm.worker.model_runner_base import ModelRunnerBase
 
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
-from vllm_rbln.model_executor.models.optimum import (  # noqa
-    ModelInputForRBLN, RBLNOptimumForEncoderModel)
-from vllm_rbln.utils.optimum.registry import (get_rbln_model_info,
-                                              is_enc_dec_arch)
+from vllm_rbln.model_executor.models.optimum import (
+    ModelInputForRBLN, RBLNOptimumForEncoderModel, get_rbln_model_info,
+    is_enc_dec_arch, is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -62,6 +63,12 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             vllm_config.model_config.hf_config.__dict__["architectures"] = [
                 "Qwen3Model"
             ]
+            # NOTE It is for cases
+            # where the pooling configuration files (modules.json, ...)
+            # do not exist in the compiled Qwen3 embedding model directory.
+            if vllm_config.model_config.pooler_config.pooling_type is None:
+                vllm_config.model_config.pooler_config.pooling_type = "LAST"
+                vllm_config.model_config.pooler_config.normalize = True
 
         ModelRunnerBase.__init__(self, vllm_config)
 
@@ -71,17 +78,13 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         # Multi-modal data support
         self.input_registry = INPUT_REGISTRY
         self.mm_registry = MULTIMODAL_REGISTRY
-
+        self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
+            .create_input_mapper(self.model_config)
+        self.mm_registry.init_mm_limits_per_prompt(self.model_config)
         self.enable_lora = self.vllm_config.lora_config is not None
 
-        # Lazy initialization
-        self.model: nn.Module  # Set after load_model
-        # Set after load_model.
-        self.sampler = get_sampler()
-
     def load_model(self) -> None:
-        with set_current_vllm_config(self.vllm_config, check_compile=False):
-            self.model = get_optimum_model(vllm_config=self.vllm_config)
+        self.model = get_optimum_model(vllm_config=self.vllm_config)
         self.use_optimum_lora = getattr(self.model.rbln_model_config,
                                         "use_lora", None)
         if self.enable_lora and not self.use_optimum_lora:
@@ -102,11 +105,12 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     def _prepare_prompt(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-    ) -> Tuple[torch.Tensor, torch.Tensor, List[int], BatchedTensorInputs,
-               torch.Tensor, List[int]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[int],
+               BatchedTensorInputs, torch.Tensor, List[int]]:
         assert len(seq_group_metadata_list) > 0
         input_tokens: List[List[int]] = []
         input_positions: List[List[int]] = []
+        token_type_ids: List[List[int]] = []
 
         seq_lens: List[int] = []
         multi_modal_inputs_list: List[MultiModalKwargs] = []
@@ -137,8 +141,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             seq_lens.append(seq_len)
 
             input_tokens.append(prompt_tokens)
-            positions = list(range(seq_len))
-            input_positions.append(positions)
+            input_positions.append(list(range(seq_len)))
 
             assert seq_group_metadata.block_tables is not None
             block_table = seq_group_metadata.block_tables[seq_id]
@@ -148,15 +151,23 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             mm_data = seq_group_metadata.multi_modal_data
             if mm_data:
                 # Process multi-modal data
-                mm_kwargs = self._compute_multi_modal_input(
-                    positions, seq_group_metadata)
-
+                if self.mm_registry.has_processor(self.model_config):
+                    mm_kwargs = mm_data
+                else:
+                    mm_kwargs = self.multi_modal_input_mapper(
+                        mm_data,
+                        seq_group_metadata.mm_processor_kwargs,
+                    )
                 multi_modal_inputs_list.append(mm_kwargs)
+
+            if len(seq_group_metadata.token_type_ids) > 0:
+                token_type_ids.append(seq_group_metadata.token_type_ids)
 
             request_id = seq_group_metadata.request_id
             running_requests_ids.append(request_id)
 
-        max_seq_len = max(seq_lens)
+        max_seq_len = max(seq_lens) if not is_pooling_arch(
+            self.model_config.hf_config) else self.model_config.max_model_len
 
         assert max_seq_len > 0
         input_tokens = make_tensor_with_pad(input_tokens,
@@ -178,9 +189,16 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             device=self.device,
         ).to(torch.int16) if len(block_tables) > 0 else None
 
+        token_type_ids = make_tensor_with_pad(
+            token_type_ids,
+            max_len=max_seq_len,
+            pad=0,
+            dtype=torch.long,
+            device=self.device) if len(token_type_ids) > 0 else None
+
         multi_modal_kwargs = MultiModalKwargs.batch(multi_modal_inputs_list)
         return (input_tokens, input_positions, seq_lens, multi_modal_kwargs,
-                block_tables, running_requests_ids)
+                block_tables, token_type_ids, running_requests_ids)
 
     def _prepare_decode(
         self,
@@ -248,18 +266,6 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             self, tensor_dict: Dict[str, Any]) -> ModelInputForRBLN:
         return ModelInputForRBLN.from_broadcasted_tensor_dict(tensor_dict)
 
-    def _compute_multi_modal_input(
-            self, positions: list[int],
-            seq_group_metadata: SequenceGroupMetadata
-    ) -> Optional[Dict[str, Any]]:
-        """If multi-modal data is given, add it to the input."""
-        mm_kwargs, _ = MultiModalPlaceholderMap.from_seq_group(
-            seq_group_metadata,
-            range(positions[0], positions[0] + len(positions)))
-        if not mm_kwargs:
-            return None
-        return mm_kwargs
-
     def prepare_model_input(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
@@ -273,13 +279,17 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         # Prepare input tensors.
         if is_prompt:
             (input_tokens, input_positions, seq_lens, multi_modal_kwargs,
-             block_tables, running_requests_ids
+             block_tables, type_token_ids, running_requests_ids
              ) = self._prepare_prompt(seq_group_metadata_list)
+            pooling_metadata = self._prepare_pooling(seq_group_metadata_list,
+                                                     seq_lens)
 
         else:
             (input_tokens, input_positions, block_tables, running_requests_ids
              ) = self._prepare_decode(seq_group_metadata_list)
             seq_lens = None
+            type_token_ids = None
+            pooling_metadata = None
 
         sampling_metadata = SamplingMetadata.prepare(
             seq_group_metadata_list,
@@ -305,17 +315,41 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                        index_mapping=[],
                                        prompt_mapping=[])
 
-        return ModelInputForRBLN(
-            input_tokens=input_tokens,
-            input_positions=input_positions,
-            sampling_metadata=sampling_metadata,
-            multi_modal_kwargs=multi_modal_kwargs,
-            block_tables=block_tables,
-            pooling_metadata=None,  # Pooling is deprecated in V0
-            running_requests_ids=running_requests_ids,
-            finished_requests_ids=finished_requests_ids,
-            lora_requests=lora_requests,
-            lora_mapping=lora_mapping)
+        return ModelInputForRBLN(input_tokens=input_tokens,
+                                 input_positions=input_positions,
+                                 sampling_metadata=sampling_metadata,
+                                 multi_modal_kwargs=multi_modal_kwargs,
+                                 block_tables=block_tables,
+                                 token_type_ids=type_token_ids,
+                                 pooling_metadata=pooling_metadata,
+                                 running_requests_ids=running_requests_ids,
+                                 finished_requests_ids=finished_requests_ids,
+                                 lora_requests=lora_requests,
+                                 lora_mapping=lora_mapping)
+
+    def _prepare_pooling(
+        self,
+        seq_group_metadata_list: List[SequenceGroupMetadata],
+        prompt_lens: List[int],
+    ) -> PoolingMetadata:
+        """Prepare PoolingMetadata for the sequence group metadata list."""
+        seq_groups: List[Tuple[List[int], PoolingParams]] = []
+        for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+            seq_ids = list(seq_group_metadata.seq_data.keys())
+            pooling_params = seq_group_metadata.pooling_params
+            seq_groups.append((seq_ids, pooling_params))
+
+        seq_data: Dict[int, SequenceData] = {}
+        for seq_group_metadata in seq_group_metadata_list:
+            seq_data.update(seq_group_metadata.seq_data)
+
+        pooling_metadata = PoolingMetadata(
+            seq_groups=seq_groups,
+            seq_data=seq_data,
+            prompt_lens=prompt_lens,
+        )
+
+        return pooling_metadata
 
     @torch.inference_mode()
     def execute_model(
@@ -333,6 +367,10 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
                                   model_input.lora_mapping)
 
         hidden_states = self.model(model_input=model_input)
+        if isinstance(self.model, RBLNOptimumForEncoderModel):
+            return [
+                self.model.pool(hidden_states, model_input.pooling_metadata)
+            ]
 
         # Compute the logits.
         # select last sequence in logits

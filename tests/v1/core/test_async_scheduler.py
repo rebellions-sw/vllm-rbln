@@ -26,20 +26,10 @@ from .utils import (create_model_runner_output, create_requests,
     "exp_new_req0_blocks, exp_new_req1_blocks, "
     "exp_cached0_new, exp_cached1_new",
     [
-        pytest.param(2,
-                     16,
-                     64,
-                     9,
-                     32, [1, 2], [3, 4], ([5], ), ([6], ),
-                     id="16bsize-32len"),
-        pytest.param(2,
-                     8,
-                     24,
-                     7,
-                     17, [1, 2, 3], [4, 5, 6],
-                     None,
-                     None,
-                     id="8bsize-17len")
+        pytest.param(
+            2, 16, 64, 9, 32, [1, 2], [3, 4], [5], [6], id="16bsize-32len"),
+        pytest.param(
+            2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], [], [], id="8bsize-17len")
     ],
 )
 def test_schedule_alloc_block(
@@ -93,8 +83,8 @@ def test_schedule_alloc_block(
     # can be scheduled with decode phase.
     scheduler_output2 = scheduler.schedule()
     scheduled_cached_reqs = scheduler_output2.scheduled_cached_reqs
-    assert scheduled_cached_reqs.new_block_ids[0] == exp_cached0_new
-    assert scheduled_cached_reqs.new_block_ids[1] == exp_cached1_new
+    assert scheduled_cached_reqs[0].new_block_ids[0] == exp_cached0_new
+    assert scheduled_cached_reqs[1].new_block_ids[0] == exp_cached1_new
 
 
 @pytest.mark.parametrize(
@@ -102,7 +92,7 @@ def test_schedule_alloc_block(
     [
         pytest.param(5, 5, 6, [1, 2, 3, 4, 5], id="normal"),
         pytest.param(2, 5, 5, [1, 2, 2, 2, 2], id="limited-max_num_seqs"),
-        pytest.param(3, 5, 4, [1, 2, 3, 1, 1], id="limited-blocks"),
+        pytest.param(3, 5, 4, [1, 2, 3, 3, 3], id="limited-blocks"),
     ],
 )
 def test_running_queue(
@@ -124,9 +114,7 @@ def test_running_queue(
     assert len(scheduler.running) == 0
 
     for _, sz in zip(requests, exp_running_sz):
-        sched_output = scheduler.schedule()
-        model_runner_output = create_model_runner_output(sched_output)
-        scheduler.update_from_output(sched_output, model_runner_output)
+        scheduler.schedule()
         assert len(scheduler.running) == sz
 
 

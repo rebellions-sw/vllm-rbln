@@ -17,8 +17,7 @@ import time
 from collections import deque
 from typing import Callable, Deque, List, Optional, Set, Tuple
 
-from vllm.config import CacheConfig, SchedulerConfig
-from vllm.config.lora import LoRAConfig
+from vllm.config import CacheConfig, LoRAConfig, SchedulerConfig
 from vllm.core.interfaces import AllocStatus, BlockSpaceManager
 from vllm.core.scheduler import (ARTIFICIAL_PREEMPTION_PROB,
                                  PartialPrefillMetadata, PreemptionMode,
@@ -158,6 +157,9 @@ class RBLNOptimumScheduler(Scheduler):
                 continue
 
             num_lookahead_slots: int = 0
+            if self.scheduler_config.is_multi_step and enable_chunking:
+                num_lookahead_slots = self._get_num_lookahead_slots(
+                    True, enable_chunking)
 
             # If the sequence group cannot be allocated, stop.
             can_allocate = self.block_manager.can_allocate(
@@ -214,6 +216,24 @@ class RBLNOptimumScheduler(Scheduler):
             if partial_prefill_metadata is not None:
                 partial_prefill_metadata.maybe_increment_partial_prefills(
                     seq_group)
+
+            if enable_chunking and self.scheduler_config.is_multi_step:
+                blocks_to_copy: List[Tuple[int, int]] = []
+                # init_multi_step_from_lookahead_slots happens in append_slots
+                self._append_slots(seq_group, blocks_to_copy, enable_chunking)
+                # This assert will trip when a copy-on-write happens. This is
+                # not a concern as the very first sequence-group block
+                # allocation happens above. Still, we have the assert to
+                # catch any edge-cases.
+                assert not blocks_to_copy
+            else:
+                seq_group.init_multi_step_from_lookahead_slots(
+                    num_lookahead_slots,
+                    num_scheduler_steps=self.scheduler_config.
+                    num_scheduler_steps,
+                    is_multi_step=self.scheduler_config.is_multi_step,
+                    enable_chunking=enable_chunking,
+                )
 
             seq_groups.append(
                 ScheduledSequenceGroup(seq_group=seq_group,

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import torch
-import vllm.envs as envs
+import vllm.envs as env
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
@@ -59,7 +59,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
         request_nums = input_ids.shape[0]
-        if envs.VLLM_USE_V1:
+        if env.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0

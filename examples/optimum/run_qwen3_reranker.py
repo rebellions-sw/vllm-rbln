@@ -75,13 +75,13 @@ def get_input_prompts(model_id, max_length, suffix_tokens,
 
 
 async def generate(engine: AsyncLLMEngine, prompt_tokens: list[int],
-                   model: str, request_id: int, true_token: int,
+                   model: str, requst_id: int, true_token: int,
                    false_token: int):
-    print(f"generate request_id={request_id}, prompt_tokens={prompt_tokens}")
+    print(f"generate request_id={requst_id}, prompt_tokens={prompt_tokens}")
     example_input = {
         "stream": True,
         "temperature": 0.0,
-        "request_id": str(request_id),
+        "request_id": str(requst_id),
     }
 
     sampling_params = SamplingParams(
@@ -124,11 +124,18 @@ def compute_logits(outputs, true_token, false_token):
 
 
 async def main(
+    batch_size: int,
     max_seq_len: int,
+    kvcache_block_size: int,
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id)
+    engine_args = AsyncEngineArgs(model=model_id,
+                                  device="auto",
+                                  max_num_seqs=batch_size,
+                                  max_num_batched_tokens=max_seq_len,
+                                  max_model_len=max_seq_len,
+                                  block_size=kvcache_block_size)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.padding_side = "left"
     tokenizer.pad_token = tokenizer.eos_token
@@ -150,7 +157,7 @@ async def main(
                 generate(engine,
                          prompt_tokens=p,
                          model=model_id,
-                         request_id=i,
+                         requst_id=i,
                          true_token=true_token,
                          false_token=false_token)))
 
@@ -160,13 +167,18 @@ async def main(
 
 
 def entry_point(
+    batch_size: int = 1,
     max_seq_len: int = 32768,
+    kvcache_block_size: int = 32768,
     num_input_prompt: int = 2,
     model_id: str = "/qwen3-0.6b-b1",
 ):
-    asyncio.run(
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(
         main(
+            batch_size=batch_size,
             max_seq_len=max_seq_len,
+            kvcache_block_size=kvcache_block_size,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
         ))

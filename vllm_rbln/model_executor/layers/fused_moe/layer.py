@@ -159,4 +159,4 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
 
 UnquantizedFusedMoEMethod.forward_oot = (
     unquantized_fused_moe_method_forward_rbln_rsd)
-FusedMoE.forward_oot = fused_moe_forward_rbln
+FusedMoE.forward_impl = fused_moe_forward_rbln

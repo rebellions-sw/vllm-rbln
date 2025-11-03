@@ -12,21 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
-from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.core.sched.output import SchedulerOutput
-from vllm.v1.kv_cache_interface import KVCacheSpec
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.worker.worker_base import WorkerBase
 
@@ -57,18 +54,14 @@ class RBLNOptimumWorker(WorkerBase):
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
             init_cached_hf_modules()
+
+        self.model_runner = RBLNOptimumModelRunner(self.vllm_config,
+                                                   self.device)
         self.profiler = None
 
     def init_device(self) -> None:
-        # Initialize the distributed environment.
-        init_worker_distributed_environment(self.vllm_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank)
         # Set random seed.
         set_random_seed(self.model_config.seed)
-        self.device = self.vllm_config.device_config.device
-        self.model_runner = RBLNOptimumModelRunner(self.vllm_config,
-                                                   self.device)
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
@@ -106,7 +99,7 @@ class RBLNOptimumWorker(WorkerBase):
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
 
-        if not envs.VLLM_RBLN_ENABLE_WARM_UP:
+        if not envs.RBLN_ENABLE_WARM_UP:
             logger.info(
                 "Warm up is disabled. " \
                 "Set VLLM_RBLN_ENABLE_WARM_UP=1 to enable warm up."
@@ -119,19 +112,12 @@ class RBLNOptimumWorker(WorkerBase):
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
 
-    def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
-        return self.model_runner.get_supported_tasks()
-
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
 
-    def initialize_from_config(self, kv_cache_configs: list[Any]) -> None:
-        pass
-
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
-        """Initialize the KV cache with the given size in blocks."""
-        pass
+    def initialize_from_config(self, kv_cache_config: KVCacheConfig) -> None:
+        """Allocate NPU KV cache with the specified kv_cache_config."""
+        self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def get_cache_block_size_bytes(self) -> int:
         """Determine the size in bytes of a cache block.
@@ -159,23 +145,3 @@ class RBLNOptimumWorker(WorkerBase):
 
     def pin_lora(self, lora_id: int) -> bool:
         raise RuntimeError("It is not required in vLLM RBLN.")
-
-
-def init_worker_distributed_environment(
-    vllm_config: VllmConfig,
-    rank: int,
-    distributed_init_method: Optional[str] = None,
-    local_rank: int = -1,
-) -> None:
-    """Initialize the distributed environment."""
-    init_distributed_environment(
-        world_size=1,
-        rank=rank,
-        local_rank=local_rank,
-        distributed_init_method=distributed_init_method,
-        backend="gloo",
-    )
-    ensure_model_parallel_initialized(
-        1,
-        1,
-    )

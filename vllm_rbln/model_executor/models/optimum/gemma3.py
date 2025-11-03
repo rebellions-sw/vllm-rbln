@@ -14,7 +14,7 @@
 from typing import Any, Optional
 
 import torch
-import vllm.envs as envs
+import vllm.envs as env
 from transformers import AutoTokenizer
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
@@ -26,7 +26,6 @@ from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForTextGeneration)
-from vllm.model_executor.models.utils import flatten_bn
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
@@ -118,7 +117,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables
 
-        if envs.VLLM_USE_V1:
+        if env.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
@@ -243,12 +242,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(
 
     def _parse_and_validate_image_input(
             self, **kwargs: Any) -> Optional[Gemma3ImageInputs]:
-        pixel_values = kwargs.pop("pixel_values", None)
-        num_crops = kwargs.pop("num_crops", None)
-        image_embeds = kwargs.pop("image_embeds", None)
-        config = self.vllm_config.model_config.hf_config
+        pixel_values: torch.Tensor = kwargs.get("pixel_values")
+        num_crops: torch.Tensor = kwargs.get("num_crops")
+        embed_is_patch = kwargs.get("embed_is_patch")
+        num_embeds = kwargs.get("num_embeds")
 
-        assert image_embeds is None, "Gemma3 does not support image_embeds."
         if pixel_values is None:
             return None
 
@@ -256,16 +254,34 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
 
-        if not isinstance(num_crops, (torch.Tensor, list)):
-            raise ValueError("Incorrect type of num_crops. "
-                             f"Got type: {type(num_crops)}")
-
-        image_size = config.vision_config.image_size
+        if env.VLLM_USE_V1:
+            pixel_values = pixel_values.squeeze(1)
+        else:
+            pixel_values = pixel_values.squeeze(0)
 
         return Gemma3ImagePixelInputs(
-            pixel_values=flatten_bn(pixel_values, concat=True),
-            num_patches=flatten_bn(num_crops, concat=True) + 1,
-            resolve_bindings={
-                "h": image_size,
-                "w": image_size
-            })
+            type="pixel_values",
+            pixel_values=self._validate_pixel_values(pixel_values),
+            num_patches=num_crops + 1,
+            embed_is_patch=embed_is_patch,
+            num_embeds=num_embeds,
+        )
+
+    def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
+        h = w = self.model.config.vision_config.image_size
+        expected_dims = (3, h, w)
+
+        def _validate_shape(d: torch.Tensor):
+            actual_dims = tuple(d.shape)
+
+            if actual_dims != expected_dims:
+                expected_expr = str(expected_dims)
+                raise ValueError(
+                    "The expected shape of pixel values per image per batch "
+                    f" per patch is {expected_expr}. "
+                    f"You supplied {tuple(d.shape)}.")
+
+        for d in data:
+            _validate_shape(d)
+
+        return data

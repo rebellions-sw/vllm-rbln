@@ -12,5 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from vllm_rbln.v1.sample.rbln_sampler import WARM_UP_CONFIGS  # noqa
-from vllm_rbln.v1.sample.rbln_sampler import RBLNSampler  # noqa
+import vllm_rbln.v1.sample.sampler  # noqa

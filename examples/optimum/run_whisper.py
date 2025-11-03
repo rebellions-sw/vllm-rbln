@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
-import os
 
 import fire
 from datasets import load_dataset
@@ -44,7 +43,7 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
                        skip_special_tokens=True,
                        stop_token_ids=[tokenizer.eos_token_id],
                        max_tokens=448),
-        str(request_id),
+        request_id,
     )
 
     final_output = None
@@ -54,10 +53,17 @@ async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
 
 
 async def main(
+    batch_size: int,
+    max_seq_len: int,
     num_input_prompt: int,
     model_id: str,
 ):
     engine_args = AsyncEngineArgs(model=model_id,
+                                  device="auto",
+                                  max_num_seqs=batch_size,
+                                  max_num_batched_tokens=max_seq_len,
+                                  max_model_len=max_seq_len,
+                                  block_size=max_seq_len,
                                   limit_mm_per_prompt={"audio": 1})
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -83,19 +89,20 @@ async def main(
 
 
 def entry_point(
+    batch_size: int = 4,
+    max_seq_len: int = 448,
     num_input_prompt: int = 1,
     model_id: str = "/whisper-base-b4-wo-token-timestamps",
 ):
-    asyncio.run(main(
-        num_input_prompt=num_input_prompt,
-        model_id=model_id,
-    ))
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(
+        main(
+            batch_size=batch_size,
+            max_seq_len=max_seq_len,
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        ))
 
 
 if __name__ == "__main__":
-    # NOTE To avoid multiprocessing issues
-    # `VLLM_WORKER_MULTIPROC_METHOD` must be set to "spawn".
-    # for both V0 and V1.
-    # https://github.com/vllm-project/vllm/issues/26581
-    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
     fire.Fire(entry_point)

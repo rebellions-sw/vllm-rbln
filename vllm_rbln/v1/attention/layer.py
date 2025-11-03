@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import importlib.util
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -29,6 +28,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
+from vllm.v1.attention.backends.utils import validate_kv_sharing_target
 
 # @FIXME(RBLN): We hope to remove the Custom Attention forward.
 # The original vLLM forward function will be used in the future.
@@ -40,10 +40,10 @@ def __custom_init__(
     head_size: int,
     scale: float,
     num_kv_heads: Optional[int] = None,
-    alibi_slopes: Optional[List[float]] = None,
+    alibi_slopes: Optional[list[float]] = None,
     cache_config: Optional[CacheConfig] = None,
     quant_config: Optional[QuantizationConfig] = None,
-    blocksparse_params: Optional[Dict[str, Any]] = None,
+    blocksparse_params: Optional[dict[str, Any]] = None,
     logits_soft_cap: Optional[float] = None,
     per_layer_sliding_window: Optional[int] = None,
     use_mla: bool = False,
@@ -105,8 +105,8 @@ def __custom_init__(
     self.num_kv_heads = num_kv_heads
     self.sliding_window = sliding_window
 
-    quant_method = quant_config.get_quant_method(
-        self, prefix=prefix) if quant_config else None
+    quant_method = (quant_config.get_quant_method(self, prefix=prefix)
+                    if quant_config else None)
     if quant_method is not None and not isinstance(quant_method,
                                                    UnquantizedLinearMethod):
         assert isinstance(quant_method, BaseKVCacheMethod)
@@ -125,13 +125,15 @@ def __custom_init__(
     # During model initialization, the default dtype is set as the model
     # weight and activation dtype.
     dtype = torch.get_default_dtype()
-    attn_backend = get_attn_backend(head_size,
-                                    dtype,
-                                    kv_cache_dtype,
-                                    block_size,
-                                    is_attention_free,
-                                    blocksparse_params is not None,
-                                    use_mla=use_mla)
+    attn_backend = get_attn_backend(
+        head_size,
+        dtype,
+        kv_cache_dtype,
+        block_size,
+        is_attention_free,
+        blocksparse_params is not None,
+        use_mla=use_mla,
+    )
     impl_cls = attn_backend.get_impl_cls()
     self.impl = impl_cls(
         num_heads,
@@ -154,8 +156,8 @@ def __custom_init__(
     # torch.compile works by registering the attention as one giant
     # opaque custom op. For other platforms, we directly call them
     # and let torch.compile handle them.
-    self.use_direct_call = not current_platform.is_cuda_alike(
-    ) and not current_platform.is_cpu()
+    self.use_direct_call = (not current_platform.is_cuda_alike()
+                            and not current_platform.is_cpu())
 
     self.use_output = attn_backend.accept_output_buffer
     compilation_config = get_current_vllm_config().compilation_config
@@ -170,15 +172,11 @@ def __custom_init__(
             raise NotImplementedError(
                 "Cross-layer KV sharing is not supported in V0.")
 
-        if importlib.util.find_spec(
-                "vllm.v1.attention.backends.utils") is not None:
-            from vllm.v1.attention.backends.utils import (
-                validate_kv_sharing_target)
-            validate_kv_sharing_target(
-                prefix,
-                kv_sharing_target_layer_name,
-                compilation_config.static_forward_context,
-            )
+        validate_kv_sharing_target(
+            prefix,
+            kv_sharing_target_layer_name,
+            compilation_config.static_forward_context,
+        )
     self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
 
     # use a placeholder kv cache tensor during init, which will be replaced
@@ -195,14 +193,6 @@ def __custom_init__(
 
     # NOTE(jiwoo.park) layer index is required to use external binding KV cache.
     self.layer_index = extract_layer_index(self.layer_name)
-
-    # NOTE - consider PP
-    vllm_config = get_current_vllm_config()
-    parallel_config = vllm_config.parallel_config
-    model_config = vllm_config.model_config
-    start, end = model_config.get_layers_start_end_indices(parallel_config)
-    assert self.layer_index >= start and self.layer_index < end
-    self.layer_index -= start
 
 
 def custom_attention_forward(
@@ -298,6 +288,86 @@ def custom_attention_forward(
         else:
             return torch.ops.vllm.unified_attention(query, key, value,
                                                     self.layer_name)
+    '''
+    if self.calculate_kv_scales:
+        attn_metadata = get_forward_context().attn_metadata
+        if attn_metadata.enable_kv_scales_calculation:
+            self.calc_kv_scales(query, key, value)
+    if self.use_output:
+        output_shape = output_shape if output_shape is not None else query.shape
+        output = torch.empty(
+            output_shape, dtype=query.dtype, device=query.device
+        )
+        hidden_size = output_shape[-1]
+        # We skip reshaping query, key and value tensors for the MLA
+        # backend since these tensors have different semantics and are
+        # processed differently.
+        if not self.use_mla:
+            # Reshape the query, key, and value tensors.
+            # NOTE(woosuk): We do this outside the custom op to minimize the
+            # CPU overheads from the non-CUDA-graph regions.
+            query = query.view(-1, self.num_heads, self.head_size)
+            output = output.view(-1, self.num_heads, self.head_size)
+            if key is not None:
+                key = key.view(-1, self.num_kv_heads, self.head_size)
+            if value is not None:
+                value = value.view(-1, self.num_kv_heads, self.head_size)
+        if self.use_direct_call:
+            forward_context: ForwardContext = get_forward_context()
+            attn_metadata = forward_context.attn_metadata
+            """
+            NOTE(jiwoo.park) - To represent kv cache as model input,
+            modify attention
+            instead of attention layer's embedded kv cache(self.kv_cache),
+            use attention metadata's kv cache.
+            attention metadata's kv cache must equal
+            the attention layer's embedded kv cache.
+            """
+            # assert attn_metadata.kv_cache is not None
+            # assert self.layer_index < len(attn_metadata.kv_caches)
+            self_kv_cache = attn_metadata[self.layer_name].kv_cache
+            return self.impl.forward(
+                self,
+                query,
+                key,
+                value,
+                self_kv_cache,
+                attn_metadata[self.layer_name],
+            )
+        else:
+            torch.ops.vllm.unified_attention_with_output(
+                query, key, value, output, self.layer_name
+            )
+        return output.view(-1, hidden_size)
+    else:
+        if self.use_direct_call:
+            forward_context = get_forward_context()
+            attn_metadata = forward_context.attn_metadata
+            # attn_metadata = forward_context.attn_metadata[self.layer_name]
+            """
+            NOTE(jiwoo.park) - To represent kv cache as model input,
+            modify attention
+            instead of attention layer's embedded kv cache(self.kv_cache),
+            use attention metadata's kv cache.
+            attention metadata's kv cache must equal
+            the attention layer's embedded kv cache.
+            """
+            # assert attn_metadata.kv_cache is not None
+            # assert self.layer_index < len(attn_metadata.kv_caches)
+            self_kv_cache = attn_metadata[self.layer_name].kv_cache
+            return self.impl.forward(
+                self,
+                query,
+                key,
+                value,
+                self_kv_cache,
+                attn_metadata[self.layer_name],
+            )
+        else:
+            return torch.ops.vllm.unified_attention(
+                query, key, value, self.layer_name
+            )
+    '''
 
 
 Attention.__init__ = __custom_init__

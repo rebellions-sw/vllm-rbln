@@ -21,16 +21,14 @@ from typing import Any, Optional
 import optimum.rbln
 import torch
 import torch.nn as nn
-import vllm.envs as envs
-from optimum.rbln.transformers.models.decoderonly import (
-    decoderonly_runtime_utils as runtime_utils)
+import vllm.envs as env
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
-from vllm_rbln.utils.optimum.registry import get_rbln_model_info
+from .base import get_rbln_model_info
 
 logger = init_logger(__name__)
 
@@ -55,7 +53,7 @@ class KVCacheBlockAdapter:
     ):
         self.vllm_config = vllm_config
         self.estimated_kvcache_num_blocks = estimated_kvcache_num_blocks
-        self.use_v1 = envs.VLLM_USE_V1
+        self.use_v1 = env.VLLM_USE_V1
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -77,12 +75,7 @@ class KVCacheBlockAdapter:
         """True if we can allocate a full batch worth of blocks."""
         estimated = self._estimated_num_blocks()
 
-        if self.vllm_config.cache_config.enable_prefix_caching:
-            block_size = self.vllm_config.additional_config["attn_block_size"]
-
-        else:
-            block_size = self.vllm_config.cache_config.block_size
-
+        block_size = self.vllm_config.cache_config.block_size
         max_model_len = self.vllm_config.model_config.max_model_len
         max_num_seqs = self.vllm_config.scheduler_config.max_num_seqs
 
@@ -91,26 +84,12 @@ class KVCacheBlockAdapter:
         return estimated >= ideal_total
 
     def get_available_num_blocks(self) -> int:
-        if self.vllm_config.cache_config.enable_prefix_caching:
-            ob_size = self.vllm_config.additional_config["attn_block_size"]
-            ib_size = self.vllm_config.cache_config.block_size
-            blk_ratio = ob_size // ib_size
-        else:
-            blk_ratio = 1
-        estimated = self._estimated_num_blocks() * blk_ratio
+        estimated = self._estimated_num_blocks()
+
         if self.is_full_block_available():
             return estimated + 1 if self.use_v1 else estimated
 
         return estimated if self.use_v1 else max(0, estimated - 1)
-
-    def get_available_num_outer_blocks(self) -> int:
-        """Number of outer blocks available for prefix caching."""
-        estimated = self._estimated_num_blocks()
-
-        if self.is_full_block_available():
-            return estimated
-
-        return estimated - 1
 
 
 class RBLNOptimumModelBase(nn.Module):
@@ -120,10 +99,10 @@ class RBLNOptimumModelBase(nn.Module):
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__()
-        self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.scheduler_config = vllm_config.scheduler_config
         self.cache_config = vllm_config.cache_config
+
         self.init_model()
         self.batch_size = self.scheduler_config.max_num_seqs
         self.kv_block_adapter = KVCacheBlockAdapter(
@@ -156,9 +135,9 @@ class RBLNOptimumModelBase(nn.Module):
             if model_path.is_dir() and any(model_path.glob('*.rbln')):
                 compiled_path = self.model_config.model
             else:
-                compiled_path = None
+                compiled_path = self.model_config.compiled_model_dir
         else:
-            compiled_path = None
+            compiled_path = self.model_config.compiled_model_dir
 
         if compiled_path is None or not os.path.exists(compiled_path):
             raise RuntimeError(
@@ -167,9 +146,6 @@ class RBLNOptimumModelBase(nn.Module):
         # huggingface model class name
         logger.info("model_name = %s, model_cls_name = %s, model_path = %s",
                     model_name, model_cls_name, compiled_path)
-
-        self.supports_transcription_only = (
-            model_cls_name == "RBLNOptimumWhisperForConditionalGeneration")
 
         # huggingface model class
         model_cls = getattr(optimum.rbln, model_cls_name)
@@ -314,45 +290,6 @@ class RBLNOptimumDecoderMixin:
             "cache_position": cache_position,
         }
         return kwargs
-
-    def _copy_cached_kv_blocks(self,
-                               prefill_decoder: runtime_utils.RBLNRuntimeModel,
-                               cached_block_tables: list[int],
-                               cached_lengths: list[int],
-                               block_tables: torch.Tensor):
-        """Copy cached KV blocks from source to destination blocks.
-        
-        Args:
-            cached_block_tables: List of source block IDs to copy from
-            cached_lengths: List of cached lengths for each block
-            block_tables: Tensor containing destination block IDs
-        """
-        if not cached_block_tables:
-            return
-
-        if len(cached_block_tables) != len(cached_lengths):
-            raise ValueError(
-                "Mismatch between cached_block_tables length (%s) "
-                "and cached_lengths length (%s)", len(cached_block_tables),
-                len(cached_lengths))
-
-        # Convert to list once for efficiency
-        dst_blocks = block_tables[0].tolist()
-
-        for block_idx, (src_block, dst_block) in enumerate(
-                zip(cached_block_tables, dst_blocks)):
-            try:
-                prefill_decoder.runtime._copy_kv_cache(
-                    src_block, dst_block, cached_lengths[block_idx])
-                logger.debug(
-                    "Successfully copied KV cache from block %d to block %d",
-                    src_block, dst_block)
-            except Exception as e:
-                error_msg = (
-                    "Failed to copy KV cache from block %d to block %d "
-                    "at index %d: %s", src_block, dst_block, block_idx, e)
-                logger.error(error_msg)
-                raise RuntimeError(error_msg) from e
 
     def sample(
         self,
