@@ -6,12 +6,13 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import math
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import math
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
@@ -21,9 +22,9 @@ import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 
 from vllm_rbln.logger import init_logger
-from vllm_rbln.prefix_cache_manager.optimum_block_mapping_manager import (
+from vllm_rbln.v1.core.prefix_cache_manager.optimum_block_mapping_manager import (
     BlockMappingManager, RBLNBlock)
-from vllm_rbln.prefix_cache_manager.optimum_eviction_policy import (
+from vllm_rbln.v1.core.prefix_cache_manager.optimum_eviction_policy import (
     FIFOEvictionPolicy, LRUEvictionPolicy)
 
 logger = init_logger(__name__)
@@ -190,7 +191,11 @@ class RBLNPrefixKVCacheManager:
                  num_inner_blocks: int):
         assert ob_size % ib_size == 0, \
             "Outer block size must be a multiple of inner block size"
-        num_ob = math.ceil(num_inner_blocks / (ob_size // ib_size))
+        print("num_inner_blocks:", num_inner_blocks)
+        print("ob_size:", ob_size)
+        print("ib_size:", ib_size)
+        num_ob = math.ceil(num_inner_blocks / (ob_size // ib_size)) 
+        print("num_ob:", num_ob)
         self._config = BlockConfiguration(ob_size, ib_size, max_model_len,
                                           num_ob)
         self._allocator = RBLNBlockAllocator(num_ob)
@@ -259,19 +264,19 @@ class RBLNPrefixKVCacheManager:
                      block_ids, inner_blocks)
 
     def compute_num_blocks_to_allocate(self,
-                                       inner_blocks: list[int],
+                                       num_inner_blocks: list[int],
                                        num_allocated_tokens: int = 0) -> int:
         """
         Compute the number of outer blocks to allocate based on inner blocks
         and the number of already allocated tokens.
         """
-        if len(inner_blocks) == 0:
+        if num_inner_blocks == 0:
             return 0
 
         if num_allocated_tokens == 0:
             # PREFILL
             num_obs_needed = math.ceil(
-                len(inner_blocks) / self._config.block_ratio)
+                num_inner_blocks / self._config.block_ratio)
         else:
             # DECODE
             num_already_allocated_ibs = \
@@ -284,11 +289,11 @@ class RBLNPrefixKVCacheManager:
 
         return num_obs_needed
 
-    def can_allocate(self, new_blocks: list[int],
+    def can_allocate(self, num_new_blocks: int,
                      num_computed_tokens: int) -> bool:
         # 1. Check if the enough outer blocks are free
         required_num_ob = self.compute_num_blocks_to_allocate(
-            new_blocks, num_computed_tokens)
+            num_new_blocks, num_computed_tokens)
         free_count = self._allocator.get_free_count()
         if free_count >= required_num_ob:
             return True
@@ -408,11 +413,11 @@ class RBLNPrefixKVCacheManager:
 
         inner_blocks = inner_blocks.get_block_ids()[0]
         cached_blocks = cached_blocks.get_block_ids()[0]
-
-        if len(inner_blocks) == 0:
+        num_new_blocks = len(inner_blocks)
+        if num_new_blocks == 0:
             return self.get_blocks(request_id), [], []
 
-        num_new_ob = self.compute_num_blocks_to_allocate(inner_blocks, 0)
+        num_new_ob = self.compute_num_blocks_to_allocate(num_new_blocks, 0)
         self.ensure_free_blocks(num_new_ob)
         cached_block_table, cached_length = self.get_matched_outer_blocks(
             request_id, cached_blocks)
@@ -427,12 +432,12 @@ class RBLNPrefixKVCacheManager:
                                num_allocated_tokens: int,
                                inner_blocks: KVCacheBlocks) -> torch.Tensor:
         inner_blocks = inner_blocks.get_block_ids()[0]
-
-        if len(inner_blocks) == 0:
+        num_new_blocks = len(inner_blocks)
+        if num_new_blocks == 0:
             return self.get_blocks(request_id)
 
         num_new_ob = self.compute_num_blocks_to_allocate(
-            inner_blocks, num_allocated_tokens)
+            num_new_blocks, num_allocated_tokens)
         self.ensure_free_blocks(num_new_ob)
         self.allocate_blocks(request_id, num_new_ob, inner_blocks)
         return self.get_blocks(request_id)

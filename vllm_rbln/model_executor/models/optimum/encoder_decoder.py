@@ -40,6 +40,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             use_multiple_decoder=False,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
+            num_blocks=self.kv_block_adapter.get_available_num_blocks(),
         )
 
     def _forward(
@@ -131,7 +132,6 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
 
         kwargs = self.preprocess_for_decoder(is_prompt,
                                              block_tables,
-                                             self.kv_block_adapter,
                                              input_ids,
                                              cache_position,
                                              input_block_ids=valid_block_ids)
