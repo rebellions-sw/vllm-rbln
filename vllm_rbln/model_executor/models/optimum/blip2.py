@@ -14,7 +14,7 @@
 from typing import Any, Optional
 
 import torch
-import vllm.envs as env
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.blip2 import (Blip2ImageEmbeddingInputs,
@@ -52,7 +52,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
 
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
@@ -99,49 +99,29 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
             logits = logits[:request_nums]
         return logits
 
-    def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:
-        h = w = self.model.config.vision_config.image_size
-        expected_dims = (3, h, w)
-        actual_dims = tuple(data.shape[1:])
-
-        if actual_dims != expected_dims:
-            expected_expr = ("batch_size", *map(str, expected_dims))
-            raise ValueError(
-                f"The expected shape of pixel values is {expected_expr}. "
-                f"You supplied {tuple(data.shape)}.")
-
-        return data
-
     def _parse_and_validate_image_input(
             self, **kwargs: Any) -> Optional[Blip2ImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
+        config = self.vllm_config.model_config.hf_config
 
         if pixel_values is None and image_embeds is None:
             return None
 
         if pixel_values is not None:
-            if not isinstance(pixel_values, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of pixel values. "
-                                 f"Got type: {type(pixel_values)}")
-
-            pixel_values = flatten_bn(pixel_values, concat=True)
-
-            return Blip2ImagePixelInputs(
-                type="pixel_values",
-                data=self._validate_pixel_values(pixel_values),
-            )
+            expected_h = expected_w = config.vision_config.image_size
+            return Blip2ImagePixelInputs(type="pixel_values",
+                                         data=flatten_bn(pixel_values,
+                                                         concat=True),
+                                         resolve_bindings={
+                                             "h": expected_h,
+                                             "w": expected_w
+                                         })
 
         if image_embeds is not None:
-            if not isinstance(image_embeds, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of image embeddings. "
-                                 f"Got type: {type(image_embeds)}")
-
-            image_embeds = flatten_bn(image_embeds, concat=True)
-
             return Blip2ImageEmbeddingInputs(
                 type="image_embeds",
-                data=image_embeds,
+                data=flatten_bn(image_embeds, concat=True),
             )
 
         raise AssertionError("This line should be unreachable.")

@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import torch
-import vllm.envs as env
+import vllm.envs as envs
 from vllm.config import VllmConfig
-from vllm.logger import init_logger
+
+from vllm_rbln.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -45,7 +46,7 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         block_tables = model_input.block_tables
 
         request_nums = input_ids.shape[0]
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
@@ -59,7 +60,11 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         if is_prompt:
             if self.model.prefill_decoder is None:
                 raise version_error
-
+            if model_input.cached_block_tables:
+                self._copy_cached_kv_blocks(self.model.prefill_decoder,
+                                            model_input.cached_block_tables,
+                                            model_input.cached_lengths,
+                                            block_tables)
             return self.model.prefill_decoder(**kwargs).logits
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]

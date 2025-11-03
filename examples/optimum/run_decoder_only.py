@@ -85,20 +85,13 @@ def compare_copy_prompt_task_result(
 
 
 async def main(
-    batch_size: int,
     max_seq_len: int,
-    kvcache_block_size: int,
     num_input_prompt: int,
     model_id: str,
     prompt_txt: str,
     golden_json: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  max_model_len=max_seq_len,
-                                  block_size=kvcache_block_size)
+    engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt = get_input_prompts(prompt_txt)
@@ -124,20 +117,15 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 2,
     max_seq_len: int = 4096,
-    kvcache_block_size: int = 4096,
     num_input_prompt: int = 1,
     model_id: str = "/llama2-7b_batch2",
     prompt_txt: str = "/prompts/copy_prompts.txt",
     golden_json: str = "/golden/golden_llama7b_result_copy_prompts.json",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
-            batch_size=batch_size,
             max_seq_len=max_seq_len,
-            kvcache_block_size=kvcache_block_size,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
             prompt_txt=prompt_txt,

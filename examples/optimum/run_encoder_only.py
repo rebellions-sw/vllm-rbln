@@ -45,7 +45,7 @@ def compare_copy_prompt_task_result(scores: list[float], golden_json: str):
 
 
 async def encode(engine, prompt, request_id):
-    pooling_params = PoolingParams()
+    pooling_params = PoolingParams(task="embed")
     results_generator = engine.encode(prompt=prompt,
                                       pooling_params=pooling_params,
                                       request_id=str(request_id))
@@ -69,15 +69,9 @@ async def get_result(engine, model_id, prompt, num_input_prompt):
     return results
 
 
-async def main(model_id: str, max_seq_len: int, batch_size: int,
-               num_input_prompt: int, q_prompt_txt: str, p_prompt_txt: str,
-               golden_json: str):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  block_size=max_seq_len,
-                                  max_model_len=max_seq_len)
+async def main(model_id: str, num_input_prompt: int, q_prompt_txt: str,
+               p_prompt_txt: str, golden_json: str):
+    engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     q_prompt = get_input_prompts(q_prompt_txt)
@@ -105,19 +99,14 @@ async def main(model_id: str, max_seq_len: int, batch_size: int,
 
 
 def entry_point(
-    max_seq_len: int = 4096,
-    batch_size: int = 4,
     num_input_prompt: int = 3,
     model_id: str = "/bge-m3-1k-batch4",
     q_prompt_txt: str = "/prompts/q_prompts.txt",
     p_prompt_txt: str = "/prompts/p_prompts.txt",
     golden_json: str = "/golden/golden_bge_m3_result_qp_prompts.json",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         main(
-            max_seq_len=max_seq_len,
-            batch_size=batch_size,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
             q_prompt_txt=q_prompt_txt,
