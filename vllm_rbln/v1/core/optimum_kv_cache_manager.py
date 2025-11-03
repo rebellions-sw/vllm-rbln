@@ -12,25 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Optional
+
 import torch
-import math
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
-
-from dataclasses import dataclass
-from typing import Literal, Optional, overload
-
-from vllm.distributed.kv_events import KVCacheEvent
-from vllm_rbln.logger import init_logger
-from vllm.v1.core.kv_cache_coordinator import get_kv_cache_coordinator
-from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.kv_cache_interface import KVCacheConfig
-from vllm.v1.metrics.stats import PrefixCacheStats
-from vllm.v1.request import Request, RequestStatus
-from vllm_rbln.v1.core.prefix_cache_manager.optimum_prefix_cache_manager import (
-    RBLNPrefixKVCacheManager,
-)
+from vllm.v1.request import Request
+
+from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.core.prefix_cache_manager import RBLNPrefixKVCacheManager
 
 logger = init_logger(__name__)
+
+
 class RBLNKVCacheManager(KVCacheManager):
 
     def __init__(
@@ -45,9 +39,9 @@ class RBLNKVCacheManager(KVCacheManager):
         attn_block_size: Optional[int] = None,
     ) -> None:
         """
-        Initialize the RBLNKVCacheManager.
-        It manages prefix_cache_manager in addition to the base KVCacheManager.
-        It manages the mapping between inner blocks and outer blocks for prefix caching.
+        RBLNKVCacheManager = KVCacheManager + PrefixKVCacheManager.
+        PrefixKVCacheManager manages the mapping
+        between inner blocks and outer blocks for prefix caching.
         """
         super().__init__(
             kv_cache_config,
@@ -59,8 +53,6 @@ class RBLNKVCacheManager(KVCacheManager):
             dcp_world_size,
         )
         if enable_caching:
-            assert attn_block_size is not None, \
-                "`attn_block_size` must be provided when prefix caching is enabled."
             self.attn_block_size = attn_block_size
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=self.attn_block_size,
@@ -71,11 +63,12 @@ class RBLNKVCacheManager(KVCacheManager):
         else:
             self.attn_block_size = self.block_size
 
-    def free(self, request: Request, preemption: int =False) -> None:
+    def free(self, request: Request, preemption: int = False) -> None:
         """Free the blocks allocated for the request.
         """
         if self.enable_caching:
-            self.prefix_cache_manager.free_request(request.request_id, preemption=preemption)
+            self.prefix_cache_manager.free_request(request.request_id,
+                                                   preemption=preemption)
         self.coordinator.free(request.request_id)
 
     def allocate_slots(
@@ -85,41 +78,6 @@ class RBLNKVCacheManager(KVCacheManager):
         num_new_computed_tokens: int = 0,
         new_computed_blocks: Optional[KVCacheBlocks] = None,
     ) -> Optional[KVCacheBlocks]:
-        """Add slots for a request with new tokens to append.
-
-        Args:
-            request: The request to allocate slots.
-            num_new_tokens: The number of tokens to allocate, including external
-                tokens. Note that this does not include tokens that have
-                already been computed locally (i.e. new_computed_blocks).
-            num_new_computed_tokens: The number of new computed tokens just
-                hitting the prefix caching, excluding external tokens.
-            new_computed_blocks: The cached blocks for the above new computed 
-                tokens.
-            num_lookahead_tokens: The number of speculative tokens to allocate.
-                This is used by spec decode proposers with kv-cache such 
-                as eagle.
-            delay_cache_blocks: Whether to skip caching the blocks. This is
-                used by P/D when allocating blocks used in a KV transfer
-                which will complete in a future step.
-
-        Blocks layout:
-        ```
-        -----------------------------------------------------------------------
-        | < computed > | < new computed > |    < new >    | < pre-allocated > |
-        -----------------------------------------------------------------------
-        |                  < required >                   |
-        --------------------------------------------------
-        |                    < full >                  |
-        ------------------------------------------------
-                                          | <new full> |
-                                          --------------
-        ```
-        The following *_blocks are illustrated in this layout.
-
-        Returns:
-            A list of new allocated blocks.
-        """
         if num_new_tokens == 0:
             raise ValueError("num_new_tokens must be greater than 0")
 
@@ -129,27 +87,17 @@ class RBLNKVCacheManager(KVCacheManager):
             new_computed_block_list = tuple(
                 [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
         # NOTE `new_computed_block_list` is used only for touch
-        # When allocating new blocks, we do not re-use the provided
-        # `new_computed_blocks`, we need to allocate new blocks.
+        # When allocating new blocks, we do not reuse the provided
+        # `new_computed_blocks` and we need to allocate new blocks.
         empty_computed_block_list = tuple(
-            [] for _ in range(len(self.kv_cache_config.kv_cache_groups))
-        )
-        # Free the blocks that are skipped during the attention computation
-        # (e.g., tokens outside the sliding window).
-        # We can do this even if we cannot schedule this request due to
-        # insufficient free blocks.
-        # Should call this function before allocating new blocks to reduce
-        # the number of evicted blocks.
-        # self.coordinator.remove_skipped_blocks(request.request_id,
-        #                                        request.num_computed_tokens)
+            [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
 
-        # The number of computed tokens is the number of computed tokens plus
-        # the new prefix caching hits
-        # In prefill, `num_computed_tokens` will be 0, and `num_new_tokens`
-        # will the length of the input prompt.
-        # In decode, `num_computed_tokens` will be the number of tokens of prompt
-        # and generated tokens so far, 
-        # and `num_new_tokens` will be 1.
+        # In prefill,
+        # `num_computed_tokens` = 0,
+        # `num_new_tokens` = the length of the input prompt.
+        # In decode,
+        # `num_computed_tokens` = the length of prompt + generated text
+        # `num_new_tokens` = 1.
         num_computed_tokens = request.num_computed_tokens
         num_tokens_need_slot = min(request.num_tokens, self.max_model_len)
         num_blocks_to_allocate = self.coordinator.get_num_blocks_to_allocate(
@@ -159,22 +107,16 @@ class RBLNKVCacheManager(KVCacheManager):
             num_encoder_tokens=0,
         )
 
-        # print(f"[ib] request_id: {request.request_id} num_blocks_to_allocate: {num_blocks_to_allocate}")
-
         if num_blocks_to_allocate > self.block_pool.get_num_free_blocks():
             # Cannot allocate new blocks
             return None
-        if self.enable_caching:
-            # num_ibs_per_ob = self.attn_block_size // self.block_size
-            # num_outer_blocks_to_allocate = math.ceil(num_blocks_to_allocate / num_ibs_per_ob)
-            # if request.request_id == "2":
-            # print(f"[ob] request_id: {request.request_id} num_outer_blocks_to_allocate: {num_outer_blocks_to_allocate}")
-            if not self.prefix_cache_manager.can_allocate(
-                num_blocks_to_allocate,
-                num_computed_tokens,
+        if self.enable_caching and \
+            not self.prefix_cache_manager.can_allocate(
+                    num_blocks_to_allocate,
+                    num_computed_tokens,
             ):
-                # Cannot allocate new outer blocks for prefix caching
-                return None
+            # Cannot allocate new outer blocks for prefix caching
+            return None
 
         # Touch the computed blocks to make sure they won't be evicted.
         if self.enable_caching:
@@ -184,12 +126,12 @@ class RBLNKVCacheManager(KVCacheManager):
                 "Computed blocks should be empty when "
                 "prefix caching is disabled")
 
-        # Append the new computed blocks to the request blocks until now to
-        # avoid the case where the new blocks cannot be allocated.
-        # TODO what is the role of the code?
-        self.coordinator.save_new_computed_blocks(request.request_id,
-                                                  empty_computed_block_list,
-                                                )
+        # Generate req_to_blocks, num_cached_block
+        # in the coordinator
+        self.coordinator.save_new_computed_blocks(
+            request.request_id,
+            empty_computed_block_list,
+        )
 
         new_blocks = self.coordinator.allocate_new_blocks(
             request.request_id, num_tokens_need_slot, 0)
@@ -201,9 +143,6 @@ class RBLNKVCacheManager(KVCacheManager):
 
         # Allocate outer blocks for prefix caching.
         # TODO
-        # if self.enable_caching:
-        #     self.prefix_cache_manager.compute_num_blocks_to_allocate(new_blocks, num_computed_tokens)
-
         # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
         # num_new_tokens, but must exclude "non-committable" tokens (e.g.,
         # draft tokens that could be rejected). Therefore, we cap the number
@@ -213,18 +152,20 @@ class RBLNKVCacheManager(KVCacheManager):
         self.coordinator.cache_blocks(request, num_tokens_to_cache)
         return KVCacheBlocks(new_blocks)
 
-
-    def get_prefix_cached_blocks_prefill(self, request: Request, cached_blocks: KVCacheBlocks,
-        num_cached_tokens: int, inner_blocks: KVCacheBlocks) -> tuple[torch.Tensor, dict, int]:
+    def get_prefix_cached_blocks_prefill(
+            self, request: Request, cached_blocks: KVCacheBlocks,
+            num_cached_tokens: int,
+            inner_blocks: KVCacheBlocks) -> tuple[torch.Tensor, dict, int]:
         """Get the block table for prefill phase.
         """
         return self.prefix_cache_manager.get_block_table_prefill(
-            request.request_id, cached_blocks,
-            num_cached_tokens, inner_blocks
-        )
+            request.request_id, cached_blocks, num_cached_tokens, inner_blocks)
 
-    def get_prefix_cached_blocks_decode(self, request: Request, new_inner_blocks: KVCacheBlocks) -> torch.Tensor:
+    def get_prefix_cached_blocks_decode(
+            self, request: Request,
+            new_inner_blocks: KVCacheBlocks) -> torch.Tensor:
         """Get the block table for decode phase.
         """
         num_computed_tokens = request.num_computed_tokens
-        return self.prefix_cache_manager.get_block_table_decode(request.request_id, num_computed_tokens, new_inner_blocks)
+        return self.prefix_cache_manager.get_block_table_decode(
+            request.request_id, num_computed_tokens, new_inner_blocks)

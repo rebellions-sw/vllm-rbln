@@ -14,8 +14,8 @@
 from collections import OrderedDict
 
 from vllm_rbln.logger import init_logger
-from vllm_rbln.v1.core.prefix_cache_manager.optimum_block_mapping_manager import (
-    BlockMappingManager)
+
+from .optimum_block_mapping_manager import BlockMappingManager
 
 logger = init_logger(__name__)
 
@@ -43,13 +43,9 @@ class SimpleEvictionPolicy:
                                    count: int) -> list[int]:
         """Select blocks for eviction."""
         inactive_mappings = mapping_manager.get_inactive_mappings()
-        evicted_blocks = []
+        inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
-        for mapping in inactive_mappings:
-            if len(evicted_blocks) >= count:
-                break
-            evicted_blocks.append(mapping.outer_block_id)
-        return evicted_blocks[:count]
+        return inactive_block_ids[:count]
 
 
 class FIFOEvictionPolicy(SimpleEvictionPolicy):
@@ -58,7 +54,7 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
     """
 
     def __init__(self):
-        self._allocation_order: OrderedDict[int, float] = OrderedDict()
+        self._allocation_order: OrderedDict[int, bool] = OrderedDict()
 
     def register_block(self, block_id: int) -> None:
         assert block_id not in self._allocation_order
@@ -76,9 +72,6 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
-        if not inactive_block_ids:
-            return []
-
         # TODO reduce duplication
         # when calculating the number of evictable blocks
         # and selecting blocks for eviction
@@ -87,8 +80,7 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
             if block_id in inactive_block_ids
         ]
 
-        selected = evictable_blocks[:count]
-        return selected
+        return evictable_blocks[:count]
 
 
 class LRUEvictionPolicy(SimpleEvictionPolicy):
@@ -97,7 +89,7 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
     """
 
     def __init__(self):
-        self._access_order: OrderedDict[int, float] = OrderedDict()
+        self._access_order: OrderedDict[int, bool] = OrderedDict()
 
     def touch(self, block_id: int) -> None:
         """Mark a block as recently accessed"""
@@ -116,10 +108,6 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
-        if not inactive_block_ids:
-            logger.warning("No inactive blocks available for eviction")
-            return []
-
         # TODO reduce duplication
         # when calculating the number of evictable blocks
         # and selecting blocks for eviction
@@ -134,6 +122,4 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         ]
 
         evictable_blocks = untouched_blocks + touched_blocks
-        selected = evictable_blocks[:count]
-
-        return selected
+        return evictable_blocks[:count]
