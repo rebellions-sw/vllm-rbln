@@ -33,17 +33,13 @@ class SimpleEvictionPolicy:
         """Unregister a block (called when block is deallocated)"""
         pass
 
-    def can_evict(self, mapping_manager: BlockMappingManager,
-                  count: int) -> bool:
-        """Check if there are enough inactive blocks to evict."""
-        selected = self.select_blocks_for_eviction(mapping_manager, count)
-        return len(selected) >= count
-
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
                                    count: int) -> list[int]:
         """Select blocks for eviction."""
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
+        if len(inactive_block_ids) < count:
+            return []
 
         return inactive_block_ids[:count]
 
@@ -79,6 +75,9 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
             block_id for block_id in self._allocation_order
             if block_id in inactive_block_ids
         ]
+
+        if len(evictable_blocks) < count:
+            return []
 
         return evictable_blocks[:count]
 
@@ -122,4 +121,6 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         ]
 
         evictable_blocks = untouched_blocks + touched_blocks
+        if len(evictable_blocks) < count:
+            return []
         return evictable_blocks[:count]
