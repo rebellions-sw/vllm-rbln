@@ -72,6 +72,7 @@ def initialize_kv_cache(runner: RBLNOptimumModelRunner):
     )
 
 
+# TODO add tests for both `enable_prefix_caching = True` and `False`
 def get_vllm_config(async_scheduling=False):
     scheduler_config = SchedulerConfig(
         max_num_seqs=10,

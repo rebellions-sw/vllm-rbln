@@ -51,6 +51,8 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
     RBLNPrefixKVCacheManager)
+from vllm_rbln.utils.optimum.registry import get_rbln_model_info
+from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 
 logger = init_logger(__name__)
@@ -59,6 +61,21 @@ logger = init_logger(__name__)
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
+        # FIXME: For RBLN support Enc-only model which based on enc-dec config.
+        # When using an encoder-only model (such as T5EncoderModel)
+        # with a config designed for enc-dec architectures,
+        # it’s important to set the is_encoder_decoder flag to False.
+        # This prevents the scheduler from applying text generation settings.
+        _, model_cls_name = get_rbln_model_info(vllm_config.model_config)
+        if model_cls_name in ["RBLNQwen3ForCausalLM"
+                              ] and vllm_config.model_config.task == "embed":
+            # NOTE The architecture of Qwen3-Embedding model in huggingface
+            # is `Qwen3ForCausalLM`. But it have to be mapped to `Qwen3Model`
+            # for optimum-rbln.
+            vllm_config.model_config.hf_config.__dict__["architectures"] = [
+                "Qwen3Model"
+            ]
+
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
@@ -250,11 +267,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         with record_function_or_nullcontext("Forward"):
             hidden_states = self.model(model_input)
 
-        # FIXME [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
-        hidden_states = hidden_states.squeeze(1)
         if self.is_pooling_model:
             return self._pool(hidden_states, num_scheduled_tokens,
                               num_scheduled_tokens_np)
+        # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
+        hidden_states = hidden_states.squeeze(1)
         logits = self.model.compute_logits(hidden_states, None)
 
         with record_function_or_nullcontext("Sample"):
@@ -286,8 +303,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
             sampled_token_ids=valid_sampled_token_ids,
-            logprobs=None,
-            prompt_logprobs_dict={},
+            logprobs=logprobs_lists,
+            prompt_logprobs_dict=prompt_logprobs_dict,
             pooler_output=[],
             kv_connector_output=None,
             num_nans_in_logits={},
@@ -447,7 +464,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def _prepare_prefill(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], list[int],
                Optional[MultiModalKwargs], list[str]]:
         input_tokens: list[list[int]] = []
@@ -490,11 +507,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_blocks = num_blocks_per_req[req_index]
         if self.enable_prefix_caching:
             block_table, cached_block_table, cached_length = \
-                self.prefix_cache_manager.get_block_table_with_cache(
+                self.prefix_cache_manager.get_block_table_prefill(
                     req_id,
-                    0,  # num_allocated_tokens
+                    scheduler_output.new_computed_blocks,
                     num_computed_tokens,
-                    block_ids)
+                    block_ids
+                )
             logger.debug(
                 "Request %s is now scheduled. Prompt tokens: %s, "
                 "Already generated tokens: %s, Allocated block(s): %s", req_id,
@@ -569,10 +587,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
-                block_table, _, _ = \
-                    self.prefix_cache_manager.get_block_table_with_cache(
+                block_table = \
+                    self.prefix_cache_manager.get_block_table_decode(
                         req_id,
-                        num_computed_tokens[req_id],
                         num_computed_tokens[req_id],
                         new_blocks_ids[req_id])
             else:
@@ -587,7 +604,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         return input_tokens, input_positions, block_tables, running_request_ids
 
-    def _update_states(self, scheduler_output: "SchedulerOutput") -> None:
+    def _update_states(self, scheduler_output: "RBLNSchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler
         output.
 
@@ -597,6 +614,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         The SamplingMetadata is updated and copied to the NPU if there is a
         new/resumed/paused/finished request in the batch.
         """
+        # Update prefix_cache_manager if preemption happened
+        if self.enable_prefix_caching:
+            for req_id in scheduler_output.preempted_req_ids:
+                self.prefix_cache_manager.free_request(req_id, preemption=True)
+
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             if logger.isEnabledFor(logging.DEBUG):

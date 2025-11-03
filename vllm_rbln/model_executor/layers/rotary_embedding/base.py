@@ -15,8 +15,7 @@
 from typing import Optional, Tuple
 
 import torch
-from vllm.model_executor.layers.rotary_embedding import (
-    DeepseekScalingRotaryEmbedding, RotaryEmbedding)
+from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
 from vllm.model_executor.layers.rotary_embedding.common import (rotate_gptj,
                                                                 rotate_neox)
 
@@ -108,51 +107,5 @@ def rope_forward_oot(
     return query, key
 
 
-def deepseek_scaling_rope_forward(
-    self,
-    positions: torch.Tensor,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    offsets: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """PyTorch-native implementation equivalent to forward()."""
-    if offsets is not None:
-        positions = positions + offsets
-    positions = positions.flatten()
-
-    query_rot = query[..., :self.rotary_dim]
-    key_rot = key[..., :self.rotary_dim]
-    if self.rotary_dim < self.head_size:
-        query_pass = query[..., self.rotary_dim:]
-        key_pass = key[..., self.rotary_dim:]
-
-    self.cos_sin_cache = self.cos_sin_cache.to(positions.device)
-    cos_sin = self.cos_sin_cache.index_select(0, positions)
-    cos, sin = cos_sin.chunk(2, dim=-1)
-    if self.is_neox_style:
-        # NOTE(woosuk): Here we assume that the positions tensor has the
-        # shape [batch_size, seq_len].
-        cos = cos.repeat(1, 2).unsqueeze(-2)
-        sin = sin.repeat(1, 2).unsqueeze(-2)
-    else:
-        cos = torch.stack([cos, cos],
-                          dim=-1).reshape(cos_sin.shape).unsqueeze(-2)
-        sin = torch.stack([sin, sin],
-                          dim=-1).reshape(cos_sin.shape).unsqueeze(-2)
-
-    rotate_fn = rotate_neox if self.is_neox_style else rotate_gptj
-    query_rot = query_rot * cos + rotate_fn(query_rot) * sin
-    key_rot = key_rot * cos + rotate_fn(key_rot) * sin
-
-    if self.rotary_dim < self.head_size:
-        query = torch.cat((query_rot, query_pass), dim=-1)
-        key = torch.cat((key_rot, key_pass), dim=-1)
-    else:
-        query = query_rot
-        key = key_rot
-    return query, key
-
-
 RotaryEmbedding.__init__ = rope__custom_init__
 RotaryEmbedding.forward_oot = rope_forward_oot
-DeepseekScalingRotaryEmbedding.forward = deepseek_scaling_rope_forward

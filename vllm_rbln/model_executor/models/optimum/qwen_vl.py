@@ -264,12 +264,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
             image_grid_thw = self._validate_and_reshape_mm_tensor(
                 image_grid_thw, "image grid_thw")
 
-            if not isinstance(pixel_values, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of image pixel values. "
-                                 f"Got type: {type(pixel_values)}")
-
-            return self._create_image_pixel_inputs(pixel_values,
-                                                   image_grid_thw)
+            return self._create_image_pixel_inputs(
+                pixel_values=pixel_values, image_grid_thw=image_grid_thw)
 
         if image_embeds is not None:
             image_embeds = self._validate_and_reshape_mm_tensor(
@@ -277,12 +273,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
             image_grid_thw = self._validate_and_reshape_mm_tensor(
                 image_grid_thw, "image grid_thw")
 
-            if not isinstance(image_embeds, torch.Tensor):
-                raise ValueError("Incorrect type of image embeddings. "
-                                 f"Got type: {type(image_embeds)}")
-
-            return self._create_image_embedding_inputs(image_embeds,
-                                                       image_grid_thw)
+            return self._create_image_embedding_inputs(
+                image_embeds=image_embeds, image_grid_thw=image_grid_thw)
 
         # fallback return if both are None
         return None
@@ -351,11 +343,19 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
         if second_per_grid_ts is None:
             raise ValueError(
                 "second_per_grid_ts is required for Qwen2.5-VL video inputs.")
+        # NOTE vLLM also squeezes the second_per_grid_ts tensor
+        # https://github.com/vllm-project/vllm/blob/v0.10.2/vllm/model_executor/models/qwen2_5_vl.py#L1021
+        if envs.VLLM_USE_V1:
+            # [num_videos, 1] -> [num_videos]
+            second_per_grid_ts = second_per_grid_ts.squeeze(-1)
+        else:
+            # [1, num_videos] -> [num_videos]
+            second_per_grid_ts = second_per_grid_ts.squeeze(-2)
         return Qwen2_5_VLVideoPixelInputs(
             type="pixel_values_videos",
             pixel_values_videos=pixel_values_videos,
             video_grid_thw=video_grid_thw,
-            second_per_grid_ts=second_per_grid_ts.squeeze(0))
+            second_per_grid_ts=second_per_grid_ts)
 
     def _create_video_embedding_inputs(self, video_embeds, video_grid_thw):
         return Qwen2_5_VLVideoEmbeddingInputs(type="video_embeds",

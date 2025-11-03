@@ -60,7 +60,6 @@ class ModelInputForRebel(ModelRunnerInputBase):
 
     input_tokens: Optional[torch.Tensor] = None
     input_positions: Optional[torch.Tensor] = None
-    token_type_ids: Optional[torch.Tensor] = None
     attn_metadata: Optional["AttentionMetadata"] = None
     virtual_engine: Optional[int] = None
     seq_lens: Optional[List[int]] = None
@@ -71,7 +70,6 @@ class ModelInputForRebel(ModelRunnerInputBase):
         tensor_dict = {
             "input_tokens": self.input_tokens,
             "input_positions": self.input_positions,
-            "token_type_ids": self.token_type_ids,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
 
@@ -102,7 +100,6 @@ class ModelInputForRebelWithSamplingMetadata(ModelInputForRebel):
         tensor_dict = {
             "input_tokens": self.input_tokens,
             "input_positions": self.input_positions,
-            "token_type_ids": self.token_type_ids,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
         _add_sampling_metadata_broadcastable_dict(tensor_dict,
@@ -131,7 +128,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
             self.use_mrope = use_mrope
             self.input_tokens: List[List[int]] = []
             self.input_positions: List[List[int]] = []
-            self.token_type_ids: Optional[List[List[int]]] = []
             self.seq_lens: List[int] = []
             self.query_lens: List[int] = []
             self.prefill_block_tables: List[List[int]] = []
@@ -360,7 +356,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         assert self.seq_group_metadata_list is not None
         seq_group_metadata_list = self.seq_group_metadata_list
         is_prompt = seq_group_metadata_list[0].is_prompt
-        token_type_ids = seq_group_metadata_list[0].token_type_ids
         input_data = self.input_data
         # Prepare input tensors.
         if is_prompt:
@@ -379,7 +374,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
         return self.model_input_cls(
             input_tokens=input_tokens,
             input_positions=input_positions,
-            token_type_ids=token_type_ids,
             seq_lens=input_data.seq_lens,
             query_lens=input_data.query_lens,
             attn_metadata=attn_metadata,
@@ -443,6 +437,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         options = {
             "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
+            "mode": "strict",
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "

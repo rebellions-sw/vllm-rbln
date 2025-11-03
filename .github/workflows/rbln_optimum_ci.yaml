@@ -58,6 +58,9 @@ jobs:
 
       - name: Install rebel-compiler
         run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+          export CXX=$(which g++)
           python3 -m pip uninstall rebel-compiler -y
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
@@ -96,7 +99,7 @@ jobs:
 
       - name: Run decoder-only test (Flash-attention mode) (V1)
         run: >
-          python3 examples/optimum/run_decoder_only.py --batch_size 4 --max_seq_len 131072 --kvcache_block_size 16384
+          python3 examples/optimum/run_decoder_only.py --max_seq_len 131072
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llama3_2-3b-128k_kv16k_batch4
           --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
@@ -104,37 +107,37 @@ jobs:
 
       - name : Run Llava-next (Eager mode) (V1)
         run: >
-           python3 examples/optimum/run_llava.py --max_seq_len 32768 --kvcache_partition_len 32768
+           python3 examples/optimum/run_llava.py
            --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
            --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4/
       
       - name : Run Llava-next (Eager mode) (V0)
         run: >
-           VLLM_USE_V1=0 python3 examples/optimum/run_llava.py --max_seq_len 32768 --kvcache_partition_len 32768
+           VLLM_USE_V1=0 python3 examples/optimum/run_llava.py
            --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
            --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4/
 
       - name : Run Llava-next (Flash-attention mode) (V1)
         run: >
-          python3 examples/optimum/run_llava.py --max_seq_len 32768 --kvcache_partition_len 16384
+          python3 examples/optimum/run_llava.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4-kv16k
       
       - name : Run Llava-next (Flash-attention mode) (V0)
         run: >
-          VLLM_USE_V1=0 python3 examples/optimum/run_llava.py --max_seq_len 32768 --kvcache_partition_len 16384
+          VLLM_USE_V1=0 python3 examples/optimum/run_llava.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4-kv16k
 
       - name : Run Idefics3 (Eager mode) (V1)
         run: >
-          python3 examples/optimum/run_idefics3.py --max_seq_len 32768 --kvcache_partition_len 32768
+          python3 examples/optimum/run_idefics3.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/idefics3-8b-llama3-32k-b4
 
       - name : Run Idefics3 (Flash-attention mode) (V1)
         run: >
-          python3 examples/optimum/run_idefics3.py --max_seq_len 32768 --kvcache_partition_len 16384
+          python3 examples/optimum/run_idefics3.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/idefics3-8b-llama3-32k-b4-kv16k
 

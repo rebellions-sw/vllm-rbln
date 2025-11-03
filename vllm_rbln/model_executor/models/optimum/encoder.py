@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -20,11 +20,43 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import DispatchPooler, Pooler
 from vllm.model_executor.models import VllmModelForPooling
+from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
+from vllm.tasks import PoolingTask
+from vllm.v1.pool.metadata import PoolingMetadata
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumModelBase
 
 logger = init_logger(__name__)
+
+
+class RBLNClassifierPooler(Pooler):
+    """
+    A pooler for RBLN models that simply wraps pre-processed 
+    hidden states into vLLM's PoolerOutput format.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def get_supported_tasks(self) -> set[PoolingTask]:
+        return {"classify", "score"}
+
+    @staticmethod
+    def _build_output(
+        all_data: Union[torch.Tensor, list[torch.Tensor]], ) -> PoolerOutput:
+        """Wrap tensor data into vLLM's PoolerOutput format."""
+        all_outputs = [PoolingSequenceGroupOutput(data) for data in all_data]
+        return PoolerOutput(outputs=all_outputs)
+
+    def forward(
+        self,
+        hidden_states: Union[torch.Tensor, list[torch.Tensor]],
+        pooling_metadata: PoolingMetadata,
+    ) -> PoolerOutput:
+        # RBLN models return already pooled/processed states for classification
+        # No additional pooling needed - just format for vllm compatibility
+        return self._build_output(hidden_states)
 
 
 class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
@@ -48,14 +80,10 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         )
         self.pooler = DispatchPooler(
             {
-                "encode":
-                Pooler.for_encode(pooler_config),
-                "embed":
-                Pooler.for_embed(pooler_config),
-                "classify":
-                Pooler.for_classify(pooler_config, classifier=self.score),
-                "score":
-                Pooler.for_classify(pooler_config, classifier=self.score),
+                "encode": Pooler.for_encode(pooler_config),
+                "embed": Pooler.for_embed(pooler_config),
+                "classify": RBLNClassifierPooler(),
+                "score": RBLNClassifierPooler(),
             }, )
 
     def is_classification_arch(self):

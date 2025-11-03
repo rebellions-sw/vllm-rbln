@@ -45,13 +45,13 @@ def get_input_prompts() -> list[str]:
 
 
 async def embed(engine: AsyncLLMEngine, prompt: str, model: str,
-                requst_id: int):
-    print(f"embed request_id={requst_id}, prompt={prompt}")
-    pooling_params = PoolingParams()
+                request_id: int):
+    print(f"embed request_id={request_id}, prompt={prompt}")
+    pooling_params = PoolingParams(task="embed")
     results_generator = engine.encode(
         prompt,
         pooling_params,
-        str(requst_id),
+        str(request_id),
     )
 
     # get the results
@@ -62,9 +62,6 @@ async def embed(engine: AsyncLLMEngine, prompt: str, model: str,
 
 
 async def main(
-    batch_size: int,
-    max_seq_len: int,
-    kvcache_block_size: int,
     num_input_prompt: int,
     model_id: str,
 ):
@@ -85,7 +82,7 @@ async def main(
                     engine,
                     prompt=p,
                     model=model_id,
-                    requst_id=i,
+                    request_id=i,
                 )))
 
     outputs = await asyncio.gather(*futures)
@@ -97,20 +94,13 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 1,
-    max_seq_len: int = 32768,
-    kvcache_block_size: int = 32768,
     num_input_prompt: int = 2,
     model_id: str = "/qwen3-0.6b-b1-embedding",
 ):
-    asyncio.run(
-        main(
-            batch_size=batch_size,
-            max_seq_len=max_seq_len,
-            kvcache_block_size=kvcache_block_size,
-            num_input_prompt=num_input_prompt,
-            model_id=model_id,
-        ))
+    asyncio.run(main(
+        num_input_prompt=num_input_prompt,
+        model_id=model_id,
+    ))
 
 
 if __name__ == "__main__":

@@ -24,13 +24,13 @@ from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher
-from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
-                                       SchedulerOutput)
+from vllm.v1.core.sched.output import CachedRequestData, NewRequestData
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
 from vllm.v1.worker.gpu_input_batch import InputBatch
 
+from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 MAX_NUM_SEQ = 2
@@ -163,7 +163,9 @@ def _schedule_new_request(
     block_ids: tuple[list[int], ...],
     new_computed_tokens: int,
     finished_req_ids: Optional[list[str]] = None,
-) -> SchedulerOutput:
+    new_computed_blocks: Optional[list[int]] = None,
+    preempted_req_ids: Optional[list[str]] = None,
+) -> RBLNSchedulerOutput:
     new_reqs = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
@@ -184,7 +186,7 @@ def _schedule_new_request(
         num_scheduled_tokens[req_id] = len(token_ids)
         total_num_scheduled_tokens += num_scheduled_tokens[req_id]
 
-    return SchedulerOutput(
+    return RBLNSchedulerOutput(
         scheduled_new_reqs=new_reqs,
         scheduled_cached_reqs=CachedRequestData.make_empty(),
         num_scheduled_tokens=num_scheduled_tokens,
@@ -196,6 +198,8 @@ def _schedule_new_request(
         free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
+        new_computed_blocks=new_computed_blocks if new_computed_blocks else [],
+        preempted_req_ids=preempted_req_ids if preempted_req_ids else [],
     )
 
 
@@ -204,7 +208,7 @@ def _schedule_cached_reqs(
     new_block_ids: list[tuple[list[int], ...]],
     finished_req_ids: Optional[list[str]] = None,
     resumed_from_preemption: bool = False,
-) -> SchedulerOutput:
+) -> RBLNSchedulerOutput:
     req_ids = []
     resumed_from_preemption = []
     arr_new_token_ids = []
@@ -229,7 +233,7 @@ def _schedule_cached_reqs(
         num_computed_tokens=arr_num_computed_tokens,
     )
 
-    return SchedulerOutput(
+    return RBLNSchedulerOutput(
         scheduled_new_reqs=[],
         scheduled_cached_reqs=cached_req_data,
         num_scheduled_tokens=num_scheduled_tokens,

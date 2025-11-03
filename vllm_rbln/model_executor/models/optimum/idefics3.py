@@ -123,6 +123,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
             self, **kwargs: Any) -> Optional[ImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
+        config = self.vllm_config.model_config.hf_config
 
         if pixel_values is None and image_embeds is None:
             return None
@@ -152,16 +153,17 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
                 raise ValueError("Incorrect type of num_patches. "
                                  f"Got type: {type(num_patches)}")
 
-            pixel_values = flatten_bn(pixel_values, concat=True)
-            pixel_attention_mask = flatten_bn(pixel_attention_mask,
-                                              concat=True)
-            num_patches = flatten_bn(num_patches, concat=True)
-
+            expected_h = expected_w = config.vision_config.image_size
             return Idefics3ImagePixelInputs(
                 type="pixel_values",
-                pixel_values=self._validate_pixel_values(pixel_values),
-                pixel_attention_mask=pixel_attention_mask,
-                num_patches=num_patches,
+                pixel_values=flatten_bn(pixel_values, concat=True),
+                pixel_attention_mask=flatten_bn(pixel_attention_mask,
+                                                concat=True),
+                num_patches=flatten_bn(num_patches, concat=True),
+                resolve_bindings={
+                    "h": expected_h,
+                    "w": expected_w
+                },
             )
 
         raise AssertionError("This line should be unreachable.")
