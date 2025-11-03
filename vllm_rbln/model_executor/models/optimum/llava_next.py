@@ -14,7 +14,7 @@
 from typing import Any, List, Optional, Union
 
 import torch
-import vllm.envs as env
+import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.llava_next import (LlavaNextImageInputs,
@@ -109,7 +109,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
 
-        if env.VLLM_USE_V1:
+        if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
@@ -154,9 +154,10 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
 
     def _parse_and_validate_image_input(
             self, **kwargs: Any) -> Optional[LlavaNextImageInputs]:
-        pixel_values = kwargs.get("pixel_values")
-        image_sizes = kwargs.get("image_sizes")
-        image_embeds = kwargs.get("image_embeds")
+        pixel_values = kwargs.pop("pixel_values", None)
+        image_sizes = kwargs.pop("image_sizes", None)
+        image_embeds = kwargs.pop("image_embeds", None)
+        config = self.vllm_config.model_config.hf_config
 
         if pixel_values is None and image_embeds is None:
             return None
@@ -170,11 +171,15 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 raise ValueError("Incorrect type of image sizes. "
                                  f"Got type: {type(image_sizes)}")
 
+            expected_h = expected_w = config.vision_config.image_size
             return LlavaNextImagePixelInputs(
                 type="pixel_values",
                 pixel_values=flatten_bn(pixel_values),
-                image_sizes=flatten_bn(image_sizes),
-            )
+                image_sizes=flatten_bn(image_sizes, concat=True),
+                resolve_bindings={
+                    "h": expected_h,
+                    "w": expected_w,
+                })
 
         if image_embeds is not None:
             if not isinstance(image_embeds, torch.Tensor):

@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A RBLN worker class."""
-
+import copy
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -28,9 +28,11 @@ from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
+from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
-from vllm.v1.outputs import ModelRunnerOutput
+from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
+                             ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.worker_base import WorkerBase
 
@@ -78,42 +80,56 @@ class RBLNWorker(WorkerBase):
 
             init_cached_hf_modules()
 
+        # Buffers saved before sleep
+        self._sleep_saved_buffers: dict[str, torch.Tensor] = {}
+
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
-            logger.info(
-                "Profiling enabled. Traces will be saved to: %s",
-                torch_profiler_trace_dir,
+            logger.info("Profiling enabled. Traces will be saved to: %s",
+                        torch_profiler_trace_dir)
+            logger.debug(
+                "Profiler config: record_shapes=%s,"
+                "profile_memory=%s,with_stack=%s,with_flops=%s",
+                envs.VLLM_TORCH_PROFILER_RECORD_SHAPES,
+                envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
+                envs.VLLM_TORCH_PROFILER_WITH_STACK,
+                envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
             )
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
                 ],
-                with_stack=True,
+                record_shapes=envs.VLLM_TORCH_PROFILER_RECORD_SHAPES,
+                profile_memory=envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
+                with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
+                with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True),
-            )
+                    torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
 
         self.parallel_config.disable_custom_all_reduce = True
 
-    def profile(self, is_start: bool = True):
-        if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
-        if is_start:
-            self.profiler.start()
-        else:
-            self.profiler.stop()
-            print(self.profiler.key_averages().table(
-                sort_by="self_cuda_time_total"))
+    def sleep(self, level: int = 1) -> None:
+        logger.warning("sleep mode is not supported on RBLN, ignore it.")
+        pass
+
+    def wake_up(self, tags: Optional[list[str]] = None) -> None:
+        logger.warning("sleep mode is not supported on RBLN, ignore it.")
+        pass
+
+    def initialize_cache(self, num_gpu_blocks: int,
+                         num_cpu_blocks: int) -> None:
+        self.cache_config.num_gpu_blocks = num_gpu_blocks
+        self.cache_config.num_cpu_blocks = num_cpu_blocks
 
     def _init_device_env(self) -> None:
         world_size = self.parallel_config.world_size
         env_var = current_platform.device_control_env_var
 
-        total_device_count = world_size * envs.RBLN_TP_SIZE
+        total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
         if env_var not in os.environ:
             device_ids = [str(i) for i in range(total_device_count)]
@@ -129,8 +145,8 @@ class RBLNWorker(WorkerBase):
             raise RuntimeError(f"{env_var} has devices {device_ids}"
                                f" but required {total_device_count}")
 
-        start_idx = self.local_rank * envs.RBLN_TP_SIZE
-        end_idx = start_idx + envs.RBLN_TP_SIZE
+        start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
+        end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
         selected_devices = ",".join(device_ids[start_idx:end_idx])
 
         os.environ[env_var] = selected_devices
@@ -142,30 +158,20 @@ class RBLNWorker(WorkerBase):
 
     def init_device(self) -> None:
         # Initialize the distributed environment.
-        init_worker_distributed_environment(
-            self.vllm_config,
-            self.rank,
-            self.distributed_init_method,
-            self.local_rank,
-        )
-
+        init_worker_distributed_environment(self.vllm_config, self.rank,
+                                            self.distributed_init_method,
+                                            self.local_rank,
+                                            current_platform.dist_backend)
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
+        # Construct the model runner
         self.model_runner: RBLNModelRunner = RBLNModelRunner(
             self.vllm_config, self.device)
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
             report_usage_stats(self.vllm_config)
-
-    def sleep(self, level: int = 1) -> None:
-        logger.warning("sleep mode is not supported on RBLN, ignore it.")
-        pass
-
-    def wake_up(self, tags: Optional[list[str]] = None) -> None:
-        logger.warning("sleep mode is not supported on RBLN, ignore it.")
-        pass
 
     def load_model(self):
         self.model_runner.load_model()
@@ -212,7 +218,7 @@ class RBLNWorker(WorkerBase):
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def compile_or_warm_up_model(self) -> None:
-        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL:
+        if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
             logger.warning("skipping compile_or_warm_up_model")
             return
 
@@ -221,28 +227,59 @@ class RBLNWorker(WorkerBase):
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
 
+    def get_supported_tasks(self) -> tuple[SupportedTask, ...]:
+        return self.model_runner.get_supported_tasks()
+
     @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Optional[ModelRunnerOutput]:
+    ) -> Optional[Union[ModelRunnerOutput, AsyncModelRunnerOutput]]:
         intermediate_tensors = None
-        if not get_pp_group().is_first_rank:
+        forward_pass = scheduler_output.total_num_scheduled_tokens > 0
+        if forward_pass and not get_pp_group().is_first_rank:
             intermediate_tensors = IntermediateTensors(
                 get_pp_group().recv_tensor_dict(
                     all_gather_group=get_tp_group()))
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
+        if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
+            return output
+
+        assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
-        if (parallel_config.distributed_executor_backend != "external_launcher"
-                and not get_pp_group().is_last_rank):
-            assert isinstance(output, IntermediateTensors)
-            get_pp_group().send_tensor_dict(output.tensors,
-                                            all_gather_group=get_tp_group())
+        assert parallel_config.distributed_executor_backend != (
+            "external_launcher") and not get_pp_group().is_last_rank
+
+        get_pp_group().send_tensor_dict(output.tensors,
+                                        all_gather_group=get_tp_group())
+
+        kv_connector_output = output.kv_connector_output
+        if not kv_connector_output:
             return None
-        assert isinstance(output, ModelRunnerOutput)
-        return output if self.is_driver_worker else None
+
+        # In case of PP with kv transfer, we need to pass through the
+        # kv_connector_output
+        if (not kv_connector_output.finished_sending
+                and not kv_connector_output.finished_recving):
+            return EMPTY_MODEL_RUNNER_OUTPUT
+
+        output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
+        output.kv_connector_output = kv_connector_output
+        return output
+
+    def profile(self, is_start: bool = True):
+        if self.profiler is None:
+            raise RuntimeError("Profiler is not enabled.")
+        if is_start:
+            self.profiler.start()
+        else:
+            self.profiler.stop()
+            # only print profiler results on rank 0
+            if self.local_rank == 0:
+                print(self.profiler.key_averages().table(
+                    sort_by="self_cuda_time_total"))
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         raise NotImplementedError
@@ -250,10 +287,10 @@ class RBLNWorker(WorkerBase):
     def remove_lora(self, lora_id: int) -> bool:
         raise NotImplementedError
 
-    def pin_lora(self, lora_id: int) -> bool:
+    def list_loras(self) -> set[int]:
         raise NotImplementedError
 
-    def list_loras(self) -> set[int]:
+    def pin_lora(self, lora_id: int) -> bool:
         raise NotImplementedError
 
     def check_health(self) -> None:

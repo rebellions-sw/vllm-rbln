@@ -72,17 +72,10 @@ def compare(result):
 
 
 async def main(
-    batch_size: int,
-    max_seq_len: int,
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  device="auto",
-                                  max_num_seqs=batch_size,
-                                  max_num_batched_tokens=max_seq_len,
-                                  max_model_len=max_seq_len,
-                                  block_size=max_seq_len)
+    engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     prompt = get_input_prompts(num_prompts=num_input_prompt)
@@ -104,19 +97,13 @@ async def main(
 
 
 def entry_point(
-    batch_size: int = 2,
-    max_seq_len: int = 512,
     num_input_prompt: int = 10,
     model_id: str = "/rbln_bart-small_batch2",
 ):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
-        main(
-            batch_size=batch_size,
-            max_seq_len=max_seq_len,
-            num_input_prompt=num_input_prompt,
-            model_id=model_id,
-        ))
+    asyncio.run(main(
+        num_input_prompt=num_input_prompt,
+        model_id=model_id,
+    ))
 
 
 if __name__ == "__main__":
