@@ -37,6 +37,8 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
                                          "use_multiple_decoder", False),
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
+            # including null block of kv_cache_manager for padding
+            num_blocks=self.kv_block_adapter.get_available_num_blocks(),
         )
 
     def forward(self, model_input: ModelInputForRBLN,
@@ -52,8 +54,9 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             self.kv_block_adapter, input_ids,
-                                             cache_position)
+                                             input_ids, cache_position)
+        # print("cache_position:", kwargs["cache_position"])
+        # print("block_tables:", kwargs["block_tables"])
         padded_batch_size = kwargs.pop("padded_batch_size",
                                        self.decoder_batch_size)
 
