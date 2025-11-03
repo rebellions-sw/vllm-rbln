@@ -147,14 +147,10 @@ class RBLNKVCacheManager(KVCacheManager):
         # Allocate outer blocks for prefix caching
         # following the inner blocks allocation
         inner_block_ids = [block.block_id for block in new_blocks[0]]
-        num_new_ib = len(inner_block_ids)
-
-        num_new_ob = self.prefix_cache_manager.compute_num_blocks_to_allocate(
-            num_new_ib, num_computed_tokens)
 
         self.prefix_cache_manager.allocate_blocks(
             request.request_id,
-            num_new_ob,
+            num_computed_tokens,
             inner_block_ids,
         )
 

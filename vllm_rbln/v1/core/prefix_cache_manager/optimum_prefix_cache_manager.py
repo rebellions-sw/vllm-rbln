@@ -217,22 +217,6 @@ class RBLNPrefixKVCacheManager:
         self._memory_pool_manager = MemoryPoolManager(max_model_len, ob_size)
         self._eviction_policy = LRUEvictionPolicy()
 
-    def allocate_blocks(self, request_id: str, num_new_ob: int,
-                        inner_blocks: list[int]) -> None:
-        """
-        Allocate blocks for a given request
-        based on its phase (PREFILL or DECODE).
-        """
-        if len(inner_blocks) == 0:
-            return
-
-        if self._mapping_manager.is_request_registered(request_id):
-            self._handle_decode_allocation(request_id, num_new_ob,
-                                           inner_blocks)
-        else:
-            self._handle_prefill_allocation(request_id, num_new_ob,
-                                            inner_blocks)
-
     def _handle_decode_allocation(self, request_id: str, num_new_ob: int,
                                   inner_blocks: list[int]) -> None:
         """
@@ -279,9 +263,9 @@ class RBLNPrefixKVCacheManager:
         logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id,
                      block_ids, inner_blocks)
 
-    def compute_num_blocks_to_allocate(self,
-                                       num_inner_blocks: int,
-                                       num_allocated_tokens: int = 0) -> int:
+    def _compute_num_blocks_to_allocate(self,
+                                        num_inner_blocks: int,
+                                        num_allocated_tokens: int = 0) -> int:
         """
         Compute the number of outer blocks to allocate based on inner blocks
         and the number of already allocated tokens.
@@ -305,35 +289,9 @@ class RBLNPrefixKVCacheManager:
 
         return num_obs_needed
 
-    def can_allocate(self, num_new_blocks: int,
-                     num_computed_tokens: int) -> bool:
-        # 1. Check if the enough outer blocks are free
-        required_num_ob = self.compute_num_blocks_to_allocate(
-            num_new_blocks, num_computed_tokens)
-        free_count = self._allocator.get_free_count()
-        if free_count >= required_num_ob:
-            return True
-
-        # 2. Check if we can evict enough blocks
-        evict_count = required_num_ob - free_count
-        blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
-            self._mapping_manager, evict_count)
-
-        can_evict = len(blocks_to_evict) >= evict_count
-
-        # 3. Evict blocks if possible
-        if can_evict:
-            # NOTE: In vLLM, the blocks are returned
-            # to the free block queue in reversed order.
-            # It is for preventing memory fragmentation.
-            # But here, we don't need to reverse the order.
-            for block_id in blocks_to_evict:
-                self._evict_block(block_id)
-        return can_evict
-
-    def ensure_free_blocks(self, num_new_blocks: int) -> None:
+    def _check_free_blocks(self, num_new_blocks: int) -> None:
         """
-        Ensure that there are enough free blocks to allocate.
+        Check that there are enough free blocks to allocate.
         """
         free_count = self._allocator.get_free_count()
         assert free_count >= num_new_blocks, \
@@ -420,3 +378,51 @@ class RBLNPrefixKVCacheManager:
 
         block_ids = self._mapping_manager.get_request_blocks(request_id)
         return self._memory_pool_manager.get_tensor_for_blocks(block_ids)
+
+    def can_allocate(self, num_new_blocks: int,
+                     num_computed_tokens: int) -> bool:
+        # 1. Check if the enough outer blocks are free
+        required_num_ob = self._compute_num_blocks_to_allocate(
+            num_new_blocks, num_computed_tokens)
+        free_count = self._allocator.get_free_count()
+        if free_count >= required_num_ob:
+            return True
+
+        # 2. Check if we can evict enough blocks
+        evict_count = required_num_ob - free_count
+        blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
+            self._mapping_manager, evict_count)
+
+        can_evict = len(blocks_to_evict) >= evict_count
+
+        # 3. Evict blocks if possible
+        if can_evict:
+            # NOTE: In vLLM, the blocks are returned
+            # to the free block queue in reversed order.
+            # It is for preventing memory fragmentation.
+            # But here, we don't need to reverse the order.
+            for block_id in blocks_to_evict:
+                self._evict_block(block_id)
+        return can_evict
+
+    def allocate_blocks(self, request_id: str, num_allocated_tokens: int,
+                        inner_blocks: list[int]) -> None:
+        """
+        Allocate blocks for a given request
+        based on its phase (PREFILL or DECODE).
+        """
+        num_new_ib = len(inner_blocks)
+        if num_new_ib == 0:
+            return
+
+        num_new_ob = self._compute_num_blocks_to_allocate(
+            num_new_ib, num_allocated_tokens)
+
+        self._check_free_blocks(num_new_ob)
+
+        if self._mapping_manager.is_request_registered(request_id):
+            self._handle_decode_allocation(request_id, num_new_ob,
+                                           inner_blocks)
+        else:
+            self._handle_prefill_allocation(request_id, num_new_ob,
+                                            inner_blocks)
