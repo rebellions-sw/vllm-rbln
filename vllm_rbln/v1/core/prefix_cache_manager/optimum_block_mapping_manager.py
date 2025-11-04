@@ -31,6 +31,12 @@ class BlockMapping:
     is_active: bool = True
 
 
+@dataclass
+class OuterBlockInfo:
+    outer_block_id: int
+    num_cached_ibs: int
+
+
 class BlockMappingManager:
     """
     Manage mappings between outer blocks and inner blocks.
@@ -39,8 +45,9 @@ class BlockMappingManager:
 
     def __init__(self):
         self._outer_to_inner: dict[int, BlockMapping] = {}
-        self._inner_to_outer: dict[int, list[int]] = {}
+        self._inner_to_outer: dict[int, int] = {}
         self._request_mappings: dict[str, list[int]] = {}
+        self._matched: dict[int, list[OuterBlockInfo]] = {}
 
     def is_request_registered(self, request_id: str) -> bool:
         """
@@ -59,9 +66,9 @@ class BlockMappingManager:
         """
         Add a new mapping from an inner block ID to an outer block ID.
         """
-        if inner_block_id not in self._inner_to_outer:
-            self._inner_to_outer[inner_block_id] = []
-        self._inner_to_outer[inner_block_id].append(outer_block_id)
+        # if inner_block_id not in self._inner_to_outer:
+        #     self._inner_to_outer[inner_block_id] = []
+        self._inner_to_outer[inner_block_id] = outer_block_id
 
     def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
                        request_id: str) -> None:
@@ -91,9 +98,9 @@ class BlockMappingManager:
         if mapping:
             for ib_id in mapping.inner_block_ids:
                 if ib_id in self._inner_to_outer:
-                    self._inner_to_outer[ib_id].remove(outer_block_id)
-                    if not self._inner_to_outer[ib_id]:
-                        del self._inner_to_outer[ib_id]
+                    del self._inner_to_outer[ib_id]
+                if ib_id in self._matched:
+                    del self._matched[ib_id]
 
         return mapping
 
@@ -116,11 +123,11 @@ class BlockMappingManager:
         """
         return self._outer_to_inner.get(outer_block_id)
 
-    def get_outer_blocks_for_inner(self, inner_block_id: int) -> list[int]:
+    def get_outer_block_for_inner(self, inner_block_id: int) -> int:
         """
-        Return the list of outer block IDs that map to a given inner block ID.
+        Return the outer block ID that maps to a given inner block ID.
         """
-        return self._inner_to_outer.get(inner_block_id, []).copy()
+        return self._inner_to_outer.get(inner_block_id)
 
     def get_inner_blocks_for_outer(self, outer_block_id: int) -> list[int]:
         """
@@ -137,3 +144,43 @@ class BlockMappingManager:
             mapping for mapping in self._outer_to_inner.values()
             if not mapping.is_active
         ]
+
+    def match_cached_blocks(self, cached_ib: list[int],
+                            outer_block_ids: list[int],
+                            block_ratio: int) -> None:
+        """
+        Record matched outer block id between cached inner blocks.
+        """
+        for outer_block_id in outer_block_ids:
+            start_ib_idx = outer_block_id * block_ratio
+            end_ib_idx = min(start_ib_idx + block_ratio, len(cached_ib))
+            cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
+            first_unique_ib = cur_ib_segment[0]
+            if first_unique_ib not in self._matched:
+                self._matched[first_unique_ib] = []
+            outer_block_info = OuterBlockInfo(outer_block_id,
+                                              len(cur_ib_segment))
+            self._matched[first_unique_ib].append(outer_block_info)
+            logger.debug(
+                "[PFX] Matched outer block id %d "
+                "for cached inner block segment %s", outer_block_id,
+                cur_ib_segment)
+
+    def get_outer_block_for_copied_inner(
+            self, cached_ib_segment: list[int]) -> tuple[int, int]:
+        """
+        Return the matched outer block ID
+        for a given cached inner block segment.
+        """
+        matched_obs = self._matched.get(cached_ib_segment[0])
+        if matched_obs is not None:
+            alive_obs = [
+                ob for ob in matched_obs
+                if ob.outer_block_id in self._outer_to_inner
+            ]
+            if len(alive_obs) > 0:
+                outer_block_id, num_cached_ibs = alive_obs[
+                    0].outer_block_id, alive_obs[0].num_cached_ibs
+                if num_cached_ibs >= len(cached_ib_segment):
+                    return outer_block_id, num_cached_ibs
+        return -1, 0

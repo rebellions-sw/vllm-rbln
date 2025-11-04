@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Sequence
 from typing import Optional
 
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
+from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.request import Request
 
@@ -154,6 +156,12 @@ class RBLNKVCacheManager(KVCacheManager):
             inner_block_ids,
         )
 
+        self._set_prefix_cached_blocks(
+            request.request_id,
+            num_new_computed_tokens,
+            new_computed_block_list,
+        )
+
         # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
         # num_new_tokens, but must exclude "non-committable" tokens (e.g.,
         # draft tokens that could be rejected). Therefore, we cap the number
@@ -180,3 +188,21 @@ class RBLNKVCacheManager(KVCacheManager):
 
     def get_block_table(self, request_id: str) -> torch.Tensor:
         return self.prefix_cache_manager.get_blocks(request_id)
+
+    def _set_prefix_cached_blocks(
+        self,
+        request_id: str,
+        num_new_computed_tokens: int,
+        new_computed_block_list: tuple[Sequence[KVCacheBlock], ...],
+    ) -> None:
+        if len(new_computed_block_list[0]) == 0:
+            return
+        cached_blocks = [
+            block.block_id for block in new_computed_block_list[0]
+        ]
+        allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(
+            request_id)
+        self.prefix_cache_manager.set_cached_blocks(
+            cached_blocks,
+            allocated_outer_blocks,
+        )

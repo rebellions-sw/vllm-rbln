@@ -264,6 +264,7 @@ class RBLNOptimumScheduler(Scheduler):
                     break
 
                 if self.cache_config.enable_prefix_caching:
+                    # Update the block table to the return output.
                     self.update_block_table_dict(request, block_table_dict)
 
                 # Request was already popped from self.waiting
