@@ -31,23 +31,34 @@ class BlockMapping:
     is_active: bool = True
 
 
-@dataclass
-class OuterBlockInfo:
-    outer_block_id: int
-    num_cached_ibs: int
-
-
 class BlockMappingManager:
     """
     Manage mappings between outer blocks and inner blocks.
     Also manage mappings between requests and their allocated outer blocks.
+    Args:
+        _outer_to_inner: dict[int, BlockMapping]
+            Mapping from outer block ID to BlockMapping.
+        _inner_to_outer: dict[int, int]
+            Mapping from inner block ID to outer block ID.
+        _request_mappings: dict[str, list[int]]
+            Mapping from request ID to list of outer block IDs.
+        _outer_to_cached_inner: dict[int, list[int]]
+            Mapping from outer block ID to list of cached inner block IDs.
+        _cached_inner_to_outers: dict[int, list[int]]
+            Mapping from cached inner block ID to list of outer block IDs.
+    Note:
+        - outer_to_inner, inner_to_outer, _request_mappings are used for managing
+          all block mappings.
+        - _outer_to_cached_inner, _cached_inner_to_outers
+          are used for managing cached blocks.
     """
 
     def __init__(self):
         self._outer_to_inner: dict[int, BlockMapping] = {}
         self._inner_to_outer: dict[int, int] = {}
         self._request_mappings: dict[str, list[int]] = {}
-        self._matched: dict[int, list[OuterBlockInfo]] = {}
+        self._outer_to_cached_inner: dict[int, list[int]] = {}
+        self._cached_inner_to_outers: dict[int, list[int]] = {}
 
     def is_request_registered(self, request_id: str) -> bool:
         """
@@ -94,13 +105,34 @@ class BlockMappingManager:
         """
         Remove a mapping by outer block ID and return the removed mapping.
         """
+        cached_inner_block_ids = self.get_cached_inner_blocks_for_outer(outer_block_id)
+        inner_block_ids = self.get_inner_blocks_for_outer(outer_block_id)
+        # Remove inner_block_id mapped to the outer_block_id
+        logger.debug(f"[BLOCK MAPPING] Removing mapping for outer_block_id: {outer_block_id}, "
+                     f"inner_block_ids: {inner_block_ids}")
+        logger.debug(f"[BLOCK MAPPING] Removing mapping for outer_block_id: {outer_block_id}, "
+                     f"cached inner_block_ids: {cached_inner_block_ids}")
+        for ib_id in inner_block_ids:
+            self._cached_inner_to_outers.pop(ib_id, None)
+            self._inner_to_outer.pop(ib_id, None)
+            # Remove the mapping between outer_block_id and removed inner_block_ids
+            # TODO naive sync
+            ob_ids = list(self._outer_to_cached_inner.keys())
+            for ob_id in ob_ids:
+                cached_ibs = self._outer_to_cached_inner[ob_id]
+                if ib_id in cached_ibs:
+                    cached_ibs.remove(ib_id)
+                    if len(cached_ibs) == 0:
+                        self._outer_to_cached_inner.pop(ob_id, None)
+        # The cached inner blocks are still mapped to the valid outer block.
+        # Just remove the mapping between removing outer_block_id
+        # and cached_inner_block_ids
+        for ib_id in cached_inner_block_ids:
+            self._cached_inner_to_outers[ib_id].remove(outer_block_id)
+
+        # Remove key: outer_block_id
         mapping = self._outer_to_inner.pop(outer_block_id, None)
-        if mapping:
-            for ib_id in mapping.inner_block_ids:
-                if ib_id in self._inner_to_outer:
-                    del self._inner_to_outer[ib_id]
-                if ib_id in self._matched:
-                    del self._matched[ib_id]
+        self._outer_to_cached_inner.pop(outer_block_id, None)
 
         return mapping
 
@@ -145,42 +177,66 @@ class BlockMappingManager:
             if not mapping.is_active
         ]
 
-    def match_cached_blocks(self, cached_ib: list[int],
+    def set_cached_blocks(self, inner_blocks: list[int],
                             outer_block_ids: list[int],
                             block_ratio: int) -> None:
         """
-        Record matched outer block id between cached inner blocks.
+        Set the cached blocks by mapping inner blocks to outer blocks.
+        inner_blocks: list[int]
+            List of inner block IDs that are cached
+            or newly allocated inner block IDs.
+        outer_block_ids: list[int]
+            List of outer block IDs.
         """
-        for outer_block_id in outer_block_ids:
-            start_ib_idx = outer_block_id * block_ratio
-            end_ib_idx = min(start_ib_idx + block_ratio, len(cached_ib))
-            cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
-            first_unique_ib = cur_ib_segment[0]
-            if first_unique_ib not in self._matched:
-                self._matched[first_unique_ib] = []
-            outer_block_info = OuterBlockInfo(outer_block_id,
-                                              len(cur_ib_segment))
-            self._matched[first_unique_ib].append(outer_block_info)
-            logger.debug(
-                "[PFX] Matched outer block id %d "
-                "for cached inner block segment %s", outer_block_id,
-                cur_ib_segment)
+        if len(inner_blocks) == 0:
+            return
 
-    def get_outer_block_for_copied_inner(
-            self, cached_ib_segment: list[int]) -> tuple[int, int]:
-        """
-        Return the matched outer block ID
-        for a given cached inner block segment.
-        """
-        matched_obs = self._matched.get(cached_ib_segment[0])
+        cur_outer_block_idx = 0
+        for start_ib_idx in range(0, len(inner_blocks), block_ratio):
+            end_ib_idx = min(start_ib_idx + block_ratio,
+                             len(inner_blocks))
+            cur_ib_segment = inner_blocks[start_ib_idx:end_ib_idx]
+            cur_outer_block_id = outer_block_ids[cur_outer_block_idx]
+            if self._outer_to_cached_inner.get(cur_outer_block_id) is None:
+                # PREFILL
+                self._outer_to_cached_inner[cur_outer_block_id] = cur_ib_segment
+            else:
+                # DECODE
+                self._outer_to_cached_inner[cur_outer_block_id].extend(cur_ib_segment)
+
+            for ib_id in cur_ib_segment:
+                if ib_id not in self._cached_inner_to_outers:
+                    self._cached_inner_to_outers[ib_id] = []
+                self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)
+            cur_outer_block_idx += 1
+    
+    def get_outer_blocks_for_cached_inner(
+        self, cached_ib_segment: list[int]) -> tuple[int, int]:
+        matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
+        logger.debug(f"[BLOCK MAPPING] OBS={matched_obs}: IBS={cached_ib_segment[0]}")
+        outer_block_ids = -1
+        num_cached_ibs = 0
         if matched_obs is not None:
             alive_obs = [
                 ob for ob in matched_obs
-                if ob.outer_block_id in self._outer_to_inner
+                if ob in self._outer_to_inner
             ]
-            if len(alive_obs) > 0:
-                outer_block_id, num_cached_ibs = alive_obs[
-                    0].outer_block_id, alive_obs[0].num_cached_ibs
-                if num_cached_ibs >= len(cached_ib_segment):
-                    return outer_block_id, num_cached_ibs
-        return -1, 0
+            # TODO naive sync
+            assert len(matched_obs) == len(alive_obs)
+            for outer_block_id in alive_obs:
+                cached_ibs = self._outer_to_cached_inner[outer_block_id]
+                min_size = min(len(cached_ibs), len(cached_ib_segment))
+                # TODO find longest one.
+                if cached_ibs[:min_size] == cached_ib_segment[:min_size]:
+                    outer_block_ids = outer_block_id
+                    num_cached_ibs = len(cached_ibs[:min_size])
+                    break
+        return outer_block_ids, num_cached_ibs
+
+    def get_cached_inner_blocks_for_outer(self, outer_block_id: int) -> list[int]:
+        """
+        Return the list of inner block IDs that are cached
+        for a given outer block ID.
+        """
+        return self._outer_to_cached_inner.get(outer_block_id, [])
+

@@ -149,17 +149,26 @@ class RBLNKVCacheManager(KVCacheManager):
         # Allocate outer blocks for prefix caching
         # following the inner blocks allocation
         inner_block_ids = [block.block_id for block in new_blocks[0]]
-
+        cached_blocks = [
+            block.block_id for block in new_computed_block_list[0]
+        ]
         self.prefix_cache_manager.allocate_blocks(
             request.request_id,
             num_computed_tokens,
             inner_block_ids,
         )
-
+        # Set the computed blocks as cached blocks
         self._set_prefix_cached_blocks(
             request.request_id,
             num_new_computed_tokens,
-            new_computed_block_list,
+            cached_blocks,
+        )
+
+        # Set the newly allocated blocks as cached blocks
+        self._set_prefix_cached_blocks(
+            request.request_id,
+            num_new_computed_tokens,
+            inner_block_ids,
         )
 
         # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
@@ -193,13 +202,14 @@ class RBLNKVCacheManager(KVCacheManager):
         self,
         request_id: str,
         num_new_computed_tokens: int,
-        new_computed_block_list: tuple[Sequence[KVCacheBlock], ...],
+        cached_blocks: list[int],
     ) -> None:
-        if len(new_computed_block_list[0]) == 0:
+        # FIXME 
+        # Currently, this function is called only prefill
+        # But if it is called decode phase,
+        # it is more efficient
+        if len(cached_blocks) == 0:
             return
-        cached_blocks = [
-            block.block_id for block in new_computed_block_list[0]
-        ]
         allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(
             request_id)
         self.prefix_cache_manager.set_cached_blocks(
