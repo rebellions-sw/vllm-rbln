@@ -139,15 +139,6 @@ class RBLNOptimumScheduler(Scheduler):
             attn_block_size=attn_block_size,
         )
 
-        # num_ib = num_gpu_blocks -1 to exclude the null block
-        # if self.cache_config.enable_prefix_caching:
-        #     self.prefix_cache_manager = RBLNPrefixKVCacheManager(
-        #         ob_size=self.vllm_config.additional_config["attn_block_size"],
-        #         ib_size=self.cache_config.block_size,
-        #         max_model_len=self.max_model_len,
-        #         num_inner_blocks=self.kv_cache_manager.block_pool.
-        #         num_gpu_blocks - 1,
-        #     )
         self.use_pp = False
 
     def schedule(self) -> RBLNSchedulerOutput:
@@ -338,14 +329,9 @@ class RBLNOptimumScheduler(Scheduler):
                     # allow the lower-priority requests to be scheduled.
                     req_index += 1
                     continue
-                requires_preempt = False
                 while True:
-                    # NOTE len of required new outer blocks
-                    # in decode phase is maximum 1
-                    # So preemption triggered at maximum once per request.
-                    if not requires_preempt:
-                        new_blocks = self.kv_cache_manager.allocate_slots(
-                            request, num_new_tokens)
+                    new_blocks = self.kv_cache_manager.allocate_slots(
+                        request, num_new_tokens)
                     if new_blocks is None:
                         # The request cannot be scheduled.
                         # Preempt the lowest-priority request.

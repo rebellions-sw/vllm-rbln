@@ -55,8 +55,6 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
                                              input_ids, cache_position)
-        # print("cache_position:", kwargs["cache_position"])
-        # print("block_tables:", kwargs["block_tables"])
         padded_batch_size = kwargs.pop("padded_batch_size",
                                        self.decoder_batch_size)
 

@@ -68,9 +68,6 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
-        # TODO reduce duplication
-        # when calculating the number of evictable blocks
-        # and selecting blocks for eviction
         evictable_blocks = [
             block_id for block_id in self._allocation_order
             if block_id in inactive_block_ids
@@ -107,9 +104,6 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
-        # TODO reduce duplication
-        # when calculating the number of evictable blocks
-        # and selecting blocks for eviction
         untouched_blocks = [
             block_id for block_id in inactive_block_ids
             if block_id not in self._access_order
