@@ -467,7 +467,8 @@ class RBLNScheduler(Scheduler):
         )
 
         # only generate grammar bitmask for scheduled requests
-        active_running_reqs = scheduled_running_reqs + scheduled_new_reqs
+        active_running_reqs = \
+            scheduled_running_reqs + scheduled_new_reqs + scheduled_resumed_reqs
         structured_output_request_ids, grammar_bitmask = (
             self.get_grammar_bitmask(active_running_reqs,
                                      scheduled_spec_decode_tokens))
