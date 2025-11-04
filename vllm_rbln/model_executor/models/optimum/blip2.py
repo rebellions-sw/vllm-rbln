@@ -65,8 +65,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
         request_nums = input_ids.shape[0]
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             self.kv_block_adapter, input_ids,
-                                             cache_position)
+                                             input_ids, cache_position)
 
         if is_prompt:
             if model_input.multi_modal_kwargs:
