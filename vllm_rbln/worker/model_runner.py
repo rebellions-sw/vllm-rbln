@@ -429,8 +429,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         # Multi-modal data support
         self.input_registry = input_registry
-#self.mm_registry = mm_registry
-#self.mm_registry.init_mm_limits_per_prompt(self.model_config)
+        self.mm_registry = mm_registry
 
         # Lazy initialization.
         self.model: nn.Module  # initialize after load_model.
