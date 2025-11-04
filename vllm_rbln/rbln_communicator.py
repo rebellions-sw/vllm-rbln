@@ -41,11 +41,13 @@ class RblnCommunicator(DeviceCommunicatorBase):
 
             output_tensor = output_tensor.reshape((self.world_size, ) + input_size)
             if dim == 2:
-                # output_tensor(dim=4).movedim(0, 2) == permute(1, 2, 0)
-                # output_tensor = output_tensor.movedim(0, dim)
+                # (0,1,2,3) -> movedim(0, 2) -> (1,2,0,3)
                 output_tensor = output_tensor.permute(1, 2, 0, 3)
+            elif dim == 1:
+                # (0,1,2) -> movedim(0, 1) -> (1,0,2)
+                output_tensor = output_tensor.permute(1, 0, 2)
             else:
-                assert False, "not yet implemented"
+                assert False, f"not yet implemented dim = {dim}, input_dim={input_.dim()}, output_dim={output_tensor.dim()}"
             output_tensor = output_tensor.reshape(input_size[:dim] +
                                                   (self.world_size *
                                                    input_size[dim], ) +

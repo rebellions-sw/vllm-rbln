@@ -401,8 +401,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                 self.model_runner.compile_context.mark_static_address(kv_cache)
 
     def _warm_up_model(self) -> None:
-        if self.model_config.enforce_eager or not envs.RBLN_COMPILE_MODEL \
-            or not envs.RBLN_ENABLE_WARM_UP:
+        if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL \
+            or not envs.VLLM_RBLN_ENABLE_WARM_UP:
             logger.warning("skipping _warm_up_model")
             return
 

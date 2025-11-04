@@ -429,8 +429,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         # Multi-modal data support
         self.input_registry = input_registry
-        self.mm_registry = mm_registry
-        self.mm_registry.init_mm_limits_per_prompt(self.model_config)
+#self.mm_registry = mm_registry
+#self.mm_registry.init_mm_limits_per_prompt(self.model_config)
 
         # Lazy initialization.
         self.model: nn.Module  # initialize after load_model.
@@ -470,7 +470,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         logger.info("[RBLN] DP device group id = %s, cpu group id = %s",
                     DP.device_group.group_name, DP.cpu_group.group_name)
 
-        if envs.RBLN_COMPILE_MODEL:
+        if envs.VLLM_RBLN_COMPILE_MODEL:
             process_group_dict = {}
             process_group_dict[TP.device_group.group_name] = TP.ranks
             process_group_dict[TP.cpu_group.group_name] = TP.ranks
@@ -709,21 +709,23 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                         model_input.seq_lens) if model_input.seq_lens else 0
                     self.performance_tracker.record_decode(
                         execution_time, num_seqs)
+            if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
+                # Gather logits for TP
+                logits_processor = self.compute_logits_model.logits_processor
+                logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(0)
+                logits_or_intermediate_states = logits_processor._gather_logits(logits_or_intermediate_states)
+                logits_or_intermediate_states = logits_or_intermediate_states.squeeze(0)
 
-        if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
-            # Gather logits for TP
-            logits_processor = self.compute_logits_model.logits_processor
-            logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(0)
-            logits = logits_processor._gather_logits(logits_or_intermediate_states)
-            logits = logits.squeeze(0)
-        else:
+        if not get_pp_group().is_last_rank:
             intermediate_states = logits_or_intermediate_states
             assert isinstance(intermediate_states, IntermediateTensors)
             return intermediate_states
 
         # Compute the logits. -> moved to model executable
-        if not (num_prefills > 0 and len_token_indices != 0):
-            logits = logits[selected_token_indices]
+        if num_prefills > 0 and len_token_indices != 0:
+            logits = logits_or_intermediate_states
+        else:
+            logits = logits_or_intermediate_states[selected_token_indices]
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
