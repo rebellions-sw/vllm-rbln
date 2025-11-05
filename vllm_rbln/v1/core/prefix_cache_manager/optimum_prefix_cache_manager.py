@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import math
 from abc import ABC, abstractmethod
 from collections import deque
@@ -94,8 +95,11 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
             self._free_blocks.append(block)
             del self._allocated_blocks[block.block_id]
         else:
-            logger.warning("Attempting to deallocate unallocated block: %d",
-                           block.block_id)
+            logger.warning(
+                "[PFX] [DEALLOCATE-WARNING] BLOCK=%d | "
+                "REASON=unallocated_block",
+                block.block_id
+            )
 
     def get_free_count(self) -> int:
         return len(self._free_blocks)
@@ -130,26 +134,43 @@ class CacheSearchManager:
         best_match = self._try_match_request(cached_blocks, mapping_manager)
         self._cached_blocks_per_request[request_id] = best_match
         final_num_cached_tokens = sum(best_match.cached_lengths)
-        if final_num_cached_tokens < num_new_computed_tokens:
-            logger.debug(
-                "Request %s could not reuse all computed tokens (%d). "
-                "The last %d tokens did not hit the prefix cache.",
-                request_id,
-                num_new_computed_tokens,
-                num_new_computed_tokens - final_num_cached_tokens)
 
-        if best_match.has_cache_hit:
-            cached_blocks = []
-            for i, ob in enumerate(best_match.cached_outer_blocks):
-                ibs = mapping_manager.get_cached_inner_blocks_for_outer(ob)
-                cached_inner_blocks = ibs[:best_match.cached_lengths[i]]
-                cached_blocks.extend(cached_inner_blocks)
-            # FIXME upgrade the logging
-            # to show the cache hit details
-            # the inner_blocks, the source outer blocks, the real hitted outer blocks
-            logger.debug("[PFX] [CACHE-HIT] REQUEST=%s hits OB=%s (IB=%s)",
-                         request_id, best_match.cached_outer_blocks,
-                         cached_blocks)
+        if logger.isEnabledFor(logging.DEBUG):
+            if final_num_cached_tokens < num_new_computed_tokens:
+                miss_rate = ((num_new_computed_tokens - final_num_cached_tokens) / num_new_computed_tokens * 100) if num_new_computed_tokens > 0 else 0
+                logger.debug(
+                    "[PFX] [CACHE-PARTIAL] REQUEST=%s | "
+                    "REUSED=%d/%d tokens (%.1f%%) | "
+                    "MISSED=%d tokens (%.1f%%) | "
+                    "REASON=partial_cache_miss",
+                    request_id,
+                    final_num_cached_tokens, num_new_computed_tokens, 
+                    (final_num_cached_tokens / num_new_computed_tokens * 100),
+                    num_new_computed_tokens - final_num_cached_tokens, miss_rate
+                )
+
+            if best_match.has_cache_hit:
+                cached_blocks = []
+                ob_to_ib_mapping = {}
+                total_cached_tokens = sum(best_match.cached_lengths)
+                
+                for i, ob in enumerate(best_match.cached_outer_blocks):
+                    ibs = mapping_manager.get_cached_inner_blocks_for_outer(ob)
+                    cached_inner_blocks = ibs[:best_match.cached_lengths[i]]
+                    cached_blocks.extend(cached_inner_blocks)
+                    ob_to_ib_mapping[ob] = len(cached_inner_blocks)
+
+                cache_hit_rate = (total_cached_tokens / num_new_computed_tokens * 100) if num_new_computed_tokens > 0 else 0
+                logger.debug(
+                    "[PFX] [CACHE-HIT] REQUEST=%s | "
+                    "OB_COUNT=%d %s | "
+                    "IB_TOTAL=%d %s | "
+                    "OB_TO_IB_MAP=%s",
+                    request_id,
+                    len(best_match.cached_outer_blocks), best_match.cached_outer_blocks,
+                    len(cached_blocks), cached_blocks,
+                    ob_to_ib_mapping
+                )
 
         return best_match
 
@@ -173,40 +194,13 @@ class CacheSearchManager:
             end_ib_idx = min(start_ib_idx + self._config.block_ratio,
                              len(cached_ib))
             cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
-            # TODO return outer blocks
-            #   1. exact match
-            #   2. not exact match, but includes the matched inner blocks
-            # ob_id, num_cached_ibs = \
-            #     mapping_manager.get_outer_block_for_copied_inner(
-            #     cur_ib_segment)
-            # ob_id = mapping_manager.get_outer_block_for_inner(
-            #     cur_ib_segment[0])
-            cached_ob, num_cached_ibs = mapping_manager.get_outer_blocks_for_cached_inner(
+            cached_ob, num_cached_ibs = mapping_manager.get_longest_matched_block(
                 cur_ib_segment)
             # FIXME simple
             if cached_ob == -1:
                 break
             cached_obs.append(cached_ob)
             cached_lengths.append(num_cached_ibs * self._config.ib_size)
-
-            # for 
-            # if ob_id == -1:
-            #     ob_id = mapping_manager.get_outer_block_for_inner(
-            #         cur_ib_segment[0])
-            #     if ob_id is None:
-            #         break
-            #     inner_blocks = mapping_manager.get_inner_blocks_for_outer(
-            #         ob_id)
-            #     num_cached_ibs = len(cur_ib_segment)
-            #     if inner_blocks[:num_cached_ibs] == cur_ib_segment:
-            #         cached_ob.append(ob_id)
-            #         print("Get using original ", "ob_id ", ob_id, num_cached_ibs)
-            #         cached_lengths.append(num_cached_ibs *
-            #                             self._config.ib_size)
-            # else:
-            #     cached_ob.append(ob_id)
-            #     print("Get using new ", "ob_id ", ob_id, num_cached_ibs)
-            #     cached_lengths.append(num_cached_ibs * self._config.ib_size)
 
         return CacheSearchResult(cached_outer_blocks=cached_obs,
                                  cached_lengths=cached_lengths)
@@ -217,28 +211,15 @@ class CacheSearchManager:
     def remove_cached_blocks_by_outer(self, outer_block_id: int) -> None:
         for request_id, cache_result in list(self._cached_blocks_per_request.items()):
             if outer_block_id in cache_result.cached_outer_blocks:
-                logger.debug(f"[CACHE SEARCH] Removing cached blocks for request {request_id} "
-                             f"due to eviction of outer block {outer_block_id}")
+                logger.debug(
+                    "[PFX] [CACHE-INVALIDATE] REQUEST=%s | "
+                    "EVICTED_OB=%d | "
+                    "AFFECTED_OBS=%s | "
+                    "REASON=eviction",
+                    request_id, outer_block_id, 
+                    cache_result.cached_outer_blocks
+                )
                 self._cached_blocks_per_request.pop(request_id, None)
-    # def _all_valid(self, cached_outer_blocks: list[int],
-    #                 cached_inner_blocks: list[int],
-    #                mapping_manager: BlockMappingManager) -> bool:
-    #     # for ob_id in cached_outer_blocks:
-    #     #     if mapping_manager.get_mapping(ob_id) is None:
-    #     #         return False
-    #     # for ib_id in cached_inner_blocks:
-    #     #     if mapping_manager.get_mapping(ib_id) is None:
-    #     #         return False
-    #     # outer_block_id = 
-    #     # for ib_id in cached_inner_blocks:
-    #     #     matched_obs = mapping_manager.get_outer_blocks_for_cached_inner(ib_id)
-    #     #     if not matched_obs:
-    #     #         return False
-    #     #     if 
-    #     for start_ib_idx in range(0, len(cached_inner_blocks), self._config.block_ratio):
-    #         end_ib_idx = min(start_ib_idx + self._config.block_ratio,
-    #                          len(cached_inner_blocks))
-    #         cur_ib_segment = cached_inner_blocks[start_ib_idx:end_ib_idx]
 
 
 class MemoryPoolManager:
@@ -318,8 +299,14 @@ class RBLNPrefixKVCacheManager:
             self._eviction_policy.register_block(block.block_id)
             block_ids.append(block.block_id)
 
-        logger.debug("[PFX] [ALLOC] REQUEST=%s OB=%s (IB=%s)", request_id,
-                     block_ids, inner_blocks)
+        logger.debug(
+            "[PFX] [ALLOC] REQUEST=%s | "
+            "OB_COUNT=%d %s | "
+            "IB_COUNT=%d %s | ",
+            request_id,
+            len(block_ids), block_ids,
+            len(inner_blocks), inner_blocks,
+        )
 
     def _compute_num_blocks_to_allocate(self,
                                         num_inner_blocks: int,
@@ -367,11 +354,22 @@ class RBLNPrefixKVCacheManager:
             if block:
                 self._allocator.deallocate(block)
                 self._eviction_policy.unregister_block(block_id)
-                logger.debug("[PFX] [EVICTION] OB=%d (IB=%s)", block_id,
-                             mapping.inner_block_ids)
+                logger.debug(
+                    "[PFX] [EVICTION] OB=%d | "
+                    "IB_COUNT=%d %s | "
+                    "REQUEST=%s | "
+                    "FREE_BLOCKS_AFTER=%d",
+                    block_id,
+                    len(mapping.inner_block_ids), mapping.inner_block_ids,
+                    mapping.request_id if mapping.request_id else "None",
+                    self._allocator.get_free_count()
+                )
             else:
-                logger.error("Block %d not found in allocator during eviction",
-                             block_id)
+                logger.error(
+                    "[PFX] [EVICTION-ERROR] OB=%d | "
+                    "REASON=block_not_found_in_allocator",
+                    block_id
+                )
 
     def _append_to_existing_block(self, outer_block_id: int,
                                   inner_blocks: list[int]) -> None:
@@ -439,7 +437,11 @@ class RBLNPrefixKVCacheManager:
         Get the list of outer block IDs for a given request.
         """
         if not self._mapping_manager.is_request_registered(request_id):
-            logger.warning("Request %s not found in mappings", request_id)
+            logger.warning(
+                "[PFX] [GET-BLOCKS-WARNING] REQUEST=%s | "
+                "REASON=request_not_registered",
+                request_id, 
+            )
             return []
 
         return self._mapping_manager.get_request_blocks(request_id)

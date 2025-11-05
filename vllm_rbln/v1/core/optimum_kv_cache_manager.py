@@ -207,7 +207,7 @@ class RBLNKVCacheManager(KVCacheManager):
         # FIXME 
         # Currently, this function is called only prefill
         # But if it is called decode phase,
-        # it is more efficient
+        # it will be more efficient (next step)
         if len(cached_blocks) == 0:
             return
         allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(

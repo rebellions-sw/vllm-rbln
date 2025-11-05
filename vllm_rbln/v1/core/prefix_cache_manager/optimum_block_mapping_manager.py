@@ -6,6 +6,12 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -77,8 +83,6 @@ class BlockMappingManager:
         """
         Add a new mapping from an inner block ID to an outer block ID.
         """
-        # if inner_block_id not in self._inner_to_outer:
-        #     self._inner_to_outer[inner_block_id] = []
         self._inner_to_outer[inner_block_id] = outer_block_id
 
     def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
@@ -107,11 +111,9 @@ class BlockMappingManager:
         """
         cached_inner_block_ids = self.get_cached_inner_blocks_for_outer(outer_block_id)
         inner_block_ids = self.get_inner_blocks_for_outer(outer_block_id)
-        # Remove inner_block_id mapped to the outer_block_id
-        logger.debug(f"[BLOCK MAPPING] Removing mapping for outer_block_id: {outer_block_id}, "
-                     f"inner_block_ids: {inner_block_ids}")
-        logger.debug(f"[BLOCK MAPPING] Removing mapping for outer_block_id: {outer_block_id}, "
-                     f"cached inner_block_ids: {cached_inner_block_ids}")
+        # 1. Remove inner_block_id mapped to the removed outer_block_id
+        logger.debug(f"[MAPPING] [REMOVE] OB: {outer_block_id} => "
+                     f"IBS: {inner_block_ids}")
         for ib_id in inner_block_ids:
             self._cached_inner_to_outers.pop(ib_id, None)
             self._inner_to_outer.pop(ib_id, None)
@@ -124,13 +126,14 @@ class BlockMappingManager:
                     cached_ibs.remove(ib_id)
                     if len(cached_ibs) == 0:
                         self._outer_to_cached_inner.pop(ob_id, None)
-        # The cached inner blocks are still mapped to the valid outer block.
-        # Just remove the mapping between removing outer_block_id
+        # 2. Remove the mapping between removed outer_block_id
         # and cached_inner_block_ids
         for ib_id in cached_inner_block_ids:
             self._cached_inner_to_outers[ib_id].remove(outer_block_id)
+            logger.debug(f"[MAPPING] [REMOVE-HISTORY] IB: {ib_id} => "
+                        f"OB: {outer_block_id}")
 
-        # Remove key: outer_block_id
+        # 3. Remove the removed outer_block_id to inner mapping
         mapping = self._outer_to_inner.pop(outer_block_id, None)
         self._outer_to_cached_inner.pop(outer_block_id, None)
 
@@ -177,6 +180,13 @@ class BlockMappingManager:
             if not mapping.is_active
         ]
 
+    def get_cached_inner_blocks_for_outer(self, outer_block_id: int) -> list[int]:
+        """
+        Return the list of inner block IDs that are cached
+        for a given outer block ID.
+        """
+        return self._outer_to_cached_inner.get(outer_block_id, [])
+
     def set_cached_blocks(self, inner_blocks: list[int],
                             outer_block_ids: list[int],
                             block_ratio: int) -> None:
@@ -210,33 +220,46 @@ class BlockMappingManager:
                 self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)
             cur_outer_block_idx += 1
     
-    def get_outer_blocks_for_cached_inner(
+    def get_longest_matched_block(
         self, cached_ib_segment: list[int]) -> tuple[int, int]:
+        """
+        Given a segment of cached inner block IDs,
+        return the outer block ID that has the longest matching prefix
+        with the cached inner block segment.
+        If no match is found, return tuple[-1, 0].
+        """
+        # Find the outer block IDs that match the first block of cached inner block segment
         matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
-        logger.debug(f"[BLOCK MAPPING] OBS={matched_obs}: IBS={cached_ib_segment[0]}")
-        outer_block_ids = -1
-        num_cached_ibs = 0
+        logger.debug(f"[BLOCK MAPPING] OBS={matched_obs} can be used for IBS={cached_ib_segment}")
+        final_outer_block_id = -1
+        final_num_ibs = 0
         if matched_obs is not None:
             alive_obs = [
                 ob for ob in matched_obs
                 if ob in self._outer_to_inner
             ]
-            # TODO naive sync
+            # TODO to be removed
             assert len(matched_obs) == len(alive_obs)
             for outer_block_id in alive_obs:
                 cached_ibs = self._outer_to_cached_inner[outer_block_id]
-                min_size = min(len(cached_ibs), len(cached_ib_segment))
-                # TODO find longest one.
-                if cached_ibs[:min_size] == cached_ib_segment[:min_size]:
-                    outer_block_ids = outer_block_id
-                    num_cached_ibs = len(cached_ibs[:min_size])
-                    break
-        return outer_block_ids, num_cached_ibs
+                prefix_ibs = self._get_common_prefix(cached_ibs, cached_ib_segment)
+                cache_hit_size = len(prefix_ibs)
+                if cache_hit_size > final_num_ibs:
+                    final_outer_block_id = outer_block_id
+                    final_num_ibs = cache_hit_size
+        return final_outer_block_id, final_num_ibs
 
-    def get_cached_inner_blocks_for_outer(self, outer_block_id: int) -> list[int]:
-        """
-        Return the list of inner block IDs that are cached
-        for a given outer block ID.
-        """
-        return self._outer_to_cached_inner.get(outer_block_id, [])
 
+    def _get_common_prefix(
+        self, arr1: list[int], arr2: list[int]) -> list[int]:
+        """
+        Return the common prefix between two lists of integers.
+        """
+        common_prefix = []
+        min_length = min(len(arr1), len(arr2))
+        for i in range(min_length):
+            if arr1[i] == arr2[i]:
+                common_prefix.append(arr1[i])
+            else:
+                break
+        return common_prefix
