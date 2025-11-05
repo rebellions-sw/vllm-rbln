@@ -12,12 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Sequence
 from typing import Optional
 
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
-from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.request import Request
 
@@ -204,11 +202,10 @@ class RBLNKVCacheManager(KVCacheManager):
         num_new_computed_tokens: int,
         cached_blocks: list[int],
     ) -> None:
-        # FIXME 
-        # Currently, this function is called only prefill
-        # But if it is called decode phase,
-        # it will be more efficient (next step)
-        if len(cached_blocks) == 0:
+        # NOTE Currently, this function is called only prefill
+        # and prefix caching is hit in the original
+        # kv cache manager.
+        if num_new_computed_tokens == 0:
             return
         allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(
             request_id)
