@@ -98,6 +98,7 @@ class RBLNKVCacheManager(KVCacheManager):
         # In decode,
         # `num_computed_tokens` = the length of prompt + generated text
         # `num_new_tokens` = 1.
+        is_prefill = (request.num_computed_tokens == 0)
         num_computed_tokens = request.num_computed_tokens
         num_tokens_need_slot = min(request.num_tokens, self.max_model_len)
         num_blocks_to_allocate = self.coordinator.get_num_blocks_to_allocate(
@@ -119,13 +120,16 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new outer blocks for prefix caching
             return None
 
+        # NOTE If touch the blocks, the ref_cnt of the blocks
+        # will be increased. It prevents deallocation
+        # even after the request is freed.
         # Touch the computed blocks to make sure they won't be evicted.
-        if self.enable_caching:
-            self.block_pool.touch(new_computed_block_list)
-        else:
-            assert not any(new_computed_block_list), (
-                "Computed blocks should be empty when "
-                "prefix caching is disabled")
+        # if self.enable_caching:
+        #     self.block_pool.touch(new_computed_block_list)
+        # else:
+        #     assert not any(new_computed_block_list), (
+        #         "Computed blocks should be empty when "
+        #         "prefix caching is disabled")
 
         # Generate req_to_blocks, num_cached_block
         # in the coordinator
@@ -160,6 +164,7 @@ class RBLNKVCacheManager(KVCacheManager):
             request.request_id,
             num_new_computed_tokens,
             cached_blocks,
+            is_prefill,
         )
 
         # Set the newly allocated blocks as cached blocks
@@ -167,6 +172,7 @@ class RBLNKVCacheManager(KVCacheManager):
             request.request_id,
             num_new_computed_tokens,
             inner_block_ids,
+            is_prefill,
         )
 
         # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
@@ -201,11 +207,12 @@ class RBLNKVCacheManager(KVCacheManager):
         request_id: str,
         num_new_computed_tokens: int,
         cached_blocks: list[int],
+        is_prefill: bool,
     ) -> None:
         # NOTE Currently, this function is called only prefill
         # and prefix caching is hit in the original
         # kv cache manager.
-        if num_new_computed_tokens == 0:
+        if not is_prefill:
             return
         allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(
             request_id)

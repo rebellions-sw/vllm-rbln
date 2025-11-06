@@ -152,9 +152,12 @@ class CacheSearchManager:
                 cached_blocks = []
                 ob_to_ib_mapping = {}
 
-                for i, ob in enumerate(best_match.cached_outer_blocks):
+                for i, (ob, cached_length) in \
+                    enumerate(zip(best_match.cached_outer_blocks, 
+                        best_match.cached_lengths)):
                     ibs = mapping_manager.get_cached_inner_blocks_for_outer(ob)
-                    cached_inner_blocks = ibs[:best_match.cached_lengths[i]]
+                    cached_num_ib = cached_length // self._config.ib_size
+                    cached_inner_blocks = ibs[:cached_num_ib]
                     cached_blocks.extend(cached_inner_blocks)
                     ob_to_ib_mapping[ob] = len(cached_inner_blocks)
 
@@ -225,14 +228,15 @@ class MemoryPoolManager:
     """
 
     def __init__(self, max_model_len: int, ob_size: int):
+        self.dtype = torch.int16
         self._pooled_tensor = torch.zeros(max_model_len // ob_size,
-                                          dtype=torch.int32)
+                                          dtype=self.dtype)
 
     def get_tensor_for_blocks(self, block_ids: list[int]) -> torch.Tensor:
         self._pooled_tensor.fill_(-1)
 
         if block_ids:
-            value = torch.tensor(block_ids, dtype=torch.int32)
+            value = torch.tensor(block_ids, dtype=self.dtype)
             self._pooled_tensor[:len(value)].copy_(value)
 
         return self._pooled_tensor.clone()
@@ -452,7 +456,6 @@ class RBLNPrefixKVCacheManager:
         evict_count = required_num_ob - free_count
         blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
             self._mapping_manager, evict_count)
-
         can_evict = len(blocks_to_evict) >= evict_count
 
         # 3. Evict blocks if possible
