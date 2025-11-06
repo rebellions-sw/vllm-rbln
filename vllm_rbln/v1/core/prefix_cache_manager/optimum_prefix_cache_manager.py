@@ -116,20 +116,18 @@ class CacheSearchManager:
 
     def __init__(self, config: BlockConfiguration):
         self._config = config
-        self._cached_blocks_per_request: dict[str, CacheSearchResult] = {}
 
     def find_cached_blocks(
             self, request_id: str, cached_blocks: list[int],
-            num_new_computed_tokens: int,
+            skip_blocks: set[int], num_new_computed_tokens: int,
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Find cached outer blocks that match the given inner blocks.
         """
-        if request_id in self._cached_blocks_per_request:
-            return self._cached_blocks_per_request[request_id]
 
-        best_match = self._try_match_request(cached_blocks, mapping_manager)
-        self._cached_blocks_per_request[request_id] = best_match
+        best_match = self._try_match_request(cached_blocks, skip_blocks,
+                                             mapping_manager)
+        # self._cached_blocks_per_request[request_id] = best_match
         final_num_cached_tokens = sum(best_match.cached_lengths)
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -164,7 +162,7 @@ class CacheSearchManager:
                 # TODO specify the hit ratio?
                 logger.debug(
                     "[PFX] [CACHE-HIT] REQUEST=%s | "
-                    "OB_COUNT=%d %s | "
+                    "OB=%d %s | "
                     "IB_TOTAL=%d %s | "
                     "OB_TO_IB_MAP=%s", request_id,
                     len(best_match.cached_outer_blocks),
@@ -181,7 +179,7 @@ class CacheSearchManager:
         return cached_len_tokens // self._config.ib_size
 
     def _try_match_request(
-            self, cached_ib: list[int],
+            self, cached_ib: list[int], skip_blocks: set[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Try to find the best matching outer blocks for the given inner blocks.
@@ -195,7 +193,7 @@ class CacheSearchManager:
             cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
             cached_ob, num_cached_ibs = \
                 mapping_manager.get_longest_matched_block(
-                cur_ib_segment)
+                cur_ib_segment, skip_blocks)
             # FIXME simple stop condition
             # Upgrade the readability later
             if cached_ob == NO_MATCH_FOUND:
@@ -205,21 +203,6 @@ class CacheSearchManager:
 
         return CacheSearchResult(cached_outer_blocks=cached_obs,
                                  cached_lengths=cached_lengths)
-
-    def remove_cached_blocks(self, request_id: str) -> None:
-        self._cached_blocks_per_request.pop(request_id, None)
-
-    def remove_cached_blocks_by_outer(self, outer_block_id: int) -> None:
-        for request_id, cache_result in list(
-                self._cached_blocks_per_request.items()):
-            if outer_block_id in cache_result.cached_outer_blocks:
-                logger.debug(
-                    "[PFX] [CACHE-INVALIDATE] REQUEST=%s | "
-                    "EVICTED_OB=%d | "
-                    "AFFECTED_OBS=%s | "
-                    "REASON=eviction", request_id, outer_block_id,
-                    cache_result.cached_outer_blocks)
-                self._cached_blocks_per_request.pop(request_id, None)
 
 
 class MemoryPoolManager:
@@ -350,7 +333,6 @@ class RBLNPrefixKVCacheManager:
         """
         Evict a block and free its resources.
         """
-        self._cache_search_manager.remove_cached_blocks_by_outer(block_id)
         mapping = self._mapping_manager.remove_mapping(block_id)
         if mapping:
             block = self._allocator.get_allocated_block(block_id)
@@ -359,7 +341,7 @@ class RBLNPrefixKVCacheManager:
                 self._eviction_policy.unregister_block(block_id)
                 logger.debug(
                     "[PFX] [EVICTION] OB=%d | "
-                    "IB_COUNT=%d %s | "
+                    "IB=%d %s | "
                     "FREE_BLOCKS_AFTER=%d", block_id,
                     len(mapping.inner_block_ids), mapping.inner_block_ids,
                     self._allocator.get_free_count())
@@ -395,7 +377,6 @@ class RBLNPrefixKVCacheManager:
         If it is not preemption, keep the mappings for potential future reuse.
         """
         outer_blocks = self._mapping_manager.remove_request(request_id)
-        self._cache_search_manager.remove_cached_blocks(request_id)
 
         for block_id in outer_blocks:
             mapping = self._mapping_manager.get_mapping(block_id)
@@ -411,8 +392,9 @@ class RBLNPrefixKVCacheManager:
         """
         Get the matched outer blocks using inner blocks.
         """
+        skip_blocks = set(self._mapping_manager.get_request_blocks(request_id))
         result = self._cache_search_manager.find_cached_blocks(
-            request_id, cached_blocks, num_new_computed_tokens,
+            request_id, cached_blocks, skip_blocks, num_new_computed_tokens,
             self._mapping_manager)
 
         if result.has_cache_hit and isinstance(self._eviction_policy,

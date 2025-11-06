@@ -231,17 +231,6 @@ class RBLNOptimumScheduler(Scheduler):
                     self.kv_cache_manager.get_computed_blocks(
                         request)
 
-                # Get the cached blocks for prefix caching.
-                # using new_computed_blocks, num_new_local_computed_tokens
-                if self.cache_config.enable_prefix_caching:
-                    (
-                        cached_block_table,
-                        cached_length,
-                    ) = self.kv_cache_manager.get_prefix_cached_blocks(
-                        request,
-                        new_computed_blocks,
-                        num_new_local_computed_tokens,
-                    )
 
                 # Number of tokens to be scheduled.
                 # We use `request.num_tokens` instead of
@@ -263,7 +252,18 @@ class RBLNOptimumScheduler(Scheduler):
                     # The request cannot be scheduled.
                     break
 
+                # Get the cached blocks for prefix caching.
+                # using new_computed_blocks, num_new_local_computed_tokens
                 if self.cache_config.enable_prefix_caching:
+                    (
+                        cached_block_table,
+                        cached_length,
+                    ) = self.kv_cache_manager.get_prefix_cached_blocks(
+                        request,
+                        new_computed_blocks,
+                        num_new_local_computed_tokens,
+                    )
+
                     # Update the block table to the return output.
                     self.update_block_table_dict(request, block_table_dict)
 

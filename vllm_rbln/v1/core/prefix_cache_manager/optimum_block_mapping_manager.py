@@ -226,8 +226,8 @@ class BlockMappingManager:
                     self._cached_inner_to_outers[ib_id] = []
                 self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)
 
-    def get_longest_matched_block(
-            self, cached_ib_segment: list[int]) -> tuple[int, int]:
+    def get_longest_matched_block(self, cached_ib_segment: list[int],
+                                  skip_blocks: set[int]) -> tuple[int, int]:
         """
         Given a segment of cached inner block IDs,
         return the outer block ID that has the longest matching prefix
@@ -252,6 +252,8 @@ class BlockMappingManager:
             ]
             # TODO It is not required. But it is a safety check.
             assert len(matched_obs) == len(alive_obs)
+
+            alive_obs = [ob for ob in alive_obs if ob not in skip_blocks]
             for outer_block_id in alive_obs:
                 cached_ibs = self._outer_to_cached_inner[outer_block_id]
                 prefix_ibs = self._get_common_prefix(cached_ibs,
