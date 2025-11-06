@@ -120,16 +120,20 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new outer blocks for prefix caching
             return None
 
-        # NOTE If touch the blocks, the ref_cnt of the blocks
-        # will be increased. It prevents deallocation
-        # even after the request is freed.
-        # Touch the computed blocks to make sure they won't be evicted.
-        # if self.enable_caching:
-        #     self.block_pool.touch(new_computed_block_list)
-        # else:
-        #     assert not any(new_computed_block_list), (
-        #         "Computed blocks should be empty when "
-        #         "prefix caching is disabled")
+        # TODO (eunji): The touch function 
+        # increases the ref_cnt. We don't need ref_cnt
+        # because we don't reuse the provided computed blocks
+        # and just copy the prefix matched blocks.
+        # But for consistency with original vllm and
+        # cache hit rate, we keep the touch function here.
+        # It triggers all blocks are not freed
+        # even though the request is freed.
+        if self.enable_caching:
+            self.block_pool.touch(new_computed_block_list)
+        else:
+            assert not any(new_computed_block_list), (
+                "Computed blocks should be empty when "
+                "prefix caching is disabled")
 
         # Generate req_to_blocks, num_cached_block
         # in the coordinator
