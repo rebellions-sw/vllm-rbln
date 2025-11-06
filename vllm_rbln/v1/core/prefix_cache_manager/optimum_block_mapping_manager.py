@@ -236,7 +236,6 @@ class BlockMappingManager:
         """
         # Find the outer block IDs
         # that match the first block of cached inner block segment
-        print("$$ _cached_inner_to_outers", self._cached_inner_to_outers)
         matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
         logger.debug(
             "[PFX] [MAPPING-SEARCH] QUERY_IB=%d | "
