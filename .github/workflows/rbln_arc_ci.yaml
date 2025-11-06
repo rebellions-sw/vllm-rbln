@@ -124,6 +124,7 @@ jobs:
         env:
           UV_EXTRA_INDEX_URL: "http://${{ secrets.E2E_REPOSITORY_ID }}:${{ secrets.E2E_REPOSITORY_PWD }}@${{ secrets.E2E_REPOSITORY_URL }}/repository/pypi/simple"
           VLLM_TARGET_DEVICE: cpu
+          UV_NO_CACHE: "1"
         run: |
           uv venv
           source .venv/bin/activate
