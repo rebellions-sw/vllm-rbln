@@ -117,13 +117,19 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
           submodules: recursive
 
-      - name: Install vLLM-RBLN from PR source
-        run: |
-          source /workspace/.venv/bin/activate
-          pip install -e .
-          pip list | grep vllm
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
 
-      - name: Run Python Tests
+      - name: Install vLLM-RBLN with all dependencies from PR source
+        env:
+          UV_EXTRA_INDEX_URL: "http://${{ secrets.E2E_REPOSITORY_ID }}:${{ secrets.E2E_REPOSITORY_PWD }}@${{ secrets.E2E_REPOSITORY_URL }}/repository/pypi/simple"
+          VLLM_TARGET_DEVICE: cpu
         run: |
-          source /workspace/.venv/bin/activate
+          uv venv
+          source .venv/bin/activate
+          uv pip install --index-strategy unsafe-best-match --no-binary vllm -e ".[test]"
+          uv pip list | grep -E "(vllm|rebel|torch|triton)"
+
+      - name: Run vLLM-RBLN Tests
+        run: |
           pytest tests/v1/core -vv --durations 0
