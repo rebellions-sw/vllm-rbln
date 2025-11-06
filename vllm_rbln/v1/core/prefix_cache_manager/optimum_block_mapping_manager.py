@@ -82,7 +82,19 @@ class BlockMappingManager:
                                outer_block_id: int) -> None:
         """
         Add a new mapping from an inner block ID to an outer block ID.
+        And remove previous caching history of newly allocated
+        inner blocks if exist (Lazy update).
         """
+        if inner_block_id in self._cached_inner_to_outers:
+            self._cached_inner_to_outers.pop(inner_block_id)
+            ob_ids = list(self._outer_to_cached_inner.keys())
+            for ob_id in ob_ids:
+                cached_ibs = self._outer_to_cached_inner[ob_id]
+                if inner_block_id in cached_ibs:
+                    cached_ibs.remove(inner_block_id)
+                    if len(cached_ibs) == 0:
+                        self._outer_to_cached_inner.pop(ob_id, None)
+
         self._inner_to_outer[inner_block_id] = outer_block_id
 
     def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
@@ -111,32 +123,22 @@ class BlockMappingManager:
         cached_inner_block_ids = self.get_cached_inner_blocks_for_outer(
             outer_block_id)
         inner_block_ids = self.get_inner_blocks_for_outer(outer_block_id)
-        # 1. Remove inner_block_id mapped to the removed outer_block_id
         logger.debug(
             "[PFX] [MAPPING-REMOVE] OB=%d | "
             "IB_COUNT=%d %s | "
             "CACHED_IB_COUNT=%d %s",
             outer_block_id, len(inner_block_ids), inner_block_ids,
             len(cached_inner_block_ids), cached_inner_block_ids)
+        # 1. Remove inner_block_id mapped to the removed outer_block_id
         for ib_id in inner_block_ids:
-            self._cached_inner_to_outers.pop(ib_id, None)
             self._inner_to_outer.pop(ib_id, None)
-            # Remove the mapping between outer_block_id and
-            # removed inner_block_ids
-            # TODO naive sync
-            ob_ids = list(self._outer_to_cached_inner.keys())
-            for ob_id in ob_ids:
-                cached_ibs = self._outer_to_cached_inner[ob_id]
-                if ib_id in cached_ibs:
-                    cached_ibs.remove(ib_id)
-                    if len(cached_ibs) == 0:
-                        self._outer_to_cached_inner.pop(ob_id, None)
-        # 2. Remove the mapping between removed outer_block_id
-        # and cached_inner_block_ids
+        # 2. Remove outer_block_id from cached_inner_to_outers mapping
+        # The contents of ib_id cannot be accessed through
+        # outer_block_id anymore.
         for ib_id in cached_inner_block_ids:
             self._cached_inner_to_outers[ib_id].remove(outer_block_id)
 
-        # 3. Remove the removed outer_block_id to inner mapping
+        # 3. Reset the outer_block_id to inner mapping
         mapping = self._outer_to_inner.pop(outer_block_id, None)
         self._outer_to_cached_inner.pop(outer_block_id, None)
 
@@ -234,6 +236,7 @@ class BlockMappingManager:
         """
         # Find the outer block IDs
         # that match the first block of cached inner block segment
+        print("$$ _cached_inner_to_outers", self._cached_inner_to_outers)
         matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
         logger.debug(
             "[PFX] [MAPPING-SEARCH] QUERY_IB=%d | "

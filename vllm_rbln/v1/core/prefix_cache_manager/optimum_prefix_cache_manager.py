@@ -153,7 +153,7 @@ class CacheSearchManager:
                 ob_to_ib_mapping = {}
 
                 for i, (ob, cached_length) in \
-                    enumerate(zip(best_match.cached_outer_blocks, 
+                    enumerate(zip(best_match.cached_outer_blocks,
                         best_match.cached_lengths)):
                     ibs = mapping_manager.get_cached_inner_blocks_for_outer(ob)
                     cached_num_ib = cached_length // self._config.ib_size
@@ -193,6 +193,7 @@ class CacheSearchManager:
             end_ib_idx = min(start_ib_idx + self._config.block_ratio,
                              len(cached_ib))
             cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
+            print("## cur_ib_segment", cur_ib_segment)
             cached_ob, num_cached_ibs = \
                 mapping_manager.get_longest_matched_block(
                 cur_ib_segment)
@@ -411,6 +412,7 @@ class RBLNPrefixKVCacheManager:
         """
         Get the matched outer blocks using inner blocks.
         """
+        print("@@ request_id", request_id, "cached_blocks", cached_blocks)
         result = self._cache_search_manager.find_cached_blocks(
             request_id, cached_blocks, num_new_computed_tokens,
             self._mapping_manager)

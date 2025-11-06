@@ -120,7 +120,7 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new outer blocks for prefix caching
             return None
 
-        # TODO (eunji): The touch function 
+        # TODO (eunji): The touch function
         # increases the ref_cnt. We don't need ref_cnt
         # because we don't reuse the provided computed blocks
         # and just copy the prefix matched blocks.
