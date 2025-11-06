@@ -77,7 +77,14 @@ class RBLNKVCacheManager(KVCacheManager):
         num_new_tokens: int,
         num_new_computed_tokens: int = 0,
         new_computed_blocks: Optional[KVCacheBlocks] = None,
+        num_lookahead_tokens: int = 0,
+        delay_cache_blocks: bool = False,
+        num_encoder_tokens: int = 0,
     ) -> Optional[KVCacheBlocks]:
+        assert num_lookahead_tokens == 0
+        assert not delay_cache_blocks
+        assert num_encoder_tokens == 0
+
         if num_new_tokens == 0:
             raise ValueError("num_new_tokens must be greater than 0")
 
