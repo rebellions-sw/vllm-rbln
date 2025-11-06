@@ -303,7 +303,7 @@ class RBLNPrefixKVCacheManager:
         logger.debug(
             "[PFX] [ALLOC] REQUEST=%s | "
             "OB_COUNT=%d %s | "
-            "IB_COUNT=%d %s | ",
+            "IB_COUNT=%d %s",
             request_id,
             len(block_ids),
             block_ids,
