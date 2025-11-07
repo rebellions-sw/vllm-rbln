@@ -231,7 +231,6 @@ class RBLNOptimumScheduler(Scheduler):
                     self.kv_cache_manager.get_computed_blocks(
                         request)
 
-
                 # Number of tokens to be scheduled.
                 # We use `request.num_tokens` instead of
                 # `request.num_prompt_tokens` to consider the resumed

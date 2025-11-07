@@ -307,6 +307,8 @@ def test_cache_hit_child_block(limited_6blocks_scheduler):
     assert output.cached_block_table == [2, 3]
 
 
+# def test_allocated_blocks_excluded_from_cache_hit(scheduler):
+
 # def test_free_blocks(scheduler):
 #     pass
 
