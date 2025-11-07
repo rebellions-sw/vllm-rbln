@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from vllm.v1.worker.gpu_input_batch import InputBatch
 
 import vllm_rbln.rbln_envs as envs
+import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
@@ -487,23 +488,10 @@ class RBLNFlashAttentionMetadataBuilder(
             attn_masks = chunked_attention_mask
         else:
             # batch padding
-            batch_size = num_reqs
-            batch_padding_size = self.scheduler_config.max_num_seqs - batch_size
-            seq_lens_tensor = torch.cat([
-                seq_lens_tensor,
-                torch.full(
-                    (batch_padding_size, seq_lens_tensor.shape[-1]),
-                    0,
-                ),
-            ])
-            block_tables_tensor = torch.cat([
-                block_tables_tensor,
-                torch.full(
-                    (batch_padding_size, block_tables_tensor.shape[-1]),
-                    0,
-                    device=self.device,
-                ),
-            ])
+            seq_lens_tensor = rbln_utils.pad(
+                seq_lens_tensor, 0, self.scheduler_config.max_num_seqs)
+            block_tables_tensor = rbln_utils.pad(
+                block_tables_tensor, 0, self.scheduler_config.max_num_seqs)
             decode_attention_mask = torch.zeros(
                 self.scheduler_config.max_num_seqs,
                 1,
