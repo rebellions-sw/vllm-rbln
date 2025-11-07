@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-from typing import Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -30,7 +30,8 @@ from vllm.multimodal.utils import group_mm_kwargs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
-from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
+from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader,
+                        is_pin_memory_available)
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
@@ -54,14 +55,9 @@ from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
-from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, DeviceMemoryProfiler,
-                        GiB_bytes, LazyLoader, check_use_alibi, get_dtype_size,
-                        is_pin_memory_available, round_up, supports_dynamo)
+
 if TYPE_CHECKING:
     import xgrammar as xgr
-
-    from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
     from vllm.v1.core.sched.output import SchedulerOutput
 else:
     xgr = LazyLoader("xgr", globals(), "xgrammar")
@@ -281,7 +277,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         with record_function_or_nullcontext("Postprocess"):
             if self.is_pooling_model:
                 return self._pool(hidden_states, num_scheduled_tokens,
-                                num_scheduled_tokens_np)
+                                  num_scheduled_tokens_np)
             # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
             hidden_states = hidden_states.squeeze(1)
             logits = self.model.compute_logits(hidden_states, None)

@@ -394,10 +394,9 @@ class RBLNOptimumScheduler(Scheduler):
             req_to_new_blocks,
         )
         structured_output_request_ids, grammar_bitmask = (
-            self.get_grammar_bitmask(scheduled_new_reqs + scheduled_running_reqs,
-                                     scheduled_spec_decode_tokens))
-        # print("structured_output_request_ids", structured_output_request_ids)
-        # print("grammar_bitmask", grammar_bitmask)
+            self.get_grammar_bitmask(
+                scheduled_new_reqs + scheduled_running_reqs,
+                scheduled_spec_decode_tokens))
 
         scheduler_output = RBLNSchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
