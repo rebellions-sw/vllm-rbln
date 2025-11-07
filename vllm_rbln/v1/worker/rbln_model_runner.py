@@ -2400,6 +2400,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             # the attention backends
             if attn_module.attn_type == AttentionType.DECODER:
                 if attn_module.sliding_window is not None:
+                    assert attn_module.sliding_window == block_size, \
+                        "Only sliding window equal to block size is supported."
                     kv_cache_spec[layer_name] = SlidingWindowSpec(
                         block_size=block_size,
                         num_kv_heads=attn_module.num_kv_heads,
