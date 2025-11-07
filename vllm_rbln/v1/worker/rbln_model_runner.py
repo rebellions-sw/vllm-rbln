@@ -202,8 +202,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         self.uses_mrope = model_config.uses_mrope
         assert not self.uses_mrope, "RBLN does not support M-RoPE."
 
-        self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
-            model_config)
+        # self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
+        #     model_config)
+        self.supports_mm_inputs = False
 
         if self.model_config.is_encoder_decoder:
             # Maximum length of the encoder input, only for encoder-decoder
