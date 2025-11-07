@@ -1040,6 +1040,16 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                         "the cached compiled binary will be reused.")
             options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
                                     > 1 else "./cache_dir")
+        if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
+            options["mode"] = "strict"
+
+        # compile compute_logits
+        self.compute_logits = torch.compile(
+            self.compute_logits,
+            backend="rbln",
+            options=options,
+            dynamic=False,
+        )
 
         compiled_model = torch.compile(
             model,
@@ -1047,6 +1057,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             options=options,
             dynamic=False,
         )
+
         return compiled_model
 
     def get_model(self) -> nn.Module:
@@ -1294,6 +1305,66 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
     ) -> torch.Tensor:
 
         return self.model.compute_logits(hidden_states, sampling_metadata)
+
+    # unchanged from GPUModelRunner
+    def apply_grammar_bitmask(
+        self,
+        scheduler_output: "SchedulerOutput",
+        logits: torch.Tensor,
+    ):
+        grammar_bitmask = scheduler_output.grammar_bitmask
+        if grammar_bitmask is None:
+            return
+
+        # We receive the structured output bitmask from the scheduler,
+        # compacted to contain bitmasks only for structured output requests.
+        # The order of the requests in the bitmask is not guaranteed to be the
+        # same as the order of the requests in the gpu runner's batch. We need
+        # to sort the bitmask to match the order of the requests used here.
+
+        # Get the batch indices of the structured output requests.
+        # Keep track of the number of speculative tokens scheduled for every
+        # request in the batch, as the logit indices are offset by this amount.
+        struct_out_req_batch_indices: dict[str, int] = {}
+        cumulative_offset = 0
+        seq = sorted(self.input_batch.req_id_to_index.items(),
+                     key=lambda x: x[1])
+        for req_id, batch_index in seq:
+            logit_index = batch_index + cumulative_offset
+            cumulative_offset += len(
+                scheduler_output.scheduled_spec_decode_tokens.get(req_id, []))
+            if req_id in scheduler_output.structured_output_request_ids:
+                struct_out_req_batch_indices[req_id] = logit_index
+
+        out_indices = []
+
+        # Reorder the bitmask to match the order of the requests in the batch.
+        sorted_bitmask = np.zeros_like(grammar_bitmask,
+                                       shape=(logits.shape[0],
+                                              grammar_bitmask.shape[1]))
+        cumulative_index = 0
+        seq = sorted(scheduler_output.structured_output_request_ids.items(),
+                     key=lambda x: x[1])
+        for req_id, _ in seq:
+            logit_index = struct_out_req_batch_indices[req_id]
+            num_spec_tokens = len(
+                scheduler_output.scheduled_spec_decode_tokens.get(req_id, []))
+            for i in range(1 + num_spec_tokens):
+                sorted_bitmask[logit_index + i] = \
+                    grammar_bitmask[cumulative_index + i]
+                out_indices.append(logit_index + i)
+            cumulative_index += 1 + num_spec_tokens
+        grammar_bitmask = sorted_bitmask
+
+        # Serialization of np.ndarray is much more efficient than a tensor,
+        # so we receive it in that format.
+        grammar_bitmask = torch.from_numpy(grammar_bitmask)
+
+        xgr.apply_token_bitmask_inplace(
+            logits,
+            grammar_bitmask.to(self.device, non_blocking=True),
+            indices=out_indices,
+        )
 
     @torch.inference_mode()
     def warmup_model(self) -> None:
@@ -1818,15 +1889,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
             self.compile_context = CompileContext(use_weight_sharing=True)
             self.model_executable = self._compile_model(self.model)
-            self.compute_logits = torch.compile(
-                self.compute_logits,
-                backend="rbln",
-                options={
-                    "compile_context": self.compile_context,
-                    "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
-                },
-                dynamic=False,
-            )
 
     def save_tensorized_model(
         self,
