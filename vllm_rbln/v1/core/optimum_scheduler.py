@@ -373,11 +373,11 @@ class RBLNOptimumScheduler(Scheduler):
         # This can be potentially used for cascade attention.
         num_common_prefix_blocks = [0] * len(
             self.kv_cache_config.kv_cache_groups)
-        # if self.running:
-        #     any_request = self.running[0]
-        #     num_common_prefix_blocks = (
-        #         self.kv_cache_manager.get_num_common_prefix_blocks(
-        #             any_request, len(self.running)))
+        if self.running:
+            any_request = self.running[0]
+            num_common_prefix_blocks = (
+                self.kv_cache_manager.get_num_common_prefix_blocks(
+                    any_request, len(self.running)))
 
         # Construct the scheduler output.
         new_reqs_data = [

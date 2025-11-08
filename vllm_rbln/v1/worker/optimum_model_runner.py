@@ -281,13 +281,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
             hidden_states = hidden_states.squeeze(1)
             logits = self.model.compute_logits(hidden_states, None)
-            print("BEFORE GRAMMAR MASKING:", logits)
             if scheduler_output.grammar_bitmask is not None:
                 self.apply_grammar_bitmask(
                     scheduler_output,
                     logits,
                 )
-            print("AFTER GRAMMAR MASKING:", logits)
 
         with record_function_or_nullcontext("Sample"):
             sampler_output = self.sampler(
