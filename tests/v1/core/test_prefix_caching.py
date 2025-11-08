@@ -307,13 +307,147 @@ def test_cache_hit_child_block(limited_6blocks_scheduler):
     assert output.cached_block_table == [2, 3]
 
 
-# def test_allocated_blocks_excluded_from_cache_hit(scheduler):
+def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
+    """
+    If the allocated blocks are excluded when calculating
+    the cached blocks for prefix caching.
+    0. There are 4 blocks in total.
+    1. Generate req0 which spends 2 blocks when it is scheduled.
+    2. Generate req1 which spends 2 blocks when it is scheduled.
+    3. Generate req2 which spends 2 blocks when it is scheduled.
+        - It is for getting enough freed inner blocks.
+    4. Finish req0 and req1, and generate req3 with the same prompt
+        - Here, req3's prompt is the same as req0's prompt.
+        - req0 is allocated [0, 1]
+        - So the cached blocks become [2, 3], not [0, 1].
+    """
+    init_none_hash(HASH_FN)
+    # 1. Generate req0: 32 tokens -> 8 inner blocks
+    common_token_ids = [i for i in range(31)]
+    req0_id = "req0"
+    req0 = create_request(req0_id, common_token_ids, IB_SIZE, HASH_FN)
 
-# def test_free_blocks(scheduler):
-#     pass
+    req1_id = "req1"
+    req1 = create_request(req1_id, common_token_ids, IB_SIZE, HASH_FN)
 
-# def test_partial_cache_hit(scheduler):
-#     pass
+    req2_id = "req2"
+    req2 = create_request(req2_id, common_token_ids, IB_SIZE, HASH_FN)
 
-# def test_cache_hit_block_evicted(scheduler):
-#     pass
+    req3_id = "req3"
+    req3 = create_request(req3_id, common_token_ids, IB_SIZE, HASH_FN)
+
+    requests = [req0, req1, req2, req3]
+    for request in requests:
+        limited_6blocks_scheduler.add_request(request)
+
+    # Schedule req0 [0, 1]
+    output = limited_6blocks_scheduler.schedule()
+    model_runner_output = create_model_runner_output(output)
+    limited_6blocks_scheduler.update_from_output(output, model_runner_output)
+    assert output.cached_block_table == []
+    assert output.block_table_dict[req0_id].tolist() == [0, 1, -1, -1]
+
+    # Schedule req1 [2, 3]
+    output = limited_6blocks_scheduler.schedule()
+    model_runner_output = create_model_runner_output(output)
+    limited_6blocks_scheduler.update_from_output(output, model_runner_output)
+    assert output.cached_block_table == [0, 1]
+    assert output.block_table_dict[req1_id].tolist() == [2, 3, -1, -1]
+
+    # Schedule req2 [4, 5]
+    limited_6blocks_scheduler.finish_requests(req0_id,
+                                              RequestStatus.FINISHED_ABORTED)
+    output = limited_6blocks_scheduler.schedule()
+    model_runner_output = create_model_runner_output(output)
+    limited_6blocks_scheduler.update_from_output(output, model_runner_output)
+    assert output.cached_block_table == [0, 1]
+    assert output.block_table_dict[req2_id].tolist() == [4, 5, -1, -1]
+
+    # Finish Schedule req0, req1 and schedule req3 [0, 1]
+    # 1. To get enough freed inner blocks
+    # this pytest finishes req0 and req1
+    # 2. req3 is allocated [0, 1] again
+    # 3. So the cached blocks become [2, 3]
+    # to exclude the allocated blocks [0, 1].
+    limited_6blocks_scheduler.finish_requests(req0_id,
+                                              RequestStatus.FINISHED_ABORTED)
+    limited_6blocks_scheduler.finish_requests(req1_id,
+                                              RequestStatus.FINISHED_ABORTED)
+    output = limited_6blocks_scheduler.schedule()
+    model_runner_output = create_model_runner_output(output)
+    limited_6blocks_scheduler.update_from_output(output, model_runner_output)
+    assert output.cached_block_table == [2, 3]
+    assert output.block_table_dict[req3_id].tolist() == [0, 1, -1, -1]
+
+
+def test_finish_request(scheduler):
+    """
+    Check that finishing a request correctly frees its allocated blocks
+    while retaining the mapping for future reuse.
+    """
+    init_none_hash(HASH_FN)
+    # 1. Generate req0: 10 tokens -> 3 inner blocks
+    common_token_ids = [i for i in range(10)]
+    req0_id = "req0"
+    req0 = create_request(req0_id, common_token_ids, IB_SIZE, HASH_FN)
+
+    scheduler.add_request(req0)
+
+    output = scheduler.schedule()
+    model_runner_output = create_model_runner_output(output)
+    scheduler.update_from_output(output, model_runner_output)
+
+    # Finish req0
+    scheduler.finish_requests(req0_id, RequestStatus.FINISHED_ABORTED)
+    prefix_cache_manager = scheduler.kv_cache_manager.prefix_cache_manager
+    # The allocated blocks for req0 is not freed yet
+    allocated_blocks = prefix_cache_manager._allocator._allocated_blocks
+    assert len(allocated_blocks) == 1
+
+    # Mark req0 as finished and free its blocks
+    mapping_manager = prefix_cache_manager._mapping_manager
+    mapping = mapping_manager.get_mapping(0)
+    assert not mapping_manager.is_request_registered(req0_id)
+    assert mapping.request_id is None
+    assert mapping.is_active is False
+
+    # Keep the mapping between outer and inner blocks
+    # to reuse them for future requests.
+    assert mapping.outer_block_id == 0
+    assert mapping.inner_block_ids == [1, 2, 3]
+    assert len(mapping_manager._inner_to_outer) == 3
+    assert mapping_manager.get_cached_inner_blocks_for_outer(0) == [1, 2, 3]
+    assert mapping_manager.get_outer_blocks_for_cached_inner(1) == [0]
+    assert mapping_manager.get_outer_blocks_for_cached_inner(2) == [0]
+    assert mapping_manager.get_outer_blocks_for_cached_inner(3) == [0]
+
+
+def test_free_outer_blocks(scheduler):
+    """
+    Check the evicted blocks are correctly freed
+    from the prefix cache manager.
+    """
+    init_none_hash(HASH_FN)
+    # 1. Generate req0: 10 tokens -> 3 inner blocks
+    common_token_ids = [i for i in range(10)]
+    req0_id = "req0"
+    req0 = create_request(req0_id, common_token_ids, IB_SIZE, HASH_FN)
+
+    scheduler.add_request(req0)
+
+    output = scheduler.schedule()
+    model_runner_output = create_model_runner_output(output)
+    scheduler.update_from_output(output, model_runner_output)
+
+    # Evict the outer block 0
+    prefix_cache_manager = scheduler.kv_cache_manager.prefix_cache_manager
+    mapping_manager = prefix_cache_manager._mapping_manager
+    prefix_cache_manager.free_request(req0_id, preemption=True)
+    assert not mapping_manager.is_request_registered(req0_id)
+    assert mapping_manager.get_mapping(0) is None
+
+    assert len(mapping_manager._inner_to_outer) == 0
+    assert mapping_manager.get_cached_inner_blocks_for_outer(0) == []
+    assert mapping_manager.get_outer_blocks_for_cached_inner(1) == []
+    assert mapping_manager.get_outer_blocks_for_cached_inner(2) == []
+    assert mapping_manager.get_outer_blocks_for_cached_inner(3) == []
