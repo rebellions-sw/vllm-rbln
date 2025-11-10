@@ -43,7 +43,7 @@ environment_variables = {
     (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in
      ("true", "1")),
     "RBLN_USE_VLLM_MODEL":
-    (lambda: os.environ.get("USE_VLLM_MODEL", "False").lower() in
+    (lambda: os.environ.get("USE_VLLM_MODEL", "True").lower() in
      ("true", "1")),
     # enable flash attention w/o attention mask (called as causal attention)
     "RBLN_FLASH_CAUSAL_ATTN":
@@ -55,15 +55,15 @@ environment_variables = {
      ("true", "1")),
     # use moe custom kernel, by default disabled
     "RBLN_MOE_CUSTOM_KERNEL":
-    (lambda: os.environ.get("MOE_CUSTOM_KERNEL", "False").lower() in
+    (lambda: os.environ.get("MOE_CUSTOM_KERNEL", "True").lower() in
      ("true", "1")),
     # DP_INPUT_ALL_GATHER, use DP input all_gather
     "RBLN_DP_INPUT_ALL_GATHER":
-    (lambda: os.environ.get("DP_INPUT_ALL_GATHER", "False").lower() in
+    (lambda: os.environ.get("DP_INPUT_ALL_GATHER", "True").lower() in
      ("true", "1")),
     # LOGITS_ALL_GATHER, include logits all_gather into model compilation
     "RBLN_LOGITS_ALL_GATHER":
-    (lambda: os.environ.get("LOGITS_ALL_GATHER", "False").lower() in
+    (lambda: os.environ.get("LOGITS_ALL_GATHER", "True").lower() in
      ("true", "1")),
     # Number of Ray nodes
     "RBLN_NUM_RAY_NODES":
