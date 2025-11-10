@@ -144,6 +144,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 WARM_UP_CONFIGS)
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
+                max_num_seqs=self.vllm_config.scheduler_config.max_num_seqs,
+                vocab_size=self.model_config.get_vocab_size(),
                 seed=self.vllm_config.model_config.seed,
             )
             sampler = torch.compile(sampler, dynamic=False, fullgraph=False)

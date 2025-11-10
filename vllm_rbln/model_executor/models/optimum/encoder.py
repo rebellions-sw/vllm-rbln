@@ -160,6 +160,7 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         if isinstance(hidden_states, tuple):
             hidden_states = hidden_states[0]
 
+        # FIXME(eunji.lee): How to handle padding in encoder?
         if not self.is_classification_arch():
             # Depad hidden_states for the number of requests and length.
             hidden_states = hidden_states[:request_nums]

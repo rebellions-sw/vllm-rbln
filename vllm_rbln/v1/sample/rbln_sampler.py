@@ -105,10 +105,21 @@ def top_p_only_fake(
 class RBLNSampler(VLLMSampler):
 
     def __init__(self,
-                 logprobs_mode: LogprobsMode = "raw_logprobs",
-                 seed: int = 42):
+                 logprobs_mode: LogprobsMode,
+                 max_num_seqs: int,
+                 vocab_size: int,
+                 seed: int = 42,):
         super().__init__()
         rebel.manual_seed(seed)
+        self.bucket_sizes = self.get_bucket_sizes(max_num_seqs)
+        self._pooled_tensor = torch.empty(
+            (max_num_seqs, vocab_size),
+            dtype=torch.float32,
+        )
+        self._pooled_top_p = torch.empty(
+            (max_num_seqs,),
+            dtype=torch.float32,
+        )
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
@@ -119,6 +130,12 @@ class RBLNSampler(VLLMSampler):
     def apply_topp_sampler(
             self, logits: torch.Tensor, top_p: torch.Tensor
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # NOTE(eunji.lee): To prevent excessive recompilations,
+        # we pad logits and top_p to the bucket_size.
+        logits, top_p = self.pad_to_bucket_size(
+            logits,
+            top_p,
+        )
         sampled = self.rbln_topp_sampler(logits, top_p)
         logits_to_return = None
         if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
@@ -191,7 +208,6 @@ class RBLNSampler(VLLMSampler):
         # Covering other cases with RBLN is work in progress.
         if (sampling_metadata.top_p is not None
                 and sampling_metadata.top_k is None):
-
             random_sampled, processed_logprobs = self.apply_topp_sampler(
                 logits, sampling_metadata.top_p)
 
@@ -232,6 +248,43 @@ class RBLNSampler(VLLMSampler):
             )
         return logits
 
+    @staticmethod
+    def get_bucket_sizes(max_num_seqs: int) -> list[int]:
+            """Get the bucket sizes for the sampler.
+            Args:
+                max_num_seqs (int): The maximum number of sequences.
+            Returns:
+                list[int]: The bucket sizes.
+            [1, 2, 4] + list(range(8, 256, 8)) + list(
+                range(256, max_num_seqs + 1, 16))
+            """
+        bucket_sizes = [
+            i for i in [1, 2, 4] if i <= max_num_seqs
+        ]
+        if max_num_seqs >= 8:
+            # Step size 8 for small batch sizes, up to 256(not included)
+            bucket_sizes += list(
+                range(8, min(max_num_seqs + 1, 256), 8)
+            )
+        if max_num_seqs >= 256:
+            # Step size 16 for larger batch sizes
+            bucket_sizes += list(
+                range(256, max_num_seqs + 1, 16)
+            )
+        return bucket_sizes
+
+    def pad_to_bucket_size(
+        self,
+        logits: torch.Tensor,
+        top_p: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        top_p = self._pooled_top_p[:logits.shape[0]].copy_(top_p)
+        logits = self._pooled_tensor[:logits.shape[0], :logits.shape[1]].copy_(logits)
+        bucket_size = next(
+            b for b in self.bucket_sizes if b >= logits.shape[0]
+        )
+        
+        return logits, top_p
 
 WARM_UP_CONFIGS = [
     {

@@ -96,7 +96,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
 
             logits = self.model.language_model.decoder(**kwargs).logits
         if not is_prompt:
-            logits = logits[:request_nums]
+            logits = logits
         return logits
 
     def _parse_and_validate_image_input(
