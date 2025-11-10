@@ -359,6 +359,7 @@ class RBLNOptimumDecoderMixin:
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
+        # Only for V0
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 

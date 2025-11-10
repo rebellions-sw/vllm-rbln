@@ -118,6 +118,4 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 local_block_tables=local_block_table_id,
             ).logits
 
-        if not is_prompt:
-            logits = logits[:request_nums]
         return logits

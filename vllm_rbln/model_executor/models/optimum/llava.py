@@ -133,8 +133,6 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             cache_position=cache_position,
         )
 
-        if not is_prompt:
-            logits = logits[:request_nums]
         return logits
 
     def _parse_and_validate_image_input(
