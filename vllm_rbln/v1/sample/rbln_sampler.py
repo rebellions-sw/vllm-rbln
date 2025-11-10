@@ -21,7 +21,7 @@ import rebel
 from vllm.config import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
-from vllm_rbln.v1.sample.rbln_sampler import WARM_UP_CONFIGS
+
 logger = init_logger(__name__)
 
 _SAMPLING_EPS = 1e-5
@@ -109,10 +109,6 @@ class RBLNSampler(VLLMSampler):
                  seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
-        # NOTE(eunji.lee): Set recompile limit for RBLN sampler
-        batch_size = self.vllm_config.scheduler_config.max_num_seqs
-        torch._dynamo.config.recompile_limit = batch_size * len(
-            WARM_UP_CONFIGS)
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
