@@ -21,6 +21,7 @@ from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type,
                     TypeVar, Union, cast)
 
 import torch
+import torch.distributed as dist
 from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
@@ -491,6 +492,24 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
                                         > 1 else "./cache_dir")
 
+        # Initialize world group with rbln-ccl backend before torch.compile
+        # This ensures RCCL is properly initialized before compilation
+        # All devices (PP, TP, DP all included) participate in this all_reduce
+        try:
+            world_size = dist.get_world_size()
+            world_rank = dist.get_rank()
+            all_ranks = list(range(world_size))
+
+            logger.info("[RBLN] Initializing rbln-ccl process group for world (all devices) before torch.compile")
+
+            rbln_world_group = dist.new_group(all_ranks, backend="rbln-ccl")
+            # Warm up RCCL with a dummy all_reduce across all devices
+            dummy_tensor = torch.zeros(1, dtype=torch.float16, device="rbln")
+            dist.all_reduce(dummy_tensor, group=rbln_world_group, op=dist.ReduceOp.SUM)
+        except Exception as e:
+            logger.warning(
+                "[RBLN] Failed to initialize rbln-ccl process group before torch.compile: %s", e)
+
         compiled_model = torch.compile(
             model,
             backend="rbln",
@@ -685,7 +704,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # RBLN compile context is much similar to vLLM forward context
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
-            
+
             start_time = time.perf_counter()
             logits_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
