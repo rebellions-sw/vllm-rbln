@@ -2001,8 +2001,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
             num_reqs = self.input_batch.num_reqs
-            input_ids = input_ids.view(num_reqs, -1).to(torch.long)
-            positions = positions.view(num_reqs, -1)
+            if input_ids is not None:
+                input_ids = input_ids.view(num_reqs, -1).to(torch.long)
+            if self.uses_mrope:
+                positions = positions.view(3, num_reqs, -1)
+            else:
+                positions = positions.view(num_reqs, -1)
+            if inputs_embeds is not None:
+                inputs_embeds = inputs_embeds.view(num_reqs, -1,
+                                                   inputs_embeds.shape[-1])
             is_prefills = (self.input_batch.num_computed_tokens_cpu
                            < self.input_batch.num_tokens - 1)
 
@@ -2021,12 +2028,21 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 prefill_size = (self.scheduler_config.max_num_batched_tokens if
                                 self.scheduler_config.chunked_prefill_enabled
                                 else 1 << (math.ceil(math.log2(max_seq_len))))
-                input_ids = rbln_utils.pad(input_ids, -1, prefill_size)
+                if input_ids is not None:
+                    input_ids = rbln_utils.pad(input_ids, -1, prefill_size)
                 positions = rbln_utils.pad(positions, -1, prefill_size)
+                if inputs_embeds is not None:
+                    inputs_embeds = rbln_utils.pad(inputs_embeds, 1,
+                                                   prefill_size)
+
             else:
                 # decode batch padding
-                input_ids = rbln_utils.pad(input_ids, 0, self.max_num_seqs)
+                if input_ids is not None:
+                    input_ids = rbln_utils.pad(input_ids, 0, self.max_num_seqs)
                 positions = rbln_utils.pad(positions, -2, self.max_num_seqs)
+                if inputs_embeds is not None:
+                    inputs_embeds = rbln_utils.pad(inputs_embeds, 0,
+                                                   self.max_num_seqs)
 
             if self.lora_config is not None:
                 lora_ids = [
