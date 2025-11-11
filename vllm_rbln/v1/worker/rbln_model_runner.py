@@ -1277,7 +1277,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 mm_embeds.append(mm_embeds_item)
         return mm_embeds
 
-    def _compile_model(self, model):
+    def _compile(self, model):
         TP = get_tp_group()
         PP = get_pp_group()
         DP = get_dp_group()
@@ -1296,28 +1296,19 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             "process_group_dict": process_group_dict
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
-            logger.info("Once the model is compiled for the first time, "
-                        "the cached compiled binary will be reused.")
             options["cache_dir"] = os.path.join(envs.VLLM_CACHE_ROOT, 'rbln')
+            logger.info_once(
+                f"Cache directory for compiled binaries: {options['cache_dir']}"
+            )
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
-        # compile compute_logits
-        self.compute_logits = torch.compile(
-            self.compute_logits,
-            backend="rbln",
-            options=options,
-            dynamic=False,
-        )
-
-        compiled_model = torch.compile(
+        return torch.compile(
             model,
             backend="rbln",
             options=options,
             dynamic=False,
         )
-
-        return compiled_model
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -2348,8 +2339,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             from rebel.compile_context import CompileContext
 
             self.compile_context = CompileContext(use_weight_sharing=True)
-            compiled_graph = self._compile_model(model_wrapper)
-            self.model_executable = compiled_graph
+            self.model_executable = self._compile(model_wrapper)
+            self.compute_logits = self._compile(self.compute_logits)
 
     def save_tensorized_model(
         self,
