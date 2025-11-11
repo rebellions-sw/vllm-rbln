@@ -140,6 +140,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
+            # NOTE(eunji.lee): Set recompile limit for RBLN sampler
+            batch_size = self.vllm_config.scheduler_config.max_num_seqs
+            torch._dynamo.config.recompile_limit = batch_size * len(
+                WARM_UP_CONFIGS)
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
