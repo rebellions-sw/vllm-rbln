@@ -14,8 +14,8 @@
 from collections import OrderedDict
 
 from vllm_rbln.logger import init_logger
-from vllm_rbln.prefix_cache_manager.optimum_block_mapping_manager import (
-    BlockMappingManager)
+
+from .optimum_block_mapping_manager import BlockMappingManager
 
 logger = init_logger(__name__)
 
@@ -35,21 +35,13 @@ class SimpleEvictionPolicy:
 
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
                                    count: int) -> list[int]:
-        # Select blocks for eviction.
+        """Select blocks for eviction."""
         inactive_mappings = mapping_manager.get_inactive_mappings()
-        evicted_blocks = []
+        inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
+        if len(inactive_block_ids) < count:
+            return []
 
-        for mapping in inactive_mappings:
-            if len(evicted_blocks) >= count:
-                break
-            evicted_blocks.append(mapping.outer_block_id)
-
-        if len(evicted_blocks) < count:
-            logger.warning(
-                "Could not find enough inactive blocks for eviction. "
-                "Requested: %d, Found: %d", count, len(evicted_blocks))
-
-        return evicted_blocks[:count]
+        return inactive_block_ids[:count]
 
 
 class FIFOEvictionPolicy(SimpleEvictionPolicy):
@@ -58,7 +50,7 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
     """
 
     def __init__(self):
-        self._allocation_order: OrderedDict[int, float] = OrderedDict()
+        self._allocation_order: OrderedDict[int, bool] = OrderedDict()
 
     def register_block(self, block_id: int) -> None:
         assert block_id not in self._allocation_order
@@ -67,7 +59,7 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._allocation_order.pop(block_id, None)
 
-    def select_blocks_for_eviction(self, mapping_manager,
+    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
                                    count: int) -> list[int]:
         # NOTE If the cached block is evicted, we should also evict its mapping
         # How about exclude the cached blocks from eviction?
@@ -76,26 +68,15 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
-        if not inactive_block_ids:
-            logger.warning("No inactive blocks available for eviction")
-            return []
-
         evictable_blocks = [
             block_id for block_id in self._allocation_order
             if block_id in inactive_block_ids
         ]
 
-        selected = evictable_blocks[:count]
+        if len(evictable_blocks) < count:
+            return []
 
-        for block_id in selected:
-            self._allocation_order.pop(block_id, None)
-
-        if len(selected) < count:
-            logger.warning(
-                "Could not find enough inactive blocks for eviction. "
-                "Requested: %d, Found: %d", count, len(selected))
-
-        return selected
+        return evictable_blocks[:count]
 
 
 class LRUEvictionPolicy(SimpleEvictionPolicy):
@@ -104,7 +85,7 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
     """
 
     def __init__(self):
-        self._access_order: OrderedDict[int, float] = OrderedDict()
+        self._access_order: OrderedDict[int, bool] = OrderedDict()
 
     def touch(self, block_id: int) -> None:
         """Mark a block as recently accessed"""
@@ -118,14 +99,10 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._access_order.pop(block_id, None)
 
-    def select_blocks_for_eviction(self, mapping_manager,
+    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
                                    count: int) -> list[int]:
         inactive_mappings = mapping_manager.get_inactive_mappings()
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
-
-        if not inactive_block_ids:
-            logger.warning("No inactive blocks available for eviction")
-            return []
 
         untouched_blocks = [
             block_id for block_id in inactive_block_ids
@@ -138,14 +115,6 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         ]
 
         evictable_blocks = untouched_blocks + touched_blocks
-        selected = evictable_blocks[:count]
-
-        for block_id in selected:
-            self._access_order.pop(block_id, None)
-
-        if len(selected) < count:
-            logger.warning(
-                "Could not find enough inactive blocks for eviction. "
-                "Requested: %d, Found: %d", count, len(selected))
-
-        return selected
+        if len(evictable_blocks) < count:
+            return []
+        return evictable_blocks[:count]
