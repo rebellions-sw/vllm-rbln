@@ -44,6 +44,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
     def forward(self, model_input: ModelInputForRBLN,
@@ -64,8 +65,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
         request_nums = input_ids.shape[0]
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             self.kv_block_adapter, input_ids,
-                                             cache_position)
+                                             input_ids, cache_position)
 
         if is_prompt:
             if model_input.multi_modal_kwargs:
