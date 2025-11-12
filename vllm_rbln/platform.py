@@ -15,6 +15,7 @@
 from typing import TYPE_CHECKING, Optional
 
 import torch
+import torch.distributed as dist
 
 if TYPE_CHECKING:
     from vllm.config import ModelConfig, VllmConfig
@@ -78,6 +79,10 @@ class RblnPlatform(Platform):
         return False
 
     @classmethod
+    def get_device_communicator_cls(cls) -> str:
+        return "vllm_rbln.rbln_communicator.RblnCommunicator"  # noqa
+
+    @classmethod
     def use_all_gather(cls) -> bool:
         """
         Whether to use allgather in LogitsProcessor to gather the logits.
@@ -88,6 +93,20 @@ class RblnPlatform(Platform):
     def pre_register_and_update(cls,
                                 parser: Optional[FlexibleArgumentParser] = None
                                 ) -> None:
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            import vllm_rbln.attention.layer  # noqa
+            import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
+            import vllm_rbln.model_executor.layers.logits_processor  # noqa
+            import vllm_rbln.model_executor.layers.rotary_embedding.base  # noqa
+            import vllm_rbln.model_executor.layers.rotary_embedding.deepseek_scaling_rope  # noqa
+            import vllm_rbln.model_executor.layers.vocab_parallel_embedding  # noqa
+            import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
+            import vllm_rbln.models.deepseek_v2  # noqa
+            import vllm_rbln.models.qwen2_moe  # noqa
+            import vllm_rbln.models.qwen3  # noqa
+            import vllm_rbln.models.qwen3_moe  # noqa
+            import vllm_rbln.models.utils  # noqa
+
         if parser is None:
             return
 
@@ -129,14 +148,22 @@ class RblnPlatform(Platform):
                     "T5 encoder-decoder model is not supported on V1. "
                     "Set `VLLM_USE_V1=0` to run T5 models in V0")
 
-        logger.info("original model_config.dtype = %s", model_config.dtype)
-        if model_config.dtype == torch.bfloat16:
-            logger.warning("bfloat16 is not supported on RBLN.")
+        if envs.RBLN_ENFORCE_MODEL_FP32:
+            logger.info("original model_config.dtype = %s", model_config.dtype)
+            if model_config.dtype == torch.bfloat16:
+                logger.warning("bfloat16 is not supported on RBLN.")
 
-        # FIXME - force model dtype into fp32 for graph compilation
-        model_config.dtype = torch.float
-        assert model_config.dtype == torch.float
-        logger.info("RBLN model_config.dtype = %s", model_config.dtype)
+            # FIXME - force model dtype into fp32 for graph compilation
+            model_config.dtype = torch.float
+            assert model_config.dtype == torch.float
+            logger.info("RBLN enforce model_config.dtype as torch.float")
+        else:
+            dtype = model_config.dtype
+            logger.info("original model_config.dtype = %s", dtype)
+            if dtype != torch.bfloat16 and dtype != torch.float16 and dtype != torch.float:
+                logger.warning("%s is not supported on RBLN. only fp32,fp16,bf16 is supported", dtype)
+                model_config.dtype = torch.float
+            logger.info("RBLN use model_config.dtype = %s", model_config.dtype)
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config

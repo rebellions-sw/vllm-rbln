@@ -46,7 +46,7 @@ environment_variables = {
      ("true", "1")),
     # Enable warmup
     "VLLM_RBLN_ENABLE_WARM_UP":
-    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "True").lower() in
+    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in
      ("true", "1")),
     # If true, it uses the natively compiled vLLM model
     # rather than the optimum-rbln compiled model.
@@ -56,6 +56,28 @@ environment_variables = {
     # Use flash attention for causal attention
     "VLLM_RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
+     ("true", "1")),
+    # enforce model data type into fp32 not model_config.dtype
+    "RBLN_ENFORCE_MODEL_FP32":
+    (lambda: os.environ.get("ENFORCE_MODEL_FP32", "False").lower() in
+     ("true", "1")),
+    # use moe custom kernel, by default disabled
+    "RBLN_MOE_CUSTOM_KERNEL":
+    (lambda: os.environ.get("MOE_CUSTOM_KERNEL", "False").lower() in
+     ("true", "1")),
+    # DP_INPUT_ALL_GATHER, use DP input all_gather
+    "RBLN_DP_INPUT_ALL_GATHER":
+    (lambda: os.environ.get("DP_INPUT_ALL_GATHER", "False").lower() in
+     ("true", "1")),
+    # LOGITS_ALL_GATHER, include logits all_gather into model compilation
+    "RBLN_LOGITS_ALL_GATHER":
+    (lambda: os.environ.get("LOGITS_ALL_GATHER", "False").lower() in
+     ("true", "1")),
+    # Number of Ray nodes
+    "RBLN_NUM_RAY_NODES":
+    lambda: int(os.environ.get("NUM_RAY_NODES", 1)),
+    "RBLN_METRICS":
+    (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
      ("true", "1")),
 }
 
