@@ -60,30 +60,35 @@ def rope_forward_oot(
     key: torch.Tensor,
     offsets: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """A PyTorch-native implementation of forward()."""
+    """
+    Args:
+        positions: [batch_size, seq_len]
+        query: [batch_size, seq_len, num_heads * head_size]
+        key: [batch_size, seq_len, num_kv_heads * head_size]
+    """
     # NOTE(RBLN): For best compatibility with rbln,
     # tensors are reshaped/transposed as follows:
-    # - cos, sin: (1, 1, num_tokens, rotary_dim * 2)
-    # - query, key: (1, num_heads, num_tokens, head_size)
+    # - cos, sin: (batch_size, 1, seq_len, rotary_dim * 2)
+    # - query, key: (batch_size, num_heads, seq_len, head_size)
 
     if offsets is not None:
         positions = positions + offsets
-    positions = positions.flatten()
-    num_tokens = positions.shape[0]
 
+    batch_size, seq_len = positions.shape[0], positions.shape[1]
     rotate_fn = rotate_neox if self.is_neox_style else rotate_gptj
 
-    cos = self.cos_cache.index_select(0, positions)
-    sin = self.sin_cache.index_select(0, positions)
-    cos = cos[None, None, :, :]
-    sin = sin[None, None, :, :]
+    positions_flat = positions.flatten()
+    cos = self.cos_cache.index_select(0, positions_flat).view(
+        batch_size, 1, seq_len, -1)
+    sin = self.sin_cache.index_select(0, positions_flat).view(
+        batch_size, 1, seq_len, -1)
 
     query_shape = query.shape
-    query = query.view(num_tokens, -1, self.head_size)
+    query = query.view(batch_size, seq_len, -1, self.head_size)
     query_rot = query[..., :self.rotary_dim]
-    query_rot = query_rot.unsqueeze(0).transpose(1, 2)
+    query_rot = query_rot.transpose(1, 2)
     query_rot = query_rot * cos + rotate_fn(query_rot) * sin
-    query_rot = query_rot.transpose(1, 2).squeeze(0)
+    query_rot = query_rot.transpose(1, 2)
     # FIXME(RBLN) - if slice size is zero, DO NOT slice
     if self.head_size == self.rotary_dim:
         query = query_rot.reshape(query_shape)
@@ -92,11 +97,11 @@ def rope_forward_oot(
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
     key_shape = key.shape
-    key = key.view(num_tokens, -1, self.head_size)
+    key = key.view(batch_size, seq_len, -1, self.head_size)
     key_rot = key[..., :self.rotary_dim]
-    key_rot = key_rot.unsqueeze(0).transpose(1, 2)
+    key_rot = key_rot.transpose(1, 2)
     key_rot = key_rot * cos + rotate_fn(key_rot) * sin
-    key_rot = key_rot.transpose(1, 2).squeeze(0)
+    key_rot = key_rot.transpose(1, 2)
     # FIXME(RBLN) - if slice size is zero, DO NOT slice
     if self.head_size == self.rotary_dim:
         key = key_rot.reshape(key_shape)

@@ -93,6 +93,8 @@ setup(name="vllm-rbln",
       install_requires=get_requirements(),
       entry_points={
           "vllm.platform_plugins": ["rbln = vllm_rbln:register"],
-          "vllm.general_plugins":
-          ["rbln_new_models = vllm_rbln:register_model"]
+          "vllm.general_plugins": [
+              "rbln_new_models = vllm_rbln:register_model",
+              "rbln_custom_ops = vllm_rbln:register_ops"
+          ]
       })
