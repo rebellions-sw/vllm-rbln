@@ -13,6 +13,7 @@
 # limitations under the License.
 """A RBLN worker class."""
 import os
+import time
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -20,12 +21,15 @@ import torch.distributed
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, VllmConfig)
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
+from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
+                              get_tp_group, init_distributed_environment)
+from vllm.forward_context import DPMetadata
 from vllm.model_executor import set_random_seed
+from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
-from vllm.sequence import ExecuteModelRequest, SequenceGroupMetadata
+from vllm.sequence import (ExecuteModelRequest, IntermediateTensors,
+                           SequenceGroupMetadata)
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, bind_kv_cache
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
@@ -35,6 +39,8 @@ try:
 except ImportError:
     from vllm.worker.worker_base import (
         LoraNotSupportedWorkerBase as LoRANotSupportedWorkerBase, )
+
+from vllm.worker.model_runner_base import BroadcastableModelInput
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -246,6 +252,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         else:
             self.profiler = None
 
+        self.is_dummy_execute_phase = False
+        self.dummy_execute_model_req: Optional[ExecuteModelRequest] = None
+
     def start_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
@@ -401,21 +410,24 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                 self.model_runner.compile_context.mark_static_address(kv_cache)
 
     def _warm_up_model(self) -> None:
+        model_inputs = self._prepare_dummy_input()
         if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL \
             or not envs.VLLM_RBLN_ENABLE_WARM_UP:
             logger.warning("skipping _warm_up_model")
             return
 
         assert self.kv_cache is not None
-        model_inputs = self._prepare_dummy_input()
         self.model_runner._dummy_run(model_inputs, self.kv_cache[0])
 
-    def _prepare_dummy_input(self,
-                             max_num_batched_tokens: int = 8,
-                             max_num_seqs: int = 1):
+    def _prepare_dummy_input(
+        self,
+        max_num_batched_tokens: int = 1,
+        max_num_seqs: int = 1
+    ) -> Tuple[BroadcastableModelInput, BroadcastableModelInput]:
         prefill_req = None
         decode_req = None
         if self.is_driver_worker:
+            num_blocks = self.cache_config.num_gpu_blocks
             sampling_params = SamplingParams()
 
             prefill_seqs: List[SequenceGroupMetadata] = []
@@ -429,7 +441,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                                             seq_len,
                                             self.model_runner.mm_registry)
                 prefill_seq_data = dummy_data.seq_data
-                block_tables = {group_id: [group_id]}
+                block_tables = {group_id: [num_blocks]}
 
                 prefill_seq = SequenceGroupMetadata(
                     request_id=str(group_id),
@@ -458,11 +470,47 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             prefill_req = ExecuteModelRequest(prefill_seqs[:1])
             decode_req = ExecuteModelRequest(decode_seqs)
 
+        if self.parallel_config.data_parallel_size > 1:
+            self.dummy_execute_model_req = prefill_req
         prefill_inputs = self.prepare_input(prefill_req)
         decode_inputs = self.prepare_input(decode_req)
         prefill_model_input, _, _ = prefill_inputs
         decode_model_input, _, _ = decode_inputs
         return (prefill_model_input, decode_model_input)
+
+    def _prepare_dp_model(self, model_input: BroadcastableModelInput) -> None:
+        dp_size = self.parallel_config.data_parallel_size
+        if self.is_dummy_execute_phase or dp_size <= 1:
+            return
+
+        dp_rank = self.parallel_config.data_parallel_rank
+        assert model_input.attn_metadata is not None
+        if model_input.attn_metadata.num_prefill_tokens > 0:
+            num_tokens = \
+                self.scheduler_config.max_num_batched_tokens
+        else:
+            num_tokens = self.scheduler_config.max_num_seqs
+
+        num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
+            num_tokens, dp_size, dp_rank)
+
+        if model_input.attn_metadata.num_prefill_tokens > 0:
+            return
+
+        def is_same_phase(val, tensors):
+            return all(t == val for t in tensors)
+
+        same_phase = is_same_phase(num_tokens, num_tokens_across_dp)
+        if same_phase:
+            return
+
+        self.is_dummy_execute_phase = True
+        while not same_phase:
+            self.execute_model(self.dummy_execute_model_req)
+            num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
+                num_tokens, dp_size, dp_rank)
+            same_phase = is_same_phase(num_tokens, num_tokens_across_dp)
+        self.is_dummy_execute_phase = False
 
     @property
     def do_metadata_broadcast(self) -> bool:
@@ -490,6 +538,70 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                 worker_input.blocks_to_copy)
             """
 
+    def execute_model(
+        self,
+        execute_model_req: Optional[ExecuteModelRequest] = None,
+    ) -> Optional[List[SamplerOutput]]:
+        """Executes at least one model step on the given sequences, unless no
+        sequences are provided."""
+        start_time = time.perf_counter()
+
+        inputs = self.prepare_input(execute_model_req)
+        if inputs is None:
+            return None
+
+        model_input, worker_input, kwargs = inputs
+        num_steps = worker_input.num_steps
+
+        self._prepare_dp_model(model_input)
+
+        self.execute_worker(worker_input)
+
+        # If there is no input, we don't need to execute the model.
+        if worker_input.num_seq_groups == 0:
+            return []
+
+        intermediate_tensors = None
+        orig_model_execute_time = 0.0
+        if not get_pp_group().is_first_rank:
+            intermediate_tensors = IntermediateTensors(
+                get_pp_group().recv_tensor_dict(
+                    all_gather_group=get_tp_group()))
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_execute_time):
+                orig_model_execute_time = intermediate_tensors.tensors.get(
+                    "model_execute_time", torch.tensor(0)).item()
+
+        output = self.model_runner.execute_model(
+            model_input=model_input,
+            kv_caches=self.kv_cache[worker_input.virtual_engine]
+            if self.kv_cache is not None else None,
+            intermediate_tensors=intermediate_tensors,
+            num_steps=num_steps,
+            **kwargs,
+        )
+
+        model_execute_time = time.perf_counter() - start_time
+        if not get_pp_group().is_last_rank:
+            # output is IntermediateTensors
+            assert isinstance(output, IntermediateTensors)
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_execute_time):
+                output.tensors["model_execute_time"] = torch.tensor(
+                    model_execute_time + orig_model_execute_time)
+            get_pp_group().send_tensor_dict(output.tensors,
+                                            all_gather_group=get_tp_group())
+            return [None]
+        if (self.observability_config is not None
+                and self.observability_config.collect_model_execute_time
+                and output is not None):
+            for o in output:
+                o.model_execute_time = (orig_model_execute_time +
+                                        model_execute_time)
+
+        # output is List[SamplerOutput]
+        return output
+
     def get_cache_block_size_bytes(self) -> int:
         """Get the size of the KV cache block size in bytes."""
         return RBLNCacheEngine.get_cache_block_size(
@@ -503,14 +615,14 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # Set envs for RCCL
         os.environ['LOCAL_RANK'] = str(self.local_rank)
         os.environ['WORLD_SIZE'] = str(self.parallel_config.world_size)
-        
+
         if self.parallel_config.data_parallel_size > 1:
             world_size = self.parallel_config.world_size
             rank = self.parallel_config.data_parallel_rank * world_size + self.local_rank
             world_size = self.parallel_config.world_size_across_dp
             os.environ['LOCAL_RANK'] = str(rank)
             os.environ['WORLD_SIZE'] = str(world_size)
-        
+
         init_distributed_environment(
             world_size=self.parallel_config.world_size,
             rank=self.rank,

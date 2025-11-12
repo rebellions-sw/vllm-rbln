@@ -351,18 +351,14 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
     if not envs.RBLN_DP_INPUT_ALL_GATHER:
         # each DP rank gather all inputs via torch.distributed.all_reduce
         # broadcast(value) == all_reduce(value for me or zeros for others)
-        all_gather_buffer = None
+        all_buffer = None
         zeros = x - x
         for rank in range(get_dp_group().world_size):
-            if rank == dp_rank:
-                broadcast_tensor = get_dp_group().all_reduce(x)
-            else:
-                broadcast_tensor = get_dp_group().all_reduce(zeros)
-            if all_gather_buffer is None:
-                all_gather_buffer = broadcast_tensor
-            else:
-                all_gather_buffer = torch.cat((all_gather_buffer, broadcast_tensor), dim=0)
-        return all_gather_buffer
+            rank_tensor = x if rank == dp_rank else zeros
+            all_buffer = torch.cat((all_buffer, rank_tensor), dim=0) \
+                if all_buffer is not None else rank_tensor
+        output = get_dp_group().all_reduce(all_buffer)
+        return output
     else:
         # gather all inputs via torch.distributed.all_gather
         all_gather_buffer = get_dp_group().all_gather(x, dim=0)

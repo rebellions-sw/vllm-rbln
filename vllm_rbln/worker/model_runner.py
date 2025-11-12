@@ -778,7 +778,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         return self.model_config.get_vocab_size()
 
     def _dummy_run(self,
-                   model_inputs: Tuple[ModelInputForRebelWithSamplingMetadata],
+                   model_inputs: Tuple[ModelInputForRebelWithSamplingMetadata,
+                                       ModelInputForRebelWithSamplingMetadata],
                    kv_caches: List[torch.Tensor]) -> None:
         # Run the model with the dummy inputs.
         for model_input in model_inputs:
