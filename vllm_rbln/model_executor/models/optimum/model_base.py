@@ -253,6 +253,8 @@ class RBLNOptimumDecoderMixin:
 
         if unused_blocks.numel() > 0:
             padded_block_tables[mask] = unused_blocks[0]
+        else:
+            assert not torch.any(mask), "No unused blocks available for padding."
 
         return padded_input_ids, padded_position_ids, padded_block_tables
 
