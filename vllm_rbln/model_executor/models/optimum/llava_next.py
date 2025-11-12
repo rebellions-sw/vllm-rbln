@@ -43,7 +43,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
-            num_blocks=self.kv_block_adapter.get_available_num_blocks(),
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
     def merge_multimodal_embeddings(

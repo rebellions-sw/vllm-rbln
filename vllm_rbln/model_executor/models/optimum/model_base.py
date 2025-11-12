@@ -97,11 +97,13 @@ class KVCacheBlockAdapter:
             blk_ratio = ob_size // ib_size
         else:
             blk_ratio = 1
-        estimated = self._estimated_num_blocks() * blk_ratio
-        if self.is_full_block_available():
-            return estimated + 1 if self.use_v1 else estimated
 
-        return estimated if self.use_v1 else max(0, estimated - 1)
+        if self.is_full_block_available():
+            new_estimated = self._estimated_num_blocks() * blk_ratio
+            return new_estimated + 1 if self.use_v1 else new_estimated
+
+        new_estimated = (self._estimated_num_blocks() - 1) * blk_ratio + 1
+        return new_estimated if self.use_v1 else max(0, new_estimated - 1)
 
 
 class RBLNOptimumModelBase(nn.Module):
