@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-from typing import Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -30,7 +30,8 @@ from vllm.multimodal.utils import group_mm_kwargs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
-from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
+from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader,
+                        is_pin_memory_available)
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
@@ -52,6 +53,12 @@ from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
+
+if TYPE_CHECKING:
+    import xgrammar as xgr
+    from vllm.v1.core.sched.output import SchedulerOutput
+else:
+    xgr = LazyLoader("xgr", globals(), "xgrammar")
 
 logger = init_logger(__name__)
 
@@ -131,6 +138,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
+            # NOTE(eunji.lee): Set recompile limit for RBLN sampler
+            batch_size = self.vllm_config.scheduler_config.max_num_seqs
+            torch._dynamo.config.recompile_limit = batch_size * len(
+                WARM_UP_CONFIGS)
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
@@ -257,12 +268,18 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         with record_function_or_nullcontext("Forward"):
             hidden_states = self.model(model_input)
 
-        if self.is_pooling_model:
-            return self._pool(hidden_states, num_scheduled_tokens,
-                              num_scheduled_tokens_np)
-        # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
-        hidden_states = hidden_states.squeeze(1)
-        logits = self.model.compute_logits(hidden_states, None)
+        with record_function_or_nullcontext("Postprocess"):
+            if self.is_pooling_model:
+                return self._pool(hidden_states, num_scheduled_tokens,
+                                  num_scheduled_tokens_np)
+            # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
+            hidden_states = hidden_states.squeeze(1)
+            logits = self.model.compute_logits(hidden_states, None)
+            if scheduler_output.grammar_bitmask is not None:
+                self.apply_grammar_bitmask(
+                    scheduler_output,
+                    logits,
+                )
 
         with record_function_or_nullcontext("Sample"):
             sampler_output = self.sampler(
@@ -1085,3 +1102,68 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.transfer_event.record()
         # self.transfer_event.synchronize()
         return pinned.tolist()
+
+    def apply_grammar_bitmask(
+        self,
+        scheduler_output: "SchedulerOutput",
+        logits: torch.Tensor,
+    ):
+        grammar_bitmask = scheduler_output.grammar_bitmask
+        if grammar_bitmask is None:
+            return
+
+        # We receive the structured output bitmask from the scheduler,
+        # compacted to contain bitmasks only for structured output requests.
+        # The order of the requests in the bitmask is not guaranteed to be the
+        # same as the order of the requests in the gpu runner's batch. We need
+        # to sort the bitmask to match the order of the requests used here.
+
+        # Get the batch indices of the structured output requests.
+        # Keep track of the number of speculative tokens scheduled for every
+        # request in the batch, as the logit indices are offset by this amount.
+        struct_out_req_batch_indices: dict[str, int] = {}
+        cumulative_offset = 0
+        seq = sorted(self.input_batch.req_id_to_index.items(),
+                     key=lambda x: x[1])
+        for req_id, batch_index in seq:
+            logit_index = batch_index + cumulative_offset
+            cumulative_offset += len(
+                scheduler_output.scheduled_spec_decode_tokens.get(req_id, []))
+            if req_id in scheduler_output.structured_output_request_ids:
+                struct_out_req_batch_indices[req_id] = logit_index
+
+        out_indices = []
+
+        # Reorder the bitmask to match the order of the requests in the batch.
+        sorted_bitmask = np.full(shape=(logits.shape[0],
+                                        grammar_bitmask.shape[1]),
+                                 fill_value=-1,
+                                 dtype=grammar_bitmask.dtype)
+        cumulative_index = 0
+        seq = sorted(scheduler_output.structured_output_request_ids.items(),
+                     key=lambda x: x[1])
+        for req_id, _ in seq:
+            logit_index = struct_out_req_batch_indices[req_id]
+            num_spec_tokens = len(
+                scheduler_output.scheduled_spec_decode_tokens.get(req_id, []))
+            for i in range(1 + num_spec_tokens):
+                sorted_bitmask[logit_index + i] = \
+                    grammar_bitmask[cumulative_index + i]
+                out_indices.append(logit_index + i)
+            cumulative_index += 1 + num_spec_tokens
+        grammar_bitmask = sorted_bitmask
+
+        # If the length of out indices and the logits have the same shape
+        # we don't need to pass indices to the kernel,
+        # since the bitmask is already aligned with the logits.
+        skip_out_indices = len(out_indices) == logits.shape[0]
+
+        # Serialization of np.ndarray is much more efficient than a tensor,
+        # so we receive it in that format.
+        grammar_bitmask = torch.from_numpy(grammar_bitmask).contiguous()
+
+        xgr.apply_token_bitmask_inplace(
+            logits,
+            grammar_bitmask.to(self.device, non_blocking=True),
+            indices=out_indices if not skip_out_indices else None,
+        )

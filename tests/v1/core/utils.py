@@ -18,7 +18,7 @@ import torch
 from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
 from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
-from vllm.sampling_params import SamplingParams
+from vllm.sampling_params import GuidedDecodingParams, SamplingParams
 from vllm.utils import sha256
 from vllm.v1.core.kv_cache_utils import (get_request_block_hasher,
                                          init_none_hash)
@@ -27,6 +27,7 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request
 from vllm.v1.structured_output import StructuredOutputManager
+from vllm.v1.structured_output.request import StructuredOutputRequest
 
 from vllm_rbln.core.scheduler import RBLNScheduler
 from vllm_rbln.v1.core.optimum_scheduler import (RBLNOptimumScheduler,
@@ -47,6 +48,7 @@ def create_scheduler(
     is_torch_compile: bool = False,
     outer_block_size: int = 0,
     enable_prefix_caching: bool = False,
+    structured_output_manager: Optional[StructuredOutputManager] = None,
 ) -> Union[RBLNOptimumScheduler, RBLNScheduler]:
     """Create RBLNOptimumscheduler under test.
 
@@ -120,6 +122,7 @@ def create_requests(
     prompt_logprobs: Optional[int] = None,
     same_prompt: bool = False,
     block_size: int = 16,
+    sample_json_schema: str = None,
 ) -> list[Request]:
     global _none_hash_initialized
     if not _none_hash_initialized:
@@ -127,10 +130,16 @@ def create_requests(
         _none_hash_initialized = True
 
     block_hasher = get_request_block_hasher(block_size, sha256)
+    if sample_json_schema:
+        guided_decoding = GuidedDecodingParams(json=sample_json_schema,
+                                               backend="xgrammar")
+    else:
+        guided_decoding = None
     sampling_params = SamplingParams(ignore_eos=False,
                                      max_tokens=max_tokens,
                                      stop_token_ids=stop_token_ids,
-                                     prompt_logprobs=prompt_logprobs)
+                                     prompt_logprobs=prompt_logprobs,
+                                     guided_decoding=guided_decoding)
     requests = []
     for i in range(num_requests):
         mm_features = []
@@ -149,15 +158,15 @@ def create_requests(
 
         prompt_token_ids = ([0] * num_tokens if same_prompt else [i] *
                             num_tokens)
-        request = Request(
-            request_id=f"{i}",
-            prompt_token_ids=prompt_token_ids,
-            sampling_params=sampling_params,
-            pooling_params=None,
-            mm_features=mm_features if mm_features else None,
-            eos_token_id=EOS_TOKEN_ID,
-            block_hasher=block_hasher,
-        )
+        request = Request(request_id=f"{i}",
+                          prompt_token_ids=prompt_token_ids,
+                          sampling_params=sampling_params,
+                          pooling_params=None,
+                          mm_features=mm_features if mm_features else None,
+                          eos_token_id=EOS_TOKEN_ID,
+                          block_hasher=block_hasher,
+                          structured_output_request=StructuredOutputRequest(
+                              sampling_params=sampling_params))
         requests.append(request)
     return requests
 
