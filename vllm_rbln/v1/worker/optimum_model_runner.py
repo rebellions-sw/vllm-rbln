@@ -50,8 +50,6 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
-from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
-    RBLNPrefixKVCacheManager)
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
@@ -239,14 +237,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if self.use_optimum_lora:
             self.valid_lora_ids = list(
                 range(len(self.model.rbln_model_config.lora_config.adapters)))
-        if self.enable_prefix_caching:
-            self.prefix_cache_manager = RBLNPrefixKVCacheManager(
-                ob_size=self.vllm_config.additional_config["attn_block_size"],
-                ib_size=self.cache_config.block_size,
-                max_model_len=self.max_model_len,
-                num_ob=self.model.kv_block_adapter.
-                get_available_num_outer_blocks(),
-            )
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -503,7 +493,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_index = self.input_batch.req_id_to_index[req_id]
             prompt_tokens = np.array(scheduled.prompt_token_ids)
             block_ids = scheduled.block_ids[0]
-            num_computed_tokens = scheduled.num_computed_tokens
         elif scheduler_output.scheduled_cached_reqs.num_reqs == 1:
             # Preempted request resumed
             req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
@@ -513,8 +502,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             prompt_tokens = self.input_batch.token_ids_cpu[
                 req_index][:num_token]
             block_ids = scheduler_output.scheduled_cached_reqs.new_block_ids[0]
-            num_computed_tokens = \
-                scheduler_output.scheduled_cached_reqs.num_computed_tokens[0]
         else:
             raise RuntimeError(
                 "Prefill stage request cannot processed with other requests.")
@@ -523,18 +510,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_positions = list(range(seq_len))
         num_blocks = num_blocks_per_req[req_index]
         if self.enable_prefix_caching:
-            block_table, cached_block_table, cached_length = \
-                self.prefix_cache_manager.get_block_table_prefill(
-                    req_id,
-                    scheduler_output.new_computed_blocks,
-                    num_computed_tokens,
-                    block_ids
-                )
             logger.debug(
                 "Request %s is now scheduled. Prompt tokens: %s, "
                 "Already generated tokens: %s, Allocated block(s): %s", req_id,
                 len(self.requests[req_id].prompt_token_ids),
                 len(self.requests[req_id].output_token_ids), block_ids)
+            block_table = scheduler_output.block_table_dict[req_id]
+            cached_block_table = scheduler_output.cached_block_table
+            cached_length = scheduler_output.cached_length
             total_cached_length = sum(cached_length)
             if total_cached_length > 0:
                 prompt_tokens = prompt_tokens[total_cached_length:]
@@ -562,7 +545,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_table = block_table.unsqueeze(0)
         # NOTE The cached_block_table is not unsqueezed for convenience.
         # It is used only for prefill
-
         return input_tokens, input_positions, block_table, cached_block_table, \
         cached_length, batched_mm_inputs, running_request_ids
 
@@ -579,21 +561,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
 
-        if self.enable_prefix_caching:
-            scheduled_cached_reqs = scheduler_output.scheduled_cached_reqs
-            new_blocks_ids = {
-                req_id: new_block_ids[0] if new_block_ids is not None else []
-                for req_id, new_block_ids in zip(
-                    scheduled_cached_reqs.req_ids,
-                    scheduled_cached_reqs.new_block_ids)
-            }
-            num_computed_tokens = {
-                req_id: num_computed_tokens
-                for req_id, num_computed_tokens in zip(
-                    scheduled_cached_reqs.req_ids,
-                    scheduled_cached_reqs.num_computed_tokens)
-            }
-
         req_ids = self.input_batch.req_ids
         for req_id in req_ids:
             req_index = self.input_batch.req_id_to_index[req_id]
@@ -604,15 +571,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
-                block_table = \
-                    self.prefix_cache_manager.get_block_table_decode(
-                        req_id,
-                        num_computed_tokens[req_id],
-                        new_blocks_ids[req_id])
+                block_tables_list.append(
+                    scheduler_output.block_table_dict[req_id])
             else:
                 block_table = block_tables_cpu[req_index]
                 block_table = self.mask_block_table(block_table, num_blocks)
-            block_tables_list.append(block_table)
+                block_tables_list.append(block_table)
             running_request_ids.append(req_id)
 
         input_tokens = torch.tensor(input_tokens)
@@ -631,11 +595,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         The SamplingMetadata is updated and copied to the NPU if there is a
         new/resumed/paused/finished request in the batch.
         """
-        # Update prefix_cache_manager if preemption happened
-        if self.enable_prefix_caching:
-            for req_id in scheduler_output.preempted_req_ids:
-                self.prefix_cache_manager.free_request(req_id, preemption=True)
-
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
             if logger.isEnabledFor(logging.DEBUG):
@@ -651,8 +610,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     "Generated tokens: %s, Freed block(s): %s", req_id,
                     len(self.requests[req_id].prompt_token_ids),
                     len(self.requests[req_id].output_token_ids), block_ids)
-            if self.enable_prefix_caching:
-                self.prefix_cache_manager.free_request(req_id)
+
             self.requests.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
         # NOTE(woosuk): There could be an edge case where finished_req_ids and
