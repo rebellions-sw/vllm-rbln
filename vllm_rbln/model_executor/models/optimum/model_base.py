@@ -208,6 +208,7 @@ class RBLNOptimumDecoderMixin:
         block_tables: torch.Tensor,
         input_block_ids: Optional[torch.Tensor] = None,
         padded_batch_size: Optional[int] = None,
+        dummy_block: Optional[int] = None,
     ):
         assert input_ids.shape[1] == 1
         if input_block_ids is None and padded_batch_size is None:
@@ -233,9 +234,6 @@ class RBLNOptimumDecoderMixin:
                                           block_tables.shape[1],
                                           dtype=block_tables.dtype).fill_(-1)
 
-        unused_blocks = self.available_blocks[
-            ~torch.isin(self.available_blocks, block_tables.flatten())]
-
         mask = torch.ones_like(
             padded_block_tables,
             dtype=torch.bool,
@@ -253,12 +251,15 @@ class RBLNOptimumDecoderMixin:
             padded_block_tables[input_block_ids] = block_tables
             mask[input_block_ids, :] = False
 
-        if unused_blocks.numel() > 0:
+        if torch.any(mask):
+            if dummy_block is not None:
+                unused_blocks = torch.tensor([dummy_block], dtype=block_tables.dtype)
+            else:
+                unused_blocks = self.available_blocks[
+                    ~torch.isin(self.available_blocks, block_tables.flatten())]
             padded_block_tables[mask] = unused_blocks[0]
-        else:
-            assert not torch.any(
-                mask), "No unused blocks available for padding."
 
+        assert (tensor == -1).any(), f"The block table contains -1."
         return padded_input_ids, padded_position_ids, padded_block_tables
 
     def preprocess_for_decoder(
@@ -268,6 +269,7 @@ class RBLNOptimumDecoderMixin:
         input_ids: Optional[torch.Tensor] = None,
         cache_position: Optional[torch.Tensor] = None,
         input_block_ids: Optional[list[int]] = None,
+        dummy_block: Optional[int] = None,
     ):
         padded_batch_size = None
         # 1. Set the type
@@ -298,6 +300,7 @@ class RBLNOptimumDecoderMixin:
                 block_tables,
                 input_block_ids=input_block_ids,
                 padded_batch_size=padded_batch_size,
+                dummy_block=dummy_block,
             )
 
         kwargs = {

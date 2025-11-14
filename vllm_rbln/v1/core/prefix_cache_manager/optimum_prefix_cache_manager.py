@@ -35,6 +35,7 @@ class BlockConfiguration:
     ob_size: int
     ib_size: int
     max_model_len: int
+    max_num_seqs: int
     num_ob: int
 
     def __post_init__(self):
@@ -105,6 +106,12 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
 
     def get_allocated_block(self, block_id: int) -> Optional[RBLNBlock]:
         return self._allocated_blocks.get(block_id)
+    
+    def peek_dummy_block(self) -> int:
+        """
+        Peek the free block without allocating it.
+        """
+        return self._free_blocks[0].block_id
 
 
 class CacheSearchManager:
@@ -228,17 +235,22 @@ class MemoryPoolManager:
 class RBLNPrefixKVCacheManager:
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
-                 num_inner_blocks: int):
+                max_num_seqs: int, num_inner_blocks: int):
         assert ob_size % ib_size == 0, \
             "Outer block size must be a multiple of inner block size"
         num_ob = math.ceil(num_inner_blocks / (ob_size // ib_size))
         self._config = BlockConfiguration(ob_size, ib_size, max_model_len,
-                                          num_ob)
+        max_num_seqs, num_ob)
         self._allocator = RBLNBlockAllocator(num_ob)
         self._mapping_manager = BlockMappingManager()
         self._cache_search_manager = CacheSearchManager(self._config)
         self._memory_pool_manager = MemoryPoolManager(max_model_len, ob_size)
         self._eviction_policy = FIFOEvictionPolicy()
+
+    def is_full_block_available(self) -> bool:
+        blocks_per_seq = math.ceil(self._config.max_model_len / self._config.ob_size)
+        ideal_total = self._config.max_num_seqs * blocks_per_seq
+        return self._config.num_ob >= ideal_total
 
     def _handle_decode_allocation(self, request_id: str, num_new_ob: int,
                                   inner_blocks: list[int]) -> None:
@@ -480,3 +492,27 @@ class RBLNPrefixKVCacheManager:
         self._mapping_manager.set_cached_blocks(cached_blocks,
                                                 allocated_outer_blocks,
                                                 self._config.block_ratio)
+
+    def get_dummy_block(self) -> int:
+        print("is_full_block_available: ", self.is_full_block_available())
+        if not self.is_full_block_available():
+            # NOTE(eunji.lee):
+            # If the kv cache is not a full-block,
+            # there is an additional block kept for padding.
+            # So we utilize it as a dummy block.
+            return self._config.num_ob
+        else:
+            # NOTE(eunji.lee):
+            # If the kv cache is full-block,
+            # we utilize remaining blocks for padding.
+            num_blocks_to_allocate = 1
+            can_allocate = self.can_allocate(num_blocks_to_allocate, 0)
+            if not can_allocate:
+                raise RuntimeError("Failed to allocate a dummy block")
+            self._check_free_blocks(num_blocks_to_allocate)
+            dummy_block = self._allocator.peek_dummy_block()
+            logger.debug(
+                "[PFX] [GET-DUMMY-BLOCK] DUMMY_BLOCK=%d",
+                dummy_block,
+            )
+            return dummy_block

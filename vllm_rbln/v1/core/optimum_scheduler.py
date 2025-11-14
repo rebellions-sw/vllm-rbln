@@ -47,10 +47,15 @@ class RBLNSchedulerOutput(SchedulerOutput):
         List of cached outer block table entries for prefill.
     cached_length: list[int]
         List of cached lengths for each outer block for prefill.
+    dummy_block: int
+        The index of dummy block for padding. It is required
+        if the number of requests is less than the number of batch_size
+        in decode phase.
     """
     block_table_dict: dict[str, torch.Tensor] = None
     cached_block_table: list[int] = field(default_factory=list)
     cached_length: list[int] = field(default_factory=list)
+    dummy_block: Optional[int] = None
 
 
 class RBLNOptimumScheduler(Scheduler):
@@ -137,6 +142,7 @@ class RBLNOptimumScheduler(Scheduler):
             enable_kv_cache_events=False,
             dcp_world_size=1,
             attn_block_size=attn_block_size,
+            max_num_seqs=self.max_num_running_reqs,
         )
 
         self.use_pp = False
@@ -168,6 +174,7 @@ class RBLNOptimumScheduler(Scheduler):
         block_table_dict = {}
         cached_block_table = []
         cached_length = []
+        dummy_block = None
 
         # NOTE The scheduling process is changed like below.
         # (1) vllm-rbln distinguishes
@@ -428,6 +435,13 @@ class RBLNOptimumScheduler(Scheduler):
                 scheduled_new_reqs + scheduled_running_reqs,
                 scheduled_spec_decode_tokens))
 
+        # Calculate the dummy block index.
+        if self.cache_config.enable_prefix_caching:
+            num_prefill_reqs = len(scheduled_new_reqs)
+            num_decode_reqs = len(scheduled_running_reqs)
+            if num_prefill_reqs == 0 and num_decode_reqs > 0 and num_decode_reqs < self.max_num_running_reqs:
+                dummy_block = self.kv_cache_manager.get_dummy_block()
+
         scheduler_output = RBLNSchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=cached_reqs_data,
@@ -447,6 +461,7 @@ class RBLNOptimumScheduler(Scheduler):
             block_table_dict=block_table_dict,
             cached_block_table=cached_block_table,
             cached_length=cached_length,
+            dummy_block=dummy_block,
         )
 
         self._update_after_schedule(scheduler_output)

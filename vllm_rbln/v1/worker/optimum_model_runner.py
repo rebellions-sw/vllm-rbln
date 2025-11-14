@@ -418,7 +418,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             pooling_metadata=None,  # FIXME
             cached_block_tables=cached_block_tables,
             cached_lengths=cached_lengths,
-            is_prompt=is_prefill)
+            is_prompt=is_prefill,
+            dummy_block=scheduler_output.dummy_block)
         return model_input, num_scheduled_tokens
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
