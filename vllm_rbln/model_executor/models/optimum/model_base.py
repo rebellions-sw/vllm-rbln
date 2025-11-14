@@ -253,13 +253,15 @@ class RBLNOptimumDecoderMixin:
 
         if torch.any(mask):
             if dummy_block is not None:
-                unused_blocks = torch.tensor([dummy_block], dtype=block_tables.dtype)
+                unused_blocks = torch.tensor([dummy_block],
+                                             dtype=block_tables.dtype)
             else:
                 unused_blocks = self.available_blocks[
                     ~torch.isin(self.available_blocks, block_tables.flatten())]
             padded_block_tables[mask] = unused_blocks[0]
 
-        assert (tensor == -1).any(), f"The block table contains -1."
+        assert (
+            padded_block_tables == -1).any(), "The block table contains -1."
         return padded_input_ids, padded_position_ids, padded_block_tables
 
     def preprocess_for_decoder(

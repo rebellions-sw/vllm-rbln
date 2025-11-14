@@ -61,7 +61,7 @@ class RBLNKVCacheManager(KVCacheManager):
                 max_num_seqs=max_num_seqs,
                 num_inner_blocks=self.block_pool.num_gpu_blocks - 1,
             )
-    
+
     def free(self, request: Request, preemption: int = False) -> None:
         """Free the blocks allocated for the request.
         """

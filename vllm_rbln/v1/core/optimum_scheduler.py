@@ -437,9 +437,9 @@ class RBLNOptimumScheduler(Scheduler):
 
         # Calculate the dummy block index.
         if self.cache_config.enable_prefix_caching:
-            num_prefill_reqs = len(scheduled_new_reqs)
             num_decode_reqs = len(scheduled_running_reqs)
-            if num_prefill_reqs == 0 and num_decode_reqs > 0 and num_decode_reqs < self.max_num_running_reqs:
+            if num_decode_reqs > 0 and \
+                num_decode_reqs < self.max_num_running_reqs:
                 dummy_block = self.kv_cache_manager.get_dummy_block()
 
         scheduler_output = RBLNSchedulerOutput(

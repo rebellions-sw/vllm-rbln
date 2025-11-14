@@ -106,7 +106,7 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
 
     def get_allocated_block(self, block_id: int) -> Optional[RBLNBlock]:
         return self._allocated_blocks.get(block_id)
-    
+
     def peek_dummy_block(self) -> int:
         """
         Peek the free block without allocating it.
@@ -235,12 +235,12 @@ class MemoryPoolManager:
 class RBLNPrefixKVCacheManager:
 
     def __init__(self, ob_size: int, ib_size: int, max_model_len: int,
-                max_num_seqs: int, num_inner_blocks: int):
+                 max_num_seqs: int, num_inner_blocks: int):
         assert ob_size % ib_size == 0, \
             "Outer block size must be a multiple of inner block size"
         num_ob = math.ceil(num_inner_blocks / (ob_size // ib_size))
         self._config = BlockConfiguration(ob_size, ib_size, max_model_len,
-        max_num_seqs, num_ob)
+                                          max_num_seqs, num_ob)
         self._allocator = RBLNBlockAllocator(num_ob)
         self._mapping_manager = BlockMappingManager()
         self._cache_search_manager = CacheSearchManager(self._config)
@@ -248,7 +248,8 @@ class RBLNPrefixKVCacheManager:
         self._eviction_policy = FIFOEvictionPolicy()
 
     def is_full_block_available(self) -> bool:
-        blocks_per_seq = math.ceil(self._config.max_model_len / self._config.ob_size)
+        blocks_per_seq = math.ceil(self._config.max_model_len /
+                                   self._config.ob_size)
         ideal_total = self._config.max_num_seqs * blocks_per_seq
         return self._config.num_ob >= ideal_total
 
@@ -392,11 +393,12 @@ class RBLNPrefixKVCacheManager:
 
         for block_id in outer_blocks:
             mapping = self._mapping_manager.get_mapping(block_id)
-            if mapping:
+            if preemption:
+                self._evict_block(block_id)
+            else:
+                assert mapping is not None, "Mapping not found for block"
                 mapping.is_active = False
                 mapping.request_id = None
-                if preemption:
-                    self._evict_block(block_id)
 
     def get_matched_outer_blocks(
             self, request_id: str, cached_blocks: list[int],
@@ -494,7 +496,6 @@ class RBLNPrefixKVCacheManager:
                                                 self._config.block_ratio)
 
     def get_dummy_block(self) -> int:
-        print("is_full_block_available: ", self.is_full_block_available())
         if not self.is_full_block_available():
             # NOTE(eunji.lee):
             # If the kv cache is not a full-block,
