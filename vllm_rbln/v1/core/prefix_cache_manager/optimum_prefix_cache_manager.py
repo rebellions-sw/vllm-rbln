@@ -162,8 +162,8 @@ class CacheSearchManager:
                 # TODO specify the hit ratio?
                 logger.debug(
                     "[PFX] [CACHE-HIT] REQUEST=%s | "
-                    "OB=%d %s | "
-                    "IB_TOTAL=%d %s | "
+                    "OB_COUNT=%d OB=%s | "
+                    "IB_COUNT=%d IB=%s | "
                     "OB_TO_IB_MAP=%s", request_id,
                     len(best_match.cached_outer_blocks),
                     best_match.cached_outer_blocks, len(cached_blocks),
@@ -285,8 +285,8 @@ class RBLNPrefixKVCacheManager:
 
         logger.debug(
             "[PFX] [ALLOC] REQUEST=%s | "
-            "OB_COUNT=%d %s | "
-            "IB_COUNT=%d %s",
+            "OB_COUNT=%d OB=%s | "
+            "IB_COUNT=%d IB=%s",
             request_id,
             len(block_ids),
             block_ids,
@@ -341,7 +341,7 @@ class RBLNPrefixKVCacheManager:
                 self._eviction_policy.unregister_block(block_id)
                 logger.debug(
                     "[PFX] [EVICTION] OB=%d | "
-                    "IB=%d %s | "
+                    "IB_COUNT=%d IB=%s | "
                     "FREE_BLOCKS_AFTER=%d", block_id,
                     len(mapping.inner_block_ids), mapping.inner_block_ids,
                     self._allocator.get_free_count())
