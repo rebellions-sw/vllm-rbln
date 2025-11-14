@@ -260,7 +260,7 @@ class RBLNOptimumDecoderMixin:
                     ~torch.isin(self.available_blocks, block_tables.flatten())]
             padded_block_tables[mask] = unused_blocks[0]
 
-        assert (
+        assert not (
             padded_block_tables == -1).any(), "The block table contains -1."
         return padded_input_ids, padded_position_ids, padded_block_tables
 
