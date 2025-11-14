@@ -509,11 +509,8 @@ class RBLNPrefixKVCacheManager:
             num_blocks_to_allocate = 1
             can_allocate = self.can_allocate(num_blocks_to_allocate, 0)
             if not can_allocate:
-                raise RuntimeError("Failed to allocate a dummy block")
+                raise RuntimeError("[PFX] [GET-DUMMY-BLOCK-ERROR] "
+                                   "REASON=failed_to_allocate_dummy_block")
             self._check_free_blocks(num_blocks_to_allocate)
             dummy_block = self._allocator.peek_dummy_block()
-            logger.debug(
-                "[PFX] [GET-DUMMY-BLOCK] DUMMY_BLOCK=%d",
-                dummy_block,
-            )
             return dummy_block
