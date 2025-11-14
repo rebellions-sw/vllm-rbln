@@ -413,7 +413,10 @@ class RBLNPrefixKVCacheManager:
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):
-            for ob_id in result.cached_outer_blocks:
+            # NOTE(eunji.lee):
+            # The tail blocks have to be touched first
+            # to prevent the head blocks from being evicted first.
+            for ob_id in reversed(result.cached_outer_blocks):
                 self._eviction_policy.touch(ob_id)
 
         return result.cached_outer_blocks, result.cached_lengths

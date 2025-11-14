@@ -33,15 +33,21 @@ class SimpleEvictionPolicy:
         """Unregister a block (called when block is deallocated)"""
         pass
 
+    def get_inactive_block_ids(
+            self, mapping_manager: BlockMappingManager) -> set[int]:
+        """Get the list of inactive block IDs in reverse order."""
+        inactive_mappings = mapping_manager.get_inactive_mappings()
+        inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
+        return set(inactive_block_ids)
+
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
                                    count: int) -> list[int]:
         """Select blocks for eviction."""
-        inactive_mappings = mapping_manager.get_inactive_mappings()
-        inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
+        inactive_block_ids = self.get_inactive_block_ids(mapping_manager)
         if len(inactive_block_ids) < count:
             return []
 
-        return inactive_block_ids[:count]
+        return list(inactive_block_ids)[:count]
 
 
 class FIFOEvictionPolicy(SimpleEvictionPolicy):
@@ -65,9 +71,8 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         # How about exclude the cached blocks from eviction?
         # AS-IS: Eviction -> Cache check -> Allocation
         # TO-DO: Cache check -> Eviction -> Allocation (more complicated)
-        inactive_mappings = mapping_manager.get_inactive_mappings()
-        inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
-
+        inactive_block_ids = self.get_inactive_block_ids(mapping_manager)
+        # Sort by allocation order (FIFO: first allocated blocks first)
         evictable_blocks = [
             block_id for block_id in self._allocation_order
             if block_id in inactive_block_ids
@@ -101,20 +106,12 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
 
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
                                    count: int) -> list[int]:
-        inactive_mappings = mapping_manager.get_inactive_mappings()
-        inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
-
-        untouched_blocks = [
-            block_id for block_id in inactive_block_ids
-            if block_id not in self._access_order
-        ]
-
-        touched_blocks = [
+        inactive_block_ids = self.get_inactive_block_ids(mapping_manager)
+        evictable_blocks = [
             block_id for block_id in self._access_order
             if block_id in inactive_block_ids
         ]
 
-        evictable_blocks = untouched_blocks + touched_blocks
         if len(evictable_blocks) < count:
             return []
         return evictable_blocks[:count]
