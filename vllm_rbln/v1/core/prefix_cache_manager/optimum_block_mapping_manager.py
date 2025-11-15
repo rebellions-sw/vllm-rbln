@@ -125,7 +125,7 @@ class BlockMappingManager:
         inner_block_ids = self.get_inner_blocks_for_outer(outer_block_id)
         logger.debug(
             "[PFX] [MAPPING-REMOVE] OB=%d | "
-            "IB_COUNT=%d %s | "
+            "IB_COUNT=%d IB=%s | "
             "CACHED_IB_COUNT=%d %s",
             outer_block_id, len(inner_block_ids), inner_block_ids,
             len(cached_inner_block_ids), cached_inner_block_ids)
@@ -247,7 +247,7 @@ class BlockMappingManager:
         matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
         logger.debug(
             "[PFX] [MAPPING-SEARCH] QUERY_IB=%d | "
-            "SEGMENT_SIZE=%d %s | "
+            "SEGMENT_SIZE=%d SEGMENT=%s | "
             "CANDIDATE_OBS=%s",
             cached_ib_segment[0] if cached_ib_segment else -1,
             len(cached_ib_segment), cached_ib_segment,
