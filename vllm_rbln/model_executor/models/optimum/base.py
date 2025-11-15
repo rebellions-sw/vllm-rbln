@@ -48,6 +48,7 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     pooling_metadata: Optional[PoolingMetadata] = None  # for V1
     lora_requests: Optional[List[LoRARequest]] = None  # for V0
     lora_mapping: Optional["LoRAMapping"] = None  # for V0
+    dummy_block: Optional[int] = None  # for prefix caching
 
     def as_broadcastable_tensor_dict(
             self) -> Dict[str, Union[int, torch.Tensor]]:
