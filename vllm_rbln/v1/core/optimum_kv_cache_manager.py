@@ -37,6 +37,7 @@ class RBLNKVCacheManager(KVCacheManager):
         enable_kv_cache_events: bool = False,
         dcp_world_size: int = 1,
         attn_block_size: Optional[int] = None,
+        max_num_seqs: int = 1,
     ) -> None:
         """
         RBLNKVCacheManager = KVCacheManager + PrefixKVCacheManager.
@@ -53,15 +54,13 @@ class RBLNKVCacheManager(KVCacheManager):
             dcp_world_size,
         )
         if enable_caching:
-            self.attn_block_size = attn_block_size
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
-                ob_size=self.attn_block_size,
+                ob_size=attn_block_size,
                 ib_size=self.block_size,
                 max_model_len=self.max_model_len,
+                max_num_seqs=max_num_seqs,
                 num_inner_blocks=self.block_pool.num_gpu_blocks - 1,
             )
-        else:
-            self.attn_block_size = self.block_size
 
     def free(self, request: Request, preemption: int = False) -> None:
         """Free the blocks allocated for the request.
@@ -212,6 +211,9 @@ class RBLNKVCacheManager(KVCacheManager):
 
     def get_block_table(self, request_id: str) -> torch.Tensor:
         return self.prefix_cache_manager.get_blocks(request_id)
+
+    def get_dummy_block(self) -> int:
+        return self.prefix_cache_manager.get_dummy_block()
 
     def _set_prefix_cached_blocks(
         self,
