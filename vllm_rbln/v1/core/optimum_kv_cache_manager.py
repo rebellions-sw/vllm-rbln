@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from typing import Optional
-import math
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.kv_cache_interface import KVCacheConfig
@@ -65,7 +64,6 @@ class RBLNKVCacheManager(KVCacheManager):
     def free(self, request: Request, preemption: int = False) -> None:
         """Free the blocks allocated for the request.
         """
-        print(f"@@ free request: {request.request_id}")
         if self.enable_caching:
             self.prefix_cache_manager.free_request(request.request_id,
                                                    preemption=preemption)
@@ -141,8 +139,7 @@ class RBLNKVCacheManager(KVCacheManager):
             ):
             # Cannot allocate new outer blocks for prefix caching
             return None
-        print(f"## num_free_blocks: {self.block_pool.get_num_free_blocks()}") 
-        print(f"## num_blocks_to_allocate: {num_blocks_to_allocate}")
+
         # TODO (eunji): The touch function
         # increases the ref_cnt. We don't need ref_cnt
         # because we don't reuse the provided computed blocks
