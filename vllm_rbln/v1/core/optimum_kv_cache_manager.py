@@ -124,15 +124,16 @@ class RBLNKVCacheManager(KVCacheManager):
         # after the touch function is called
         # We need to check the free blocks will be enough
         # after the touch function is called
-        removed_blocks = 0
-        for blocks_per_group in new_computed_block_list:
-            for block in blocks_per_group:
-                if block.ref_cnt == 0 and not block.is_null:
-                    removed_blocks += 1
+        if self.enable_caching:
+            removed_blocks = 0
+            for blocks_per_group in new_computed_block_list:
+                for block in blocks_per_group:
+                    if block.ref_cnt == 0 and not block.is_null:
+                        removed_blocks += 1
 
-        if num_blocks_to_allocate + removed_blocks > \
-            self.block_pool.get_num_free_blocks():
-            return None
+            if num_blocks_to_allocate + removed_blocks > \
+                self.block_pool.get_num_free_blocks():
+                return None
 
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
