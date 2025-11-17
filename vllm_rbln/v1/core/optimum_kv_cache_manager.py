@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from typing import Optional
+
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.kv_cache_interface import KVCacheConfig
@@ -128,10 +129,11 @@ class RBLNKVCacheManager(KVCacheManager):
             for block in blocks_per_group:
                 if block.ref_cnt == 0 and not block.is_null:
                     removed_blocks += 1
-        
-        if num_blocks_to_allocate + removed_blocks > self.block_pool.get_num_free_blocks():
+
+        if num_blocks_to_allocate + removed_blocks > \
+            self.block_pool.get_num_free_blocks():
             return None
-                    
+
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
                     num_blocks_to_allocate,
