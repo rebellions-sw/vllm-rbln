@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from typing import Optional
-
+import math
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.kv_cache_interface import KVCacheConfig
@@ -65,6 +65,7 @@ class RBLNKVCacheManager(KVCacheManager):
     def free(self, request: Request, preemption: int = False) -> None:
         """Free the blocks allocated for the request.
         """
+        print(f"@@ free request: {request.request_id}")
         if self.enable_caching:
             self.prefix_cache_manager.free_request(request.request_id,
                                                    preemption=preemption)
@@ -118,6 +119,21 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new blocks
             return None
 
+        # Edge case
+        # removed_blocks refers the blocks
+        # that are removed from the free blocks
+        # after the touch function is called
+        # We need to check the free blocks will be enough
+        # after the touch function is called
+        removed_blocks = 0
+        for blocks_per_group in new_computed_block_list:
+            for block in blocks_per_group:
+                if block.ref_cnt == 0 and not block.is_null:
+                    removed_blocks += 1
+        
+        if num_blocks_to_allocate + removed_blocks > self.block_pool.get_num_free_blocks():
+            return None
+                    
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
                     num_blocks_to_allocate,
@@ -125,7 +141,8 @@ class RBLNKVCacheManager(KVCacheManager):
             ):
             # Cannot allocate new outer blocks for prefix caching
             return None
-
+        print(f"## num_free_blocks: {self.block_pool.get_num_free_blocks()}") 
+        print(f"## num_blocks_to_allocate: {num_blocks_to_allocate}")
         # TODO (eunji): The touch function
         # increases the ref_cnt. We don't need ref_cnt
         # because we don't reuse the provided computed blocks
