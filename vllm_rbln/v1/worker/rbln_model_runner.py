@@ -1372,6 +1372,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         prefill_seq_len = (self.scheduler_config.max_num_batched_tokens
                            if self.scheduler_config.chunked_prefill_enabled
                            else self.scheduler_config.max_model_len)
+        num_kv_cache_groups = len(self.kv_cache_config.kv_cache_groups)
         dummy_prefill_schedule = SchedulerOutput(
             scheduled_new_reqs=[
                 NewRequestData(
@@ -1382,7 +1383,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     mm_positions=[],
                     sampling_params=SamplingParams(temperature=0.0),
                     pooling_params=None,
-                    block_ids=([0], ),
+                    block_ids=([0], ) * num_kv_cache_groups,
                     num_computed_tokens=0,
                     lora_request=None,
                 )
@@ -1392,7 +1393,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             total_num_scheduled_tokens=prefill_seq_len,
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[0],
+            num_common_prefix_blocks=[0] * num_kv_cache_groups,
             finished_req_ids=set(),
             free_encoder_mm_hashes=[],
             structured_output_request_ids={},
@@ -1405,7 +1406,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             total_num_scheduled_tokens=0,
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[1],
+            num_common_prefix_blocks=[1] * num_kv_cache_groups,
             finished_req_ids={
                 "dummy_prefill",
             },
@@ -1435,7 +1436,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     mm_positions=[],
                     sampling_params=SamplingParams(temperature=0.0),
                     pooling_params=None,
-                    block_ids=([0] * decode_max_num_blocks, ),
+                    block_ids=([0] * decode_max_num_blocks, ) *
+                    num_kv_cache_groups,
                     num_computed_tokens=decode_max_seq_len - 1,
                     lora_request=None,
                 ) for i in range(decode_max_batch_size)
@@ -1448,7 +1450,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             total_num_scheduled_tokens=decode_max_batch_size,
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[0],
+            num_common_prefix_blocks=[0] * num_kv_cache_groups,
             finished_req_ids=set(),
             free_encoder_mm_hashes=[],
             structured_output_request_ids={},
@@ -1461,7 +1463,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             total_num_scheduled_tokens=0,
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[1],
+            num_common_prefix_blocks=[1] * num_kv_cache_groups,
             finished_req_ids=set(f"dummy_decode_{i}"
                                  for i in range(decode_max_batch_size)),
             free_encoder_mm_hashes=[],

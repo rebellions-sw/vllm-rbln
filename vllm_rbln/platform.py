@@ -279,3 +279,7 @@ class RblnPlatform(Platform):
                              "use_sliding_window", True):
                 cls._disable_prefix_caching(vllm_config,
                                             "sliding window models")
+
+    @classmethod
+    def support_hybrid_kv_cache(cls) -> bool:
+        return True
