@@ -42,8 +42,8 @@ dependencies = [
     "vllm==0.10.2",
     "optimum-rbln>=0.9.2",
     "numpy<2",
-    "rebel-compiler==0.9.2.post1",
-    "triton-rbln>=3.2.0",
+    "rebel-compiler==0.9.3.dev120+gd2b492be",
+    "triton-rbln==3.2.0+rbln.git617682d1",
 ]
 
 [project.optional-dependencies]
