@@ -37,6 +37,7 @@ from .qwen_vl import (  # noqa: F401
 from .sliding_window import (  # noqa: F401
     RBLNOptimumSlidingWindowAttentionForCausalLM)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
+from .paligemma import RBLNOptimumPaliGemmaForConditionalGeneration  # noqa: F401
 
 logger = init_logger(__name__)
 

@@ -56,6 +56,7 @@ _RBLN_MULTIMODAL_MODELS = {
                                         "RBLNWhisperForConditionalGeneration"),
     "LlavaForConditionalGeneration": ("llava",
                                       "RBLNLlavaForConditionalGeneration"),
+    "PaliGemmaForConditionalGeneration": ("paligemma", "RBLNPaliGemmaForConditionalGeneration"),
 }
 
 _RBLN_EMBEDDING_MODELS = {
