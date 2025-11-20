@@ -83,7 +83,7 @@ async def main(
 
 def entry_point(
     num_input_prompt: int = 10,
-    model_id: str = "/home/eunji.lee/poc_models/paligemma/paligemma2_b2",
+    model_id: str = "./paligemma_b4",
 ):
     asyncio.run(main(
         num_input_prompt=num_input_prompt,
