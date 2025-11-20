@@ -23,8 +23,7 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
                                               CommonAttentionMetadata)
-from vllm.v1.kv_cache_interface import (AttentionSpec, FullAttentionSpec,
-                                        SlidingWindowSpec)
+from vllm.v1.kv_cache_interface import AttentionSpec
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput

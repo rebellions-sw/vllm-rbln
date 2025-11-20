@@ -163,6 +163,9 @@ class RblnPlatform(Platform):
                     RblnPlatform.device_type))
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
+
+            cls.disable_unsupported_prefix_caching(vllm_config)
+
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":

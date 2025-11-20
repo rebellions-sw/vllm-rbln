@@ -60,7 +60,7 @@ from vllm.v1.kv_cache_interface import (AttentionSpec,
                                         EncoderOnlyAttentionSpec,
                                         FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheSpec,
-                                        MambaSpec, SlidingWindowSpec)
+                                        MambaSpec)
 # yapf: enable
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              LogprobsLists, LogprobsTensors, ModelRunnerOutput,
@@ -84,6 +84,7 @@ from vllm.v1.worker.utils import (AttentionGroup, MultiModalBudget,
 import vllm_rbln.rbln_envs as envs
 import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -2402,9 +2403,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             # the attention backends
             if attn_module.attn_type == AttentionType.DECODER:
                 if attn_module.sliding_window is not None:
-                    assert attn_module.sliding_window == block_size, \
-                        "Only sliding window equal to block size is supported."
-                    kv_cache_spec[layer_name] = SlidingWindowSpec(
+                    kv_cache_spec[layer_name] = RBLNSlidingWindowSpec(
                         block_size=block_size,
                         num_kv_heads=attn_module.num_kv_heads,
                         head_size=attn_module.head_size,
