@@ -42,8 +42,7 @@ dependencies = [
     "vllm==0.10.2",
     "optimum-rbln>=0.9.2",
     "numpy<2",
-    "rebel-compiler==0.9.3.dev120+gd2b492be",
-    "triton-rbln==3.2.0+rbln.git617682d1",
+    "rebel-compiler==0.9.2.post1"
 ]
 
 [project.optional-dependencies]
@@ -63,6 +62,7 @@ dev = [
     "huggingface_hub",
     "fire",
 ]
+experimental = []
 
 [project.urls]
 Homepage="https://rebellions.ai"
@@ -154,6 +154,10 @@ plugins.md033.enabled = false # inline-html
 plugins.md024.allow_different_nesting = true # no-duplicate-headers
 
 [tool.uv]
+override-dependencies = [
+    "rebel-compiler==0.9.3.dev120+gd2b492be ; extra == 'experimental'",
+    "triton-rbln==3.2.0+rbln.git617682d1 ; extra == 'experimental'",
+]
 # Primary package index
 index-url = "https://pypi.org/simple"
 
