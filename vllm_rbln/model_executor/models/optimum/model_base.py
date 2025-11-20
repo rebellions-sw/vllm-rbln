@@ -31,7 +31,7 @@ from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
-from optimum.rbln.configuration_utils import RBLNModelConfig
+
 logger = init_logger(__name__)
 
 
@@ -146,7 +146,8 @@ class RBLNOptimumModelBase(nn.Module):
         if isinstance(self.model_config.model,
                       (str, Path)) and os.path.exists(self.model_config.model):
             model_path = Path(self.model_config.model)
-            if model_path.is_dir() and any(model_path.glob('rbln_config.json')):
+            if model_path.is_dir() and any(
+                    model_path.glob('rbln_config.json')):
                 compiled_path = self.model_config.model
             else:
                 compiled_path = None
@@ -283,7 +284,6 @@ class RBLNOptimumDecoderMixin:
         if is_prompt:
             block_tables = block_tables.squeeze(0)
             padded_batch_size = 1
-            attention_mask = None
         else:
             if input_block_ids is None:
                 padded_batch_size = self.decoder_batch_size
@@ -302,16 +302,11 @@ class RBLNOptimumDecoderMixin:
                 padded_batch_size=padded_batch_size,
                 dummy_block=dummy_block,
             )
-            attention_mask = self.generate_attention_mask(padded_batch_size,
-                self.rbln_model_config.language_model,
-                cache_position
-            )
         kwargs = {
             "block_tables": block_tables,
             "padded_batch_size": padded_batch_size,
             "input_ids": input_ids,
             "cache_position": cache_position,
-            "attention_mask": attention_mask if attention_mask is not None else None,
         }
         return kwargs
 
@@ -372,21 +367,3 @@ class RBLNOptimumDecoderMixin:
                                         decoder_batch_sizes: tuple):
         index = bisect.bisect_left(decoder_batch_sizes, original_batch_size)
         return decoder_batch_sizes[index]
-
-    def generate_attention_mask(self, padded_batch_size: int, rbln_model_config: RBLNModelConfig, cache_position: torch.Tensor) -> torch.Tensor:
-        # FIXME Is it required from now on?
-        # Then the rbln_model_config is handled from each model code.
-        max_seq_len = rbln_model_config.max_seq_len
-        if rbln_model_config.use_attention_mask:
-            if rbln_model_config.attn_mask_type == "2D":
-                seq_range = torch.arange(max_seq_len).unsqueeze(0) # (1, max_seq_len,)
-                attention_mask = (seq_range <= cache_position).to(rbln_model_config.torch_dtype)
-            else:
-                attention_mask = torch.zeros(padded_batch_size, 1,
-                    rbln_model_config.prefill_chunk_size,
-                    rbln_model_config.max_seq_len,
-                    dtype=rbln_model_config.torch_dtype
-                )
-        else:
-            attention_mask = None
-        return attention_mask

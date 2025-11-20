@@ -1,19 +1,34 @@
-from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
-from vllm_rbln.model_executor.models.optimum.gemma3 import RBLNGemma3MultiModalProcessor, RBLNOptimumGemma3ForConditionalGeneration, Gemma3ProcessingInfo, Gemma3DummyInputsBuilder
-from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.config import VllmConfig
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 from typing import Any, Optional
-from vllm.model_executor.models.utils import flatten_bn
-from vllm.model_executor.models.paligemma import PaliGemmaImageInputs, PaliGemmaImagePixelInputs, PaliGemmaImageEmbeddingInputs
 
-from .base import ModelInputForRBLN
-from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 import torch
-from vllm.logger import init_logger
-
 import vllm.envs as envs
+from optimum.rbln.configuration_utils import RBLNModelConfig
+from vllm.config import VllmConfig
+from vllm.model_executor.models.paligemma import (
+    PaliGemmaImageEmbeddingInputs, PaliGemmaImageInputs,
+    PaliGemmaImagePixelInputs)
+from vllm.model_executor.models.utils import flatten_bn
+
+from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
+
+from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
+
+
 class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
-                                                  RBLNOptimumDecoderMixin):
+                                                   RBLNOptimumDecoderMixin):
 
     def __init__(
         self,
@@ -68,10 +83,18 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
         else:
             padded_batch_size = kwargs.pop("padded_batch_size",
                                            self.decoder_batch_size)
-            self.model.language_model.decoder = self.model.language_model.decoders[
-                padded_batch_size]
-            # FIXME position_ids, local_block_tables are required?
-            logits = self.model.language_model.decoder(**kwargs).logits
+            self.model.language_model.decoder = \
+                self.model.language_model.decoders[padded_batch_size]
+            # NOTE(eunji.lee): attention_mask, position_ids are required
+            # to paligemma in optimum-rbln.
+            # They depends on the version of gemma in paligemma.
+            attention_mask, position_ids = self.generate_params_for_gemma(
+                padded_batch_size, self.model.rbln_config.language_model,
+                kwargs["cache_position"])
+            logits = self.model.language_model.decoder(
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                **kwargs).logits
         if not is_prompt:
             logits = logits[:request_nums]
         return logits
@@ -95,7 +118,7 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         config = self.vllm_config.model_config.hf_config
-    
+
         if pixel_values is None and image_embeds is None:
             return None
 
@@ -119,3 +142,28 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
             )
 
         raise AssertionError("This line should be unreachable.")
+
+    def generate_params_for_gemma(
+            self, padded_batch_size: int, rbln_model_config: RBLNModelConfig,
+            cache_position: torch.Tensor) -> torch.Tensor:
+        """
+        Generate attention mask and position ids for gemma.
+        """
+        max_seq_len = rbln_model_config.max_seq_len
+        if rbln_model_config.use_attention_mask:
+            if rbln_model_config.attn_mask_type == "2D":
+                seq_range = torch.arange(max_seq_len).unsqueeze(
+                    0)  # (1, max_seq_len,)
+                attention_mask = (seq_range <= cache_position).to(
+                    rbln_model_config.torch_dtype)
+            else:
+                attention_mask = torch.zeros(
+                    padded_batch_size,
+                    1,
+                    rbln_model_config.prefill_chunk_size,
+                    rbln_model_config.max_seq_len,
+                    dtype=rbln_model_config.torch_dtype)
+        else:
+            attention_mask = None
+        position_ids = cache_position.clone()
+        return attention_mask, position_ids

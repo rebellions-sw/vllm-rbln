@@ -15,18 +15,14 @@
 import asyncio
 
 import fire
-from datasets import load_dataset
-from transformers import AutoProcessor, AutoTokenizer
-from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 import requests
 from PIL import Image
+from transformers import AutoTokenizer
+from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
-def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild",
-                           split="train").shuffle(seed=42)
-    processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
-    # images = [[dataset[i]["image"]] for i in range(batch_size)]
-    # texts = [dataset[i]["question"] for i in range(batch_size)]
+
+def generate_prompts(batch_size: int):
+    # FIXME: add more prompts and images
     texts = ["caption es"]
     url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg?download=true"
     image = Image.open(requests.get(url, stream=True).raw)

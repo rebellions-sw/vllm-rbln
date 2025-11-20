@@ -22,6 +22,7 @@ _RBLN_GENERATION_MODELS: dict[str, tuple[str, str]] = {
         "RBLNLlamaForCausalLM",
     ),
     "GemmaForCausalLM": ("gemma", "RBLNGemmaForCausalLM"),
+    "Gemma2ForCausalLM": ("gemma2", "RBLNGemma2ForCausalLM"),
     "PhiForCausalLM": ("phi", "RBLNPhiForCausalLM"),
     "GPT2LMHeadModel": ("gpt2", "RBLNGPT2LMHeadModel"),
     "MidmLMHeadModel": ("midm", "RBLNMidmLMHeadModel"),
@@ -42,8 +43,8 @@ _RBLN_ENCODER_DECODER_MODELS: dict[str, tuple[str, str]] = {
 _RBLN_MULTIMODAL_MODELS = {
     "LlavaNextForConditionalGeneration":
     ("llava_next", "RBLNLlavaNextForConditionalGeneration"),
-    "Qwen2VLForConditionalGeneration":
-    ("qwen2_vl", "RBLNQwen2VLForConditionalGeneration"),
+    "Qwen2VLForConditionalGeneration": ("qwen2_vl",
+                                        "RBLNQwen2VLForConditionalGeneration"),
     "Qwen2_5_VLForConditionalGeneration":
     ("qwen2_5_vl", "RBLNQwen2_5_VLForConditionalGeneration"),
     "Idefics3ForConditionalGeneration":
@@ -56,7 +57,8 @@ _RBLN_MULTIMODAL_MODELS = {
                                         "RBLNWhisperForConditionalGeneration"),
     "LlavaForConditionalGeneration": ("llava",
                                       "RBLNLlavaForConditionalGeneration"),
-    "PaliGemmaForConditionalGeneration": ("paligemma", "RBLNPaliGemmaForConditionalGeneration"),
+    "PaliGemmaForConditionalGeneration":
+    ("paligemma", "RBLNPaliGemmaForConditionalGeneration"),
 }
 
 _RBLN_EMBEDDING_MODELS = {

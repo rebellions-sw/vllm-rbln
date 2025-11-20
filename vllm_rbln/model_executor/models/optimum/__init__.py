@@ -31,13 +31,14 @@ from .idefics3 import RBLNOptimumIdefics3ForConditionalGeneration  # noqa: F401
 from .llava import RBLNOptimumLlavaForConditionalGeneration  # noqa: F401
 from .llava_next import (  # noqa: F401
     RBLNOptimumLlavaNextForConditionalGeneration)
+from .paligemma import (  # noqa: F401
+    RBLNOptimumPaliGemmaForConditionalGeneration)
 from .qwen_vl import (  # noqa: F401
     RBLNOptimumQwen2_5_VLForConditionalGeneration,
     RBLNOptimumQwen2VLForConditionalGeneration)
 from .sliding_window import (  # noqa: F401
     RBLNOptimumSlidingWindowAttentionForCausalLM)
 from .whisper import RBLNOptimumWhisperForConditionalGeneration  # noqa: F401
-from .paligemma import RBLNOptimumPaliGemmaForConditionalGeneration  # noqa: F401
 
 logger = init_logger(__name__)
 
