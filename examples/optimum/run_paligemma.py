@@ -61,7 +61,7 @@ async def main(
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    inputs = generate_prompts(num_input_prompt, model_id)
+    inputs = generate_prompts(num_input_prompt)
 
     futures = []
     for request_id, request in enumerate(inputs):
