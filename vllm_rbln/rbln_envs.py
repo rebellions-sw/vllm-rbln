@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_COMPILE_STRICT_MODE: bool = False
     VLLM_RBLN_TP_SIZE: int = 1
     VLLM_RBLN_SAMPLER: bool = True
-    VLLM_RBLN_ENABLE_WARM_UP: bool = True
+    VLLM_RBLN_ENABLE_WARM_UP: bool = False
     VLLM_RBLN_USE_VLLM_MODEL: bool = False
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
     VLLM_RBLN_ENFORCE_MODEL_FP32: bool = False
@@ -51,7 +51,7 @@ environment_variables = {
      ("true", "1")),
     # Enable warmup
     "VLLM_RBLN_ENABLE_WARM_UP":
-    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "True").lower() in
+    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in
      ("true", "1")),
     # If true, it uses the natively compiled vLLM model
     # rather than the optimum-rbln compiled model.

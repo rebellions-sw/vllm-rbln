@@ -81,7 +81,7 @@ class RblnPlatform(Platform):
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        return "vllm_rbln.rbln_communicator.RblnCommunicator"  # noqa
+        return "vllm_rbln.distributed.rbln_communicator.RblnCommunicator"  # noqa
 
     @classmethod
     def use_all_gather(cls) -> bool:
