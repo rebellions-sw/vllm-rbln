@@ -205,6 +205,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
             model_config)
+        if envs.VLLM_RBLN_DISABLE_MM:
+            self.supports_mm_inputs = False
 
         if self.model_config.is_encoder_decoder:
             # Maximum length of the encoder input, only for encoder-decoder
