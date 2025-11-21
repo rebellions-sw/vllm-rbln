@@ -14,8 +14,9 @@
 
 import torch
 import torch.distributed as dist
+from vllm.distributed.device_communicators.base_device_communicator import (
+    DeviceCommunicatorBase)
 
-from vllm.distributed.device_communicators.base_device_communicator import DeviceCommunicatorBase
 
 # RBLN custom communicator (vllm/distributed/device_communicators/...)
 class RblnCommunicator(DeviceCommunicatorBase):
@@ -39,7 +40,8 @@ class RblnCommunicator(DeviceCommunicatorBase):
                 # Convert negative dim to positive.
                 dim += input_.dim()
 
-            output_tensor = output_tensor.reshape((self.world_size, ) + input_size)
+            output_tensor = output_tensor.reshape((self.world_size, ) +
+                                                  input_size)
             if dim == 2:
                 # (0,1,2,3) -> movedim(0, 2) -> (1,2,0,3)
                 output_tensor = output_tensor.permute(1, 2, 0, 3)
@@ -47,7 +49,7 @@ class RblnCommunicator(DeviceCommunicatorBase):
                 # (0,1,2) -> movedim(0, 1) -> (1,0,2)
                 output_tensor = output_tensor.permute(1, 0, 2)
             else:
-                assert False, f"not yet implemented dim = {dim}, input_dim={input_.dim()}, output_dim={output_tensor.dim()}"
+                raise AssertionError("RBLN all_gather move_dim=1, 2, NYI")
             output_tensor = output_tensor.reshape(input_size[:dim] +
                                                   (self.world_size *
                                                    input_size[dim], ) +
@@ -55,9 +57,10 @@ class RblnCommunicator(DeviceCommunicatorBase):
         elif dim == 0:
             pass
         else:
-            assert False, "RBLN all_gather dim!=0 && dim!=-1, not yet implemented"
+            raise AssertionError("RBLN all_gather dim!=0, dim!=-1, NYI")
             # Reshape
-            output_tensor = output_tensor.reshape((self.world_size, ) + input_size)
+            output_tensor = output_tensor.reshape((self.world_size, ) +
+                                                  input_size)
             output_tensor = output_tensor.movedim(0, dim)
             output_tensor = output_tensor.reshape(input_size[:dim] +
                                                   (self.world_size *
@@ -65,4 +68,3 @@ class RblnCommunicator(DeviceCommunicatorBase):
                                                   input_size[dim + 1:])
 
         return output_tensor
-

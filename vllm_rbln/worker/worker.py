@@ -618,7 +618,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         if self.parallel_config.data_parallel_size > 1:
             world_size = self.parallel_config.world_size
-            rank = self.parallel_config.data_parallel_rank * world_size + self.local_rank
+            rank = self.parallel_config.data_parallel_rank * world_size
+            rank += self.local_rank
             world_size = self.parallel_config.world_size_across_dp
             os.environ['LOCAL_RANK'] = str(rank)
             os.environ['WORLD_SIZE'] = str(world_size)

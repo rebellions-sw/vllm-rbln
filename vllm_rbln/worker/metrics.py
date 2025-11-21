@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ruff: noqa: E501
+
 import atexit
 from dataclasses import dataclass, field
 
@@ -31,7 +33,16 @@ class StepMetrics:
         self.latencies.append(latency)
         self.token_counts.append(token_count)
 
-    def _without_outlier(self, values: list[float | int]) -> list[float | int]:
+    def _without_outlier_f(self, values: list[float]) -> list[float]:
+        """Return values excluding one outlier (max absolute deviation)."""
+        if len(values) <= 1:
+            return values
+        mean = sum(values) / len(values)
+        deviations = [abs(v - mean) for v in values]
+        max_idx = deviations.index(max(deviations))
+        return [v for i, v in enumerate(values) if i != max_idx]
+
+    def _without_outlier_i(self, values: list[int]) -> list[int]:
         """Return values excluding one outlier (max absolute deviation)."""
         if len(values) <= 1:
             return values
@@ -42,15 +53,18 @@ class StepMetrics:
 
     def get_avg_latency(self, ignore_outlier: bool = True) -> float:
         """Get average latency in milliseconds, optionally ignoring one outlier."""
-        values = self._without_outlier(self.latencies) if ignore_outlier else self.latencies
+        values = self._without_outlier_f(
+            self.latencies) if ignore_outlier else self.latencies
         return sum(values) / len(values) * 1000 if values else 0.0
 
     def get_avg_throughput(self, ignore_outlier: bool = True) -> float:
         """Get average throughput in tokens/second, optionally ignoring one outlier."""
         if not self.latencies or not self.token_counts:
             return 0.0
-        latencies = self._without_outlier(self.latencies) if ignore_outlier else self.latencies
-        tokens = self._without_outlier(self.token_counts) if ignore_outlier else self.token_counts
+        latencies = self._without_outlier_f(
+            self.latencies) if ignore_outlier else self.latencies
+        tokens = self._without_outlier_i(
+            self.token_counts) if ignore_outlier else self.token_counts
         total_time = sum(latencies)
         total_tokens = sum(tokens)
         return total_tokens / total_time if total_time > 0 else 0.0

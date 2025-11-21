@@ -1,18 +1,33 @@
-#!/usr/bin/env python3
-import os
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ruff: noqa
+
 import argparse
+import hashlib
 import json
-from multiprocessing import get_context
+import os
 from functools import partial
+from multiprocessing import get_context
 
 import numpy as np
 import torch
-import hashlib
 
 # ========= Tunables =========
 EPSILON = 1e-1 * 5
-PRINT_VECT_SNIPPET = True   # show a short head/tail snippet under "just print logits"
-SNIPPET_ELEMS = 6           # how many head/tail elements to show (total = SNIPPET_ELEMS*2)
+PRINT_VECT_SNIPPET = True  # show a short head/tail snippet under "just print logits"
+SNIPPET_ELEMS = 6  # how many head/tail elements to show (total = SNIPPET_ELEMS*2)
 # ============================
 
 DEFAULT_PROMPTS = [
@@ -23,12 +38,20 @@ DEFAULT_PROMPTS = [
 ]
 
 # ---------- CLI ----------
-parser = argparse.ArgumentParser(description="CPU vs RBLN parity runner (separate processes; clean envs).")
-parser.add_argument('--model', type=str, default="llama3.2-1b",
+parser = argparse.ArgumentParser(
+    description="CPU vs RBLN parity runner (separate processes; clean envs).")
+parser.add_argument('--model',
+                    type=str,
+                    default="llama3.2-1b",
                     choices=[
-                        "llama3.2-1b", "llama3-8b", "qwen3-1.7b",
-                        "qwen1.5-moe-15b", "qwen3-moe-30b", "qwen3-moe-235b",
-                        "deepseek-v2", "llama4-maverick",
+                        "llama3.2-1b",
+                        "llama3-8b",
+                        "qwen3-1.7b",
+                        "qwen1.5-moe-15b",
+                        "qwen3-moe-30b",
+                        "qwen3-moe-235b",
+                        "deepseek-v2",
+                        "llama4-maverick",
                     ])
 parser.add_argument('--batch', type=int, default=1, help="Batch size.")
 parser.add_argument('--tp', type=int, default=1)
@@ -40,41 +63,85 @@ parser.add_argument('--max-model-len', type=int, default=40 * 1024)
 parser.add_argument('--block-size-cpu', type=int, default=128)
 parser.add_argument('--block-size-rbln', type=int, default=8 * 1024)
 parser.add_argument('--max-batched', type=int, default=128)
-parser.add_argument('--prompts', type=str, nargs='*', default=None,
-                    help="Explicit list of prompts. If omitted, DEFAULT_PROMPTS are used/cycled.")
-parser.add_argument('--num-prompts', type=int, default=None,
-                    help="Number of prompts to use (cycles DEFAULT_PROMPTS if not enough). "
-                         "If --prompts is provided, trims to first N.")
+parser.add_argument(
+    '--prompts',
+    type=str,
+    nargs='*',
+    default=None,
+    help=
+    "Explicit list of prompts. If omitted, DEFAULT_PROMPTS are used/cycled.")
+parser.add_argument(
+    '--num-prompts',
+    type=int,
+    default=None,
+    help="Number of prompts to use (cycles DEFAULT_PROMPTS if not enough). "
+    "If --prompts is provided, trims to first N.")
 parser.add_argument('--trust-remote-code', action='store_true')
-parser.add_argument('--use-cache', action='store_true', help="Use cached CPU results if available")
-parser.add_argument('--num-hidden-layers', type=int, default=None, help="Override model hidden layer count")
-parser.add_argument('--max-tokens', type=int, default=256, help="Number of tokens to generate per prompt")
-parser.add_argument('--logprobs', type=int, default=1024,
+parser.add_argument('--use-cache',
+                    action='store_true',
+                    help="Use cached CPU results if available")
+parser.add_argument('--num-hidden-layers',
+                    type=int,
+                    default=None,
+                    help="Override model hidden layer count")
+parser.add_argument('--max-tokens',
+                    type=int,
+                    default=256,
+                    help="Number of tokens to generate per prompt")
+parser.add_argument('--logprobs',
+                    type=int,
+                    default=1024,
                     help="Per-token logprobs: 0=off; N=top-N; -1=full vocab")
-parser.add_argument('--max-logprobs-cap', type=int, default=128256,
-                    help='Engine-wide cap for logprobs; must be >= requested logprobs')
+parser.add_argument(
+    '--max-logprobs-cap',
+    type=int,
+    default=128256,
+    help='Engine-wide cap for logprobs; must be >= requested logprobs')
 
 # Visualization toggles
-parser.add_argument('--inspect-logits', action=argparse.BooleanOptionalAction, default=True,
-                    help="Enable/disable logits-like inspection (default: on). "
-                         "Use --no-inspect-logits to disable.")
-parser.add_argument('--topk', type=int, default=5,
-                    help="Top-K for argmax summary when --inspect-logits is on.")
-parser.add_argument('--no-color', action='store_true', help="Disable ANSI colors.")
-parser.add_argument('--no-snippet', action='store_true', help="Hide the head/tail logits snippets.")
-parser.add_argument('--snippet-elems', type=int, default=SNIPPET_ELEMS,
-                    help="How many elems to show in head/tail snippet when enabled.")
+parser.add_argument(
+    '--inspect-logits',
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="Enable/disable logits-like inspection (default: on). "
+    "Use --no-inspect-logits to disable.")
+parser.add_argument(
+    '--topk',
+    type=int,
+    default=5,
+    help="Top-K for argmax summary when --inspect-logits is on.")
+parser.add_argument('--no-color',
+                    action='store_true',
+                    help="Disable ANSI colors.")
+parser.add_argument('--no-snippet',
+                    action='store_true',
+                    help="Hide the head/tail logits snippets.")
+parser.add_argument(
+    '--snippet-elems',
+    type=int,
+    default=SNIPPET_ELEMS,
+    help="How many elems to show in head/tail snippet when enabled.")
 
 args = parser.parse_args()
+
 
 # ANSI color helpers
 class C:
     if args.no_color:
         R = G = Y = B = M = C = W = BOLD = DIM = RESET = ""
     else:
-        R = "\x1b[31m"; G = "\x1b[32m"; Y = "\x1b[33m"; B = "\x1b[34m"
-        M = "\x1b[35m"; C_ = "\x1b[36m"; W = "\x1b[37m"
-        BOLD = "\x1b[1m"; DIM = "\x1b[2m"; RESET = "\x1b[0m"
+        R = "\x1b[31m"
+        G = "\x1b[32m"
+        Y = "\x1b[33m"
+        B = "\x1b[34m"
+        M = "\x1b[35m"
+        C_ = "\x1b[36m"
+        W = "\x1b[37m"
+        BOLD = "\x1b[1m"
+        DIM = "\x1b[2m"
+        RESET = "\x1b[0m"
+
+
 C.C = C.C_  # alias
 
 # ---------- Model map ----------
@@ -96,21 +163,27 @@ if should_ep:
 else:
     assert not args.ep, f"{args.model} should not use --ep"
 
+
 # ---------- Prompt resolution ----------
 def resolve_prompts():
     if args.prompts:
         if args.num_prompts is not None:
             return args.prompts[:args.num_prompts]
         return args.prompts
-    target_n = args.num_prompts if args.num_prompts is not None else len(DEFAULT_PROMPTS)
+    target_n = args.num_prompts if args.num_prompts is not None else len(
+        DEFAULT_PROMPTS)
     if target_n <= len(DEFAULT_PROMPTS):
         return DEFAULT_PROMPTS[:target_n]
     reps = (target_n + len(DEFAULT_PROMPTS) - 1) // len(DEFAULT_PROMPTS)
     return (DEFAULT_PROMPTS * reps)[:target_n]
 
+
 prompts = resolve_prompts()
-print(f"Model = {model_id}, EP={args.ep}, TP={args.tp}, PP={args.pp}, DP={args.dp}, "
-      f"MaxTokens={args.max_tokens}, Logprobs={args.logprobs}, Prompts={len(prompts)}")
+print(
+    f"Model = {model_id}, EP={args.ep}, TP={args.tp}, PP={args.pp}, DP={args.dp}, "
+    f"MaxTokens={args.max_tokens}, Logprobs={args.logprobs}, Prompts={len(prompts)}"
+)
+
 
 # ---------- HF override (picklable) ----------
 def hf_override_num_layers(hf_config, num_hidden_layers: int):
@@ -121,6 +194,7 @@ def hf_override_num_layers(hf_config, num_hidden_layers: int):
     else:
         hf_config.update({"num_hidden_layers": num_hidden_layers})
     return hf_config
+
 
 # ---------- Helpers ----------
 def generate_llm_args(device: str):
@@ -148,15 +222,21 @@ def generate_llm_args(device: str):
             "enable_expert_parallel": False,
         })
     if args.num_hidden_layers is not None:
-        llm_args["hf_overrides"] = partial(hf_override_num_layers,
-                                           num_hidden_layers=args.num_hidden_layers)
-    llm_args["block_size"] = args.block_size_cpu if device == "cpu" else args.block_size_rbln
+        llm_args["hf_overrides"] = partial(
+            hf_override_num_layers, num_hidden_layers=args.num_hidden_layers)
+    llm_args[
+        "block_size"] = args.block_size_cpu if device == "cpu" else args.block_size_rbln
     return llm_args
+
 
 def set_env_for_device(device: str):
     for k in [
-        "VLLM_PLUGINS", "RBLN_KERNEL_MODE", "USE_VLLM_MODEL", "VLLM_USE_V1",
-        "VLLM_DISABLE_COMPILE_CACHE", "VLLM_TORCH_PROFILER_DIR",
+            "VLLM_PLUGINS",
+            "RBLN_KERNEL_MODE",
+            "USE_VLLM_MODEL",
+            "VLLM_USE_V1",
+            "VLLM_DISABLE_COMPILE_CACHE",
+            "VLLM_TORCH_PROFILER_DIR",
     ]:
         os.environ.pop(k, None)
 
@@ -175,6 +255,7 @@ def set_env_for_device(device: str):
         profile_dir = f'./profile/{device}_{model_id.replace("/", "_")}'
         os.makedirs(profile_dir, exist_ok=True)
         os.environ['VLLM_TORCH_PROFILER_DIR'] = profile_dir
+
 
 def cache_path():
     os.makedirs("./cache", exist_ok=True)
@@ -197,6 +278,7 @@ def cache_path():
     key = "_".join(filter(None, key_parts))
     return f"./cache/cpu_results_{key}.json"
 
+
 def _extract_logprobs_dict(request_output) -> dict:
     """Return {token_id(str): logprob(float)} for position 0 if available."""
     lp = getattr(request_output.outputs[0], "logprobs", None)
@@ -206,6 +288,7 @@ def _extract_logprobs_dict(request_output) -> dict:
         except Exception:
             return {}
     return {}
+
 
 def _pack_outputs(outputs):
     """Convert vLLM RequestOutput[] -> serializable list of dicts."""
@@ -218,20 +301,23 @@ def _pack_outputs(outputs):
         })
     return packed
 
+
 def save_cpu_results(packed_outputs):
     path = cache_path()
     with open(path, "w") as f:
         json.dump(packed_outputs, f, indent=2)
     print(f"✅ Cached CPU results to {path}")
 
+
 def load_cpu_results():
     path = cache_path()
     if not os.path.exists(path):
         return None
-    with open(path, "r") as f:
+    with open(path) as f:
         data = json.load(f)
     print(f"💾 Loaded cached CPU results from {path}")
     return data
+
 
 # ======== Logits-style inspection helpers ========
 def _vocab_len_from_logprob_maps(*maps: dict) -> int:
@@ -246,13 +332,14 @@ def _vocab_len_from_logprob_maps(*maps: dict) -> int:
                 continue
     return max_id + 1 if max_id >= 0 else 0
 
+
 def _vectorize_logprobs(cpu_map: dict, rbln_map: dict, vocab_hint: int = None):
     V = vocab_hint or max(_vocab_len_from_logprob_maps(cpu_map, rbln_map), 0)
     if V == 0:
         return np.array([]), np.array([])
 
-    cpu_vec = np.full((V,), -np.inf, dtype=np.float64)
-    rbln_vec = np.full((V,), -np.inf, dtype=np.float64)
+    cpu_vec = np.full((V, ), -np.inf, dtype=np.float64)
+    rbln_vec = np.full((V, ), -np.inf, dtype=np.float64)
 
     for k, v in cpu_map.items():
         try:
@@ -266,6 +353,7 @@ def _vectorize_logprobs(cpu_map: dict, rbln_map: dict, vocab_hint: int = None):
             pass
     return cpu_vec, rbln_vec
 
+
 def _pearson_safe(a: np.ndarray, b: np.ndarray) -> float:
     if a.size == 0 or b.size == 0:
         return float('nan')
@@ -274,10 +362,12 @@ def _pearson_safe(a: np.ndarray, b: np.ndarray) -> float:
     mask = np.isfinite(a) & np.isfinite(b)
     if mask.sum() < 2:
         return float('nan')
-    a_m = a[mask]; b_m = b[mask]
+    a_m = a[mask]
+    b_m = b[mask]
     if np.std(a_m) == 0 or np.std(b_m) == 0:
         return float('nan')
     return float(np.corrcoef(a_m, b_m)[0, 1])
+
 
 def _topk_indices_values(vec: np.ndarray, k: int):
     if vec.size == 0:
@@ -289,16 +379,21 @@ def _topk_indices_values(vec: np.ndarray, k: int):
     vals = vec[idx]
     return idx, vals
 
+
 def _fmt_snippet(vec: np.ndarray, elems: int) -> str:
     if vec.size == 0:
         return "[]"
     if vec.size <= elems * 2:
-        return np.array2string(vec, precision=4, suppress_small=False, max_line_width=10**9)
+        return np.array2string(vec,
+                               precision=4,
+                               suppress_small=False,
+                               max_line_width=10**9)
     head = vec[:elems]
     tail = vec[-elems:]
     h = np.array2string(head, precision=4, max_line_width=10**9)
     t = np.array2string(tail, precision=4, max_line_width=10**9)
     return f"{h[:-1]}, ..., {t[1:]}"
+
 
 def _color_by_value(val: float, good=0.999, warn=0.99) -> str:
     if np.isnan(val): return f"{C.Y}{val}{C.RESET}"
@@ -306,19 +401,24 @@ def _color_by_value(val: float, good=0.999, warn=0.99) -> str:
     if val >= warn: return f"{C.Y}{val:.6f}{C.RESET}"
     return f"{C.R}{val:.6f}{C.RESET}"
 
+
 def _hdr(title: str):
     bar = f"{C.DIM}{'─'*100}{C.RESET}"
     print(f"\n{bar}")
     print(f"{C.BOLD}{title}{C.RESET}")
     print(bar)
 
+
 def _kv(key: str, val: str, pad=18):
     print(f"{C.DIM}{key.rjust(pad)}{C.RESET}: {val}")
+
 
 def _topk_table(r_idx, r_vals, c_idx, c_vals, k):
     print(f"{C.DIM}Top-{k} (logprob) argmax — RBLN vs GOLD{C.RESET}")
     print(f"{C.DIM}{'-'*56}{C.RESET}")
-    print(f"{'Rank':>4}  {'R.idx':>8} {'R.val':>10}    {'G.idx':>8} {'G.val':>10}")
+    print(
+        f"{'Rank':>4}  {'R.idx':>8} {'R.val':>10}    {'G.idx':>8} {'G.val':>10}"
+    )
     rows = max(len(r_idx), len(c_idx))
     for i in range(rows):
         ri = r_idx[i] if i < len(r_idx) else -1
@@ -327,11 +427,14 @@ def _topk_table(r_idx, r_vals, c_idx, c_vals, k):
         cv = c_vals[i] if i < len(c_vals) else float('nan')
         print(f"{i+1:>4}  {ri:>8} {rv:>10.4f}    {ci:>8} {cv:>10.4f}")
 
+
 # ----------------- Compare & print -----------------
 def compare_and_print(cpu_packed, rbln_packed):
     need_logits = args.inspect_logits
     if need_logits and args.logprobs != -1:
-        print(f"{C.Y}⚠️  --inspect-logits works best with --logprobs -1 (full vocab). Continuing…{C.RESET}")
+        print(
+            f"{C.Y}⚠️  --inspect-logits works best with --logprobs -1 (full vocab). Continuing…{C.RESET}"
+        )
 
     for i, (cpu_out, rbln_out) in enumerate(zip(cpu_packed, rbln_packed)):
         prompt = cpu_out.get("prompt", "<unknown>")
@@ -348,7 +451,8 @@ def compare_and_print(cpu_packed, rbln_packed):
             except ValueError:
                 continue
             r_val = rbln_lp.get(str(token_id))
-            if r_val is None and isinstance(next(iter(rbln_lp.values()), None), float):
+            if r_val is None and isinstance(next(iter(rbln_lp.values()), None),
+                                            float):
                 r_val = rbln_lp.get(token_id)
             if r_val is None:
                 continue
@@ -359,7 +463,8 @@ def compare_and_print(cpu_packed, rbln_packed):
         _hdr(f"Prompt[{i}]: {prompt}")
         _kv("Generated text (CPU)", f"len={len(cpu_text)}")
         _kv("Generated text (RBLN)", f"len={len(rbln_text)}")
-        _kv("Outliers (absΔ ≥ EPS)", f"{num_outlier}  {C.DIM}(EPS={EPSILON}){C.RESET}")
+        _kv("Outliers (absΔ ≥ EPS)",
+            f"{num_outlier}  {C.DIM}(EPS={EPSILON}){C.RESET}")
 
         if not need_logits:
             continue
@@ -386,13 +491,15 @@ def compare_and_print(cpu_packed, rbln_packed):
         _kv("Vocab size", f"{vocab}")
         _kv("Finite overlap", f"{overlap}")
         _kv("max|Δ|", f"{max_l1:.6f}" if np.isfinite(max_l1) else str(max_l1))
-        _kv("mean|Δ|", f"{mean_l1:.6f}" if np.isfinite(mean_l1) else str(mean_l1))
+        _kv("mean|Δ|",
+            f"{mean_l1:.6f}" if np.isfinite(mean_l1) else str(mean_l1))
         _kv("pearson", _color_by_value(pear))
 
         # Optional vector snippets instead of huge dumps
         if PRINT_VECT_SNIPPET and not args.no_snippet:
             se = max(1, args.snippet_elems)
-            print(f"\n{C.DIM}Logits-like (logprob) snippet — head…tail{C.RESET}")
+            print(
+                f"\n{C.DIM}Logits-like (logprob) snippet — head…tail{C.RESET}")
             print(f"  rbln  : {_fmt_snippet(r_vec, se)}")
             print(f"  golden: {_fmt_snippet(c_vec, se)}")
 
@@ -401,6 +508,7 @@ def compare_and_print(cpu_packed, rbln_packed):
         c_idx, c_vals = _topk_indices_values(c_vec, args.topk)
         print()
         _topk_table(r_idx, r_vals, c_idx, c_vals, args.topk)
+
 
 # ----------------- Worker -----------------
 def _worker(device: str, q, prompts_local, logprobs_flag, max_tokens_local):
@@ -433,9 +541,12 @@ def _worker(device: str, q, prompts_local, logprobs_flag, max_tokens_local):
         logprobs=lp_count,
     )
 
-    print(f"[{device}] VLLM_PLUGINS = {os.environ.get('VLLM_PLUGINS', '<unset>')}")
+    print(
+        f"[{device}] VLLM_PLUGINS = {os.environ.get('VLLM_PLUGINS', '<unset>')}"
+    )
     outputs = llm.generate(prompts_local, sampling_params)
     q.put(_pack_outputs(outputs))
+
 
 # ----------------- Main -----------------
 def main():
@@ -446,7 +557,9 @@ def main():
             ctx = get_context("spawn")
             q = ctx.Queue()
             print("\n[main] Launching CPU worker…")
-            p1 = ctx.Process(target=_worker, args=("cpu", q, prompts, args.logprobs, args.max_tokens))
+            p1 = ctx.Process(target=_worker,
+                             args=("cpu", q, prompts, args.logprobs,
+                                   args.max_tokens))
             p1.start()
             cpu_packed = q.get()
             p1.join()
@@ -457,7 +570,9 @@ def main():
         ctx = get_context("spawn")
         q = ctx.Queue()
         print("\n[main] Launching CPU worker…")
-        p1 = ctx.Process(target=_worker, args=("cpu", q, prompts, args.logprobs, args.max_tokens))
+        p1 = ctx.Process(target=_worker,
+                         args=("cpu", q, prompts, args.logprobs,
+                               args.max_tokens))
         p1.start()
         cpu_packed = q.get()
         p1.join()
@@ -469,7 +584,8 @@ def main():
     ctx = get_context("spawn")
     q = ctx.Queue()
     print("\n[main] Launching RBLN worker…")
-    p2 = ctx.Process(target=_worker, args=("rbln", q, prompts, args.logprobs, args.max_tokens))
+    p2 = ctx.Process(target=_worker,
+                     args=("rbln", q, prompts, args.logprobs, args.max_tokens))
     p2.start()
     rbln_packed = q.get()
     p2.join()
@@ -478,6 +594,7 @@ def main():
 
     # Compare
     compare_and_print(cpu_packed, rbln_packed)
+
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,45 @@
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ruff: noqa
+
 import argparse
+
+from vllm import LLM, SamplingParams
+from vllm.transformers_utils.config import get_hf_text_config
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--model', type=str, default="llama3.2-1b", help="model name")
-parser.add_argument('--tp', type=int, default=1, help="vLLM tensor_parallel_size")
-parser.add_argument('--pp', type=int, default=1, help="vLLM pipeline_parallel_size")
-parser.add_argument('--dp', type=int, default=1, help="vLLM data_parallel_size")
-parser.add_argument('--ep', action='store_true', help="vLLM enable_expert_parallel")
+parser.add_argument('--model',
+                    type=str,
+                    default="llama3.2-1b",
+                    help="model name")
+parser.add_argument('--tp',
+                    type=int,
+                    default=1,
+                    help="vLLM tensor_parallel_size")
+parser.add_argument('--pp',
+                    type=int,
+                    default=1,
+                    help="vLLM pipeline_parallel_size")
+parser.add_argument('--dp',
+                    type=int,
+                    default=1,
+                    help="vLLM data_parallel_size")
+parser.add_argument('--ep',
+                    action='store_true',
+                    help="vLLM enable_expert_parallel")
 args = parser.parse_args()
 
 # dense model
@@ -63,12 +96,10 @@ print(f"pipeline_parallel_size = {args.pp}")
 print(f"data_parallel_size = {args.dp}")
 print(f"enable_expert_parallel = {args.ep}")
 
-from vllm import LLM, SamplingParams
-from vllm.transformers_utils.config import get_hf_text_config
-
 hf_overrides_kw = {
     "num_hidden_layers": 1,
 }
+
 
 # update config of multi-modal language model num_hidden_layers
 def custom_hf_overrides_kw(hf_config):
@@ -79,6 +110,7 @@ def custom_hf_overrides_kw(hf_config):
         hf_config.update(hf_overrides_kw)
     return hf_config
 
+
 prompts = [
     #"Hello, my name is",
     #"The president of the United States is",
@@ -88,8 +120,8 @@ prompts = [
     #"The capital of UK is",
 ]
 
-
 import os
+
 ## The profile results can be visualized using https://ui.perfetto.dev/
 profile_dir = './profile/' + model_id.replace('/', '_')
 os.environ['VLLM_TORCH_PROFILER_DIR'] = profile_dir

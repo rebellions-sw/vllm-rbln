@@ -11,9 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import time
+
+# ruff: noqa: E501
+
 import dataclasses
 import math
+import time
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
@@ -48,8 +51,6 @@ if TYPE_CHECKING:
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.worker.metrics import PerformanceTracker
-
-
 
 logger = init_logger(__name__)
 
@@ -489,8 +490,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             if not envs.VLLM_DISABLE_COMPILE_CACHE:
                 logger.info("Once the model is compiled for the first time, "
                             "the cached compiled binary will be reused.")
-                options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
-                                        > 1 else "./cache_dir")
+                options["cache_dir"] = ("./rsd_cache_dir"
+                                        if envs.VLLM_RBLN_TP_SIZE > 1 else
+                                        "./cache_dir")
             if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
                 options["mode"] = "strict"
 
@@ -499,18 +501,22 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         # All devices (PP, TP, DP all included) participate in this all_reduce
         try:
             world_size = dist.get_world_size()
-            world_rank = dist.get_rank()
             all_ranks = list(range(world_size))
 
-            logger.info("[RBLN] Initializing rbln-ccl process group for world (all devices) before torch.compile")
+            logger.info(
+                "[RBLN] Initializing rbln-ccl process group for world (all devices) before torch.compile"
+            )
 
             rbln_world_group = dist.new_group(all_ranks, backend="rbln-ccl")
             # Warm up RCCL with a dummy all_reduce across all devices
             dummy_tensor = torch.zeros(1, dtype=torch.float16, device="rbln")
-            dist.all_reduce(dummy_tensor, group=rbln_world_group, op=dist.ReduceOp.SUM)
+            dist.all_reduce(dummy_tensor,
+                            group=rbln_world_group,
+                            op=dist.ReduceOp.SUM)
         except Exception as e:
             logger.warning(
-                "[RBLN] Failed to initialize rbln-ccl process group before torch.compile: %s", e)
+                "[RBLN] Failed to initialize rbln-ccl process group before torch.compile: %s",
+                e)
 
         compiled_model = torch.compile(
             model,
@@ -732,9 +738,12 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
                 # Gather logits for TP
                 logits_processor = self.compute_logits_model.logits_processor
-                logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(0)
-                logits_or_intermediate_states = logits_processor._gather_logits(logits_or_intermediate_states)
-                logits_or_intermediate_states = logits_or_intermediate_states.squeeze(0)
+                logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(
+                    0)
+                logits_or_intermediate_states = logits_processor._gather_logits(
+                    logits_or_intermediate_states)
+                logits_or_intermediate_states = logits_or_intermediate_states.squeeze(
+                    0)
 
         if not get_pp_group().is_last_rank:
             intermediate_states = logits_or_intermediate_states

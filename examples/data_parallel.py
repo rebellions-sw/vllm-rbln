@@ -1,4 +1,18 @@
-# SPDX-License-Identifier: Apache-2.0
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ruff: noqa
 """
 Usage:
 Single node:
@@ -36,6 +50,7 @@ from vllm.utils import get_open_port
 hf_overrides_kw = {
     "num_hidden_layers": 2,
 }
+
 
 def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
          dp_master_port, tp_size, enable_ep):
@@ -89,19 +104,20 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     sampling_params = SamplingParams(temperature=0.0)
 
     # Create an LLM.
-    llm = LLM(model=model,
-#hf_overrides=hf_overrides_kw,
-              max_model_len=8 * 1024,
-              block_size=1024,
-              enable_chunked_prefill=True,
-              max_num_batched_tokens=128,
-              max_num_seqs=1,
-              trust_remote_code=True,
-              tensor_parallel_size=tp_size,
-              enable_expert_parallel=enable_ep,
-#data_parallel_size=dp_size,
-#enforce_eager=True,
-              )
+    llm = LLM(
+        model=model,
+        #hf_overrides=hf_overrides_kw,
+        max_model_len=8 * 1024,
+        block_size=1024,
+        enable_chunked_prefill=True,
+        max_num_batched_tokens=128,
+        max_num_seqs=1,
+        trust_remote_code=True,
+        tensor_parallel_size=tp_size,
+        enable_expert_parallel=enable_ep,
+        #data_parallel_size=dp_size,
+        #enforce_eager=True,
+    )
     outputs = llm.generate(prompts, sampling_params)
     # Print the outputs.
     for i, output in enumerate(outputs):
@@ -132,7 +148,9 @@ if __name__ == "__main__":
                         type=int,
                         default=1,
                         help="Tensor parallel size")
-    parser.add_argument('--ep', action='store_true', help="vLLM enable_expert_parallel")
+    parser.add_argument('--ep',
+                        action='store_true',
+                        help="vLLM enable_expert_parallel")
     parser.add_argument("--node-size",
                         type=int,
                         default=1,
