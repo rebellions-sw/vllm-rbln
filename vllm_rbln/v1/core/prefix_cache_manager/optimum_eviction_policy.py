@@ -34,9 +34,11 @@ class SimpleEvictionPolicy:
         pass
 
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int) -> list[int]:
+                                   count: int,
+                                   skip_request_id: str) -> list[int]:
         """Select blocks for eviction."""
-        inactive_mappings = mapping_manager.get_inactive_mappings()
+        inactive_mappings = mapping_manager.get_inactive_mappings(
+            skip_request_id)
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
         if len(inactive_block_ids) < count:
             return []
@@ -60,12 +62,14 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
         self._allocation_order.pop(block_id, None)
 
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int) -> list[int]:
+                                   count: int,
+                                   skip_request_id: str) -> list[int]:
         # NOTE If the cached block is evicted, we should also evict its mapping
         # How about exclude the cached blocks from eviction?
         # AS-IS: Eviction -> Cache check -> Allocation
         # TO-DO: Cache check -> Eviction -> Allocation (more complicated)
-        inactive_mappings = mapping_manager.get_inactive_mappings()
+        inactive_mappings = mapping_manager.get_inactive_mappings(
+            skip_request_id)
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
         evictable_blocks = [
@@ -100,8 +104,10 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
         self._access_order.pop(block_id, None)
 
     def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int) -> list[int]:
-        inactive_mappings = mapping_manager.get_inactive_mappings()
+                                   count: int,
+                                   skip_request_id: str) -> list[int]:
+        inactive_mappings = mapping_manager.get_inactive_mappings(
+            skip_request_id)
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]
 
         untouched_blocks = [

@@ -413,7 +413,10 @@ class RBLNPrefixKVCacheManager:
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):
-            for ob_id in result.cached_outer_blocks:
+            # NOTE(eunji.lee):
+            # To increase the hit ratio,
+            # we need to touch the blocks in reverse order.
+            for ob_id in reversed(result.cached_outer_blocks):
                 self._eviction_policy.touch(ob_id)
 
         return result.cached_outer_blocks, result.cached_lengths
@@ -439,7 +442,7 @@ class RBLNPrefixKVCacheManager:
 
         return self._mapping_manager.get_request_blocks(request_id)
 
-    def can_allocate(self, num_new_blocks: int,
+    def can_allocate(self, request_id: str, num_new_blocks: int,
                      num_computed_tokens: int) -> bool:
         # 1. Check if the enough outer blocks are free
         required_num_ob = self._compute_num_blocks_to_allocate(
@@ -451,7 +454,7 @@ class RBLNPrefixKVCacheManager:
         # 2. Check if we can evict enough blocks
         evict_count = required_num_ob - free_count
         blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
-            self._mapping_manager, evict_count)
+            self._mapping_manager, evict_count, request_id)
         can_evict = len(blocks_to_evict) >= evict_count
 
         # 3. Evict blocks if possible
