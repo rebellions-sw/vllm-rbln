@@ -489,9 +489,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
                         "the cached compiled binary will be reused.")
-            options["cache_dir"] = ("./rsd_cache_dir"
-                                    if envs.VLLM_RBLN_TP_SIZE > 1 else
-                                    "./cache_dir")
+            options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
+                                    > 1 else "./cache_dir")
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
