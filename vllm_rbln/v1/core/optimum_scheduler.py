@@ -147,9 +147,6 @@ class RBLNOptimumScheduler(Scheduler):
 
         self.use_pp = False
 
-        self.alone_count: dict[str, int] = defaultdict(int)
-        self.alone_count["0"] = 0
-
     def schedule(self) -> RBLNSchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
@@ -395,8 +392,6 @@ class RBLNOptimumScheduler(Scheduler):
                 num_scheduled_tokens[request.request_id] = num_new_tokens
                 token_budget -= num_new_tokens
                 req_index += 1
-                if request.request_id == "0":
-                    break
         # [skip] speculative decoding, encoder-related tasks
 
         # Check if the scheduling constraints are satisfied.
