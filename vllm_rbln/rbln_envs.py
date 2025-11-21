@@ -22,9 +22,14 @@ if TYPE_CHECKING:
     VLLM_RBLN_COMPILE_STRICT_MODE: bool = False
     VLLM_RBLN_TP_SIZE: int = 1
     VLLM_RBLN_SAMPLER: bool = True
-    VLLM_RBLN_ENABLE_WARM_UP: bool = True
+    VLLM_RBLN_ENABLE_WARM_UP: bool = False
     VLLM_RBLN_USE_VLLM_MODEL: bool = False
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
+    VLLM_RBLN_ENFORCE_MODEL_FP32: bool = False
+    VLLM_RBLN_MOE_CUSTOM_KERNEL: bool = True
+    VLLM_RBLN_DP_INPUT_ALL_GATHER: bool = True
+    VLLM_RBLN_LOGITS_ALL_GATHER: bool = True
+    VLLM_RBLN_METRICS: bool = False
 
 # extended environments
 environment_variables = {
@@ -46,7 +51,7 @@ environment_variables = {
      ("true", "1")),
     # Enable warmup
     "VLLM_RBLN_ENABLE_WARM_UP":
-    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "True").lower() in
+    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "False").lower() in
      ("true", "1")),
     # If true, it uses the natively compiled vLLM model
     # rather than the optimum-rbln compiled model.
@@ -56,6 +61,28 @@ environment_variables = {
     # Use flash attention for causal attention
     "VLLM_RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
+     ("true", "1")),
+    # enforce model data type into fp32 not model_config.dtype
+    "VLLM_RBLN_ENFORCE_MODEL_FP32":
+    (lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower() in
+     ("true", "1")),
+    # use moe custom kernel, by default disabled
+    "VLLM_RBLN_MOE_CUSTOM_KERNEL":
+    (lambda: os.environ.get("VLLM_RBLN_MOE_CUSTOM_KERNEL", "True").lower() in
+     ("true", "1")),
+    # DP_INPUT_ALL_GATHER, use DP input all_gather
+    "VLLM_RBLN_DP_INPUT_ALL_GATHER":
+    (lambda: os.environ.get("VLLM_RBLN_DP_INPUT_ALL_GATHER", "True").lower() in
+     ("true", "1")),
+    # LOGITS_ALL_GATHER, include logits all_gather into model compilation
+    "VLLM_RBLN_LOGITS_ALL_GATHER":
+    (lambda: os.environ.get("VLLM_RBLN_LOGITS_ALL_GATHER", "True").lower() in
+     ("true", "1")),
+    # Number of Ray nodes
+    "VLLM_RBLN_NUM_RAY_NODES":
+    lambda: int(os.environ.get("VLLM_RBLN_NUM_RAY_NODES", 1)),
+    "VLLM_RBLN_METRICS":
+    (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
      ("true", "1")),
 }
 

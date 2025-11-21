@@ -18,6 +18,8 @@ from typing import Optional
 
 from vllm.config import ModelConfig, ParallelConfig
 
+import vllm_rbln.rbln_envs as envs
+
 
 def get_maximum_num_blocks(
     model_config: ModelConfig,
@@ -71,6 +73,7 @@ def get_maximum_num_blocks(
     hidden_size = model_config.get_hidden_size()
     num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
     tensor_parallel_size = parallel_config.tensor_parallel_size
+    tensor_parallel_size *= tensor_parallel_size * envs.VLLM_RBLN_TP_SIZE
 
     # TODO(jongho): Update if target npu is REBEL.
     ATOM_DRAM_NBYTES = 16 * 2**30
