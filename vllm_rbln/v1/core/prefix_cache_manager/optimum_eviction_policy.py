@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from collections import OrderedDict
+from typing import Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -33,9 +34,11 @@ class SimpleEvictionPolicy:
         """Unregister a block (called when block is deallocated)"""
         pass
 
-    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int,
-                                   skip_request_id: str) -> list[int]:
+    def select_blocks_for_eviction(
+            self,
+            mapping_manager: BlockMappingManager,
+            count: int,
+            skip_request_id: Optional[str] = None) -> list[int]:
         """Select blocks for eviction."""
         inactive_mappings = mapping_manager.get_inactive_mappings(
             skip_request_id)
@@ -61,9 +64,11 @@ class FIFOEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._allocation_order.pop(block_id, None)
 
-    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int,
-                                   skip_request_id: str) -> list[int]:
+    def select_blocks_for_eviction(
+            self,
+            mapping_manager: BlockMappingManager,
+            count: int,
+            skip_request_id: Optional[str] = None) -> list[int]:
         # NOTE If the cached block is evicted, we should also evict its mapping
         # How about exclude the cached blocks from eviction?
         # AS-IS: Eviction -> Cache check -> Allocation
@@ -103,9 +108,11 @@ class LRUEvictionPolicy(SimpleEvictionPolicy):
     def unregister_block(self, block_id: int) -> None:
         self._access_order.pop(block_id, None)
 
-    def select_blocks_for_eviction(self, mapping_manager: BlockMappingManager,
-                                   count: int,
-                                   skip_request_id: str) -> list[int]:
+    def select_blocks_for_eviction(
+            self,
+            mapping_manager: BlockMappingManager,
+            count: int,
+            skip_request_id: Optional[str] = None) -> list[int]:
         inactive_mappings = mapping_manager.get_inactive_mappings(
             skip_request_id)
         inactive_block_ids = [m.outer_block_id for m in inactive_mappings]

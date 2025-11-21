@@ -137,9 +137,9 @@ class RBLNKVCacheManager(KVCacheManager):
 
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
-                request.request_id,
                 num_blocks_to_allocate,
                 num_computed_tokens,
+                request.request_id,
             ):
             # Cannot allocate new outer blocks for prefix caching
             return None
