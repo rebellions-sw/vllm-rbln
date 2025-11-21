@@ -357,7 +357,7 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
     # assert len(x.shape) == 3
 
     dp_rank = self.dp_rank
-    if not envs.RBLN_DP_INPUT_ALL_GATHER:
+    if not envs.VLLM_RBLN_DP_INPUT_ALL_GATHER:
         # each DP rank gather all inputs via torch.distributed.all_reduce
         # broadcast(value) == all_reduce(value for me or zeros for others)
         all_buffer = None
@@ -375,7 +375,7 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
 
 
 FusedMoE.forward_oot = fused_moe_forward_rbln
-if not envs.RBLN_MOE_CUSTOM_KERNEL:
+if not envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
     logger.info("[RBLN] fused moe, pytorch native kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_forward_rbln_rsd
 else:

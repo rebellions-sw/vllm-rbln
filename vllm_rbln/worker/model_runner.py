@@ -445,7 +445,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(
                 cast(RBLNModelRunner, weakref.proxy(self)))
-        if envs.RBLN_METRICS:
+        if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
 
@@ -717,7 +717,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 **execute_model_kwargs,
             )
             end_time = time.perf_counter()
-            if envs.RBLN_METRICS:
+            if envs.VLLM_RBLN_METRICS:
                 # Record performance metrics
                 execution_time = end_time - start_time
                 if model_input.is_prompt:
@@ -730,7 +730,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                         model_input.seq_lens) if model_input.seq_lens else 0
                     self.performance_tracker.record_decode(
                         execution_time, num_seqs)
-            if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
+            if get_pp_group(
+            ).is_last_rank and not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
                 # Gather logits for TP
                 logits_processor = self.compute_logits_model.logits_processor
                 logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(

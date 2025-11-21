@@ -94,20 +94,6 @@ class RblnPlatform(Platform):
     def pre_register_and_update(cls,
                                 parser: Optional[FlexibleArgumentParser] = None
                                 ) -> None:
-        if envs.VLLM_RBLN_USE_VLLM_MODEL:
-            import vllm_rbln.attention.layer  # noqa
-            import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
-            import vllm_rbln.model_executor.layers.logits_processor  # noqa
-            import vllm_rbln.model_executor.layers.rotary_embedding.base  # noqa
-            import vllm_rbln.model_executor.layers.rotary_embedding.deepseek_scaling_rope  # noqa
-            import vllm_rbln.model_executor.layers.vocab_parallel_embedding  # noqa
-            import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
-            import vllm_rbln.models.deepseek_v2  # noqa
-            import vllm_rbln.models.qwen2_moe  # noqa
-            import vllm_rbln.models.qwen3  # noqa
-            import vllm_rbln.models.qwen3_moe  # noqa
-            import vllm_rbln.models.utils  # noqa
-
         if parser is None:
             return
 
@@ -149,7 +135,7 @@ class RblnPlatform(Platform):
                     "T5 encoder-decoder model is not supported on V1. "
                     "Set `VLLM_USE_V1=0` to run T5 models in V0")
 
-        if envs.RBLN_ENFORCE_MODEL_FP32:
+        if envs.VLLM_RBLN_ENFORCE_MODEL_FP32:
             logger.info("original model_config.dtype = %s", model_config.dtype)
             if model_config.dtype == torch.bfloat16:
                 logger.warning("bfloat16 is not supported on RBLN.")

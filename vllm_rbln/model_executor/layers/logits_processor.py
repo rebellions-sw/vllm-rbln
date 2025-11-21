@@ -51,6 +51,6 @@ def logits_processor_gather_logits(self, logits: torch.Tensor) -> torch.Tensor:
     return logits
 
 
-if not envs.RBLN_LOGITS_ALL_GATHER:
+if not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
     LogitsProcessor._get_logits = logits_processor_get_logits
     LogitsProcessor._gather_logits = logits_processor_gather_logits

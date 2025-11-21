@@ -204,7 +204,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.rank = rank
         self.parallel_config.rank = rank
         self.parallel_config.local_world_size = (
-            self.parallel_config.world_size // envs.RBLN_NUM_RAY_NODES)
+            self.parallel_config.world_size // envs.VLLM_RBLN_NUM_RAY_NODES)
 
         distributed_backend = self.parallel_config.distributed_executor_backend
         if distributed_backend == "mp":
