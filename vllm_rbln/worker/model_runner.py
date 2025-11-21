@@ -471,41 +471,37 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         logger.info("[RBLN] DP device group id = %s, cpu group id = %s",
                     DP.device_group.group_name, DP.cpu_group.group_name)
 
-        if envs.VLLM_RBLN_COMPILE_MODEL:
-            process_group_dict = {}
-            process_group_dict[TP.device_group.group_name] = TP.ranks
-            process_group_dict[TP.cpu_group.group_name] = TP.ranks
-            process_group_dict[PP.device_group.group_name] = PP.ranks
-            process_group_dict[PP.cpu_group.group_name] = PP.ranks
-            process_group_dict[DP.device_group.group_name] = DP.ranks
-            process_group_dict[DP.cpu_group.group_name] = DP.ranks
+        process_group_dict = {}
+        process_group_dict[TP.device_group.group_name] = TP.ranks
+        process_group_dict[TP.cpu_group.group_name] = TP.ranks
+        process_group_dict[PP.device_group.group_name] = PP.ranks
+        process_group_dict[PP.cpu_group.group_name] = PP.ranks
+        process_group_dict[DP.device_group.group_name] = DP.ranks
+        process_group_dict[DP.cpu_group.group_name] = DP.ranks
 
-            logger.info("[RBLN] process_group_dict = %s", process_group_dict)
-            options = {
-                "compile_context": self.compile_context,
-                "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
-                "mode": "strict",
-                "process_group_dict": process_group_dict
-            }
-            if not envs.VLLM_DISABLE_COMPILE_CACHE:
-                logger.info("Once the model is compiled for the first time, "
-                            "the cached compiled binary will be reused.")
-                options["cache_dir"] = ("./rsd_cache_dir"
-                                        if envs.VLLM_RBLN_TP_SIZE > 1 else
-                                        "./cache_dir")
-            if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
-                options["mode"] = "strict"
+        logger.info("[RBLN] process_group_dict = %s", process_group_dict)
+        options = {
+            "compile_context": self.compile_context,
+            "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
+            "mode": "strict",
+            "process_group_dict": process_group_dict
+        }
+        if not envs.VLLM_DISABLE_COMPILE_CACHE:
+            logger.info("Once the model is compiled for the first time, "
+                        "the cached compiled binary will be reused.")
+            options["cache_dir"] = ("./rsd_cache_dir"
+                                    if envs.VLLM_RBLN_TP_SIZE > 1 else
+                                    "./cache_dir")
+        if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
+            options["mode"] = "strict"
 
         # Initialize world group with rbln-ccl backend before torch.compile
         # This ensures RCCL is properly initialized before compilation
         # All devices (PP, TP, DP all included) participate in this all_reduce
         try:
+            logger.info("[RBLN] Initializing rbln-ccl process group for world")
             world_size = dist.get_world_size()
             all_ranks = list(range(world_size))
-
-            logger.info(
-                "[RBLN] Initializing rbln-ccl process group for world (all devices) before torch.compile"
-            )
 
             rbln_world_group = dist.new_group(all_ranks, backend="rbln-ccl")
             # Warm up RCCL with a dummy all_reduce across all devices

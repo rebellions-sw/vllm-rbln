@@ -41,6 +41,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             use_multiple_decoder=False,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
         self.dec_max_seq_len = self.model_config.max_model_len
         self.dec_lengths = [0] * self.batch_size
@@ -88,7 +89,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
         kwargs = self.preprocess_for_decoder(is_prompt,
                                              block_tables,
-                                             self.kv_block_adapter,
                                              input_ids,
                                              cache_position,
                                              input_block_ids=valid_block_ids)
