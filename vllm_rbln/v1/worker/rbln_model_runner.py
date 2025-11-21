@@ -41,6 +41,7 @@ from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
 from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
@@ -77,7 +78,7 @@ from vllm.v1.spec_decode.ngram_proposer import NgramProposer
 from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.kv_connector_model_runner_mixin import (
-    KVConnectorModelRunnerMixin)
+    KVConnectorModelRunnerMixin, KVConnectorOutput)
 from vllm.v1.worker.utils import (AttentionGroup, MultiModalBudget,
                                   add_kv_sharing_layers_to_kv_cache_groups,
                                   bind_kv_cache)
@@ -1174,6 +1175,45 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                                                 dtype=torch.int32)
         return max_tokens_across_dp_cpu - num_tokens, num_tokens_after_padding
 
+    def _pool(
+        self,
+        hidden_states: torch.Tensor,
+        num_scheduled_tokens: int,
+        num_scheduled_tokens_np: np.ndarray,
+        kv_connector_output: Optional[KVConnectorOutput],
+    ) -> ModelRunnerOutput:
+        assert self.input_batch.num_reqs ==\
+            len(self.input_batch.pooling_params), \
+        "Either all or none of the requests in" \
+        " a batch must be pooling request"
+
+        hidden_states = hidden_states[:num_scheduled_tokens]
+        pooling_metadata = self.input_batch.get_pooling_metadata()
+        pooling_metadata.build_pooling_cursor(num_scheduled_tokens_np.tolist(),
+                                              device=hidden_states.device)
+        seq_lens_cpu = self.seq_lens.cpu[:self.input_batch.num_reqs]
+
+        # Pooling models D2H & synchronize occurs in pooler.py:build_output
+        raw_pooler_output = self.model.pooler(
+            hidden_states=hidden_states, pooling_metadata=pooling_metadata)
+
+        pooler_output: list[Optional[torch.Tensor]] = []
+        for raw_output, seq_len, prompt_len in zip(
+                raw_pooler_output, seq_lens_cpu, pooling_metadata.prompt_lens):
+
+            output = raw_output.data if seq_len == prompt_len else None
+            pooler_output.append(output)
+
+        return ModelRunnerOutput(
+            req_ids=self.input_batch.req_ids,
+            req_id_to_index=self.input_batch.req_id_to_index,
+            sampled_token_ids=[],
+            logprobs=None,
+            prompt_logprobs_dict={},
+            pooler_output=pooler_output,
+            kv_connector_output=kv_connector_output,
+        )
+
     def _preprocess(
         self,
         scheduler_output: "SchedulerOutput",
@@ -1372,80 +1412,90 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         prefill_seq_len = (self.scheduler_config.max_num_batched_tokens
                            if self.scheduler_config.chunked_prefill_enabled
                            else self.scheduler_config.max_model_len)
-        dummy_prefill_schedule = SchedulerOutput(
-            scheduled_new_reqs=[
-                NewRequestData(
-                    req_id="dummy_prefill",
-                    prompt_token_ids=list(range(prefill_seq_len)),
-                    mm_kwargs=[],
-                    mm_hashes=[],
-                    mm_positions=[],
-                    sampling_params=SamplingParams(temperature=0.0),
-                    pooling_params=None,
-                    block_ids=([0], ),
-                    num_computed_tokens=0,
-                    lora_request=None,
-                )
-            ],
-            scheduled_cached_reqs=CachedRequestData.make_empty(),
-            num_scheduled_tokens={"dummy_prefill": prefill_seq_len},
-            total_num_scheduled_tokens=prefill_seq_len,
-            scheduled_spec_decode_tokens={},
-            scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[0],
-            finished_req_ids=set(),
-            free_encoder_mm_hashes=[],
-            structured_output_request_ids={},
-            grammar_bitmask=None,
-            kv_connector_metadata=None)
-        dummy_prefill_cleanup = SchedulerOutput(
-            scheduled_new_reqs=[],
-            scheduled_cached_reqs=CachedRequestData.make_empty(),
-            num_scheduled_tokens={},
-            total_num_scheduled_tokens=0,
-            scheduled_spec_decode_tokens={},
-            scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[1],
-            finished_req_ids={
-                "dummy_prefill",
-            },
-            free_encoder_mm_hashes=[],
-            structured_output_request_ids={},
-            grammar_bitmask=None,
-            kv_connector_metadata=None)
-        self.execute_model(dummy_prefill_schedule)
-        self.execute_model(dummy_prefill_cleanup)
-
+        dummy_prefill_requests = []
+        dummy_prefill_num_scheduled_tokens = {}
+        self._add_dummy_requests(
+            requests=dummy_prefill_requests,
+            num_scheduled_tokens=dummy_prefill_num_scheduled_tokens,
+            total_tokens=prefill_seq_len,
+            num_computed_tokens=0,
+            sampling_params=None if self.is_pooling_model else SamplingParams(
+                temperature=0.0),
+            pooling_params=PoolingParams(
+                task=self.get_supported_pooling_tasks()[0])
+            if self.is_pooling_model else None,
+        )
+        self._execute_dummy_requests(dummy_prefill_requests,
+                                     dummy_prefill_num_scheduled_tokens)
         num_prefill_graphs = self._accumulative_compilation_count
         logger.info("Compiled %d graph(s) for prefill", num_prefill_graphs)
 
         # compile decode graph
         decode_max_batch_size = self.scheduler_config.max_num_seqs
         decode_max_seq_len = self.scheduler_config.max_model_len
-        decode_max_num_blocks = (decode_max_seq_len +
-                                 self.cache_config.block_size -
-                                 1) // self.cache_config.block_size
-        dummy_decode_schedule = SchedulerOutput(
-            scheduled_new_reqs=[
-                NewRequestData(
-                    req_id=f"dummy_decode_{i}",
-                    prompt_token_ids=list(range(decode_max_seq_len - 1)),
-                    mm_kwargs=[],
-                    mm_hashes=[],
-                    mm_positions=[],
-                    sampling_params=SamplingParams(temperature=0.0),
-                    pooling_params=None,
-                    block_ids=([0] * decode_max_num_blocks, ),
-                    num_computed_tokens=decode_max_seq_len - 1,
-                    lora_request=None,
-                ) for i in range(decode_max_batch_size)
-            ],
+
+        dummy_decode_requests = []
+        dummy_decode_num_scheduled_tokens = {}
+        for _ in range(decode_max_batch_size):
+            self._add_dummy_requests(
+                requests=dummy_decode_requests,
+                num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
+                total_tokens=decode_max_seq_len - 1,
+                num_computed_tokens=decode_max_seq_len - 1,
+                sampling_params=None
+                if self.is_pooling_model else SamplingParams(temperature=0.0),
+                pooling_params=PoolingParams(
+                    task=self.get_supported_pooling_tasks()[0])
+                if self.is_pooling_model else None,
+            )
+
+        self._execute_dummy_requests(
+            requests=dummy_decode_requests,
+            num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
+        )
+
+        logger.info("Compiled %d graph(s) for decode",
+                    self._accumulative_compilation_count - num_prefill_graphs)
+
+    def _add_dummy_requests(
+        self,
+        requests: list[NewRequestData],
+        num_scheduled_tokens: dict[str, int],
+        total_tokens: int,
+        num_computed_tokens: int,
+        sampling_params: Optional[SamplingParams] = None,
+        pooling_params: Optional[PoolingParams] = None,
+    ) -> None:
+
+        num_blocks = round_up(
+            total_tokens,
+            self.cache_config.block_size) // self.cache_config.block_size
+        prompt_token_ids = list(range(total_tokens))
+
+        req = NewRequestData(
+            req_id=f"dummy_request_{len(requests)}",
+            prompt_token_ids=prompt_token_ids,
+            mm_kwargs=[],
+            mm_hashes=[],
+            mm_positions=[],
+            sampling_params=sampling_params,
+            pooling_params=pooling_params,
+            block_ids=([0] * num_blocks, ),
+            num_computed_tokens=num_computed_tokens,
+            lora_request=None,
+        )
+        requests.append(req)
+        num_scheduled_tokens[req.req_id] = 1 \
+            if total_tokens - num_computed_tokens == 0 \
+                else total_tokens - num_computed_tokens
+
+    def _execute_dummy_requests(self, requests: list[NewRequestData],
+                                num_scheduled_tokens: dict[str, int]) -> None:
+        sched_output = SchedulerOutput(
+            scheduled_new_reqs=requests,
             scheduled_cached_reqs=CachedRequestData.make_empty(),
-            num_scheduled_tokens={
-                f"dummy_decode_{i}": 1
-                for i in range(decode_max_batch_size)
-            },
-            total_num_scheduled_tokens=decode_max_batch_size,
+            num_scheduled_tokens=num_scheduled_tokens,
+            total_num_scheduled_tokens=sum(num_scheduled_tokens.values()),
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
             num_common_prefix_blocks=[0],
@@ -1454,7 +1504,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
-        dummy_decode_cleanup = SchedulerOutput(
+        cleanup_sched_output = SchedulerOutput(
             scheduled_new_reqs=[],
             scheduled_cached_reqs=CachedRequestData.make_empty(),
             num_scheduled_tokens={},
@@ -1462,17 +1512,15 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
             num_common_prefix_blocks=[1],
-            finished_req_ids=set(f"dummy_decode_{i}"
-                                 for i in range(decode_max_batch_size)),
+            finished_req_ids={req.req_id
+                              for req in requests},
             free_encoder_mm_hashes=[],
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
-        self.execute_model(dummy_decode_schedule)
-        self.execute_model(dummy_decode_cleanup)
 
-        logger.info("Compiled %d graph(s) for decode",
-                    self._accumulative_compilation_count - num_prefill_graphs)
+        self.execute_model(sched_output)
+        self.execute_model(cleanup_sched_output)
 
     def _bookkeeping_sync(
         self, scheduler_output: "SchedulerOutput",
@@ -1852,8 +1900,10 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 self.model.get_language_model(), "logits_processor"):
             self.logits_processor = self.model.get_language_model(
             ).logits_processor
-        else:
+        elif hasattr(self.model, "logits_processor"):
             self.logits_processor = self.model.logits_processor
+        else:
+            self.logits_processor = None
         # if self.lora_config:
         #     self.model = self.load_lora_model(
         #         self.model,
