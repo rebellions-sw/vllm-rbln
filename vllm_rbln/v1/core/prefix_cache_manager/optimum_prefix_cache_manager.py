@@ -262,8 +262,7 @@ class RBLNPrefixKVCacheManager:
             self._allocate_new_blocks(request_id, num_new_ob, inner_blocks)
         else:
             # Append to the last outer block
-            request_blocks = self._mapping_manager.get_request_blocks(
-                request_id)
+            request_blocks = self.get_block_ids(request_id)
             last_ob_id = request_blocks[-1]
             self._append_to_existing_block(last_ob_id, inner_blocks)
 
@@ -406,7 +405,7 @@ class RBLNPrefixKVCacheManager:
         """
         Get the matched outer blocks using inner blocks.
         """
-        skip_blocks = set(self._mapping_manager.get_request_blocks(request_id))
+        skip_blocks = set(self.get_block_ids(request_id))
         result = self._cache_search_manager.find_cached_blocks(
             request_id, cached_blocks, skip_blocks, num_new_computed_tokens,
             self._mapping_manager)
@@ -432,14 +431,6 @@ class RBLNPrefixKVCacheManager:
         """
         Get the list of outer block IDs for a given request.
         """
-        if not self._mapping_manager.is_request_registered(request_id):
-            logger.warning(
-                "[PFX] [GET-BLOCKS-WARNING] REQUEST=%s | "
-                "REASON=request_not_registered",
-                request_id,
-            )
-            return []
-
         return self._mapping_manager.get_request_blocks(request_id)
 
     def can_allocate(self,

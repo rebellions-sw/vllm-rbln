@@ -392,6 +392,7 @@ class RBLNOptimumScheduler(Scheduler):
                 num_scheduled_tokens[request.request_id] = num_new_tokens
                 token_budget -= num_new_tokens
                 req_index += 1
+
         # [skip] speculative decoding, encoder-related tasks
 
         # Check if the scheduling constraints are satisfied.
