@@ -262,8 +262,7 @@ class RBLNPrefixKVCacheManager:
             self._allocate_new_blocks(request_id, num_new_ob, inner_blocks)
         else:
             # Append to the last outer block
-            request_blocks = self._mapping_manager.get_request_blocks(
-                request_id)
+            request_blocks = self.get_block_ids(request_id)
             last_ob_id = request_blocks[-1]
             self._append_to_existing_block(last_ob_id, inner_blocks)
 
@@ -406,14 +405,17 @@ class RBLNPrefixKVCacheManager:
         """
         Get the matched outer blocks using inner blocks.
         """
-        skip_blocks = set(self._mapping_manager.get_request_blocks(request_id))
+        skip_blocks = set(self.get_block_ids(request_id))
         result = self._cache_search_manager.find_cached_blocks(
             request_id, cached_blocks, skip_blocks, num_new_computed_tokens,
             self._mapping_manager)
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):
-            for ob_id in result.cached_outer_blocks:
+            # NOTE(eunji.lee):
+            # To increase the hit ratio,
+            # we need to touch the blocks in reverse order.
+            for ob_id in reversed(result.cached_outer_blocks):
                 self._eviction_policy.touch(ob_id)
 
         return result.cached_outer_blocks, result.cached_lengths
@@ -429,18 +431,12 @@ class RBLNPrefixKVCacheManager:
         """
         Get the list of outer block IDs for a given request.
         """
-        if not self._mapping_manager.is_request_registered(request_id):
-            logger.warning(
-                "[PFX] [GET-BLOCKS-WARNING] REQUEST=%s | "
-                "REASON=request_not_registered",
-                request_id,
-            )
-            return []
-
         return self._mapping_manager.get_request_blocks(request_id)
 
-    def can_allocate(self, num_new_blocks: int,
-                     num_computed_tokens: int) -> bool:
+    def can_allocate(self,
+                     num_new_blocks: int,
+                     num_computed_tokens: int,
+                     request_id: Optional[str] = None) -> bool:
         # 1. Check if the enough outer blocks are free
         required_num_ob = self._compute_num_blocks_to_allocate(
             num_new_blocks, num_computed_tokens)
@@ -451,7 +447,7 @@ class RBLNPrefixKVCacheManager:
         # 2. Check if we can evict enough blocks
         evict_count = required_num_ob - free_count
         blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
-            self._mapping_manager, evict_count)
+            self._mapping_manager, evict_count, request_id)
         can_evict = len(blocks_to_evict) >= evict_count
 
         # 3. Evict blocks if possible

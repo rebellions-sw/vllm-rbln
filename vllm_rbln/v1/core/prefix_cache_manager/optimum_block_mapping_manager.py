@@ -148,7 +148,9 @@ class BlockMappingManager:
         """
         Return the list of outer block IDs associated with a request.
         """
-        return self._request_to_outer_blocks.get(request_id, []).copy()
+        if not self.is_request_registered(request_id):
+            raise ValueError(f"Request {request_id} is not registered")
+        return self._request_to_outer_blocks[request_id].copy()
 
     def remove_request(self, request_id: str) -> list[int]:
         """
@@ -176,14 +178,22 @@ class BlockMappingManager:
         mapping = self._block_mappings.get(outer_block_id)
         return mapping.inner_block_ids if mapping else []
 
-    def get_inactive_mappings(self) -> list[BlockMapping]:
+    def get_inactive_mappings(self,
+                              skip_request_id: Optional[str] = None
+                              ) -> list[BlockMapping]:
         """
         Return a list of inactive mappings.
         """
-        return [
-            mapping for mapping in self._block_mappings.values()
-            if not mapping.is_active
-        ]
+        if skip_request_id is None:
+            return [
+                mapping for mapping in self._block_mappings.values()
+                if not mapping.is_active
+            ]
+        else:
+            return [
+                mapping for mapping in self._block_mappings.values() if
+                not mapping.is_active and mapping.request_id != skip_request_id
+            ]
 
     def get_cached_inner_blocks_for_outer(self,
                                           outer_block_id: int) -> list[int]:
