@@ -148,7 +148,9 @@ class BlockMappingManager:
         """
         Return the list of outer block IDs associated with a request.
         """
-        return self._request_to_outer_blocks.get(request_id, []).copy()
+        if not self.is_request_registered(request_id):
+            raise ValueError(f"Request {request_id} is not registered")
+        return self._request_to_outer_blocks[request_id].copy()
 
     def remove_request(self, request_id: str) -> list[int]:
         """
