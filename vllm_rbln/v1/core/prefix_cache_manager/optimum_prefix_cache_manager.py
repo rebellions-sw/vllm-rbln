@@ -458,7 +458,7 @@ class RBLNPrefixKVCacheManager:
         # 2. Check if we can evict enough blocks
         evict_count = required_num_ob - free_count
         blocks_to_evict = self._eviction_policy.select_blocks_for_eviction(
-            self._mapping_manager, evict_count, request_id)
+            self._mapping_manager, evict_count)
         can_evict = len(blocks_to_evict) >= evict_count
 
         # 3. Evict blocks if possible

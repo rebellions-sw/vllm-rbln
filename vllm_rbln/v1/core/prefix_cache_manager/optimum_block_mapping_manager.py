@@ -178,22 +178,14 @@ class BlockMappingManager:
         mapping = self._block_mappings.get(outer_block_id)
         return mapping.inner_block_ids if mapping else []
 
-    def get_inactive_mappings(self,
-                              skip_request_id: Optional[str] = None
-                              ) -> list[BlockMapping]:
+    def get_inactive_mappings(self) -> list[BlockMapping]:
         """
         Return a list of inactive mappings.
         """
-        if skip_request_id is None:
-            return [
-                mapping for mapping in self._block_mappings.values()
-                if not mapping.is_active
-            ]
-        else:
-            return [
-                mapping for mapping in self._block_mappings.values() if
-                not mapping.is_active and mapping.request_id != skip_request_id
-            ]
+        return [
+            mapping for mapping in self._block_mappings.values()
+            if not mapping.is_active
+        ]
 
     def get_cached_inner_blocks_for_outer(self,
                                           outer_block_id: int) -> list[int]:
