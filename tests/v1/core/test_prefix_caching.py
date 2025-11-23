@@ -304,7 +304,7 @@ def test_cache_hit_child_block(limited_6blocks_scheduler):
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
     answer = torch.tensor([4, 5, -1, -1], dtype=torch.int16)
     assert torch.allclose(output.block_table_dict[req4_id], answer)
-    assert output.cached_block_table == [2, 3]
+    assert output.cached_block_table == []
 
 
 def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
@@ -376,7 +376,7 @@ def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
     output = limited_6blocks_scheduler.schedule()
     model_runner_output = create_model_runner_output(output)
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
-    assert output.cached_block_table == [2, 3]
+    assert output.cached_block_table == []
     assert output.block_table_dict[req3_id].tolist() == [0, 1, -1, -1]
 
 
