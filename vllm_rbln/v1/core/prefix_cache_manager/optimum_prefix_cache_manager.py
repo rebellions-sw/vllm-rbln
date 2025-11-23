@@ -446,8 +446,7 @@ class RBLNPrefixKVCacheManager:
 
     def can_allocate(self,
                      num_new_blocks: int,
-                     num_computed_tokens: int,
-                     request_id: Optional[str] = None) -> bool:
+                     num_computed_tokens: int) -> bool:
         # 1. Check if the enough outer blocks are free
         required_num_ob = self._compute_num_blocks_to_allocate(
             num_new_blocks, num_computed_tokens)
