@@ -353,10 +353,14 @@ class RBLNPrefixKVCacheManager:
                 self._eviction_policy.unregister_block(block_id)
                 logger.debug(
                     "[PFX] [EVICTION] OB=%d | "
-                    "IB_COUNT=%d IB=%s | "
-                    "FREE_BLOCKS_AFTER=%d", block_id,
-                    len(mapping.inner_block_ids), mapping.inner_block_ids,
-                    self._allocator.get_free_count())
+                    "IB_COUNT=%d | "
+                    "FREE_BLOCKS_AFTER=%d | "
+                    "INACTIVE_MAPPINGS_AFTER=%s", block_id,
+                    len(mapping.inner_block_ids),
+                    self._allocator.get_free_count(), [
+                        m.outer_block_id
+                        for m in self._mapping_manager.get_inactive_mappings()
+                    ])
             else:
                 logger.error(
                     "[PFX] [EVICTION-ERROR] OB=%d | "
@@ -389,7 +393,14 @@ class RBLNPrefixKVCacheManager:
         If it is not preemption, keep the mappings for potential future reuse.
         """
         outer_blocks = self._mapping_manager.remove_request(request_id)
-
+        logger.debug(
+            "[PFX] [FREE-REQUEST] REQUEST=%s | "
+            "PREEMPTION=%s | "
+            "OUTER_BLOCKS=%s",
+            request_id,
+            preemption,
+            outer_blocks,
+        )
         for block_id in outer_blocks:
             mapping = self._mapping_manager.get_mapping(block_id)
             if preemption:
