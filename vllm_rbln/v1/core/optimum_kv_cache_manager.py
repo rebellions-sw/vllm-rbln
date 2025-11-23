@@ -124,16 +124,16 @@ class RBLNKVCacheManager(KVCacheManager):
         # after the touch function is called
         # We need to check the free blocks will be enough
         # after the touch function is called
-        if self.enable_caching:
-            removed_blocks = 0
-            for blocks_per_group in new_computed_block_list:
-                for block in blocks_per_group:
-                    if block.ref_cnt == 0 and not block.is_null:
-                        removed_blocks += 1
+        # if self.enable_caching:
+        #     removed_blocks = 0
+        #     for blocks_per_group in new_computed_block_list:
+        #         for block in blocks_per_group:
+        #             if block.ref_cnt == 0 and not block.is_null:
+        #                 removed_blocks += 1
 
-            if num_blocks_to_allocate + removed_blocks > \
-                self.block_pool.get_num_free_blocks():
-                return None
+        #     if num_blocks_to_allocate + removed_blocks > \
+        #         self.block_pool.get_num_free_blocks():
+        #         return None
 
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
@@ -151,12 +151,12 @@ class RBLNKVCacheManager(KVCacheManager):
         # cache hit rate, we keep the touch function here.
         # It triggers all blocks are not freed
         # even though the request is freed.
-        if self.enable_caching:
-            self.block_pool.touch(new_computed_block_list)
-        else:
-            assert not any(new_computed_block_list), (
-                "Computed blocks should be empty when "
-                "prefix caching is disabled")
+        # if self.enable_caching:
+        #     self.block_pool.touch(new_computed_block_list)
+        # else:
+        #     assert not any(new_computed_block_list), (
+        #         "Computed blocks should be empty when "
+        #         "prefix caching is disabled")
 
         # Generate req_to_blocks, num_cached_block
         # in the coordinator
