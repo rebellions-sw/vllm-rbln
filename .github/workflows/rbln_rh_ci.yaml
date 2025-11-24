@@ -37,7 +37,7 @@ jobs:
       - name: Calculate dependency hash
         id: dep_hash
         run: |
-          HASH=$(grep -E '^ARG (ATOM_DRIVER_VERSION|LLVM_VERSION|OPTIMUM_RBLN_VERSION|RAY_VERSION|REBEL_COMPILER_VERSION|TORCHVISION_VERSION|TORCH_VERSION|TRITON_VERSION|PYTHON_VERSION)=' Dockerfile.ubi.ci | sort | sha256sum | cut -c1-8)
+          HASH=$(grep -E '^ARG (ATOM_DRIVER_VERSION|RBLN_CCL_VERSION|BCM_DRIVER_VERSION|BCM_LIBBNXT_RE_VERSION|LLVM_VERSION|OPTIMUM_RBLN_VERSION|RAY_VERSION|REBEL_COMPILER_VERSION|TORCHVISION_VERSION|TORCH_VERSION|TRITON_VERSION|PYTHON_VERSION)=' Dockerfile.ubi.ci | sort | sha256sum | cut -c1-8)
           echo "hash=${HASH}" >> "${GITHUB_OUTPUT}"
           echo "Dependency hash: ${HASH}" >&2
 
@@ -90,8 +90,6 @@ jobs:
             E2E_REPOSITORY_URL=${{ secrets.E2E_REPOSITORY_URL }}
             E2E_REPOSITORY_ID=${{ secrets.E2E_REPOSITORY_ID }}
             E2E_REPOSITORY_PWD=${{ secrets.E2E_REPOSITORY_PWD }}
-            ACTIVATION_KEY=${{ secrets.ACTIVATION_KEY }}
-            ORG_ID=${{ secrets.ORG_ID }}
 
       - name: Image info
         run: |

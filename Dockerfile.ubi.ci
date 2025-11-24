@@ -8,6 +8,9 @@ ARG WORKDIR=/workspace
 WORKDIR "${WORKDIR}"
 
 ARG ATOM_DRIVER_VERSION=2.0.1-2
+ARG RBLN_CCL_VERSION="2.0.0"
+ARG BCM_DRIVER_VERSION=233.1.135.7
+ARG BCM_LIBBNXT_RE_VERSION=233.0.152.2
 ARG LLVM_VERSION=19.1.7-rbln
 ARG OPTIMUM_RBLN_VERSION=0.7.5rc3.dev3+g0e82798
 ARG RAY_VERSION=2.46.0
@@ -19,6 +22,9 @@ ARG VLLM_RBLN_VERSION=0.8.0rc0
 ARG VLLM_VERSION=0.10.2
 
 LABEL ATOM_DRIVER_VERSION="${ATOM_DRIVER_VERSION}"
+LABEL RBLN_CCL_VERSION="${RBLN_CCL_VERSION}"
+LABEL BCM_DRIVER_VERSION="${BCM_DRIVER_VERSION}"
+LABEL BCM_LIBBNXT_RE_VERSION="${BCM_LIBBNXT_RE_VERSION}"
 LABEL LLVM_VERSION="${LLVM_VERSION}"
 LABEL OPTIMUM_RBLN_VERSION="${OPTIMUM_RBLN_VERSION}"
 LABEL RAY_VERSION="${RAY_VERSION}"
@@ -50,9 +56,29 @@ RUN --mount=type=secret,id=E2E_REPOSITORY_URL,env=E2E_REPOSITORY_URL \
        --root /atom \
        "/atom/${ATOM_DRIVER_PACKAGE}" && \
     rm -f "/atom/${ATOM_DRIVER_PACKAGE}"
+  
+################################################################################
+FROM base AS driver
+
+RUN PYTHONUNBUFFERED=1 dnf install -y wget rpm && \
+    dnf clean all
+
+# Install non-RDMA dependencies (RDMA packages are installed in entrypoint.sh)
+RUN PYTHONUNBUFFERED=1 dnf install -y \
+        bzip2-libs \
+        libdrm && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf && \
+    ln -sf /usr/lib64/libbz2.so.1 /usr/lib64/libbz2.so.1.0 && \
+    ldconfig
+
+COPY --from=atom /atom/etc/ /etc/
+COPY --from=atom /atom/opt/ /opt/
+COPY --from=atom /atom/usr/ /usr/
+COPY --from=atom /atom/lib/ /usr/
 
 ################################################################################
-FROM atom AS python
+FROM driver AS python
 
 ARG PYTHON_VERSION
 
@@ -72,8 +98,9 @@ FROM python AS vllm-rbln-env
 
 RUN --mount=type=secret,id=ACTIVATION_KEY,env=ACTIVATION_KEY \
     --mount=type=secret,id=ORG_ID,env=ORG_ID \
-    subscription-manager register --activationkey="${ACTIVATION_KEY}" --org="${ORG_ID}" && \
-    PYTHONUNBUFFERED=1 dnf -y update && \
+    subscription-manager register --activationkey="${ACTIVATION_KEY}" --org="${ORG_ID}"
+
+RUN PYTHONUNBUFFERED=1 dnf -y update && \
     dnf install -y \
         wget \
         rsync \
@@ -87,8 +114,9 @@ RUN --mount=type=secret,id=ACTIVATION_KEY,env=ACTIVATION_KEY \
         python3-devel \
         numactl-devel && \
     dnf clean all && \
-    rm -rf /var/cache/dnf && \
-    subscription-manager unregister
+    rm -rf /var/cache/dnf
+
+RUN subscription-manager unregister
 
 # vLLM-RBLN ENV
 ENV RBLN_KERNEL_MODE="triton" \
@@ -106,6 +134,11 @@ RUN umask 002 && \
     mkdir -p /home/vllm && \
     chmod g+rwx /home/vllm
 
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 USER 2000
+
+ENTRYPOINT [ "/entrypoint.sh" ]
 
 CMD ["/bin/bash"]
