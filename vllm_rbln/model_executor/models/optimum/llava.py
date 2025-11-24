@@ -112,7 +112,7 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
                         pixel_values.shape[-2:]).unsqueeze(0)
                 # NOTE(eunji.lee): It is a patch for bfloat16 support.
                 dtype = self.rbln_model_config.language_model.torch_dtype
-                if dtype != torch.float32:
+                if dtype != pixel_values.dtype:
                     pixel_values = pixel_values.to(dtype)
         else:
             pixel_values = None

@@ -145,7 +145,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             input_features = input_features.squeeze(0)
             # NOTE(eunji.lee): It is a patch for bfloat16 support.
             dtype = self.rbln_model_config.torch_dtype
-            if dtype != torch.float32:
+            if dtype != input_features.dtype:
                 input_features = input_features.to(dtype)
         return input_features
 
