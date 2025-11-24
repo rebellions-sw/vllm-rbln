@@ -74,6 +74,10 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
                 if image_input is not None:
                     assert image_input["type"] == "pixel_values"
                     pixel_values = image_input["data"]
+                    # NOTE(eunji.lee): It is a patch for bfloat16 support.
+                    dtype = self.rbln_model_config.language_model.torch_dtype
+                    if dtype != torch.float32:
+                        pixel_values = pixel_values.to(dtype)
 
             block_tables = kwargs.pop("block_tables")
             input_ids = kwargs.pop("input_ids")

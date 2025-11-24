@@ -73,7 +73,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
                 pixel_attention_mask = image_input[
                     "pixel_attention_mask"].unsqueeze(0)
                 # NOTE(eunji.lee): It is a patch for bfloat16 support.
-                dtype = self.rbln_model_config.language_model.torch_dtype
+                dtype = self.model.rbln_config.text_model.torch_dtype
                 if dtype != torch.float32:
                     pixel_values = pixel_values.to(dtype)
             else:
