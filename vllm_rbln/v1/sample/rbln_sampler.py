@@ -111,15 +111,6 @@ class RBLNSampler(VLLMSampler):
                  seed: int = 42,):
         super().__init__()
         rebel.manual_seed(seed)
-        self.bucket_sizes = self.get_bucket_sizes(max_num_seqs)
-        self._pooled_tensor = torch.empty(
-            (max_num_seqs, vocab_size),
-            dtype=torch.float32,
-        )
-        self._pooled_top_p = torch.empty(
-            (max_num_seqs,),
-            dtype=torch.float32,
-        )
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
@@ -273,18 +264,18 @@ class RBLNSampler(VLLMSampler):
             )
         return bucket_sizes
 
-    def pad_to_bucket_size(
-        self,
-        logits: torch.Tensor,
-        top_p: Optional[torch.Tensor],
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        top_p = self._pooled_top_p[:logits.shape[0]].copy_(top_p)
-        logits = self._pooled_tensor[:logits.shape[0], :logits.shape[1]].copy_(logits)
-        bucket_size = next(
-            b for b in self.bucket_sizes if b >= logits.shape[0]
-        )
+    # def pad_to_bucket_size(
+    #     self,
+    #     logits: torch.Tensor,
+    #     top_p: Optional[torch.Tensor],
+    # ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    #     top_p = self._pooled_top_p[:logits.shape[0]].copy_(top_p)
+    #     logits = self._pooled_tensor[:logits.shape[0], :logits.shape[1]].copy_(logits)
+    #     bucket_size = next(
+    #         b for b in self.bucket_sizes if b >= logits.shape[0]
+    #     )
         
-        return logits, top_p
+    #     return logits, top_p
 
 WARM_UP_CONFIGS = [
     {

@@ -149,6 +149,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 seed=self.vllm_config.model_config.seed,
             )
             sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
+            self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
+            self._pooled_tensors: dict[int, torch.Tensor] = {}
+            for bucket_size in self.bucket_sizes:
+                self._pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, self.model_config.get_vocab_size()),
+                    dtype=torch.float32,
+                )
         else:
             logger.info("Using default vLLM sampler.")
             sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
@@ -284,10 +291,15 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
         with record_function_or_nullcontext("Sample"):
+            bucket_size = self.select_lower_bounded_batch_size(self.input_batch.num_reqs, self.bucket_sizes)
+            num_reqs = self.input_batch.num_reqs
+            padded_logits = self._pooled_tensors[bucket_size]
+            padded_logits[:num_reqs].copy_(logits)
             sampler_output = self.sampler(
-                logits=logits,
-                sampling_metadata=self.input_batch.sampling_metadata,
+                logits=padded_logits,
+                sampling_metadata=self.input_batch.sampling_metadata, 
             )
+            logits = padded_logits[:num_reqs]
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -838,7 +850,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_batch.presence_penalties_reqs.clear()
 
         def dummy_run_batches(base_config):
-            for batch_size in range(1, self.input_batch.max_num_reqs + 1):
+            for batch_size in self.bucket_sizes:
                 input_batch = self.input_batch
                 populate_reqs(input_batch, base_config, batch_size)
 
@@ -1111,6 +1123,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         logits: torch.Tensor,
     ):
+        valid_logits = logits[:self.input_batch.num_reqs].clone()
         grammar_bitmask = scheduler_output.grammar_bitmask
         if grammar_bitmask is None:
             return
@@ -1138,7 +1151,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         out_indices = []
 
         # Reorder the bitmask to match the order of the requests in the batch.
-        sorted_bitmask = np.full(shape=(logits.shape[0],
+        sorted_bitmask = np.full(shape=(valid_logits.shape[0],
                                         grammar_bitmask.shape[1]),
                                  fill_value=-1,
                                  dtype=grammar_bitmask.dtype)
@@ -1159,14 +1172,50 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # If the length of out indices and the logits have the same shape
         # we don't need to pass indices to the kernel,
         # since the bitmask is already aligned with the logits.
-        skip_out_indices = len(out_indices) == logits.shape[0]
+        skip_out_indices = len(out_indices) == valid_logits.shape[0]
 
         # Serialization of np.ndarray is much more efficient than a tensor,
         # so we receive it in that format.
         grammar_bitmask = torch.from_numpy(grammar_bitmask).contiguous()
 
         xgr.apply_token_bitmask_inplace(
-            logits,
+            valid_logits,
             grammar_bitmask.to(self.device, non_blocking=True),
             indices=out_indices if not skip_out_indices else None,
         )
+        # NOTE(eunji.lee):
+        # It is risky to use logits in-place
+        logits[:valid_logits.shape[0]].copy_(valid_logits)
+
+
+    @staticmethod
+    def get_bucket_sizes(max_num_seqs: int) -> list[int]:
+            """Get the bucket sizes for the sampler.
+            Args:
+                max_num_seqs (int): The maximum number of sequences.
+            Returns:
+                list[int]: The bucket sizes.
+            [1, 2, 4] + list(range(8, 256, 8)) + list(
+                range(256, max_num_seqs + 1, 16))
+            """
+        bucket_sizes = [
+            i for i in [1, 2, 4] if i <= max_num_seqs
+        ]
+        if max_num_seqs >= 8:
+            # Step size 8 for small batch sizes, up to 256(not included)
+            bucket_sizes += list(
+                range(8, min(max_num_seqs + 1, 256), 8)
+            )
+        if max_num_seqs >= 256:
+            # Step size 16 for larger batch sizes
+            bucket_sizes += list(
+                range(256, max_num_seqs + 1, 16)
+            )
+        return bucket_sizes
+
+    @classmethod
+    @cache
+    def select_lower_bounded_batch_size(self, original_batch_size: int,
+                                        bucket_sizes: tuple):
+        index = bisect.bisect_left(bucket_sizes, original_batch_size)
+        return bucket_sizes[index]
