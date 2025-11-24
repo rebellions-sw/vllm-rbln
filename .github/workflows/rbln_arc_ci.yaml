@@ -1,4 +1,4 @@
-name: vLLM-RBLN RH CI
+name: vLLM-RBLN ARC CI
 
 on:
   pull_request:
@@ -134,4 +134,4 @@ jobs:
       - name: Run vLLM-RBLN Tests
         run: |
           source .venv/bin/activate
-          pytest tests/mock.py -vv --durations 0
+          pytest tests/v1/core -vv --durations 0
