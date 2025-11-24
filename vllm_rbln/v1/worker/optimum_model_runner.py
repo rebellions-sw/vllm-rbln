@@ -11,7 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import bisect
 import logging
+from functools import cache
 from typing import TYPE_CHECKING, Optional, Union, cast
 
 import numpy as np
@@ -291,13 +293,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
         with record_function_or_nullcontext("Sample"):
-            bucket_size = self.select_lower_bounded_batch_size(self.input_batch.num_reqs, self.bucket_sizes)
+            bucket_size = self.select_bucket_size(self.input_batch.num_reqs,
+                                                  self.bucket_sizes)
             num_reqs = self.input_batch.num_reqs
             padded_logits = self._pooled_tensors[bucket_size]
             padded_logits[:num_reqs].copy_(logits)
             sampler_output = self.sampler(
                 logits=padded_logits,
-                sampling_metadata=self.input_batch.sampling_metadata, 
+                sampling_metadata=self.input_batch.sampling_metadata,
             )
             logits = padded_logits[:num_reqs]
 
@@ -1187,35 +1190,20 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # It is risky to use logits in-place
         logits[:valid_logits.shape[0]].copy_(valid_logits)
 
-
     @staticmethod
     def get_bucket_sizes(max_num_seqs: int) -> list[int]:
-            """Get the bucket sizes for the sampler.
-            Args:
-                max_num_seqs (int): The maximum number of sequences.
-            Returns:
-                list[int]: The bucket sizes.
-            [1, 2, 4] + list(range(8, 256, 8)) + list(
-                range(256, max_num_seqs + 1, 16))
-            """
-        bucket_sizes = [
-            i for i in [1, 2, 4] if i <= max_num_seqs
-        ]
+        bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
         if max_num_seqs >= 8:
             # Step size 8 for small batch sizes, up to 256(not included)
-            bucket_sizes += list(
-                range(8, min(max_num_seqs + 1, 256), 8)
-            )
+            bucket_sizes += list(range(8, min(max_num_seqs + 1, 256), 8))
         if max_num_seqs >= 256:
             # Step size 16 for larger batch sizes
-            bucket_sizes += list(
-                range(256, max_num_seqs + 1, 16)
-            )
+            bucket_sizes += list(range(256, max_num_seqs + 1, 16))
         return bucket_sizes
 
     @classmethod
     @cache
-    def select_lower_bounded_batch_size(self, original_batch_size: int,
-                                        bucket_sizes: tuple):
+    def select_bucket_size(self, original_batch_size: int,
+                           bucket_sizes: tuple):
         index = bisect.bisect_left(bucket_sizes, original_batch_size)
         return bucket_sizes[index]

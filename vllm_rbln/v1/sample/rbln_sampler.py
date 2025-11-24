@@ -104,11 +104,13 @@ def top_p_only_fake(
 
 class RBLNSampler(VLLMSampler):
 
-    def __init__(self,
-                 logprobs_mode: LogprobsMode,
-                 max_num_seqs: int,
-                 vocab_size: int,
-                 seed: int = 42,):
+    def __init__(
+        self,
+        logprobs_mode: LogprobsMode,
+        max_num_seqs: int,
+        vocab_size: int,
+        seed: int = 42,
+    ):
         super().__init__()
         rebel.manual_seed(seed)
         self._compiled_rbln_topp_sampler = torch.compile(
@@ -241,41 +243,23 @@ class RBLNSampler(VLLMSampler):
 
     @staticmethod
     def get_bucket_sizes(max_num_seqs: int) -> list[int]:
-            """Get the bucket sizes for the sampler.
-            Args:
-                max_num_seqs (int): The maximum number of sequences.
-            Returns:
-                list[int]: The bucket sizes.
-            [1, 2, 4] + list(range(8, 256, 8)) + list(
-                range(256, max_num_seqs + 1, 16))
-            """
-        bucket_sizes = [
-            i for i in [1, 2, 4] if i <= max_num_seqs
-        ]
+        """Get the bucket sizes for the sampler.
+        Args:
+            max_num_seqs (int): The maximum number of sequences.
+        Returns:
+            list[int]: The bucket sizes.
+        [1, 2, 4] + list(range(8, 256, 8)) + list(
+            range(256, max_num_seqs + 1, 16))
+        """
+        bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
         if max_num_seqs >= 8:
             # Step size 8 for small batch sizes, up to 256(not included)
-            bucket_sizes += list(
-                range(8, min(max_num_seqs + 1, 256), 8)
-            )
+            bucket_sizes += list(range(8, min(max_num_seqs + 1, 256), 8))
         if max_num_seqs >= 256:
             # Step size 16 for larger batch sizes
-            bucket_sizes += list(
-                range(256, max_num_seqs + 1, 16)
-            )
+            bucket_sizes += list(range(256, max_num_seqs + 1, 16))
         return bucket_sizes
 
-    # def pad_to_bucket_size(
-    #     self,
-    #     logits: torch.Tensor,
-    #     top_p: Optional[torch.Tensor],
-    # ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-    #     top_p = self._pooled_top_p[:logits.shape[0]].copy_(top_p)
-    #     logits = self._pooled_tensor[:logits.shape[0], :logits.shape[1]].copy_(logits)
-    #     bucket_size = next(
-    #         b for b in self.bucket_sizes if b >= logits.shape[0]
-    #     )
-        
-    #     return logits, top_p
 
 WARM_UP_CONFIGS = [
     {
