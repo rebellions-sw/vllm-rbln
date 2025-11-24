@@ -132,5 +132,4 @@ jobs:
 
       - name: Run vLLM-RBLN Tests
         run: |
-          source .venv/bin/activate
           pytest tests/v1/core -vv --durations 0
