@@ -38,15 +38,15 @@ jobs:
         id: dep_hash
         run: |
           HASH=$(grep -E '^ARG (ATOM_DRIVER_VERSION|RBLN_CCL_VERSION|BCM_DRIVER_VERSION|BCM_LIBBNXT_RE_VERSION|LLVM_VERSION|OPTIMUM_RBLN_VERSION|RAY_VERSION|REBEL_COMPILER_VERSION|TORCHVISION_VERSION|TORCH_VERSION|TRITON_VERSION|PYTHON_VERSION)=' Dockerfile.ubi.ci | sort | sha256sum | cut -c1-8)
-          echo "hash=${HASH}" >> "${GITHUB_OUTPUT}"
-          echo "Dependency hash: ${HASH}" >&2
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "Dependency hash: $HASH"
 
       - name: Set image tag
         id: image_tag
         run: |
           TAG="env-${{ steps.dep_hash.outputs.hash }}"
-          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
-          echo "Image tag: ${TAG}" >&2
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $TAG"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -59,12 +59,12 @@ jobs:
         id: check_image
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}"
-          if docker manifest inspect "${IMAGE}" > /dev/null 2>&1; then
-            echo "exists=true" >> "${GITHUB_OUTPUT}"
-            echo "Image already exists: ${IMAGE}" >&2
+          if docker manifest inspect $IMAGE > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image already exists: $IMAGE"
           else
-            echo "exists=false" >> "${GITHUB_OUTPUT}"
-            echo "Image does not exist, will build: ${IMAGE}" >&2
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Image does not exist, will build: $IMAGE"
           fi
 
       - name: Set up Docker Buildx
@@ -93,9 +93,9 @@ jobs:
 
       - name: Image info
         run: |
-          echo "Using image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}" >&2
-          echo "Image exists: ${{ steps.check_image.outputs.exists }}" >&2
-          echo "Build skipped: ${{ steps.check_image.outputs.exists }}" >&2
+          echo "Using image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}"
+          echo "Image exists: ${{ steps.check_image.outputs.exists }}"
+          echo "Build skipped: ${{ steps.check_image.outputs.exists }}"
 
   test:
     if: github.repository_owner == 'rebellions-sw'
