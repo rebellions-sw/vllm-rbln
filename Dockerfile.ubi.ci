@@ -1,4 +1,4 @@
-ARG BASE_UBI_IMAGE_TAG=9.7
+ARG BASE_UBI_IMAGE_TAG=9.5
 ARG PYTHON_VERSION=3.12.9
 
 ## Base Layer ##################################################################
