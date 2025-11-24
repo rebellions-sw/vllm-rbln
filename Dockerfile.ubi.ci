@@ -56,28 +56,6 @@ RUN --mount=type=secret,id=E2E_REPOSITORY_URL,env=E2E_REPOSITORY_URL \
        --root /atom \
        "/atom/${ATOM_DRIVER_PACKAGE}" && \
     rm -f "/atom/${ATOM_DRIVER_PACKAGE}"
-
-################################################################################
-FROM base AS bnxt
-RUN PYTHONUNBUFFERED=1 dnf install -y \
-    autoconf automake \
-    gcc gcc-c++ make \
-    iproute kmod \
-    libibverbs-devel librdmacm-devel librdmacm \
-    libtool pciutils \
-    python systemd wget && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
-
-RUN wget "https://docs.broadcom.com/docs-and-downloads/ethernet-network-adapters/NXE/BRCM_${BCM_DRIVER_VERSION}/bcm_${BCM_DRIVER_VERSION}.tar.gz" && \
-    tar -xvzf "bcm_${BCM_DRIVER_VERSION}.tar.gz" && \
-    tar -C /tmp -xf "${WORKDIR}/bcm_${BCM_DRIVER_VERSION}/drivers_linux/bnxt_rocelib/libbnxt_re-${BCM_LIBBNXT_RE_VERSION}.tar.gz" && \
-    cd "/tmp/libbnxt_re-${BCM_LIBBNXT_RE_VERSION}" && \
-    sh autogen.sh && \
-    ./configure && \
-    make clean && \
-    make && \
-    make install
   
 ################################################################################
 FROM base AS driver
@@ -92,13 +70,6 @@ RUN PYTHONUNBUFFERED=1 dnf install -y \
     dnf clean all && \
     rm -rf /var/cache/dnf && \
     ln -sf /usr/lib64/libbz2.so.1 /usr/lib64/libbz2.so.1.0 && \
-    ldconfig
-
-COPY --from=bnxt /usr/local/lib/libbnxt_re-rdmav34.so /usr/local/lib/libbnxt_re-rdmav34.so
-RUN if [ -f /usr/lib64/libibverbs/libbnxt_re-rdmav34.so ]; then \
-        mv /usr/lib64/libibverbs/libbnxt_re-rdmav34.so /usr/lib64/libibverbs/libbnxt_re-rdmav34.so.inbox; \
-    fi && \
-    ln -s /usr/local/lib/libbnxt_re-rdmav34.so /usr/local/lib/libbnxt_re.so && \
     ldconfig
 
 COPY --from=atom /atom/etc/ /etc/
@@ -125,20 +96,9 @@ RUN ln -sf "/usr/bin/python${PYTHON_VERSION%.*}" /usr/bin/python3 && \
 ################################################################################
 FROM python AS vllm-rbln-env
 
-# Add Oracle Linux repo for additional packages
-RUN cat <<'EOF' > /etc/yum.repos.d/oracle_ol9.repo
-[ol9-baseos-latest]
-name=Oracle Linux 9 BaseOS Latest
-baseurl=https://yum.oracle.com/repo/OracleLinux/OL9/baseos/latest/x86_64/
-enabled=1
-gpgcheck=0
-
-[ol9-appstream]
-name=Oracle Linux 9 Application Stream
-baseurl=https://yum.oracle.com/repo/OracleLinux/OL9/appstream/x86_64/
-enabled=1
-gpgcheck=0
-EOF
+RUN --mount=type=secret,id=ACTIVATION_KEY,env=ACTIVATION_KEY \
+    --mount=type=secret,id=ORG_ID,env=ORG_ID \
+    subscription-manager register --activationkey="${ACTIVATION_KEY}" --org="${ORG_ID}"
 
 RUN PYTHONUNBUFFERED=1 dnf -y update && \
     dnf install -y \
@@ -155,6 +115,8 @@ RUN PYTHONUNBUFFERED=1 dnf -y update && \
         numactl-devel && \
     dnf clean all && \
     rm -rf /var/cache/dnf
+
+RUN subscription-manager unregister
 
 # vLLM-RBLN ENV
 ENV RBLN_KERNEL_MODE="triton" \
