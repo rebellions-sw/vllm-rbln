@@ -147,8 +147,7 @@ class PunicaWrapperRBLN(PunicaWrapperBase):
         y += buffer @ lora_b_stacked
         """
         lora_a_w = lora_a_stacked[:, 0, :, :]
-        lora_a_w = lora_a_stacked.reshape(-1,
-                                          lora_a_w.shape[2]).transpose(0, 1)
+        lora_a_w = lora_a_w.reshape(-1, lora_a_w.shape[2]).transpose(0, 1)
         lora_b_w = lora_b_stacked[:, 0, :, :].transpose(1, 2)
         lora_b_w = lora_b_w.reshape(-1, lora_b_w.shape[2])
         out = x @ lora_a_w

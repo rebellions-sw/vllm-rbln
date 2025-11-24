@@ -2543,9 +2543,10 @@ def create_lora_mask(input_ids: torch.Tensor, lora_ids: list[int],
 def create_sampler_indices_padded(lora_ids: list[int],
                                   lora_index_to_id: list[int],
                                   max_num_seqs: int, is_prefill: bool,
-                                  max_loras: int) -> None:
+                                  max_loras: int) -> torch.Tensor:
     if is_prefill:
-        assert len(lora_ids) == 1
+        assert len(lora_ids
+                   ) == 1, "Only single LoRA is supported during prefill phase"
 
     prompt_mapping: list[int] = [
         lora_index_to_id.index(lora_ids[i])
