@@ -123,12 +123,6 @@ class RBLNSampler(VLLMSampler):
     def apply_topp_sampler(
             self, logits: torch.Tensor, top_p: torch.Tensor
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        # NOTE(eunji.lee): To prevent excessive recompilations,
-        # we pad logits and top_p to the bucket_size.
-        logits, top_p = self.pad_to_bucket_size(
-            logits,
-            top_p,
-        )
         sampled = self.rbln_topp_sampler(logits, top_p)
         logits_to_return = None
         if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
