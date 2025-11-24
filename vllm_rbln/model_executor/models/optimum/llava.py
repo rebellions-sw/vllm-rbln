@@ -132,6 +132,7 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             image_sizes=image_sizes,
             cache_position=cache_position,
         )
+
         if not is_prompt:
             logits = logits[:request_nums]
         return logits

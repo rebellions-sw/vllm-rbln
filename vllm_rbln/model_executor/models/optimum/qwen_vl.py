@@ -197,7 +197,6 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
                 position_embed=position_embed,
                 block_tables=block_tables,
             ).logits
-
         if not is_prompt:
             logits = logits[:request_nums]
         return logits

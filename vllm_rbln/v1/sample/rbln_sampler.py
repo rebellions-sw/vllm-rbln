@@ -104,13 +104,9 @@ def top_p_only_fake(
 
 class RBLNSampler(VLLMSampler):
 
-    def __init__(
-        self,
-        logprobs_mode: LogprobsMode,
-        max_num_seqs: int,
-        vocab_size: int,
-        seed: int = 42,
-    ):
+    def __init__(self,
+                 logprobs_mode: LogprobsMode = "raw_logprobs",
+                 seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
         self._compiled_rbln_topp_sampler = torch.compile(
