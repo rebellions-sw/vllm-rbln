@@ -96,7 +96,8 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
             self.model.text_model.decoder = self.model.text_model.decoders[
                 padded_batch_size]
             logits = self.model.text_model.decoder(**kwargs).logits
-
+        if not is_prompt:
+            logits = logits[:request_nums]
         return logits
 
     def _validate_pixel_values(self, data: torch.Tensor) -> torch.Tensor:

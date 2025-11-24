@@ -74,4 +74,7 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             self.model.decoder = self.model.decoders[padded_batch_size]
 
             logits = self.model.decoder(**kwargs).logits
-            return logits
+            if self.attn_impl != "flash_attn":
+                return logits[:request_nums]
+
+            return logits[:model_input.block_tables.shape[0]]

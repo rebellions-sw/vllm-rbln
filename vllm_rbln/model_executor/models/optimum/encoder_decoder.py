@@ -153,4 +153,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             block_tables=block_tables,
         )
 
-        return logits, valid_block_ids
+        if not is_prompt:
+            logits = logits[valid_block_ids]
+
+        return logits

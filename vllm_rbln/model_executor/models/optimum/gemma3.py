@@ -222,6 +222,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 position_ids=position_ids,
             ).logits
 
+        if not is_prompt:
+            logits = logits[:request_nums]
         return logits
 
     def get_pixel_values(self, model_input: ModelInputForRBLN):
