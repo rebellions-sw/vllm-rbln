@@ -52,23 +52,7 @@ RUN --mount=type=secret,id=E2E_REPOSITORY_URL,env=E2E_REPOSITORY_URL \
     rm -f "/atom/${ATOM_DRIVER_PACKAGE}"
 
 ################################################################################
-FROM atom AS python
-
-ARG PYTHON_VERSION
-
-# Install Python from dnf repository
-RUN PYTHONUNBUFFERED=1 dnf install -y \
-    "python${PYTHON_VERSION%.*}" \
-    "python${PYTHON_VERSION%.*}-pip"
-
-# Create symbolic links for versioned and unversioned commands
-RUN ln -sf "/usr/bin/python${PYTHON_VERSION%.*}" /usr/bin/python3 && \
-    ln -sf "/usr/bin/python${PYTHON_VERSION%.*}" /usr/bin/python && \
-    ln -sf "/usr/bin/pip${PYTHON_VERSION%.*}" /usr/bin/pip3 && \
-    ln -sf "/usr/bin/pip${PYTHON_VERSION%.*}" /usr/bin/pip
-
-################################################################################
-FROM python AS vllm-rbln-env
+FROM atom AS vllm-rbln-env
 
 RUN --mount=type=secret,id=ACTIVATION_KEY,env=ACTIVATION_KEY \
     --mount=type=secret,id=ORG_ID,env=ORG_ID \
@@ -84,11 +68,24 @@ RUN --mount=type=secret,id=ACTIVATION_KEY,env=ACTIVATION_KEY \
         make \
         cmake \
         ninja-build \
-        python3-devel \
         numactl-devel && \
     dnf clean all && \
     rm -rf /var/cache/dnf && \
     subscription-manager unregister
+
+ARG PYTHON_VERSION
+
+# Install Python from dnf repository
+RUN PYTHONUNBUFFERED=1 dnf install -y \
+    "python${PYTHON_VERSION%.*}" \
+    "python${PYTHON_VERSION%.*}-pip" \
+    "python${PYTHON_VERSION%.*}-devel"
+
+# Create symbolic links for versioned and unversioned commands
+RUN ln -sf "/usr/bin/python${PYTHON_VERSION%.*}" /usr/bin/python3 && \
+    ln -sf "/usr/bin/python${PYTHON_VERSION%.*}" /usr/bin/python && \
+    ln -sf "/usr/bin/pip${PYTHON_VERSION%.*}" /usr/bin/pip3 && \
+    ln -sf "/usr/bin/pip${PYTHON_VERSION%.*}" /usr/bin/pip
 
 # vLLM-RBLN ENV
 ENV RBLN_KERNEL_MODE="triton" \
