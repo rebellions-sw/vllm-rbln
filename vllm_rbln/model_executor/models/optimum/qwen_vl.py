@@ -70,6 +70,16 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
         Returns:
             Tuple of (inputs_embeds, position_embed, rope_deltas)
         """
+        # NOTE(eunji.lee): It is a patch for bfloat16 support.
+        dtype = self.rbln_model_config.language_model.torch_dtype
+        if image_input is not None and image_input[
+                "pixel_values"] is not None and dtype != torch.float32:
+            image_input["pixel_values"] = image_input["pixel_values"].to(dtype)
+        if video_input is not None and video_input[
+                "pixel_values_videos"] is not None and dtype != torch.float32:
+            video_input["pixel_values_videos"] = video_input[
+                "pixel_values_videos"].to(dtype)
+
         # Prepare base arguments common to all models
         preprocess_args = {
             "input_ids":
