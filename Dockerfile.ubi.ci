@@ -124,21 +124,8 @@ ENV RBLN_KERNEL_MODE="triton" \
     USE_VLLM_MODEL="1" \
     VLLM_DISABLE_COMPILE_CACHE="1" 
 
-# Fix permissions for OpenShift
-RUN chgrp -R 0 /workspace && \
-    chmod -R g=u /workspace
-
-# setup non-root user for OpenShift
-RUN umask 002 && \
-    useradd --uid 2000 --gid 0 vllm && \
-    mkdir -p /home/vllm && \
-    chmod g+rwx /home/vllm
-
 COPY ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-
-USER 2000
-
 ENTRYPOINT [ "/entrypoint.sh" ]
 
 CMD ["/bin/bash"]
