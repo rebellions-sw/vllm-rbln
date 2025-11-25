@@ -142,22 +142,20 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
             # NOTE(eunji.lee): Set recompile limit for RBLN sampler
             batch_size = self.vllm_config.scheduler_config.max_num_seqs
-            torch._dynamo.config.recompile_limit = batch_size * len(
-                WARM_UP_CONFIGS)
-            sampler = RBLNSampler(
-                logprobs_mode=self.model_config.logprobs_mode,
-                max_num_seqs=self.vllm_config.scheduler_config.max_num_seqs,
-                vocab_size=self.model_config.get_vocab_size(),
-                seed=self.vllm_config.model_config.seed,
-            )
-            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
             self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
-            self._pooled_tensors: dict[int, torch.Tensor] = {}
+            self.pooled_tensors: dict[int, torch.Tensor] = {}
             for bucket_size in self.bucket_sizes:
-                self._pooled_tensors[bucket_size] = torch.empty(
+                self.pooled_tensors[bucket_size] = torch.empty(
                     (bucket_size, self.model_config.get_vocab_size()),
                     dtype=torch.float32,
                 )
+            torch._dynamo.config.recompile_limit = len(
+                self.bucket_sizes) * len(WARM_UP_CONFIGS)
+            sampler = RBLNSampler(
+                logprobs_mode=self.model_config.logprobs_mode,
+                seed=self.vllm_config.model_config.seed,
+            )
+            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         else:
             logger.info("Using default vLLM sampler.")
             sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
@@ -293,16 +291,26 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
         with record_function_or_nullcontext("Sample"):
-            bucket_size = self.select_bucket_size(self.input_batch.num_reqs,
-                                                  self.bucket_sizes)
-            num_reqs = self.input_batch.num_reqs
-            padded_logits = self._pooled_tensors[bucket_size]
-            padded_logits[:num_reqs].copy_(logits)
+            if self.use_rbln_sampler:
+                bucket_size = self.select_bucket_size(
+                    self.input_batch.num_reqs, self.bucket_sizes)
+                num_reqs = self.input_batch.num_reqs
+                padded_logits = self.pooled_tensors[bucket_size]
+                padded_logits[:num_reqs].copy_(logits)
+            else:
+                padded_logits = logits
             sampler_output = self.sampler(
                 logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
-            logits = padded_logits[:num_reqs]
+            if self.use_rbln_sampler:
+                sampler_output.sampled_token_ids = \
+                    sampler_output.sampled_token_ids[:
+                                                                                    num_reqs]
+                if sampler_output.logprobs_tensors is not None:
+                    sampler_output.logprobs_tensors = \
+                        sampler_output.logprobs_tensors[:
+                                                                                      num_reqs]
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -868,10 +876,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                                             dtype=torch.long,
                                                             device="cpu")
 
-                logger.info(
+                logger.debug(
                     "Running dummy compile with batch_size=%d, vocab_size=%d",
                     batch_size, input_batch.vocab_size)
-                logger.info("Sampling metadata: %s", metadata)
+                logger.debug("Sampling metadata: %s", metadata)
 
                 with torch.inference_mode():
                     empty_logits = torch.empty(batch_size,
