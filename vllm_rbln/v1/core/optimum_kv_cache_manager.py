@@ -118,23 +118,6 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new blocks
             return None
 
-        # Edge case
-        # removed_blocks refers the blocks
-        # that are removed from the free blocks
-        # after the touch function is called
-        # We need to check the free blocks will be enough
-        # after the touch function is called
-        # if self.enable_caching:
-        #     removed_blocks = 0
-        #     for blocks_per_group in new_computed_block_list:
-        #         for block in blocks_per_group:
-        #             if block.ref_cnt == 0 and not block.is_null:
-        #                 removed_blocks += 1
-
-        #     if num_blocks_to_allocate + removed_blocks > \
-        #         self.block_pool.get_num_free_blocks():
-        #         return None
-
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
                     num_blocks_to_allocate,
@@ -143,20 +126,9 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new outer blocks for prefix caching
             return None
 
-        # TODO (eunji): The touch function
-        # increases the ref_cnt. We don't need ref_cnt
+        # NOTE(eunji.lee): We don't need to touch the blocks
         # because we don't reuse the provided computed blocks
         # and just copy the prefix matched blocks.
-        # But for consistency with original vllm and
-        # cache hit rate, we keep the touch function here.
-        # It triggers all blocks are not freed
-        # even though the request is freed.
-        # if self.enable_caching:
-        #     self.block_pool.touch(new_computed_block_list)
-        # else:
-        #     assert not any(new_computed_block_list), (
-        #         "Computed blocks should be empty when "
-        #         "prefix caching is disabled")
 
         # Generate req_to_blocks, num_cached_block
         # in the coordinator
@@ -178,9 +150,16 @@ class RBLNKVCacheManager(KVCacheManager):
         # Allocate outer blocks for prefix caching
         # following the inner blocks allocation
         inner_block_ids = [block.block_id for block in new_blocks[0]]
-        cached_blocks = [
+        cached_block_ids = [
             block.block_id for block in new_computed_block_list[0]
         ]
+
+        assert self._has_intersection(
+            inner_block_ids, cached_block_ids) is False, (
+                "Inner blocks and cached blocks must not have intersection"
+                f"inner_block_ids: {inner_block_ids}, "
+                f"cached_block_ids: {cached_block_ids}")
+
         self.prefix_cache_manager.allocate_blocks(
             request.request_id,
             num_computed_tokens,
@@ -190,7 +169,7 @@ class RBLNKVCacheManager(KVCacheManager):
         self._set_prefix_cached_blocks(
             request.request_id,
             num_new_computed_tokens,
-            cached_blocks,
+            cached_block_ids,
             is_prefill,
         )
 
@@ -250,3 +229,8 @@ class RBLNKVCacheManager(KVCacheManager):
             cached_blocks,
             allocated_outer_blocks,
         )
+
+
+def _has_intersection(a: list[int], b: list[int]) -> bool:
+    b_set = set(b)
+    return any(x in b_set for x in a)

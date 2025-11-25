@@ -375,16 +375,14 @@ class RBLNPrefixKVCacheManager:
             inner_blocks) == 1, "Can only append one inner block at a time"
         ib_id = inner_blocks[0]
 
-        # Update the outer to inner mapping
-        mapping = self._mapping_manager.get_mapping(outer_block_id)
-        if not mapping:
-            raise RuntimeError(
-                f"Mapping not found for outer block {outer_block_id}")
+        # Update the outer to inner block mapping
+        self._mapping_manager.update_outer_to_inner(outer_block_id, ib_id)
 
-        mapping.inner_block_ids.append(ib_id)
+        # Update the inner to outer block mapping
+        self._mapping_manager.update_inner_to_outer(ib_id, outer_block_id)
 
-        # Update the inner to outer mapping
-        self._mapping_manager.add_new_inner_to_outer(ib_id, outer_block_id)
+        # Update the cache history
+        self._mapping_manager.update_cache_history(ib_id)
 
     def free_request(self, request_id: str, preemption: bool = False) -> None:
         """
