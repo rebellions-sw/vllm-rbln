@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ruff: noqa: E501
-
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -147,9 +145,10 @@ class RblnPlatform(Platform):
         else:
             dtype = model_config.dtype
             logger.info("original model_config.dtype = %s", dtype)
-            if dtype != torch.bfloat16 and dtype != torch.float16 and dtype != torch.float:
+            if dtype != torch.bfloat16 and dtype != torch.float16 \
+                        and dtype != torch.float:
                 logger.warning(
-                    "%s is not supported on RBLN. only fp32,fp16,bf16 is supported",
+                    "%s not supported on RBLN, only fp32,fp16,bf16 supported",
                     dtype)
                 model_config.dtype = torch.float
             logger.info("RBLN use model_config.dtype = %s", model_config.dtype)

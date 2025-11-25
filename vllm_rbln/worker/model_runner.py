@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ruff: noqa: E501
-
 import dataclasses
 import math
 import time
@@ -510,8 +508,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                             op=dist.ReduceOp.SUM)
         except Exception as e:
             logger.warning(
-                "[RBLN] Failed to initialize rbln-ccl process group before torch.compile: %s",
-                e)
+                "[RBLN] Failed to initialize rbln-ccl process group : %s", e)
 
         compiled_model = torch.compile(
             model,
@@ -583,11 +580,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     model_output = model_output[:, selected_token_indices]
                 logits = self.compute_logits_model.compute_logits(
                     model_output, None)
-                logits = logits.view(-1, logits.size(-1))
-            else:
-                # non last rank create intermediate tensors, bypass it
-                logits = model_output
-            return logits
+                return logits.view(-1, logits.size(-1))
+
+            # non last rank create intermediate tensors, bypass it
+            return model_output
 
         if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
             self.model_executable = model_wrapper
@@ -734,12 +730,12 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             ).is_last_rank and not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
                 # Gather logits for TP
                 logits_processor = self.compute_logits_model.logits_processor
-                logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(
-                    0)
+                logits_or_intermediate_states = logits_or_intermediate_states \
+                                                .unsqueeze(0)
                 logits_or_intermediate_states = logits_processor._gather_logits(
                     logits_or_intermediate_states)
-                logits_or_intermediate_states = logits_or_intermediate_states.squeeze(
-                    0)
+                logits_or_intermediate_states = logits_or_intermediate_states \
+                                                .squeeze(0)
 
         if not get_pp_group().is_last_rank:
             intermediate_states = logits_or_intermediate_states

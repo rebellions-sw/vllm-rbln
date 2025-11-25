@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ruff: noqa: E501
-
 from typing import Callable, Optional
 
 import torch
@@ -87,7 +85,7 @@ def custom_moe_glu_fake(
     return torch.empty_like(hidden_states)
 
 
-def unquantized_fused_moe_method_forward_rbln_rsd(
+def unquantized_fused_moe_method_rbln(
     self,
     layer: torch.nn.Module,
     x: torch.Tensor,
@@ -191,18 +189,17 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     # selected_experts: (batch * sequence_length, top_k)
     _, selected_experts = torch.topk(routing_weights, k=top_k, dim=-1)
 
-    # masked_routing_weights == selected_weights w/ zeros for non selected indicies
+    # masked_routing_weights=selected_weights w/ non selected indicies zeros
     # selected_weights      = [..., top_k]
-    # masked_routing_weights= [..., n_experts], selected_experts index has only value
+    # masked_routing_weights= [..., n_experts], selected_experts has only value
     mask = torch.zeros_like(routing_weights, dtype=torch.float)
     un_mask = torch.ones_like(selected_experts, dtype=torch.float)
     mask = torch.scatter(mask, dim=1, index=selected_experts, src=un_mask)
 
     masked_routing_weights = routing_weights * mask
     if renormalize:  # only diff with mixtral sparse moe block!
-        masked_routing_weights = masked_routing_weights / masked_routing_weights.sum(
-            dim=-1, keepdim=True)
-
+        renormalize_sum = masked_routing_weights.sum(dim=-1, keepdim=True)
+        masked_routing_weights = masked_routing_weights / renormalize_sum
     ## count selected tokens for each expert index from selected_experts
     n_expert = router_logits.shape[1]
     zeros = torch.zeros(n_expert, dtype=torch.int32)
@@ -215,9 +212,9 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     # apply EP expert_map sharding into masked_routing_weights
     # E = n_exoerts
     # E'= E / ep_size
-    # since MoE custom kernel iterates only E', if index > E', DO NOTHING, ignore it
+    # since MoE custom kernel iterates only E', if index > E', ignore it
     if expert_map is not None:
-        # expert_map out of bounds values is mapped into index(=n_expert-1) beyond E'
+        # expert_map out of bounds values is mapped into index(=n_expert-1)
         # torch.scatter index dtype SHOULD be torch.int64
         expert_map_within_bounds = torch.where(expert_map < 0, n_expert - 1,
                                                expert_map).to(torch.int64)
@@ -241,7 +238,7 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     return masked_routing_weights, expert_select_count
 
 
-def unquantized_fused_moe_method_forward_rbln_custom(
+def unquantized_fused_moe_method_custom(
     self,
     layer: torch.nn.Module,
     x: torch.Tensor,
@@ -266,7 +263,7 @@ def unquantized_fused_moe_method_forward_rbln_custom(
     num_tokens = orig_shape[:-1].numel()  # noqa: F841
     intermediate_size = layer.w2_weight.shape[-1]
 
-    # w13_weight- gate_up_proj_weight, merged weight data for gate_proj(w1_weight) and up_proj (w3_weight)
+    # w13_weight- merged weight for gate_proj(w1_weight) and up_proj (w3_weight)
     # w2_weight - down_proj
     # gate_proj_weight - first half, layer.w13_weight[:intermediate_size]
     # up_proj_weight - second half, layer.w13_weight[intermediate_size:]
@@ -279,7 +276,6 @@ def unquantized_fused_moe_method_forward_rbln_custom(
     hidden_states = x.reshape(num_tokens, -1)
     router_logits = router_logits.reshape(num_tokens, -1)
 
-    # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/qwen3_moe_architecture.py
     masked_routing_weights, expert_select_count = get_masked_routing_weights(
         router_logits, top_k, renormalize, expert_map)
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
@@ -295,12 +291,12 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     if self.dp_size > 1:
         org_hidden_shape = hidden_states.shape
 
-        # input broadcast, all DPs broadcast each hidden_states & router_logits into dp group
+        # input broadcast - all DPs broadcast hidden_states & router_logits
         # example) DP2, TP/EP2
         # dp_group = {{0, 2}, {1, 3}}
         # tp_group = {{0, 1}, {2, 3}}
         # 1. initially, each DP hidden_states = [1, 128, 1024]
-        # 2. after multicast(multiple broadcast), all DPs hidden_states = [dp_size, 128, 1024]
+        # 2. after multicast, all DPs hidden_states = [dp_size, 128, 1024]
         # - all DP ranks broadcast inputs to process group
         # 3. DP x TP/EP expert parallel
         # ex) 0, 1, 2, 3 has its own hidden_states = [dp_size, 128, 1024]
@@ -335,9 +331,7 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     )
 
     if self.dp_size > 1:
-        # output all_reduce, all DPs broadcast each hidden_states & router_logits into dp group
-        # within expert, dp_group all_reduce
-        # ouf of expert, tp_group all_reduce
+        # output all_reduce == dp all_reduce + tp all_reduce
         all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
 
         hidden_shape_dp = (self.dp_size, -1, org_hidden_shape[-1])
@@ -351,7 +345,7 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
 def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
                                    cu_tokens_across_dp_cpu: torch.Tensor):
     # as-is : [num_tokens, hidden_size]
-    # to-be : buffer = [data_parallel_size*batch, seq, hidden_size], entire buffer for broadcast
+    # to-be : buffer = [data_parallel_size*batch, seq, hidden_size], broadcast
     #         hidden = [batch, seq, hidden_size]
     # x.shape = [1, seq, hidden_size]
     # assert len(x.shape) == 3
@@ -377,8 +371,8 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
 FusedMoE.forward_oot = fused_moe_forward_rbln
 if not envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
     logger.info("[RBLN] fused moe, pytorch native kernel")
-    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_forward_rbln_rsd
+    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_rbln
 else:
     logger.info("[RBLN] fused moe, RBLN custom kernel")
-    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_forward_rbln_custom
+    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_custom
 FusedMoE.naive_multicast = fused_moe_naive_multicast_rbln

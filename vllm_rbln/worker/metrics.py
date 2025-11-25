@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# ruff: noqa: E501
-
 import atexit
 from dataclasses import dataclass, field
 
@@ -52,13 +50,15 @@ class StepMetrics:
         return [v for i, v in enumerate(values) if i != max_idx]
 
     def get_avg_latency(self, ignore_outlier: bool = True) -> float:
-        """Get average latency in milliseconds, optionally ignoring one outlier."""
+        """Get average latency in milliseconds,
+        optionally ignoring one outlier."""
         values = self._without_outlier_f(
             self.latencies) if ignore_outlier else self.latencies
         return sum(values) / len(values) * 1000 if values else 0.0
 
     def get_avg_throughput(self, ignore_outlier: bool = True) -> float:
-        """Get average throughput in tokens/second, optionally ignoring one outlier."""
+        """Get average throughput in tokens/second,
+        optionally ignoring one outlier."""
         if not self.latencies or not self.token_counts:
             return 0.0
         latencies = self._without_outlier_f(
