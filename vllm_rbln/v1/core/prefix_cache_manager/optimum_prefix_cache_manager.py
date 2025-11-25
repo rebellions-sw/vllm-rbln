@@ -345,7 +345,7 @@ class RBLNPrefixKVCacheManager:
         """
         Evict a block and free its resources.
         """
-        mapping = self._mapping_manager.remove_mapping(block_id)
+        mapping = self._mapping_manager.remove_outer_block(block_id)
         if mapping:
             block = self._allocator.get_allocated_block(block_id)
             if block:
