@@ -55,6 +55,7 @@ from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
+from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -183,7 +184,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # solution, we initialize the input batch here, and re-initialize it
         # in `initialize_kv_cache` if the block_sizes here is different from
         # the block_sizes in the kv cache config.
-        self.input_batch = InputBatch(
+        self.input_batch = RBLNInputBatch(
             max_num_reqs=self.max_num_reqs,
             max_model_len=self.max_model_len,
             max_num_batched_tokens=self.max_num_tokens,
@@ -292,10 +293,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         with record_function_or_nullcontext("Sample"):
             if self.use_rbln_sampler:
-                bucket_size = self.select_bucket_size(
-                    self.input_batch.num_reqs, self.bucket_sizes)
+                # bucket_size = self.select_bucket_size(
+                #     self.input_batch.num_reqs, self.bucket_sizes)
                 num_reqs = self.input_batch.num_reqs
-                padded_logits = self.pooled_tensors[bucket_size]
+                padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
             else:
                 padded_logits = logits
@@ -305,12 +306,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             )
             if self.use_rbln_sampler:
                 sampler_output.sampled_token_ids = \
-                    sampler_output.sampled_token_ids[:
-                                                                                    num_reqs]
+                    sampler_output.sampled_token_ids[:num_reqs]
                 if sampler_output.logprobs_tensors is not None:
                     sampler_output.logprobs_tensors = \
-                        sampler_output.logprobs_tensors[:
-                                                                                      num_reqs]
+                        sampler_output.logprobs_tensors[:num_reqs]
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -790,7 +789,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.input_batch.condense()
 
         # Refresh batch metadata with any pending updates.
-        self.input_batch.refresh_metadata()
+        if self.use_rbln_sampler:
+            # To pad sampling metadata for RBLN sampler
+            self.bucket_size = self.select_bucket_size(
+                self.input_batch.num_reqs, self.bucket_sizes)
+            self.input_batch.refresh_metadata_rbln(self.bucket_size)
+        else:
+            self.input_batch.refresh_metadata()
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         pass
