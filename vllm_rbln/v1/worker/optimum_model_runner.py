@@ -597,11 +597,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         new/resumed/paused/finished request in the batch.
         """
         # Remove finished requests from the cached states.
-        print("scheduler_output.finished_req_ids",
-              len(scheduler_output.finished_req_ids))
-        print(scheduler_output.finished_req_ids)
-        print("self.requests", len(self.requests))
-        print(self.requests.keys())
         for req_id in scheduler_output.finished_req_ids:
             if logger.isEnabledFor(logging.DEBUG) and req_id in self.requests:
                 if self.enable_prefix_caching:
