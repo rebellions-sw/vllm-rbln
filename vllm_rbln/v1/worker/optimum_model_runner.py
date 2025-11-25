@@ -56,7 +56,7 @@ from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
-
+from vllm_rbln.v1.worker.utils import select_bucket_size
 if TYPE_CHECKING:
     import xgrammar as xgr
     from vllm.v1.core.sched.output import SchedulerOutput
@@ -198,6 +198,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.is_pooling_model,
                 self.vllm_config.model_config.logits_processors),
             is_pooling_model=self.is_pooling_model,
+            bucket_sizes=self.bucket_sizes if self.use_rbln_sampler else None,
         )
 
         # Cache the device properties.
@@ -791,7 +792,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # Refresh batch metadata with any pending updates.
         if self.use_rbln_sampler:
             # To pad sampling metadata for RBLN sampler
-            self.bucket_size = self.select_bucket_size(
+            self.bucket_size = select_bucket_size(
                 self.input_batch.num_reqs, self.bucket_sizes)
             self.input_batch.refresh_metadata_rbln(self.bucket_size)
         else:
@@ -1213,10 +1214,3 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # Step size 16 for larger batch sizes
             bucket_sizes += list(range(256, max_num_seqs + 1, 16))
         return bucket_sizes
-
-    @classmethod
-    @cache
-    def select_bucket_size(self, original_batch_size: int,
-                           bucket_sizes: tuple):
-        index = bisect.bisect_left(bucket_sizes, original_batch_size)
-        return bucket_sizes[index]

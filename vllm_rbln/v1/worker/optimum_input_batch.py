@@ -35,10 +35,20 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.spec_decode.utils import is_spec_decode_unsupported
 from vllm.v1.utils import copy_slice
 from vllm.v1.worker.block_table import MultiGroupBlockTable
+from vllm_rbln.v1.worker.utils import select_bucket_size
 
 class RBLNInputBatch(InputBatch):
+    """
+    Input batch for RBLN sampler.
+    To pad sampling metadata for RBLN sampler, provide bucket_sizes.
+    """
     def __init__(self, *args, **kwargs):
+        bucket_sizes = kwargs.pop("bucket_sizes")
         super().__init__(*args, **kwargs)
+        if bucket_sizes is not None:
+            # Overwrite sampling_metadata with RBLN sampling metadata
+            bucket_size = select_bucket_size(self.num_reqs, bucket_sizes)
+            self.sampling_metadata = self._make_sampling_metadata_rbln(self.num_reqs)
 
     def refresh_metadata_rbln(self, bucket_size: int):
         """Apply any batch updates to sampling metadata."""
@@ -48,6 +58,15 @@ class RBLNInputBatch(InputBatch):
             if batch_changed:
                 self.sampling_metadata = self._make_sampling_metadata_rbln(bucket_size)
             return
+
+        # For non-pooling models - generate and apply logitsprocs update;
+        # reset batch update tracking.
+        # Update sampling metadata if batch state is changed.
+        batch_update = self.batch_update_builder.get_and_reset(self.num_reqs)
+        for logit_proc in self.logitsprocs.all:
+            logit_proc.update_state(batch_update)
+        if batch_update:
+            self.sampling_metadata = self._make_sampling_metadata_rbln(bucket_size)
 
     def _make_sampling_metadata_rbln(self, bucket_size: int) -> SamplingMetadata:
         num_reqs = bucket_size
