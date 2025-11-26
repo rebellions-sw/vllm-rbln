@@ -35,11 +35,12 @@ if TYPE_CHECKING:
 
 
 def get_dp_impl():
-    if os.environ.get("VLLM_RBLN_DP_IMPL") is None:
+    dp_impl = os.environ.get("VLLM_RBLN_DP_IMPL")
+    if dp_impl is None:
         return "padded_decode"
     # default is padded_decode
     choices = set(["padded_decode", "dummy_prefill"])
-    current_impl = os.environ.get("VLLM_RBLN_DP_IMPL").lower()
+    current_impl = dp_impl.lower()
     if current_impl not in choices:
         raise ValueError(f"Invalid VLLM_RBLN_DP_IMPL: {current_impl}, "
                          f"Valid choices: {choices}")
