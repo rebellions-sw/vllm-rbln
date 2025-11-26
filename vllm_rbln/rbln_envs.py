@@ -25,11 +25,26 @@ if TYPE_CHECKING:
     VLLM_RBLN_ENABLE_WARM_UP: bool = True
     VLLM_RBLN_USE_VLLM_MODEL: bool = False
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
+    VLLM_RBLN_DP_IMPL: str = "padded_decode"
     VLLM_RBLN_ENFORCE_MODEL_FP32: bool = False
     VLLM_RBLN_MOE_CUSTOM_KERNEL: bool = True
     VLLM_RBLN_DP_INPUT_ALL_GATHER: bool = True
     VLLM_RBLN_LOGITS_ALL_GATHER: bool = True
+    VLLM_RBLN_NUM_RAY_NODES: int = 1
     VLLM_RBLN_METRICS: bool = False
+
+
+def get_dp_impl():
+    if os.environ.get("VLLM_RBLN_DP_IMPL") is None:
+        return "padded_decode"
+    # default is padded_decode
+    choices = set(["padded_decode", "dummy_prefill"])
+    current_impl = os.environ.get("VLLM_RBLN_DP_IMPL").lower()
+    if current_impl not in choices:
+        raise ValueError(f"Invalid VLLM_RBLN_DP_IMPL: {current_impl}, "
+                         f"Valid choices: {choices}")
+    return current_impl
+
 
 # extended environments
 environment_variables = {
@@ -62,6 +77,9 @@ environment_variables = {
     "VLLM_RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
      ("true", "1")),
+    # DP implementation, see candidates in get_dp_impl
+    "VLLM_RBLN_DP_IMPL":
+    get_dp_impl,
     # enforce model data type into fp32 not model_config.dtype
     "VLLM_RBLN_ENFORCE_MODEL_FP32":
     (lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower() in

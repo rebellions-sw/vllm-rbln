@@ -472,6 +472,14 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         if self.parallel_config.data_parallel_size > 1:
             self.dummy_execute_model_req = prefill_req
+            max_num_batched_tokens = \
+                self.scheduler_config.max_num_batched_tokens
+            max_num_seqs = self.scheduler_config.max_num_seqs
+            if envs.VLLM_RBLN_DP_IMPL == "padded_decode":
+                # TODO: consider relaxing this constraint
+                assert max_num_batched_tokens % max_num_seqs == 0, \
+                    "max_num_batched_tokens must be divisible by max_num_seqs"
+
         prefill_inputs = self.prepare_input(prefill_req)
         decode_inputs = self.prepare_input(decode_req)
         prefill_model_input, _, _ = prefill_inputs
@@ -553,7 +561,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         model_input, worker_input, kwargs = inputs
         num_steps = worker_input.num_steps
 
-        self._prepare_dp_model(model_input)
+        if envs.VLLM_RBLN_DP_IMPL == "dummy_prefill":
+            self._prepare_dp_model(model_input)
 
         self.execute_worker(worker_input)
 

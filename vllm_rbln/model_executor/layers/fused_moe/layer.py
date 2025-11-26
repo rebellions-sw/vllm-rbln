@@ -333,10 +333,15 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     if self.dp_size > 1:
         # output all_reduce == dp all_reduce + tp all_reduce
         all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
-
-        hidden_shape_dp = (self.dp_size, -1, org_hidden_shape[-1])
+        hidden_shape_dp = (-1, 1, org_hidden_shape[-1])
         final_hidden_states = all_hidden_states.reshape(hidden_shape_dp)
-        final_hidden_states = final_hidden_states[self.dp_rank]
+
+        max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+        num_tokens = org_hidden_shape[:-1].numel()  # noqa: F841
+        start = self.dp_rank * max_pad
+        end = start + num_tokens
+        final_hidden_states = final_hidden_states[start:end]
+
         final_hidden_states = final_hidden_states.reshape(org_hidden_shape)
 
     return final_hidden_states
@@ -350,14 +355,21 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
     # x.shape = [1, seq, hidden_size]
     # assert len(x.shape) == 3
 
-    dp_rank = self.dp_rank
+    x = x.reshape(1, -1, x.size(-1))
+    max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+    num_tokens = x.size(1)
+    num_repeat = max_pad // num_tokens
+    # TODO: evaluate various padding approaches
+    x = x.repeat(num_repeat, 1, 1)
+    x = x.reshape(1, max_pad, -1)
+
     if not envs.VLLM_RBLN_DP_INPUT_ALL_GATHER:
         # each DP rank gather all inputs via torch.distributed.all_reduce
         # broadcast(value) == all_reduce(value for me or zeros for others)
         all_buffer = None
         zeros = x - x
         for rank in range(get_dp_group().world_size):
-            rank_tensor = x if rank == dp_rank else zeros
+            rank_tensor = x if rank == self.dp_rank else zeros
             all_buffer = torch.cat((all_buffer, rank_tensor), dim=0) \
                 if all_buffer is not None else rank_tensor
         output = get_dp_group().all_reduce(all_buffer)
