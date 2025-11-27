@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import multiprocessing
-import os
 
 import pytest
 
@@ -270,31 +269,30 @@ def run_vllm(llm_args, prompts):
         raise e
 
 
+def patch_and_run(monkeypatch, env, llm_args, prompts):
+    with monkeypatch.context() as m:
+        for k, i in env.items():
+            m.setenv(k, i)
+
+        # rebellions SDK somewhat requires LLM instance to be
+        # instantiated in separated process
+        p = multiprocessing.Process(target=run_vllm, args=(llm_args, prompts))
+        p.start()
+        p.join()
+
+        assert not p.exitcode
+
+
 @pytest.mark.parametrize("target", targets)
-def test_v0(target, common_env, prompts):
-    os.environ["VLLM_USE_V1"] = "0"
-    os.environ.update(common_env)
-    os.environ.update(target.pop("extra_env", {}))
-
-    # rebellions SDK somewhat requires LLM instance to be
-    # instantiated in separated process
-    p = multiprocessing.Process(target=run_vllm, args=(target, prompts))
-    p.start()
-    p.join()
-
-    assert not p.exitcode
-
-
-@pytest.mark.parametrize("target", targets)
-def test_v1(target, common_env, prompts):
-    os.environ["VLLM_USE_V1"] = "1"
-    os.environ.update(common_env)
-    os.environ.update(target.pop("extra_env", {}))
-
-    # rebellions SDK somewhat requires LLM instance to be
-    # instantiated in separated process
-    p = multiprocessing.Process(target=run_vllm, args=(target, prompts))
-    p.start()
-    p.join()
-
-    assert not p.exitcode
+@pytest.mark.parametrize("vllm_use_v1", ["0", "1"])
+def test_model_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+    target,
+    vllm_use_v1,
+    common_env,
+    prompts,
+):
+    test_env = target.pop("extra_env", {})
+    test_env["VLLM_USE_V1"] = vllm_use_v1
+    test_env.update(common_env)
+    patch_and_run(monkeypatch, test_env, target, prompts)
