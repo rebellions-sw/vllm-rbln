@@ -40,6 +40,7 @@ from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.layers.mamba.abstract import MambaBase
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.model_executor.model_loader import TensorizerLoader, get_model_loader
+from vllm.model_executor.models import SupportsMultiModal
 from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
@@ -1708,6 +1709,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             requests=dummy_decode_requests,
             num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
         )
+
+        if self.supports_mm_inputs and get_pp_group().is_first_rank:
+            mm_budget = self.mm_budget
+            assert mm_budget is not None
+            dummy_modality = mm_budget.get_modality_with_max_tokens()
+            max_items = mm_budget.max_items_per_batch_by_modality[
+                dummy_modality]
+            dummy_mm_batch = self._get_mm_dummy_batch(dummy_modality,
+                                                      max_items)
+            assert isinstance(self.model, SupportsMultiModal)
+            self.model.get_multimodal_embeddings(**dummy_mm_batch)
 
         # FIXME(RBLN): To reduce dynamo cache lookup overhead, make dyanmo
         # evaluate a minimal set of guards required for dispatching compiled
