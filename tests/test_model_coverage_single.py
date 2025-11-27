@@ -41,14 +41,6 @@ def prompts():
 # for the sake of test environment and prevent downloading models twice,
 # always use instruct/chat model if possible
 
-# TODO: uncomment following models after VLLM_RBLN_FLASH_CAUSAL_ATTN=0
-# is handled properly or VLLM_RBLN_FLASH_CAUSAL_ATTN=1 allows
-# max_model_len==block_size
-# * openai-community/gpt2
-# * openai-community/gpt2-medium
-# * openai-community/gpt2-large
-# * openai-community/gpt2-xl
-
 # TODO: uncomment following models and adjust their arguments properly
 # after SWA is implemented
 # * mistralai/Mistral-7B-Instruct-v0.1
@@ -110,50 +102,38 @@ targets = [
         "max_num_seqs": 1,
     },
     # GPT2LMHeadModel
-    # {
-    #     "model": "openai-community/gpt2",
-    #     "max_model_len": 1024,
-    #     "block_size": 1024,
-    #     "enable_chunked_prefill": True,
-    #     "max_num_batched_tokens": 128,
-    #     "max_num_seqs": 8,
-    #     "extra_env": {
-    #         "VLLM_RBLN_FLASH_CAUSAL_ATTN": "0",
-    #     },
-    # },
-    # {
-    #     "model": "openai-community/gpt2-medium",
-    #     "max_model_len": 1024,
-    #     "block_size": 1024,
-    #     "enable_chunked_prefill": True,
-    #     "max_num_batched_tokens": 128,
-    #     "max_num_seqs": 8,
-    #     "extra_env": {
-    #         "VLLM_RBLN_FLASH_CAUSAL_ATTN": "0",
-    #     },
-    # },
-    # {
-    #     "model": "openai-community/gpt2-large",
-    #     "max_model_len": 1024,
-    #     "block_size": 1024,
-    #     "enable_chunked_prefill": True,
-    #     "max_num_batched_tokens": 128,
-    #     "max_num_seqs": 8,
-    #     "extra_env": {
-    #         "VLLM_RBLN_FLASH_CAUSAL_ATTN": "0",
-    #     },
-    # },
-    # {
-    #     "model": "openai-community/gpt2-xl",
-    #     "max_model_len": 1024,
-    #     "block_size": 1024,
-    #     "enable_chunked_prefill": True,
-    #     "max_num_batched_tokens": 128,
-    #     "max_num_seqs": 8,
-    #     "extra_env": {
-    #         "VLLM_RBLN_FLASH_CAUSAL_ATTN": "0",
-    #     },
-    # },
+    {
+        "model": "openai-community/gpt2",
+        "max_model_len": 1024,
+        "block_size": 1024,
+        "enable_chunked_prefill": True,
+        "max_num_batched_tokens": 128,
+        "max_num_seqs": 8,
+    },
+    {
+        "model": "openai-community/gpt2-medium",
+        "max_model_len": 1024,
+        "block_size": 1024,
+        "enable_chunked_prefill": True,
+        "max_num_batched_tokens": 128,
+        "max_num_seqs": 8,
+    },
+    {
+        "model": "openai-community/gpt2-large",
+        "max_model_len": 1024,
+        "block_size": 1024,
+        "enable_chunked_prefill": True,
+        "max_num_batched_tokens": 128,
+        "max_num_seqs": 8,
+    },
+    {
+        "model": "openai-community/gpt2-xl",
+        "max_model_len": 1024,
+        "block_size": 1024,
+        "enable_chunked_prefill": True,
+        "max_num_batched_tokens": 128,
+        "max_num_seqs": 8,
+    },
     # Qwen3ForCausalLM
     {
         "model": "Qwen/Qwen3-0.6B",
