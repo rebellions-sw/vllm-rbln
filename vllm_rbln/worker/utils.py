@@ -72,8 +72,8 @@ def get_maximum_num_blocks(
     vocab_size = model_config.get_vocab_size()
     hidden_size = model_config.get_hidden_size()
     num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
-    tensor_parallel_size = parallel_config.tensor_parallel_size
-    tensor_parallel_size *= tensor_parallel_size * envs.VLLM_RBLN_TP_SIZE
+    tensor_parallel_size = parallel_config.tensor_parallel_size * \
+                           envs.VLLM_RBLN_TP_SIZE
 
     # TODO(jongho): Update if target npu is REBEL.
     ATOM_DRAM_NBYTES = 16 * 2**30

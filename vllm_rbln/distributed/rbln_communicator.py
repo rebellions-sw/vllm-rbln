@@ -57,7 +57,6 @@ class RblnCommunicator(DeviceCommunicatorBase):
         elif dim == 0:
             pass
         else:
-            raise AssertionError("RBLN all_gather dim!=0, dim!=-1, NYI")
             # Reshape
             output_tensor = output_tensor.reshape((self.world_size, ) +
                                                   input_size)
@@ -66,5 +65,6 @@ class RblnCommunicator(DeviceCommunicatorBase):
                                                   (self.world_size *
                                                    input_size[dim], ) +
                                                   input_size[dim + 1:])
+            raise AssertionError("RBLN all_gather dim!=0, dim!=-1, NYI")
 
         return output_tensor
