@@ -166,9 +166,6 @@ class RBLNSampler(VLLMSampler):
         The various logits processing functions called in this method
         may update the logits tensor in-place.
         """
-        print(f"@@ sampling_metadata: {sampling_metadata}")
-        print(f"@@ all_greedy: {sampling_metadata.all_greedy}")
-        print(f"@@ all_random: {sampling_metadata.all_random}")
         assert not (sampling_metadata.all_greedy
                     and sampling_metadata.all_random)
         if sampling_metadata.all_random:

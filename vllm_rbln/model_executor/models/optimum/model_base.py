@@ -11,10 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import bisect
 import math
 import os
-from functools import cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,7 +28,7 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
-from vllm_rbln.utils.optimum.registry import get_rbln_model_info
+from vllm_rbln.utils.optimum import get_rbln_model_info, select_bucket_size
 
 logger = init_logger(__name__)
 
@@ -290,7 +288,7 @@ class RBLNOptimumDecoderMixin:
                     request_nums = input_ids.shape[0]
                 # Select lower-bounded batch size in case of multiple decoders
                 if self.use_multiple_decoder:
-                    padded_batch_size = self.select_lower_bounded_batch_size(
+                    padded_batch_size = select_bucket_size(
                         request_nums, self.decoder_batch_sizes)
 
             input_ids, cache_position, block_tables = self.pad_decoder_items(
@@ -362,9 +360,9 @@ class RBLNOptimumDecoderMixin:
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         return self.logits_processor(None, hidden_states, sampling_metadata)
 
-    @classmethod
-    @cache
-    def select_lower_bounded_batch_size(self, original_batch_size: int,
-                                        decoder_batch_sizes: tuple):
-        index = bisect.bisect_left(decoder_batch_sizes, original_batch_size)
-        return decoder_batch_sizes[index]
+    # @classmethod
+    # @cache
+    # def select_lower_bounded_batch_size(self, original_batch_size: int,
+    #                                     decoder_batch_sizes: tuple):
+    #     index = bisect.bisect_left(decoder_batch_sizes, original_batch_size)
+    #     return decoder_batch_sizes[index]

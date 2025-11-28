@@ -50,11 +50,11 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
+from vllm_rbln.utils.optimum import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
-from vllm_rbln.v1.worker.utils import select_bucket_size
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -293,8 +293,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         with record_function_or_nullcontext("Sample"):
             if self.use_rbln_sampler:
-                # bucket_size = self.select_bucket_size(
-                #     self.input_batch.num_reqs, self.bucket_sizes)
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
