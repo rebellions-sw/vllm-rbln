@@ -24,13 +24,11 @@ from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
                                        SchedulerOutput)
-from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
-                                        KVCacheGroupSpec, KVCacheTensor)
 from vllm.v1.sample.metadata import SamplingMetadata
-from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
-from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-from .utils import initialize_kv_cache
 
+from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
+
+from .utils import initialize_kv_cache
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 8
