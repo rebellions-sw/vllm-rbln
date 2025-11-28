@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
 # Copyright 2025 Rebellions Inc. All rights reserved.
 
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,51 +11,37 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from vllm.v1.worker.gpu_input_batch import InputBatch
-from dataclasses import dataclass
+
 from typing import Optional, cast
 
-import numpy as np
 import torch
-from typing_extensions import deprecated
-
-from vllm.lora.request import LoRARequest
-from vllm.multimodal.inputs import (MultiModalKwargsItem,
-                                    MultiModalKwargsItems, PlaceholderRange)
-from vllm.pooling_params import PoolingParams
-from vllm.sampling_params import SamplingParams, SamplingType
-from vllm.utils import swap_dict_values
-from vllm.v1.outputs import LogprobsTensors
-from vllm.v1.pool.metadata import PoolingMetadata
-from vllm.v1.sample.logits_processor import (BatchUpdateBuilder,
-                                             LogitsProcessors,
-                                             MoveDirectionality)
 from vllm.v1.sample.metadata import SamplingMetadata
-from vllm.v1.spec_decode.utils import is_spec_decode_unsupported
 from vllm.v1.utils import copy_slice
-from vllm.v1.worker.block_table import MultiGroupBlockTable
-from vllm_rbln.v1.worker.utils import select_bucket_size
+from vllm.v1.worker.gpu_input_batch import InputBatch
+
 
 class RBLNInputBatch(InputBatch):
     """
     Input batch for RBLN sampler.
     To pad sampling metadata for RBLN sampler, provide bucket_sizes.
     """
+
     def __init__(self, *args, **kwargs):
         bucket_sizes = kwargs.pop("bucket_sizes")
         super().__init__(*args, **kwargs)
         if bucket_sizes is not None:
             # Overwrite sampling_metadata with RBLN sampling metadata
-            bucket_size = select_bucket_size(self.num_reqs, bucket_sizes)
-            self.sampling_metadata = self._make_sampling_metadata_rbln(self.num_reqs)
+            self.sampling_metadata = self._make_sampling_metadata_rbln(
+                self.num_reqs)
 
     def refresh_metadata_rbln(self, bucket_size: int):
         """Apply any batch updates to sampling metadata."""
-
+        # NOTE(eunji.lee):
+        # Pooling model doesn't use RBLN sampler
         if self.is_pooling_model:
             batch_changed = self.batch_update_builder.reset()
             if batch_changed:
-                self.sampling_metadata = self._make_sampling_metadata_rbln(bucket_size)
+                self.sampling_metadata = self._make_sampling_metadata()
             return
 
         # For non-pooling models - generate and apply logitsprocs update;
@@ -66,9 +51,14 @@ class RBLNInputBatch(InputBatch):
         for logit_proc in self.logitsprocs.all:
             logit_proc.update_state(batch_update)
         if batch_update:
-            self.sampling_metadata = self._make_sampling_metadata_rbln(bucket_size)
+            self.sampling_metadata = self._make_sampling_metadata_rbln(
+                bucket_size)
 
-    def _make_sampling_metadata_rbln(self, bucket_size: int) -> SamplingMetadata:
+    def _make_sampling_metadata_rbln(self,
+                                     bucket_size: int) -> SamplingMetadata:
+        # NOTE(eunji.lee):
+        # Use bucket_size instead of num_reqs
+        # to pad sampling metadata for RBLN sampler.
         num_reqs = bucket_size
 
         if not self.all_greedy:

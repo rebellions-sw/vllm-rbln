@@ -11,9 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import bisect
 import logging
-from functools import cache
 from typing import TYPE_CHECKING, Optional, Union, cast
 
 import numpy as np
@@ -57,6 +55,7 @@ from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 from vllm_rbln.v1.worker.utils import select_bucket_size
+
 if TYPE_CHECKING:
     import xgrammar as xgr
     from vllm.v1.core.sched.output import SchedulerOutput
@@ -792,8 +791,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # Refresh batch metadata with any pending updates.
         if self.use_rbln_sampler:
             # To pad sampling metadata for RBLN sampler
-            self.bucket_size = select_bucket_size(
-                self.input_batch.num_reqs, self.bucket_sizes)
+            self.bucket_size = select_bucket_size(self.input_batch.num_reqs,
+                                                  self.bucket_sizes)
             self.input_batch.refresh_metadata_rbln(self.bucket_size)
         else:
             self.input_batch.refresh_metadata()
