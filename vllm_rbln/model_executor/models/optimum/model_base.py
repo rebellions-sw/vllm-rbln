@@ -28,7 +28,8 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
-from vllm_rbln.utils.optimum import get_rbln_model_info, select_bucket_size
+from vllm_rbln.utils.optimum.common import select_bucket_size
+from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 
 logger = init_logger(__name__)
 
