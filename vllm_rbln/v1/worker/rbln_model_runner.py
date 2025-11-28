@@ -45,8 +45,7 @@ from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader, check_use_alibi,
-                        get_dtype_size, is_pin_memory_available,
-                        make_tensor_with_pad, round_up)
+                        get_dtype_size, is_pin_memory_available, round_up)
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadataBuilder
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata, create_fast_prefill_custom_backend,
@@ -83,6 +82,7 @@ from vllm.v1.worker.utils import (AttentionGroup, MultiModalBudget,
                                   bind_kv_cache)
 
 import vllm_rbln.rbln_envs as envs
+import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
 
 if TYPE_CHECKING:
@@ -1665,50 +1665,27 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
-            input_ids = input_ids.view(self.input_batch.num_reqs, -1)
-            positions = positions.view(self.input_batch.num_reqs, -1)
+            num_reqs = self.input_batch.num_reqs
+            input_ids = input_ids.view(num_reqs, -1).to(torch.long)
+            positions = positions.view(num_reqs, -1)
             is_prefills = (self.input_batch.num_computed_tokens_cpu
                            < self.input_batch.num_prompt_tokens)
             # The prefill and decode cannot be mixed.
             assert len(is_prefills) > 0 and all(
                 is_prefill == is_prefills[0]
-                for is_prefill in is_prefills[:self.input_batch.num_reqs])
+                for is_prefill in is_prefills[:num_reqs])
             if is_prefills[0]:
-                max_seq_len = int(
-                    self.seq_lens.np[:self.input_batch.num_reqs].max())
+                # prefill chunk padding
+                max_seq_len = int(self.seq_lens.np[:num_reqs].max())
                 prefill_size = (self.scheduler_config.max_num_batched_tokens if
                                 self.scheduler_config.chunked_prefill_enabled
                                 else 1 << (math.ceil(math.log2(max_seq_len))))
-                input_ids = make_tensor_with_pad(
-                    input_ids.to("cpu"),
-                    max_len=prefill_size,
-                    pad=0,
-                    dtype=torch.long,
-                    device=self.device,
-                )
-                positions = make_tensor_with_pad(
-                    positions.to("cpu"),
-                    max_len=prefill_size,
-                    pad=0,
-                    dtype=torch.long,
-                    device=self.device,
-                )
+                input_ids = rbln_utils.pad(input_ids, -1, prefill_size)
+                positions = rbln_utils.pad(positions, -1, prefill_size)
             else:
-                # batch padding
-                batch_padding_size = (self.max_num_seqs -
-                                      self.input_batch.num_reqs)
-                input_ids = torch.cat([
-                    input_ids,
-                    torch.full((batch_padding_size, input_ids.shape[-1]),
-                               0,
-                               device=self.device),
-                ], )
-                positions = torch.cat([
-                    positions,
-                    torch.full((batch_padding_size, positions.shape[-1]),
-                               0,
-                               device=self.device),
-                ])
+                # decode batch padding
+                input_ids = rbln_utils.pad(input_ids, 0, self.max_num_seqs)
+                positions = rbln_utils.pad(positions, -2, self.max_num_seqs)
 
             model_output = self.model_executable(
                 input_ids=input_ids,
@@ -1727,7 +1704,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
-            hidden_states = hidden_states.view(input_ids.numel(), -1)
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
 
             # Broadcast PP output for external_launcher (torchrun)
             # to make sure we are synced across pp ranks
