@@ -28,9 +28,8 @@ from vllm.v1.core.sched.output import CachedRequestData, NewRequestData
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
-from vllm.v1.worker.gpu_input_batch import InputBatch
-
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
+from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 MAX_NUM_SEQ = 2
@@ -101,7 +100,7 @@ def initialize_kv_cache(runner: RBLNOptimumModelRunner):
         num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
     )
     runner.kv_cache_config = kv_cache_config
-    runner.input_batch = InputBatch(
+    runner.input_batch = RBLNInputBatch(
         max_num_reqs=runner.max_num_reqs,
         max_model_len=runner.max_model_len,
         max_num_batched_tokens=runner.max_num_tokens,
@@ -111,6 +110,10 @@ def initialize_kv_cache(runner: RBLNOptimumModelRunner):
         block_sizes=[
             kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
         ],
+        is_spec_decode=False,
+        logitsprocs=[],
+        is_pooling_model=False,
+        bucket_sizes=None,  # No RBLN sampler in tests
     )
 
 

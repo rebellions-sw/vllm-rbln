@@ -27,49 +27,14 @@ from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheTensor)
 from vllm.v1.sample.metadata import SamplingMetadata
-from vllm.v1.worker.gpu_input_batch import InputBatch
-
+from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
+from .utils import initialize_kv_cache
+
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 8
 DEVICE = current_platform.device_type
-
-
-def initialize_kv_cache(runner: RBLNOptimumModelRunner):
-    """
-    Only perform necessary steps in RBLNOptimumModelRunner.initialize_kv_cache()
-    """
-    attn_spec = FullAttentionSpec(
-        block_size=BLOCK_SIZE,
-        num_kv_heads=runner.model_config.get_num_kv_heads(
-            runner.parallel_config),
-        head_size=runner.model_config.get_head_size(),
-        dtype=runner.kv_cache_dtype,
-        use_mla=False,
-    )
-    tensor_size = attn_spec.page_size_bytes * NUM_BLOCKS
-    kv_cache_config = KVCacheConfig(
-        num_blocks=NUM_BLOCKS,
-        kv_cache_tensors=[
-            KVCacheTensor(size=tensor_size, shared_by=[]),
-        ],
-        kv_cache_groups=[
-            KVCacheGroupSpec(layer_names=[], kv_cache_spec=attn_spec)
-        ],
-    )
-    runner.kv_cache_config = kv_cache_config
-    runner.input_batch = InputBatch(
-        max_num_reqs=runner.max_num_reqs,
-        max_model_len=runner.max_model_len,
-        max_num_batched_tokens=runner.max_num_tokens,
-        device=runner.device,
-        pin_memory=runner.pin_memory,
-        vocab_size=runner.model_config.get_vocab_size(),
-        block_sizes=[
-            kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
-        ],
-    )
 
 
 # TODO add tests for both `enable_prefix_caching = True` and `False`

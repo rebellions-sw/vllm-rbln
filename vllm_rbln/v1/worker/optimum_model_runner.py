@@ -66,6 +66,7 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
+    input_batch: RBLNInputBatch
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
         # FIXME: For RBLN support Enc-only model which based on enc-dec config.
@@ -908,7 +909,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
             dummy_run_batches(config)
 
-    def set_active_loras(self, input_batch: InputBatch,
+    def set_active_loras(self, input_batch: RBLNInputBatch,
                          is_prefill: bool) -> None:
         num_reqs = self.input_batch.num_reqs
         req_lora_mapping_list = input_batch.request_lora_mapping[:
