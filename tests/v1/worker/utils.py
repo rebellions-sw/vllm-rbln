@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import tempfile
 from collections.abc import Callable
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +18,10 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
+from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
+                         set_current_vllm_config)
+from vllm.distributed import (ensure_model_parallel_initialized,
+                              init_distributed_environment)
 from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
@@ -29,6 +33,7 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
 
+from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
@@ -39,6 +44,37 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1
 DEVICE = current_platform.device_type
+
+
+class MockModelWrapper(nn.Module):
+
+    class MockModel:
+
+        def __init__(self):
+            self.kv_block_adapter = SimpleNamespace(
+                get_available_num_blocks=lambda: NUM_BLOCKS)
+
+    def __init__(self):
+        super().__init__()
+        self.model = self.MockModel()
+
+
+def fake_load_model(runner: RBLNOptimumModelRunner,
+                    num_reqs: int = None,
+                    vocab_size: int = None):
+
+    def fake_forward(model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
+        current_num_reqs = runner.input_batch.num_reqs
+        current_vocab_size = runner.model_config.get_vocab_size()
+
+        return torch.randn((current_num_reqs, 1, current_vocab_size),
+                           dtype=torch.float32,
+                           device=runner.device)
+
+    runner.model = MockModelWrapper()
+    runner.use_optimum_lora = False
+    # Assign the fake forward function to the model
+    runner.model.forward = fake_forward
 
 
 def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
@@ -92,7 +128,8 @@ def finish_request(manager: KVCacheManager, request: Request):
     manager.free(request)
 
 
-def initialize_kv_cache(runner: RBLNOptimumModelRunner):
+def initialize_kv_cache(runner: RBLNOptimumModelRunner,
+                        bucket_sizes: Optional[list[int]] = None):
     """
     Only perform necessary steps in RBLNOptimumModelRunner.initialize_kv_cache()
     """
@@ -114,15 +151,16 @@ def initialize_kv_cache(runner: RBLNOptimumModelRunner):
         is_spec_decode=False,
         logitsprocs=[],
         is_pooling_model=False,
-        bucket_sizes=None,  # No RBLN sampler in tests
+        bucket_sizes=bucket_sizes,  # No RBLN sampler in tests
     )
 
 
-def get_vllm_config(async_scheduling=False):
+def get_vllm_config(async_scheduling=False, max_num_seqs=None):
+    max_model_len = max_num_seqs if max_num_seqs is not None else MAX_MODEL_LEN
     scheduler_config = SchedulerConfig(
-        max_num_seqs=MAX_NUM_SEQ,
-        max_num_batched_tokens=MAX_MODEL_LEN,
-        max_model_len=MAX_MODEL_LEN,
+        max_num_seqs=max_num_seqs if max_num_seqs is not None else MAX_NUM_SEQ,
+        max_num_batched_tokens=max_model_len,
+        max_model_len=max_model_len,
         async_scheduling=async_scheduling,
     )
     model_config = ModelConfig(
@@ -148,24 +186,12 @@ def get_vllm_config(async_scheduling=False):
     return vllm_config
 
 
-class MockModelWrapper(nn.Module):
-
-    class MockModel:
-
-        def __init__(self):
-            self.kv_block_adapter = SimpleNamespace(
-                get_available_num_blocks=lambda: NUM_BLOCKS)
-
-    def __init__(self):
-        super().__init__()
-        self.model = self.MockModel()
-
-
 def _schedule_new_request(
     *req_ids: str,
-    token_ids: list[int],
-    block_ids: tuple[list[int], ...],
-    new_computed_tokens: int,
+    new_computed_tokens: int = 0,
+    token_ids: Optional[list[int]] = None,
+    block_ids: Optional[tuple[list[int], ...]] = None,
+    outer_block_ids: Optional[torch.Tensor] = None,
     finished_req_ids: Optional[list[str]] = None,
     new_computed_blocks: Optional[list[int]] = None,
     preempted_req_ids: Optional[list[str]] = None,
@@ -173,6 +199,12 @@ def _schedule_new_request(
     new_reqs = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
+    if token_ids is None:
+        token_ids = [1, 2, 3]
+    if block_ids is None:
+        block_ids = ([0], )
+    if outer_block_ids is None:
+        outer_block_ids = torch.tensor([[0]])
     for req_id in req_ids:
         new_reqs.append(
             NewRequestData(
@@ -189,7 +221,7 @@ def _schedule_new_request(
             ))
         num_scheduled_tokens[req_id] = len(token_ids)
         total_num_scheduled_tokens += num_scheduled_tokens[req_id]
-
+    print("new_reqs", new_reqs)
     return RBLNSchedulerOutput(
         scheduled_new_reqs=new_reqs,
         scheduled_cached_reqs=CachedRequestData.make_empty(),
@@ -202,8 +234,10 @@ def _schedule_new_request(
         free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
-        new_computed_blocks=new_computed_blocks if new_computed_blocks else [],
-        preempted_req_ids=preempted_req_ids if preempted_req_ids else [],
+        block_table_dict={req_id: outer_block_ids},
+        cached_block_table=[],
+        cached_length=[],
+        dummy_block=None,
     )
 
 
@@ -250,3 +284,24 @@ def _schedule_cached_reqs(
         structured_output_request_ids={},
         grammar_bitmask=None,
     )
+
+
+def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ):
+    vllm_config = get_vllm_config(max_num_seqs=max_num_seqs)
+    with set_current_vllm_config(vllm_config, check_compile=False):
+        temp_file = tempfile.mkstemp()[1]
+        init_distributed_environment(
+            world_size=1,
+            rank=0,
+            local_rank=0,
+            distributed_init_method=f"file://{temp_file}",
+            backend="gloo",
+        )
+        ensure_model_parallel_initialized(
+            1,
+            1,
+        )
+    runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
+    initialize_kv_cache(runner)
+    fake_load_model(runner)
+    return runner
