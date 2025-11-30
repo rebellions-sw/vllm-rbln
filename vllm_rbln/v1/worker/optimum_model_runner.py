@@ -1198,8 +1198,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             grammar_bitmask.to(self.device, non_blocking=True),
             indices=out_indices if not skip_out_indices else None,
         )
-        # NOTE(eunji.lee):
-        # It is risky to use logits in-place
         logits[:valid_logits.shape[0]].copy_(valid_logits)
 
     @staticmethod

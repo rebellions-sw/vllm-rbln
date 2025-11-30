@@ -355,13 +355,3 @@ class RBLNOptimumDecoderMixin:
         # Only for V0
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
-
-    # def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
-    #     return self.logits_processor(None, hidden_states)
-
-    # @classmethod
-    # @cache
-    # def select_lower_bounded_batch_size(self, original_batch_size: int,
-    #                                     decoder_batch_sizes: tuple):
-    #     index = bisect.bisect_left(decoder_batch_sizes, original_batch_size)
-    #     return decoder_batch_sizes[index]

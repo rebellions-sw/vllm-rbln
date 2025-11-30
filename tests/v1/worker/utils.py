@@ -14,7 +14,7 @@ from collections.abc import Callable
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from types import SimpleNamespace
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn as nn
@@ -26,6 +26,7 @@ from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
+from vllm.utils import LazyLoader
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher
 from vllm.v1.core.sched.output import CachedRequestData, NewRequestData
@@ -37,6 +38,11 @@ from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
+
+if TYPE_CHECKING:
+    import xgrammar as xgr
+else:
+    xgr = LazyLoader("xgr", globals(), "xgrammar")
 
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
@@ -59,9 +65,7 @@ class MockModelWrapper(nn.Module):
         self.model = self.MockModel()
 
 
-def fake_load_model(runner: RBLNOptimumModelRunner,
-                    num_reqs: int = None,
-                    vocab_size: int = None):
+def fake_load_model(runner: RBLNOptimumModelRunner):
 
     def fake_forward(model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         current_num_reqs = runner.input_batch.num_reqs
@@ -221,7 +225,7 @@ def _schedule_new_request(
             ))
         num_scheduled_tokens[req_id] = len(token_ids)
         total_num_scheduled_tokens += num_scheduled_tokens[req_id]
-    print("new_reqs", new_reqs)
+
     return RBLNSchedulerOutput(
         scheduled_new_reqs=new_reqs,
         scheduled_cached_reqs=CachedRequestData.make_empty(),
@@ -305,3 +309,7 @@ def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ):
     initialize_kv_cache(runner)
     fake_load_model(runner)
     return runner
+
+
+def create_grammar_bitmask(num_seqs: int, vocab_size: int):
+    return xgr.allocate_token_bitmask(num_seqs, vocab_size).numpy()

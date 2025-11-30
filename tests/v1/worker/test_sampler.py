@@ -15,7 +15,8 @@
 import pytest
 from vllm.platforms import current_platform
 
-from .utils import _schedule_new_request, create_model_runner
+from .utils import (_schedule_new_request, create_grammar_bitmask,
+                    create_model_runner)
 
 DEVICE = current_platform.device_type
 
@@ -54,21 +55,32 @@ def test_get_bucket_sizes(monkeypatch, num_seqs: int,
     assert len(runner.pooled_tensors) == len(expected_bucket_sizes)
 
 
-@pytest.mark.parametrize("expected_use_rbln_sampler", [True, False])
-def test_sampler_with_rbln_sampler(monkeypatch, expected_use_rbln_sampler):
+@pytest.mark.parametrize("use_rbln_sampler, use_structured_output", [
+    pytest.param(True, True, id="use_rbln_sampler_and_structured_output"),
+    pytest.param(True, False, id="use_rbln_sampler_and_no_structured_output"),
+    pytest.param(False, True, id="no_rbln_sampler_and_structured_output"),
+    pytest.param(False, False, id="no_rbln_sampler_and_no_structured_output"),
+])
+def test_sampler_with_rbln_sampler(monkeypatch, use_rbln_sampler,
+                                   use_structured_output):
     """Test sampler logic for both use_rbln_sampler=True and False."""
     # 파라미터에 따라 환경 변수 설정
-    monkeypatch.setenv("VLLM_RBLN_SAMPLER",
-                       "1" if expected_use_rbln_sampler else "0")
+    monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1" if use_rbln_sampler else "0")
     runner = create_model_runner()
 
     # Schedule a request to set up the input batch
-    scheduler_output = _schedule_new_request("req_0")
+    req0_id = "req_0"
+    scheduler_output = _schedule_new_request(req0_id)
+    if use_structured_output:
+        vocab_size = runner.model_config.get_vocab_size()
+        scheduler_output.structured_output_request_ids = {req0_id: 0}
+        scheduler_output.grammar_bitmask = create_grammar_bitmask(
+            1, vocab_size)
+
     # Execute model to trigger the sampler logic
     runner_output = runner.execute_model(scheduler_output)
 
     # Verify sampler_output was sliced correctly
     assert runner_output is not None
-    assert runner_output.req_ids == ["req_0"]
+    assert runner_output.req_ids == [req0_id]
     assert len(runner_output.sampled_token_ids) == 1
-    # assert len(runner_output.logprobs) == 1
