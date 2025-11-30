@@ -136,12 +136,7 @@ class BlockMappingManager:
         # The contents of ib_id cannot be accessed through
         # outer_block_id anymore.
         for ib_id in cached_inner_block_ids:
-            if ib_id in self._cached_inner_to_outers:
-                outer_list = self._cached_inner_to_outers[ib_id]
-                if outer_block_id in outer_list:
-                    outer_list.remove(outer_block_id)
-                if len(outer_list) == 0:
-                    self._cached_inner_to_outers.pop(ib_id, None)
+            self._cached_inner_to_outers[ib_id].remove(outer_block_id)
 
         # 3. Reset the outer_block_id to inner mapping
         mapping = self._block_mappings.pop(outer_block_id, None)
@@ -251,8 +246,6 @@ class BlockMappingManager:
         """
         # Find the outer block IDs
         # that match the first block of cached inner block segment
-        if not cached_ib_segment:
-            return -1, 0
         matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
         logger.debug(
             "[PFX] [MAPPING-SEARCH] QUERY_IB=%d | "
@@ -272,8 +265,6 @@ class BlockMappingManager:
 
             alive_obs = [ob for ob in alive_obs if ob not in skip_blocks]
             for outer_block_id in alive_obs:
-                if outer_block_id not in self._outer_to_cached_inner:
-                    continue
                 cached_ibs = self._outer_to_cached_inner[outer_block_id]
                 prefix_ibs = self._get_common_prefix(cached_ibs,
                                                      cached_ib_segment)
