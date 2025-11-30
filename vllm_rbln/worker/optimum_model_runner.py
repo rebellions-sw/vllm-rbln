@@ -332,17 +332,14 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             self.set_active_loras(model_input.lora_requests,
                                   model_input.lora_mapping)
 
-        hidden_states = self.model(model_input=model_input)
+        logits = self.model(model_input=model_input)
 
         # Compute the logits.
         # select last sequence in logits
-        if hidden_states is not None:
-            assert hidden_states.dim() == 3
-            hidden_states = hidden_states[:, -1, :]
-            assert hidden_states.dim() == 2
-
-        logits = self.model.compute_logits(hidden_states,
-                                           model_input.sampling_metadata)
+        if logits is not None:
+            assert logits.dim() == 3
+            logits = logits[:, -1, :]
+            assert logits.dim() == 2
 
         # Sample the next token.
         output = self.model.sample(
