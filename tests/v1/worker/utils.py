@@ -38,7 +38,7 @@ from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-
+from vllm_rbln.v1.sample import WARM_UP_CONFIGS
 if TYPE_CHECKING:
     import xgrammar as xgr
 else:
@@ -79,7 +79,18 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
     runner.use_optimum_lora = False
     # Assign the fake forward function to the model
     runner.model.forward = fake_forward
-
+    if runner.use_rbln_sampler:
+        runner.bucket_sizes = tuple(runner.get_bucket_sizes(runner.max_num_reqs))
+        for bucket_size in runner.bucket_sizes:
+            runner.pooled_tensors[bucket_size] = torch.empty(
+                (bucket_size, runner.model_config.get_vocab_size()),
+                dtype=torch.float32,
+            )
+        torch._dynamo.config.recompile_limit = len(
+            runner.bucket_sizes) * len(WARM_UP_CONFIGS)
+        runner.sampler = torch.compile(runner.sampler,
+                                        dynamic=False,
+                                        fullgraph=False)
 
 def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
     return KVCacheConfig(
@@ -132,32 +143,12 @@ def finish_request(manager: KVCacheManager, request: Request):
     manager.free(request)
 
 
-def initialize_kv_cache(runner: RBLNOptimumModelRunner,
-                        bucket_sizes: Optional[list[int]] = None):
-    """
-    Only perform necessary steps in RBLNOptimumModelRunner.initialize_kv_cache()
-    """
+def initialize_kv_cache(runner: RBLNOptimumModelRunner):
     kv_cache_config = make_kv_cache_config(
         block_size=IB_SIZE,
         num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
     )
     runner.kv_cache_config = kv_cache_config
-    runner.input_batch = RBLNInputBatch(
-        max_num_reqs=runner.max_num_reqs,
-        max_model_len=runner.max_model_len,
-        max_num_batched_tokens=runner.max_num_tokens,
-        device=runner.device,
-        pin_memory=runner.pin_memory,
-        vocab_size=runner.model_config.get_vocab_size(),
-        block_sizes=[
-            kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
-        ],
-        is_spec_decode=False,
-        logitsprocs=[],
-        is_pooling_model=False,
-        bucket_sizes=bucket_sizes,  # No RBLN sampler in tests
-    )
-
 
 def get_vllm_config(async_scheduling=False, max_num_seqs=None):
     max_model_len = max_num_seqs if max_num_seqs is not None else MAX_MODEL_LEN
@@ -308,7 +299,7 @@ def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ):
             1,
         )
     runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
-    initialize_kv_cache(runner)
+    # initialize_kv_cache(runner)
     fake_load_model(runner)
     return runner
 

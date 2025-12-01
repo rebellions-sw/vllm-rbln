@@ -27,9 +27,9 @@ class RBLNInputBatch(InputBatch):
     """
 
     def __init__(self, *args, **kwargs):
-        bucket_sizes = kwargs.pop("bucket_sizes")
+        use_rbln_sampler = kwargs.pop("use_rbln_sampler")
         super().__init__(*args, **kwargs)
-        if bucket_sizes is not None:
+        if use_rbln_sampler:
             # Overwrite sampling_metadata with RBLN sampling metadata
             self.sampling_metadata = self._make_sampling_metadata_rbln(
                 self.num_reqs)

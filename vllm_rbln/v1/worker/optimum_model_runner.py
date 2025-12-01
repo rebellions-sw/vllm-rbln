@@ -146,7 +146,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
             )
-            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         else:
             logger.info("Using default vLLM sampler.")
             sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
@@ -174,6 +173,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # solution, we initialize the input batch here, and re-initialize it
         # in `initialize_kv_cache` if the block_sizes here is different from
         # the block_sizes in the kv cache config.
+        print("RBLNInputBatch init")
         self.input_batch = RBLNInputBatch(
             max_num_reqs=self.max_num_reqs,
             max_model_len=self.max_model_len,
@@ -188,7 +188,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.is_pooling_model,
                 self.vllm_config.model_config.logits_processors),
             is_pooling_model=self.is_pooling_model,
-            bucket_sizes=self.bucket_sizes if self.use_rbln_sampler else None,
+            use_rbln_sampler=self.use_rbln_sampler,
         )
 
         # Cache the device properties.
