@@ -70,7 +70,8 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         is_prefill: bool,
         block_tables: torch.Tensor,
         input_ids: torch.LongTensor = None,
-        pixel_values: torch.FloatTensor = None,
+        pixel_values: Optional[Union[torch.FloatTensor,
+                                     torch.HalfTensor]] = None,
         image_sizes: Optional[torch.LongTensor] = None,
         cache_position: Union[List[torch.Tensor],
                               torch.Tensor] = None,  # vllm keyword argument
@@ -124,6 +125,10 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
                 image_sizes = image_input["image_sizes"]
+                # NOTE(eunji.lee): It is a patch for bfloat16 support.
+                dtype = self.rbln_model_config.language_model.torch_dtype
+                if dtype != pixel_values.dtype:
+                    pixel_values = pixel_values.to(dtype)
         else:
             pixel_values = None
             image_sizes = None
