@@ -245,7 +245,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             use_multiple_decoder = getattr(self.model.model.rbln_config,
                                            "use_multiple_decoder", False)
             if use_multiple_decoder:
-                self.bucket_sizes = self.model.model.decoder_batch_sizes
+                # decoder_batch_sizes is reversed
+                # so we need to reverse it
+                self.bucket_sizes = self.model.decoder_batch_sizes
             else:
                 batch_size = self.vllm_config.scheduler_config.max_num_seqs
                 self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
