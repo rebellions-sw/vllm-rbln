@@ -22,7 +22,6 @@ from typing import (TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type,
                     TypeVar, Union, cast)
 
 import torch
-import torch.distributed as dist
 from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
@@ -490,24 +489,6 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                                     > 1 else "./cache_dir")
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
-
-        # Initialize world group with rbln-ccl backend before torch.compile
-        # This ensures RCCL is properly initialized before compilation
-        # All devices (PP, TP, DP all included) participate in this all_reduce
-        try:
-            logger.info("[RBLN] Initializing rbln-ccl process group for world")
-            world_size = dist.get_world_size()
-            all_ranks = list(range(world_size))
-
-            rbln_world_group = dist.new_group(all_ranks, backend="rbln-ccl")
-            # Warm up RCCL with a dummy all_reduce across all devices
-            dummy_tensor = torch.zeros(1, dtype=torch.float16, device="rbln")
-            dist.all_reduce(dummy_tensor,
-                            group=rbln_world_group,
-                            op=dist.ReduceOp.SUM)
-        except Exception as e:
-            logger.warning(
-                "[RBLN] Failed to initialize rbln-ccl process group : %s", e)
 
         compiled_model = torch.compile(
             model,
