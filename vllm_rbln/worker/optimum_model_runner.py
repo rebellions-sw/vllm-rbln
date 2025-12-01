@@ -343,6 +343,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
 
         logits = self.model.compute_logits(hidden_states,
                                            model_input.sampling_metadata)
+
         # Sample the next token.
         output = self.model.sample(
             logits=logits,
