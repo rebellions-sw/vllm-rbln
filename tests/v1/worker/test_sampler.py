@@ -15,8 +15,8 @@
 import pytest
 from vllm.platforms import current_platform
 
-from .utils import (_schedule_new_request, create_grammar_bitmask,
-                    create_model_runner)
+from .utils import (_schedule_cached_reqs, _schedule_new_request,
+                    create_grammar_bitmask, create_model_runner, make_request)
 
 DEVICE = current_platform.device_type
 
@@ -61,26 +61,54 @@ def test_get_bucket_sizes(monkeypatch, num_seqs: int,
     pytest.param(False, True, id="no_rbln_sampler_and_structured_output"),
     pytest.param(False, False, id="no_rbln_sampler_and_no_structured_output"),
 ])
-def test_sampler_with_rbln_sampler(monkeypatch, use_rbln_sampler,
-                                   use_structured_output):
+def test_forward_decode(monkeypatch, use_rbln_sampler, use_structured_output):
     """Test sampler logic for both use_rbln_sampler=True and False."""
     # 파라미터에 따라 환경 변수 설정
     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1" if use_rbln_sampler else "0")
-    runner = create_model_runner()
+    runner = create_model_runner(max_num_seqs=4)
 
-    # Schedule a request to set up the input batch
-    req0_id = "req_0"
-    scheduler_output = _schedule_new_request(req0_id)
+    req_ids = [f"req_{i}" for i in range(3)]
+    reqs = []
+    # Prefill
+    for i in range(3):
+        req_id = f"req_{i}"
+        reqs.append(make_request(request_id=req_id, prompt_token_ids=[1, 2,
+                                                                      3]))
+
+    for i, req in enumerate(reqs):
+        req_id = req.request_id
+        scheduler_output = _schedule_new_request(req_id,
+                                                 block_ids=([i], ),
+                                                 outer_block_ids=[i])
+        if use_structured_output:
+            vocab_size = runner.model_config.get_vocab_size()
+            scheduler_output.structured_output_request_ids = {req_id: i}
+            scheduler_output.grammar_bitmask = create_grammar_bitmask(
+                1, vocab_size)
+        runner_output = runner.execute_model(scheduler_output)
+        assert runner_output is not None
+        assert runner_output.req_ids == [req_id]
+        assert len(runner_output.sampled_token_ids) == 1
+
+    # Update requests
+    for i, req in enumerate(reqs):
+        req.num_computed_tokens = 3
+
+    # Decode
+    scheduler_output = _schedule_cached_reqs(reqs,
+                                             new_block_ids=[None, None, None])
     if use_structured_output:
         vocab_size = runner.model_config.get_vocab_size()
-        scheduler_output.structured_output_request_ids = {req0_id: 0}
+        scheduler_output.structured_output_request_ids = {
+            req_id: i
+            for i, req_id in enumerate(req_ids)
+        }
         scheduler_output.grammar_bitmask = create_grammar_bitmask(
-            1, vocab_size)
+            3, vocab_size)
 
-    # Execute model to trigger the sampler logic
     runner_output = runner.execute_model(scheduler_output)
 
-    # Verify sampler_output was sliced correctly
     assert runner_output is not None
-    assert runner_output.req_ids == [req0_id]
-    assert len(runner_output.sampled_token_ids) == 1
+    # req2 remains, and req0 and req1 are newly allocated in input_batch.req_ids
+    assert runner_output.req_ids == ["req_2", "req_0", "req_1"]
+    assert len(runner_output.sampled_token_ids) == 3

@@ -26,7 +26,7 @@ from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
-from vllm.utils import LazyLoader
+from vllm.utils import LazyLoader, sha256
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher
 from vllm.v1.core.sched.output import CachedRequestData, NewRequestData
@@ -97,8 +97,8 @@ def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
 def make_request(
     request_id: str,
     prompt_token_ids: list[int],
-    block_size: int,
-    hash_fn: Callable,
+    block_size: int = IB_SIZE,
+    hash_fn: Callable = sha256,
     mm_positions: Optional[list[PlaceholderRange]] = None,
     mm_hashes: Optional[list[str]] = None,
     prompt_logprobs: Optional[int] = None,
@@ -192,10 +192,10 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
 
 def _schedule_new_request(
     *req_ids: str,
+    block_ids: list[int],
+    outer_block_ids: list[int],
     new_computed_tokens: int = 0,
     token_ids: Optional[list[int]] = None,
-    block_ids: Optional[tuple[list[int], ...]] = None,
-    outer_block_ids: Optional[torch.Tensor] = None,
     finished_req_ids: Optional[list[str]] = None,
     new_computed_blocks: Optional[list[int]] = None,
     preempted_req_ids: Optional[list[str]] = None,
@@ -205,10 +205,7 @@ def _schedule_new_request(
     total_num_scheduled_tokens = 0
     if token_ids is None:
         token_ids = [1, 2, 3]
-    if block_ids is None:
-        block_ids = ([0], )
-    if outer_block_ids is None:
-        outer_block_ids = torch.tensor([[0]])
+    outer_block_ids = torch.tensor([outer_block_ids])
     for req_id in req_ids:
         new_reqs.append(
             NewRequestData(
@@ -253,24 +250,29 @@ def _schedule_cached_reqs(
 ) -> RBLNSchedulerOutput:
     req_ids = []
     resumed_from_preemption = []
-    arr_new_token_ids = []
     arr_num_computed_tokens = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
-    for req in reqs:
+    # if block_ids is None:
+    #     block_ids = ([0], )
+    # if outer_block_ids is None:
+    #     outer_block_ids = torch.tensor([[0]])
+    block_table_dict = {}
+    outer_block_id = 0
+
+    for outer_block_id, req in enumerate(reqs):
+        block_table_dict[req.request_id] = torch.tensor([[outer_block_id]])
         num_computed_tokens = req.num_computed_tokens
-        new_token_ids = req.all_token_ids[num_computed_tokens:]
         req_ids.append(req.request_id)
         resumed_from_preemption.append(False)
-        arr_new_token_ids.append(new_token_ids)
         arr_num_computed_tokens.append(num_computed_tokens)
-        num_scheduled_tokens[req.request_id] = len(new_token_ids)
+        num_scheduled_tokens[req.request_id] = 1
         total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
 
     cached_req_data = CachedRequestData(
         req_ids=req_ids,
         resumed_from_preemption=resumed_from_preemption,
-        new_token_ids=arr_new_token_ids,
+        new_token_ids=[],
         new_block_ids=new_block_ids,
         num_computed_tokens=arr_num_computed_tokens,
     )
@@ -287,6 +289,10 @@ def _schedule_cached_reqs(
         free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
+        block_table_dict=block_table_dict,
+        cached_block_table=[],
+        cached_length=[],
+        dummy_block=None,
     )
 
 
