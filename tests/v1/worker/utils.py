@@ -149,6 +149,7 @@ def finish_request(manager: KVCacheManager, request: Request):
     request.status = RequestStatus.FINISHED_ABORTED
     manager.free(request)
 
+
 def get_vllm_config(async_scheduling=False, max_num_seqs=None):
     max_model_len = max_num_seqs if max_num_seqs is not None else MAX_MODEL_LEN
     scheduler_config = SchedulerConfig(
