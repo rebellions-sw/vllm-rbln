@@ -302,7 +302,6 @@ def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ):
             1,
         )
     runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
-    # initialize_kv_cache(runner)
     fake_load_model(runner)
     return runner
 

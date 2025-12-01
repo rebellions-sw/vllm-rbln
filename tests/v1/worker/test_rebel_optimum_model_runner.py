@@ -27,7 +27,7 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
-from .utils import _schedule_new_request, initialize_kv_cache
+from .utils import _schedule_new_request, fake_load_model
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 8
@@ -77,7 +77,7 @@ def model_runner():
             1,
         )
     runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
-    initialize_kv_cache(runner)
+    fake_load_model(runner)
     return runner
 
 
