@@ -149,15 +149,6 @@ def finish_request(manager: KVCacheManager, request: Request):
     request.status = RequestStatus.FINISHED_ABORTED
     manager.free(request)
 
-
-def initialize_kv_cache(runner: RBLNOptimumModelRunner):
-    kv_cache_config = make_kv_cache_config(
-        block_size=IB_SIZE,
-        num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
-    )
-    runner.kv_cache_config = kv_cache_config
-
-
 def get_vllm_config(async_scheduling=False, max_num_seqs=None):
     max_model_len = max_num_seqs if max_num_seqs is not None else MAX_MODEL_LEN
     scheduler_config = SchedulerConfig(
