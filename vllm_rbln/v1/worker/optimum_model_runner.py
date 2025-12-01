@@ -133,8 +133,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.uses_mrope = model_config.uses_mrope
         self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
             model_config)
-        if envs.VLLM_RBLN_DISABLE_MM:
-            self.supports_mm_inputs = False
 
         # Sampler
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
