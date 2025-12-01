@@ -22,6 +22,7 @@ from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
                          set_current_vllm_config)
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
+from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
@@ -63,6 +64,10 @@ class MockModelWrapper(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = self.MockModel()
+
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        return hidden_states
 
 
 def fake_load_model(runner: RBLNOptimumModelRunner):
