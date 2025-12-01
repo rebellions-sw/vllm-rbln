@@ -297,8 +297,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 return self._pool(hidden_states, num_scheduled_tokens,
                                   num_scheduled_tokens_np)
             # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
-            logits = hidden_states.squeeze(1)
-            # logits = self.model.compute_logits(hidden_states, None)
+            hidden_states = hidden_states.squeeze(1)
+            logits = self.model.compute_logits(hidden_states, None)
             if scheduler_output.grammar_bitmask is not None:
                 self.apply_grammar_bitmask(
                     scheduler_output,

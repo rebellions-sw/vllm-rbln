@@ -24,6 +24,7 @@ from optimum.rbln.transformers.models.decoderonly import (
     decoderonly_runtime_utils as runtime_utils)
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
+from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
@@ -190,8 +191,8 @@ class RBLNOptimumDecoderMixin:
         if self.use_multiple_decoder:
             self.decoder_batch_sizes = tuple(reversed(decoder_batch_sizes))
 
-        # self.logits_processor = LogitsProcessor(vocab_size,
-        #                                         logits_as_input=True)
+        self.logits_processor = LogitsProcessor(vocab_size,
+                                                logits_as_input=True)
         self.sampler = Sampler()
         self.available_blocks = torch.arange(
             0,
@@ -355,3 +356,7 @@ class RBLNOptimumDecoderMixin:
         # Only for V0
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
+
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        return self.logits_processor(None, hidden_states, sampling_metadata)
