@@ -82,6 +82,7 @@ environment_variables = {
     # Disable multimodal input
     "VLLM_RBLN_DISABLE_MM":
     (lambda: os.environ.get("VLLM_RBLN_DISABLE_MM", "False").lower() in
+     ("true", "1")),
     # DP implementation, see choices in get_dp_impl
     "VLLM_RBLN_DP_IMPL":
     get_dp_impl,

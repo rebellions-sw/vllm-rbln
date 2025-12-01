@@ -290,7 +290,7 @@ class RblnPlatform(Platform):
                                             "sliding window models")
 
         else:
-            # Currently, prefix caching is supported only for decoder-only models.
+            # Prefix caching is supported only for decoder-only models for now.
             if is_qwen3_pooling(vllm_config):
                 # Qwen3 pooling model does not support prefix caching for now.
                 cls._disable_prefix_caching(vllm_config,
