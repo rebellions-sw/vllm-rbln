@@ -141,17 +141,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
-            # NOTE(eunji.lee): Set recompile limit for RBLN sampler
-            batch_size = self.vllm_config.scheduler_config.max_num_seqs
-            self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
             self.pooled_tensors: dict[int, torch.Tensor] = {}
-            for bucket_size in self.bucket_sizes:
-                self.pooled_tensors[bucket_size] = torch.empty(
-                    (bucket_size, self.model_config.get_vocab_size()),
-                    dtype=torch.float32,
-                )
-            torch._dynamo.config.recompile_limit = len(
-                self.bucket_sizes) * len(WARM_UP_CONFIGS)
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
@@ -248,6 +238,28 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if self.use_optimum_lora:
             self.valid_lora_ids = list(
                 range(len(self.model.rbln_model_config.lora_config.adapters)))
+        # NOTE(eunji.lee):
+        # Set bucket sizes and pooled tensors for RBLN sampler
+        # if use_multiple_decoder is True, use decoder_batch_sizes
+        # otherwise, use max_num_seqs
+        if self.use_rbln_sampler:
+            if self.model.use_multiple_decoder:
+                self.bucket_sizes = self.model.decoder_batch_sizes
+            else:
+                batch_size = self.vllm_config.scheduler_config.max_num_seqs
+                self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
+            logger.debug("Bucket sizes for RBLN sampler: %s",
+                         self.bucket_sizes)
+            for bucket_size in self.bucket_sizes:
+                self.pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, self.model_config.get_vocab_size()),
+                    dtype=torch.float32,
+                )
+            torch._dynamo.config.recompile_limit = len(
+                self.bucket_sizes) * len(WARM_UP_CONFIGS)
+            self.sampler = torch.compile(self.sampler,
+                                         dynamic=False,
+                                         fullgraph=False)
 
     def get_model(self) -> nn.Module:
         return self.model
