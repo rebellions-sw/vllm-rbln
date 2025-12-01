@@ -242,7 +242,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # if use_multiple_decoder is True, use decoder_batch_sizes
         # otherwise, use max_num_seqs
         if self.use_rbln_sampler:
-            if self.model.use_multiple_decoder:
+            use_multiple_decoder = getattr(self.model.rbln_config,
+                                           "use_multiple_decoder", False)
+            if use_multiple_decoder:
                 self.bucket_sizes = self.model.decoder_batch_sizes
             else:
                 batch_size = self.vllm_config.scheduler_config.max_num_seqs
