@@ -718,7 +718,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 output_token_ids=[],
                 lora_request=new_req_data.lora_request,
             )
-            print("[add] req_id", req_id)
             self.requests[req_id] = req_state
 
             reqs_to_add.append(req_state)
@@ -766,7 +765,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
             req_index = self.input_batch.req_id_to_index.get(req_id)
             if req_index is None:
-                print("[update] req_id", req_id)
                 # The request is not in the persistent batch.
                 # The request was either preempted and resumed later, or was not
                 # scheduled in the previous step and needs to be added again.

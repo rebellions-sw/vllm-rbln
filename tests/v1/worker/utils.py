@@ -253,10 +253,6 @@ def _schedule_cached_reqs(
     arr_num_computed_tokens = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
-    # if block_ids is None:
-    #     block_ids = ([0], )
-    # if outer_block_ids is None:
-    #     outer_block_ids = torch.tensor([[0]])
     block_table_dict = {}
     outer_block_id = 0
 
