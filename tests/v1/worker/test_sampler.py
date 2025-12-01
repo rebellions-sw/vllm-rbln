@@ -63,7 +63,6 @@ def test_get_bucket_sizes(monkeypatch, num_seqs: int,
 ])
 def test_forward_decode(monkeypatch, use_rbln_sampler, use_structured_output):
     """Test sampler logic for both use_rbln_sampler=True and False."""
-    # 파라미터에 따라 환경 변수 설정
     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1" if use_rbln_sampler else "0")
     runner = create_model_runner(max_num_seqs=4)
 
