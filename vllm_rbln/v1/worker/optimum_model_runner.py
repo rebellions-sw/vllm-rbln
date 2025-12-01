@@ -598,7 +598,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         """
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
-            if logger.isEnabledFor(logging.DEBUG):
+            if logger.isEnabledFor(logging.DEBUG) and req_id in self.requests:
                 if self.enable_prefix_caching:
                     block_ids = self.requests[req_id].block_ids[0]
                 else:

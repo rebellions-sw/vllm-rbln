@@ -21,6 +21,8 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 
+import vllm_rbln.rbln_envs as envs
+
 
 def logits_processor_get_logits(
     self,
@@ -49,5 +51,6 @@ def logits_processor_gather_logits(self, logits: torch.Tensor) -> torch.Tensor:
     return logits
 
 
-LogitsProcessor._get_logits = logits_processor_get_logits
-LogitsProcessor._gather_logits = logits_processor_gather_logits
+if not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
+    LogitsProcessor._get_logits = logits_processor_get_logits
+    LogitsProcessor._gather_logits = logits_processor_gather_logits
