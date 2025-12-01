@@ -173,7 +173,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # solution, we initialize the input batch here, and re-initialize it
         # in `initialize_kv_cache` if the block_sizes here is different from
         # the block_sizes in the kv cache config.
-        print("RBLNInputBatch init")
         self.input_batch = RBLNInputBatch(
             max_num_reqs=self.max_num_reqs,
             max_model_len=self.max_model_len,
