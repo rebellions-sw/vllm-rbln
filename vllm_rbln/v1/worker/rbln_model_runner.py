@@ -1001,7 +1001,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     )
 
                 extra_attn_metadata_args[
-                    "num_prompt_tokens"] = self.input_batch.num_prompt_tokens
+                    "num_tokens"] = self.input_batch.num_tokens
                 extra_attn_metadata_args["positions"] = self.positions.cpu
                 attn_metadata_i = builder.build(
                     common_prefix_len=common_prefix_len,
@@ -1674,7 +1674,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             input_ids = input_ids.view(num_reqs, -1).to(torch.long)
             positions = positions.view(num_reqs, -1)
             is_prefills = (self.input_batch.num_computed_tokens_cpu
-                           < self.input_batch.num_prompt_tokens)
+                           < self.input_batch.num_tokens - 1)
             # The prefill and decode cannot be mixed.
             assert len(is_prefills) > 0 and all(
                 is_prefill == is_prefills[0]
