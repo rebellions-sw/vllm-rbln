@@ -143,6 +143,11 @@ class RblnPlatform(Platform):
             model_config.dtype = torch.float
             assert model_config.dtype == torch.float
             logger.info("RBLN enforce model_config.dtype as torch.float")
+
+            if (lora_config := vllm_config.lora_config) is not None:
+                lora_config.lora_dtype = torch.float
+                logger.info(
+                    "RBLN enforce lora_config.lora_dtype as torch.float")
         else:
             dtype = model_config.dtype
             logger.info("original model_config.dtype = %s", dtype)
@@ -153,11 +158,6 @@ class RblnPlatform(Platform):
                     dtype)
                 model_config.dtype = torch.float
             logger.info("RBLN use model_config.dtype = %s", model_config.dtype)
-
-        if (lora_config := vllm_config.lora_config) is not None:
-            lora_config.lora_dtype = torch.float32
-            logger.info("RBLN lora_config.lora_dtype = %s",
-                        lora_config.lora_dtype)
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
@@ -189,7 +189,7 @@ class RblnPlatform(Platform):
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
 
-                if lora_config is not None:
+                if (lora_config := vllm_config.lora_config) is not None:
                     lora_config.lora_dtype = torch.float16
         else:
             if envs.VLLM_USE_V1:
