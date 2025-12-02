@@ -53,7 +53,7 @@ hf_overrides_kw = {
 
 
 def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
-         dp_master_port, tp_size, enable_ep):
+         dp_master_port, tp_size, enable_ep, vllm_use_v1):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     # paralle_config.data_parallel_size = envs.sVLLM_DP_SIZE
@@ -61,16 +61,20 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     os.environ["VLLM_DP_MASTER_IP"] = dp_master_ip
     os.environ["VLLM_DP_MASTER_PORT"] = str(dp_master_port)
 
-    rbln_devices = ""
-    start_index = local_dp_rank * tp_size
-    end_index = start_index + tp_size
-    for index in range(start_index, end_index):
-        if rbln_devices:
-            rbln_devices += ","
-        rbln_devices += str(index)
+    if not vllm_use_v1:
+        rbln_devices = ""
+        start_index = local_dp_rank * tp_size
+        end_index = start_index + tp_size
+        for index in range(start_index, end_index):
+            if rbln_devices:
+                rbln_devices += ","
+            rbln_devices += str(index)
 
-    print(f"RBLN_DEVICES = {rbln_devices}")
-    os.environ["RBLN_DEVICES"] = rbln_devices
+        print(f"RBLN_DEVICES = {rbln_devices}")
+        os.environ["RBLN_DEVICES"] = rbln_devices
+    else:
+        rbln_devices = os.environ.get("RBLN_DEVICES")
+        print(f"RBLN_DEVICES = {rbln_devices}")
 
     # CUDA_VISIBLE_DEVICES for each DP rank is set automatically inside the
     # engine processes.
@@ -121,9 +125,6 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     outputs = llm.generate(prompts, sampling_params)
     # Print the outputs.
     for i, output in enumerate(outputs):
-        if i >= 5:
-            # print only 5 outputs
-            break
         prompt = output.prompt
         generated_text = output.outputs[0].text
         print(f"DP rank {global_dp_rank}, Prompt: {prompt!r}, "
@@ -134,6 +135,13 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
 
 
 if __name__ == "__main__":
+    vllm_use_v1 = (int(os.environ.get("VLLM_USE_V1", "0")) == 1)
+    if vllm_use_v1:
+        print("VLLM_USE_V1")
+        assert os.environ.get(
+            "RBLN_DEVICES", "") != "", "RBLN_DEVICES is not set in VLLM_USE_V1"
+    else:
+        print("VLLM_USE_V0")
     import argparse
     parser = argparse.ArgumentParser(description="Data Parallel Inference")
     parser.add_argument("--model",
@@ -192,7 +200,7 @@ if __name__ == "__main__":
         proc = Process(target=main,
                        args=(args.model, dp_size, local_dp_rank,
                              global_dp_rank, dp_master_ip, dp_master_port,
-                             tp_size, enable_ep))
+                             tp_size, enable_ep, vllm_use_v1))
         proc.start()
         procs.append(proc)
     exit_code = 0
