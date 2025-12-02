@@ -357,6 +357,7 @@ class RBLNOptimumDecoderMixin:
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
+    # It is required for decoder models in openai api server
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         return self.logits_processor(None, hidden_states, sampling_metadata)

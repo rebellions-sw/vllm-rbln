@@ -795,7 +795,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # Add the new or resumed requests to the persistent batch.
         # The smaller empty indices are filled first.
         for request in reqs_to_add:
-
             self.input_batch.add_request(request)
 
         # Condense the batched states if there are gaps left by removed requests
