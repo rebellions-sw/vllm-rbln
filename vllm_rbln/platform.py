@@ -172,12 +172,17 @@ class RblnPlatform(Platform):
 
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
+                hf_config = vllm_config.model_config.hf_config
+                assert not hasattr(hf_config, "sliding_window") \
+                    or not getattr(hf_config, "use_sliding_window", True)
+
                 RblnPlatform.device_type = "rbln"
                 vllm_config.device_config.device_type = RblnPlatform.device_type
                 vllm_config.device_config.device = (torch.device(
                     RblnPlatform.device_type))
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
+
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
@@ -273,24 +278,35 @@ class RblnPlatform(Platform):
     @classmethod
     def disable_unsupported_prefix_caching(cls,
                                            vllm_config: VllmConfig) -> None:
-        """
-        Currently, prefix caching is supported only for decoder-only models.
-        """
-        if vllm_config.cache_config.enable_prefix_caching:
+        if not vllm_config.cache_config.enable_prefix_caching:
+            return
+
+        hf_config = vllm_config.model_config.hf_config
+
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            if getattr(hf_config, "sliding_window", None) is not None \
+                   and getattr(hf_config, "use_sliding_window", True):
+                cls._disable_prefix_caching(vllm_config,
+                                            "sliding window models")
+
+        else:
+            # Prefix caching is supported only for decoder-only models for now.
             if is_qwen3_pooling(vllm_config):
                 # Qwen3 pooling model does not support prefix caching for now.
                 cls._disable_prefix_caching(vllm_config,
                                             "Qwen3 pooling models")
-            elif is_enc_dec_arch(vllm_config.model_config.hf_config):
+            elif is_enc_dec_arch(hf_config):
                 cls._disable_prefix_caching(vllm_config,
                                             "encoder-decoder models")
-            elif is_multi_modal(vllm_config.model_config.hf_config):
+            elif is_multi_modal(hf_config):
                 cls._disable_prefix_caching(vllm_config, "multimodal models")
-            elif is_pooling_arch(vllm_config.model_config.hf_config):
+            elif is_pooling_arch(hf_config):
                 cls._disable_prefix_caching(vllm_config, "pooling models")
-            elif getattr(vllm_config.model_config.hf_config, "sliding_window",
-                         None) is not None and getattr(
-                             vllm_config.model_config.hf_config,
-                             "use_sliding_window", True):
+            elif getattr(hf_config, "sliding_window", None) is not None \
+                    and getattr(hf_config, "use_sliding_window", True):
                 cls._disable_prefix_caching(vllm_config,
                                             "sliding window models")
+
+    @classmethod
+    def support_hybrid_kv_cache(cls) -> bool:
+        return True
