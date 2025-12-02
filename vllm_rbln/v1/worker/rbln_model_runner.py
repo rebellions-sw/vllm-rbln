@@ -31,7 +31,8 @@ from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.parallel_state import (
-    get_pp_group, get_tp_group, prepare_communication_buffer_for_model)
+    get_dp_group, get_pp_group, get_tp_group,
+    prepare_communication_buffer_for_model)
 from vllm.forward_context import (BatchDescriptor, DPMetadata,
                                   set_forward_context)
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -215,6 +216,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         # Sampler
         self.sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
+
+        # Lazy initialization
+        self.compute_logits_model: nn.Module
 
         self.eplb_state: Optional[EplbState] = None
         """
@@ -550,7 +554,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             reqs_to_add.append(req_state)
 
         # Update the states of the running/resumed requests.
-        is_last_rank = get_pp_group().is_last_rank
         req_data = scheduler_output.scheduled_cached_reqs
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
@@ -561,7 +564,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             # Update the cached states.
             req_state.num_computed_tokens = num_computed_tokens
 
-            if not is_last_rank:
+            if not get_pp_group().is_last_rank:
                 # When using PP, the scheduler sends the sampled tokens back,
                 # because there's no direct communication between the first-
                 # stage worker and the last-stage worker.
@@ -607,7 +610,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
             # For the last rank, we don't need to update the token_ids_cpu
             # because the sampled tokens are already cached.
-            if not is_last_rank:
+            if not get_pp_group().is_last_rank:
                 # Add new_token_ids to token_ids_cpu.
                 start_token_index = num_computed_tokens
                 end_token_index = num_computed_tokens + len(new_token_ids)
@@ -1031,9 +1034,40 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 max_num_scheduled_tokens)
 
     def _compile_model(self, model):
+        TP = get_tp_group()
+        PP = get_pp_group()
+        DP = get_dp_group()
+        logger.info("[RBLN] TP group unique_name = %s", TP.unique_name)
+        logger.info("[RBLN] TP group ranks = %s, local rank = %s", TP.ranks,
+                    TP.rank)
+        logger.info("[RBLN] TP device group id = %s, cpu group id = %s",
+                    TP.device_group.group_name, TP.cpu_group.group_name)
+
+        logger.info("[RBLN] PP group unique_name = %s", PP.unique_name)
+        logger.info("[RBLN] PP group ranks = %s, local rank = %s", PP.ranks,
+                    PP.rank)
+        logger.info("[RBLN] PP device group id = %s, cpu group id = %s",
+                    PP.device_group.group_name, PP.cpu_group.group_name)
+
+        logger.info("[RBLN] DP group unique_name = %s", DP.unique_name)
+        logger.info("[RBLN] DP group ranks = %s, local rank = %s", DP.ranks,
+                    DP.rank)
+        logger.info("[RBLN] DP device group id = %s, cpu group id = %s",
+                    DP.device_group.group_name, DP.cpu_group.group_name)
+
+        process_group_dict = {}
+        process_group_dict[TP.device_group.group_name] = TP.ranks
+        process_group_dict[TP.cpu_group.group_name] = TP.ranks
+        process_group_dict[PP.device_group.group_name] = PP.ranks
+        process_group_dict[PP.cpu_group.group_name] = PP.ranks
+        process_group_dict[DP.device_group.group_name] = DP.ranks
+        process_group_dict[DP.cpu_group.group_name] = DP.ranks
+
+        logger.info("[RBLN] process_group_dict = %s", process_group_dict)
         options = {
             "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
+            "process_group_dict": process_group_dict
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
@@ -1043,14 +1077,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
-        # compile compute_logits
-        self.compute_logits = torch.compile(
-            self.compute_logits,
-            backend="rbln",
-            options=options,
-            dynamic=False,
-        )
-
+        options["mode"] = "strict"
         compiled_model = torch.compile(
             model,
             backend="rbln",
@@ -1413,6 +1440,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
+        logger.info("V1, model warm-up prefill execution")
         self.execute_model(dummy_prefill_schedule)
         self.execute_model(dummy_prefill_cleanup)
 
@@ -1468,6 +1496,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
+        logger.info("V1, model warm-up decode execution")
         self.execute_model(dummy_decode_schedule)
         self.execute_model(dummy_decode_cleanup)
 
@@ -1529,6 +1558,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
         sampled_token_ids = sampler_output.sampled_token_ids
+        logger.debug("V1, num_sampled_tokens=%s", num_sampled_tokens)
+        logger.debug("V1, sampled_token_ids=%s", sampled_token_ids)
         invalid_req_indices = []
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
@@ -1543,8 +1574,13 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     self.input_batch.vocab_size,
                 )
             # Mask out the sampled tokens that should not be sampled.
+            logger.debug("V1, valid_sampled_token_ids=%s",
+                         valid_sampled_token_ids)
+            logger.debug("v1, discard_sampled_tokens_req_indices=%s",
+                         discard_sampled_tokens_req_indices)
             for i in discard_sampled_tokens_req_indices:
-                valid_sampled_token_ids[i].clear()
+                if i < len(valid_sampled_token_ids):
+                    valid_sampled_token_ids[i].clear()
         else:
             valid_sampled_token_ids = []
             invalid_req_indices = list(discard_sampled_tokens_req_indices)
@@ -1670,6 +1706,13 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             positions = positions.view(num_reqs, -1)
             is_prefills = (self.input_batch.num_computed_tokens_cpu
                            < self.input_batch.num_prompt_tokens)
+            logger.info("V1, input_batch.num_computed_tokens_cpu = %s",
+                        self.input_batch.num_computed_tokens_cpu)
+            logger.info("V1, input_batch.num_prompt_tokens = %s",
+                        self.input_batch.num_prompt_tokens)
+            logger.info("V1, is_prefills = %s", is_prefills)
+
+            token_indices = None
             # The prefill and decode cannot be mixed.
             assert len(is_prefills) > 0 and all(
                 is_prefill == is_prefills[0]
@@ -1682,6 +1725,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                                 else 1 << (math.ceil(math.log2(max_seq_len))))
                 input_ids = rbln_utils.pad(input_ids, -1, prefill_size)
                 positions = rbln_utils.pad(positions, -1, prefill_size)
+                token_indices = logits_indices
             else:
                 # decode batch padding
                 input_ids = rbln_utils.pad(input_ids, 0, self.max_num_seqs)
@@ -1691,6 +1735,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 input_ids=input_ids,
                 positions=positions,
                 intermediate_tensors=intermediate_tensors,
+                selected_token_indices=token_indices,
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
@@ -1702,10 +1747,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 hidden_states = model_output
                 aux_hidden_states = None
 
-            # FIXME(jiwoo.park) This is a temporary workaround;
-            # we must resolve the batch dimension.
-            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-
             # Broadcast PP output for external_launcher (torchrun)
             # to make sure we are synced across pp ranks
             # TODO: Support overlapping mirco-batches
@@ -1714,7 +1755,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 self.parallel_config.distributed_executor_backend \
                 == "external_launcher" and len(get_pp_group().ranks) > 0
             if not get_pp_group().is_last_rank:
-                # For mid-pipeline stages, return the hidden states.
+                # For mid-pipeline stages, return intermediate tensors
                 assert isinstance(hidden_states, IntermediateTensors)
                 if not broadcast_pp_output:
                     hidden_states.kv_connector_output = kv_connector_output
@@ -1723,18 +1764,46 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     hidden_states.tensors, all_gather_group=get_tp_group())
                 logits = None
             else:
+                # for last-pipeline stages, return hidden states
                 if self.is_pooling_model:
                     return self._pool(hidden_states, num_scheduled_tokens,
                                       num_scheduled_tokens_np,
                                       kv_connector_output)
-                if is_prefills[0]:  # prefill
-                    sample_hidden_states = hidden_states[logits_indices]
-                    logits = self.compute_logits(sample_hidden_states, None)
-                else:  # decode
-                    logits = self.compute_logits(hidden_states, None)
-                    logits = logits[logits_indices]
-                logits = self.logits_processor._gather_logits(logits)
-                logits = logits.view(-1, logits.size(-1))
+                if False:
+                    if is_prefills[0]:  # prefill
+                        sample_hidden_states = hidden_states[logits_indices]
+                        logits = self.compute_logits(sample_hidden_states,
+                                                     None)
+                    else:  # decode
+                        logits = self.compute_logits(hidden_states, None)
+                        logits = logits[logits_indices]
+                    logits = self.logits_processor._gather_logits(logits)
+                    logits = logits.view(-1, logits.size(-1))
+                else:
+                    selected_token_indices = logits_indices
+                    assert selected_token_indices.dim() == 1
+                    assert selected_token_indices.size(0) == 1
+                    if is_prefills[0]:  # prefill
+                        if selected_token_indices[0] == (self.max_num_tokens -
+                                                         1):
+                            selected_token_indices = torch.tensor(
+                                [], dtype=selected_token_indices.dtype)
+                            # chunked prefill(#0~#N-1, intermediate)
+                            # token_indices = torch.tensor([max_num_seqs-1])
+                            # selected = torch.tensor([])
+                            logits = hidden_states[selected_token_indices]
+                        else:
+                            # chunked prefill(#N, final)
+                            # token_indices = torch.tensor([last_seq_idx-1])
+                            # selected_token_indices == token_indices
+                            logits = hidden_states
+                    else:  # decode
+                        # token_indices == None, selected = torch.tensor([0])
+                        logits = hidden_states[selected_token_indices]
+                    logger.info("token indices = %s", token_indices)
+                    logger.info("selected token indices = %s",
+                                selected_token_indices)
+                    logger.info("logits shape = %s", logits.shape)
 
             if broadcast_pp_output:
                 model_output_broadcast_data = {
@@ -1818,19 +1887,44 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             model_loader.load_weights(self.model,
                                       model_config=self.model_config)
 
-        logger.info("[RBLN] load_model = %s", self.model)
-        logger.info(
-            "[RBLN] model_config.num_layers = %d",
-            self.model_config.get_num_layers(self.parallel_config),
-        )
-
-        # get logits processor from model
+        self.model = self.get_model().eval()
+        self.compute_logits_model = self.model
         if self.model_config.is_multimodal_model and hasattr(
                 self.model.get_language_model(), "logits_processor"):
-            self.logits_processor = self.model.get_language_model(
-            ).logits_processor
-        else:
-            self.logits_processor = self.model.logits_processor
+            self.compute_logits_model = self.model.get_language_model()
+
+        logger.info("[RBLN] load_model = %s", self.model)
+        logger.info("[RBLN] model_config.num_layers = %d",
+                    self.model_config.get_num_layers(self.parallel_config))
+
+        def model_wrapper(
+            input_ids: torch.Tensor,
+            positions: torch.Tensor,
+            intermediate_tensors: Optional[IntermediateTensors] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
+            selected_token_indices: Optional[torch.Tensor] = None,
+        ) -> Union[torch.Tensor, IntermediateTensors]:
+            model_output = self.model(
+                input_ids=input_ids,
+                positions=positions,
+                intermediate_tensors=intermediate_tensors,
+                inputs_embeds=inputs_embeds)
+
+            if get_pp_group().is_last_rank:
+                # last rank create real model output
+                if selected_token_indices is not None:
+                    # aten::select -> adv_index -->
+                    #     contrib_dynamic_take (tensor -> scalar)
+                    # aten::index_select --> take -->
+                    #     contrib_dynamic_take (tensor -> scalar)
+                    model_output = model_output[:, selected_token_indices]
+                logits = self.compute_logits_model.compute_logits(
+                    model_output, None)
+                return logits.view(-1, logits.size(-1))
+
+            # non last rank create intermediate tensors, bypass it
+            return model_output
+
         # if self.lora_config:
         #     self.model = self.load_lora_model(
         #         self.model,
@@ -1849,9 +1943,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         prepare_communication_buffer_for_model(self.model)
 
-        self.model.eval()
         if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
-            self.model_executable = self.model
+            self.model_executable = model_wrapper
         else:
             # NOTE - refer to pytorch 2.5 release notes
             # torch.compile regional compilation without recompilations
@@ -1865,7 +1958,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             from rebel.compile_context import CompileContext
 
             self.compile_context = CompileContext(use_weight_sharing=True)
-            self.model_executable = self._compile_model(self.model)
+            compiled_graph = self._compile_model(model_wrapper)
+            self.model_executable = compiled_graph
 
     def save_tensorized_model(
         self,

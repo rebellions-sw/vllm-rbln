@@ -65,7 +65,6 @@ class RBLNWorker(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        assert "rbln" in current_platform.get_device_name().lower()
         self.device = torch.device(current_platform.device_type)
 
         if self.parallel_config.distributed_executor_backend == "ray":
