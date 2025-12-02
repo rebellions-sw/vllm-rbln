@@ -79,6 +79,10 @@ class RblnPlatform(Platform):
         return False
 
     @classmethod
+    def get_device_communicator_cls(cls) -> str:
+        return "vllm_rbln.distributed.rbln_communicator.RblnCommunicator"  # noqa
+
+    @classmethod
     def use_all_gather(cls) -> bool:
         """
         Whether to use allgather in LogitsProcessor to gather the logits.
@@ -130,14 +134,25 @@ class RblnPlatform(Platform):
                     "T5 encoder-decoder model is not supported on V1. "
                     "Set `VLLM_USE_V1=0` to run T5 models in V0")
 
-        logger.info("original model_config.dtype = %s", model_config.dtype)
-        if model_config.dtype == torch.bfloat16:
-            logger.warning("bfloat16 is not supported on RBLN.")
+        if envs.VLLM_RBLN_ENFORCE_MODEL_FP32:
+            logger.info("original model_config.dtype = %s", model_config.dtype)
+            if model_config.dtype == torch.bfloat16:
+                logger.warning("bfloat16 is not supported on RBLN.")
 
-        # FIXME - force model dtype into fp32 for graph compilation
-        model_config.dtype = torch.float
-        assert model_config.dtype == torch.float
-        logger.info("RBLN model_config.dtype = %s", model_config.dtype)
+            # FIXME - force model dtype into fp32 for graph compilation
+            model_config.dtype = torch.float
+            assert model_config.dtype == torch.float
+            logger.info("RBLN enforce model_config.dtype as torch.float")
+        else:
+            dtype = model_config.dtype
+            logger.info("original model_config.dtype = %s", dtype)
+            if dtype != torch.bfloat16 and dtype != torch.float16 \
+                        and dtype != torch.float:
+                logger.warning(
+                    "%s not supported on RBLN, only fp32,fp16,bf16 supported",
+                    dtype)
+                model_config.dtype = torch.float
+            logger.info("RBLN use model_config.dtype = %s", model_config.dtype)
 
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config

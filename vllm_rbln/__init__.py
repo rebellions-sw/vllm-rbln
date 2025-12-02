@@ -44,6 +44,7 @@ def register_model():
 def register_ops():
     if envs.VLLM_RBLN_USE_VLLM_MODEL:
         import vllm_rbln.attention.layer  # noqa
+        import vllm_rbln.forward_context  # noqa
         import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
         import vllm_rbln.model_executor.layers.logits_processor  # noqa
         import vllm_rbln.model_executor.layers.quantization.kernels.mixed_precision  # noqa
@@ -53,5 +54,6 @@ def register_ops():
         import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
         import vllm_rbln.models.deepseek_v2  # noqa
         import vllm_rbln.models.qwen2_moe  # noqa
+        import vllm_rbln.models.qwen3  # noqa
         import vllm_rbln.models.qwen3_moe  # noqa
         import vllm_rbln.models.utils  # noqa
