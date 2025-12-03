@@ -125,10 +125,6 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
                 image_sizes = image_input["image_sizes"]
-                # NOTE(eunji.lee): It is a patch for bfloat16 support.
-                dtype = self.rbln_model_config.language_model.torch_dtype
-                if dtype != pixel_values.dtype:
-                    pixel_values = pixel_values.to(dtype)
         else:
             pixel_values = None
             image_sizes = None

@@ -76,13 +76,9 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
         if image_input is not None:
             assert image_input["pixel_values"] is not None
             pixel_values = image_input["pixel_values"]
-            if dtype != pixel_values.dtype:
-                pixel_values = pixel_values.to(dtype)
         if video_input is not None:
             assert video_input["pixel_values_videos"] is not None
             pixel_values_videos = video_input["pixel_values_videos"]
-            if dtype != pixel_values_videos.dtype:
-                pixel_values_videos = pixel_values_videos.to(dtype)
         # Prepare base arguments common to all models
         preprocess_args = {
             "input_ids":

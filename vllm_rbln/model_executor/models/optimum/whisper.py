@@ -143,10 +143,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         input_features = kwargs.pop("input_features", None)
         if input_features is not None:
             input_features = input_features.squeeze(0)
-            # NOTE(eunji.lee): It is a patch for bfloat16 support.
-            dtype = self.rbln_model_config.torch_dtype
-            if dtype != input_features.dtype:
-                input_features = input_features.to(dtype)
         return input_features
 
     def clear_dict_table(self):

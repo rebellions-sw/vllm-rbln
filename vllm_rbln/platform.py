@@ -187,6 +187,10 @@ class RblnPlatform(Platform):
                 model_config.dtype = torch.float16
 
         else:
+            # NOTE(eunji.lee):
+            # It is for multimodal models
+            # to generate inputs as fp32, not bfloat16
+            # even though the model is compiled with bfloat16
             model_config.dtype = torch.float
             assert model_config.dtype == torch.float
 
