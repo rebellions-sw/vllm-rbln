@@ -78,6 +78,11 @@ def get_rbln_params(vllm_config: VllmConfig,
 def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
                                         batch_size: int, max_model_len: int,
                                         kvcache_block_size: int) -> None:
+
+    # dtype
+    rbln_dtype = rbln_config.get("dtype")
+
+    # scheduler_config.max_num_batched_tokens
     if vllm_config.scheduler_config.max_num_seqs != batch_size:
         logger.info(
             "Updating scheduler_config.max_num_seqs from %s to %s "
@@ -85,6 +90,7 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
             vllm_config.scheduler_config.max_num_seqs, batch_size)
         vllm_config.scheduler_config.max_num_seqs = batch_size
 
+    # scheduler_config.max_num_batched_tokens
     if vllm_config.scheduler_config.max_num_batched_tokens != (max_model_len):
         logger.info(
             "Updating scheduler_config.max_num_batched_tokens from %s to "
@@ -92,6 +98,7 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
             vllm_config.scheduler_config.max_num_batched_tokens, max_model_len)
         vllm_config.scheduler_config.max_num_batched_tokens = (max_model_len)
 
+    # scheduler_config.max_model_len
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.info(
             "Updating model_config.max_model_len and "
@@ -102,6 +109,7 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
         vllm_config.model_config.max_model_len = max_model_len
         vllm_config.scheduler_config.max_model_len = max_model_len
 
+    # cache_config.block_size
     if vllm_config.cache_config.enable_prefix_caching:
         if vllm_config.cache_config.block_size != 128:
             logger.info(
