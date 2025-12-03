@@ -85,6 +85,8 @@ from vllm.v1.worker.utils import (AttentionGroup, MultiModalBudget,
 import vllm_rbln.rbln_envs as envs
 import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.attention.backends.flash_attention import (
+    RBLNFlashAttentionMetadataBuilder)
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
 
 if TYPE_CHECKING:
@@ -1001,9 +1003,10 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                         num_draft_tokens=self.num_draft_tokens.gpu[:num_reqs],
                     )
 
-                extra_attn_metadata_args[
-                    "num_prompt_tokens"] = self.input_batch.num_prompt_tokens
-                extra_attn_metadata_args["positions"] = self.positions.cpu
+                if isinstance(builder, RBLNFlashAttentionMetadataBuilder):
+                    extra_attn_metadata_args["num_prompt_tokens"] = \
+                        self.input_batch.num_prompt_tokens
+                    extra_attn_metadata_args["positions"] = self.positions.cpu
                 attn_metadata_i = builder.build(
                     common_prefix_len=common_prefix_len,
                     common_attn_metadata=common_attn_metadata,
