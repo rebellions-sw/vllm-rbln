@@ -44,6 +44,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
     def forward(self, model_input: ModelInputForRBLN,
@@ -64,8 +65,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
         request_nums = input_ids.shape[0]
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             self.kv_block_adapter, input_ids,
-                                             cache_position)
+                                             input_ids, cache_position)
 
         if is_prompt:
             if model_input.multi_modal_kwargs:
@@ -74,6 +74,10 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
                 if image_input is not None:
                     assert image_input["type"] == "pixel_values"
                     pixel_values = image_input["data"]
+                    # NOTE(eunji.lee): It is a patch for bfloat16 support.
+                    dtype = self.rbln_model_config.language_model.torch_dtype
+                    if dtype != pixel_values.dtype:
+                        pixel_values = pixel_values.to(dtype)
 
             block_tables = kwargs.pop("block_tables")
             input_ids = kwargs.pop("input_ids")

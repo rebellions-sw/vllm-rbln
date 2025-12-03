@@ -43,6 +43,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
     def merge_multimodal_embeddings(
@@ -69,7 +70,8 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         is_prefill: bool,
         block_tables: torch.Tensor,
         input_ids: torch.LongTensor = None,
-        pixel_values: torch.FloatTensor = None,
+        pixel_values: Optional[Union[torch.FloatTensor,
+                                     torch.HalfTensor]] = None,
         image_sizes: Optional[torch.LongTensor] = None,
         cache_position: Union[List[torch.Tensor],
                               torch.Tensor] = None,  # vllm keyword argument
@@ -123,13 +125,16 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
                 image_sizes = image_input["image_sizes"]
+                # NOTE(eunji.lee): It is a patch for bfloat16 support.
+                dtype = self.rbln_model_config.language_model.torch_dtype
+                if dtype != pixel_values.dtype:
+                    pixel_values = pixel_values.to(dtype)
         else:
             pixel_values = None
             image_sizes = None
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             self.kv_block_adapter, input_ids,
-                                             cache_position)
+                                             input_ids, cache_position)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")

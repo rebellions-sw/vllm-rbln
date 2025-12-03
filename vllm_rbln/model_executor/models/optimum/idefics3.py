@@ -44,6 +44,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.text_model.
             decoder_batch_sizes,
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
     def forward(self, model_input: ModelInputForRBLN,
@@ -59,8 +60,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             self.kv_block_adapter, input_ids,
-                                             cache_position)
+                                             input_ids, cache_position)
 
         if is_prompt:
             if model_input.multi_modal_kwargs:
@@ -72,6 +72,10 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
                 pixel_values = image_input["pixel_values"].unsqueeze(0)
                 pixel_attention_mask = image_input[
                     "pixel_attention_mask"].unsqueeze(0)
+                # NOTE(eunji.lee): It is a patch for bfloat16 support.
+                dtype = self.rbln_model_config.text_model.torch_dtype
+                if dtype != pixel_values.dtype:
+                    pixel_values = pixel_values.to(dtype)
             else:
                 pixel_values = None
                 pixel_attention_mask = None

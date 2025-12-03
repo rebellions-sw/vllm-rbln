@@ -41,6 +41,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             use_multiple_decoder=False,
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
         self.dec_max_seq_len = self.model_config.max_model_len
         self.dec_lengths = [0] * self.batch_size
@@ -88,7 +89,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
         kwargs = self.preprocess_for_decoder(is_prompt,
                                              block_tables,
-                                             self.kv_block_adapter,
                                              input_ids,
                                              cache_position,
                                              input_block_ids=valid_block_ids)
@@ -143,6 +143,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         input_features = kwargs.pop("input_features", None)
         if input_features is not None:
             input_features = input_features.squeeze(0)
+            # NOTE(eunji.lee): It is a patch for bfloat16 support.
+            dtype = self.rbln_model_config.torch_dtype
+            if dtype != input_features.dtype:
+                input_features = input_features.to(dtype)
         return input_features
 
     def clear_dict_table(self):

@@ -22,9 +22,9 @@ if TYPE_CHECKING:
 else:
     VllmConfig = None
 from vllm_rbln.logger import init_logger
-
-from .registry import (get_rbln_model_info, is_enc_dec_arch, is_multi_modal,
-                       is_pooling_arch)
+from vllm_rbln.utils.optimum.registry import (get_rbln_model_info,
+                                              is_enc_dec_arch, is_multi_modal,
+                                              is_pooling_arch)
 
 logger = init_logger(__name__)
 
@@ -94,10 +94,13 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
 
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.info(
-            "Updating model_config.max_model_len from %s to %s "
+            "Updating model_config.max_model_len and "
+            "scheduler_config.max_model_len "
+            "from %s to %s "
             "based on rbln_config.json",
             vllm_config.model_config.max_model_len, max_model_len)
         vllm_config.model_config.max_model_len = max_model_len
+        vllm_config.scheduler_config.max_model_len = max_model_len
 
     if vllm_config.cache_config.enable_prefix_caching:
         if vllm_config.cache_config.block_size != 128:
@@ -148,13 +151,8 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
     except Exception as e:
         raise RuntimeError("Failed to get RBLN config: %s", e) from e
 
-    if rbln_config is None:
-        kvcache_block_size = vllm_config.cache_config.block_size
-        batch_size = vllm_config.scheduler_config.max_num_seqs
-        max_model_len = vllm_config.model_config.max_model_len
-    else:
+    if rbln_config is not None:
         kvcache_block_size, batch_size, max_model_len = \
             get_rbln_params(vllm_config, rbln_config)
-
-    update_vllm_config_with_rbln_params(vllm_config, batch_size, max_model_len,
-                                        kvcache_block_size)
+        update_vllm_config_with_rbln_params(vllm_config, batch_size,
+                                            max_model_len, kvcache_block_size)

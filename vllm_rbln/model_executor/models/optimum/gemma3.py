@@ -103,6 +103,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
+            num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
         # FIXME Loading tokenizer in model runner is a temporary solution.
@@ -138,8 +139,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             )
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             self.kv_block_adapter, input_ids,
-                                             position_ids)
+                                             input_ids, position_ids)
 
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.
@@ -235,7 +235,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
-
+                # NOTE(eunji.lee): It is a patch for bfloat16 support.
+                dtype = self.rbln_model_config.language_model.torch_dtype
+                if dtype != pixel_values.dtype:
+                    pixel_values = pixel_values.to(dtype)
         else:
             pixel_values = None
 

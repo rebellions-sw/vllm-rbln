@@ -46,8 +46,7 @@ from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader, check_use_alibi,
-                        get_dtype_size, is_pin_memory_available,
-                        make_tensor_with_pad, round_up)
+                        get_dtype_size, is_pin_memory_available, round_up)
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadataBuilder
 from vllm.v1.attention.backends.utils import (
     CommonAttentionMetadata, create_fast_prefill_custom_backend,
@@ -62,7 +61,7 @@ from vllm.v1.kv_cache_interface import (AttentionSpec,
                                         EncoderOnlyAttentionSpec,
                                         FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheSpec,
-                                        MambaSpec, SlidingWindowSpec)
+                                        MambaSpec)
 # yapf: enable
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              LogprobsLists, LogprobsTensors, ModelRunnerOutput,
@@ -84,7 +83,9 @@ from vllm.v1.worker.utils import (AttentionGroup, MultiModalBudget,
                                   bind_kv_cache)
 
 import vllm_rbln.rbln_envs as envs
+import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -205,6 +206,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
             model_config)
+        if envs.VLLM_RBLN_DISABLE_MM:
+            self.supports_mm_inputs = False
 
         if self.model_config.is_encoder_decoder:
             # Maximum length of the encoder input, only for encoder-decoder
@@ -1414,11 +1417,13 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                            else self.scheduler_config.max_model_len)
         dummy_prefill_requests = []
         dummy_prefill_num_scheduled_tokens = {}
+        num_kv_cache_groups = len(self.kv_cache_config.kv_cache_groups)
         self._add_dummy_requests(
             requests=dummy_prefill_requests,
             num_scheduled_tokens=dummy_prefill_num_scheduled_tokens,
             total_tokens=prefill_seq_len,
             num_computed_tokens=0,
+            num_kv_cache_groups=num_kv_cache_groups,
             sampling_params=None if self.is_pooling_model else SamplingParams(
                 temperature=0.0),
             pooling_params=PoolingParams(
@@ -1442,6 +1447,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
                 total_tokens=decode_max_seq_len - 1,
                 num_computed_tokens=decode_max_seq_len - 1,
+                num_kv_cache_groups=num_kv_cache_groups,
                 sampling_params=None
                 if self.is_pooling_model else SamplingParams(temperature=0.0),
                 pooling_params=PoolingParams(
@@ -1463,6 +1469,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         num_scheduled_tokens: dict[str, int],
         total_tokens: int,
         num_computed_tokens: int,
+        num_kv_cache_groups: int = 1,
         sampling_params: Optional[SamplingParams] = None,
         pooling_params: Optional[PoolingParams] = None,
     ) -> None:
@@ -1480,7 +1487,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             mm_positions=[],
             sampling_params=sampling_params,
             pooling_params=pooling_params,
-            block_ids=([0] * num_blocks, ),
+            block_ids=([0] * num_blocks, ) * num_kv_cache_groups,
             num_computed_tokens=num_computed_tokens,
             lora_request=None,
         )
@@ -1489,8 +1496,10 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             if total_tokens - num_computed_tokens == 0 \
                 else total_tokens - num_computed_tokens
 
-    def _execute_dummy_requests(self, requests: list[NewRequestData],
-                                num_scheduled_tokens: dict[str, int]) -> None:
+    def _execute_dummy_requests(self,
+                                requests: list[NewRequestData],
+                                num_scheduled_tokens: dict[str, int],
+                                num_kv_cache_groups: int = 1) -> None:
         sched_output = SchedulerOutput(
             scheduled_new_reqs=requests,
             scheduled_cached_reqs=CachedRequestData.make_empty(),
@@ -1498,7 +1507,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             total_num_scheduled_tokens=sum(num_scheduled_tokens.values()),
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[0],
+            num_common_prefix_blocks=[0] * num_kv_cache_groups,
             finished_req_ids=set(),
             free_encoder_mm_hashes=[],
             structured_output_request_ids={},
@@ -1511,7 +1520,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             total_num_scheduled_tokens=0,
             scheduled_spec_decode_tokens={},
             scheduled_encoder_inputs={},
-            num_common_prefix_blocks=[1],
+            num_common_prefix_blocks=[1] * num_kv_cache_groups,
             finished_req_ids={req.req_id
                               for req in requests},
             free_encoder_mm_hashes=[],
@@ -1713,50 +1722,27 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
-            input_ids = input_ids.view(self.input_batch.num_reqs, -1)
-            positions = positions.view(self.input_batch.num_reqs, -1)
+            num_reqs = self.input_batch.num_reqs
+            input_ids = input_ids.view(num_reqs, -1).to(torch.long)
+            positions = positions.view(num_reqs, -1)
             is_prefills = (self.input_batch.num_computed_tokens_cpu
                            < self.input_batch.num_prompt_tokens)
             # The prefill and decode cannot be mixed.
             assert len(is_prefills) > 0 and all(
                 is_prefill == is_prefills[0]
-                for is_prefill in is_prefills[:self.input_batch.num_reqs])
+                for is_prefill in is_prefills[:num_reqs])
             if is_prefills[0]:
-                max_seq_len = int(
-                    self.seq_lens.np[:self.input_batch.num_reqs].max())
+                # prefill chunk padding
+                max_seq_len = int(self.seq_lens.np[:num_reqs].max())
                 prefill_size = (self.scheduler_config.max_num_batched_tokens if
                                 self.scheduler_config.chunked_prefill_enabled
                                 else 1 << (math.ceil(math.log2(max_seq_len))))
-                input_ids = make_tensor_with_pad(
-                    input_ids.to("cpu"),
-                    max_len=prefill_size,
-                    pad=0,
-                    dtype=torch.long,
-                    device=self.device,
-                )
-                positions = make_tensor_with_pad(
-                    positions.to("cpu"),
-                    max_len=prefill_size,
-                    pad=0,
-                    dtype=torch.long,
-                    device=self.device,
-                )
+                input_ids = rbln_utils.pad(input_ids, -1, prefill_size)
+                positions = rbln_utils.pad(positions, -1, prefill_size)
             else:
-                # batch padding
-                batch_padding_size = (self.max_num_seqs -
-                                      self.input_batch.num_reqs)
-                input_ids = torch.cat([
-                    input_ids,
-                    torch.full((batch_padding_size, input_ids.shape[-1]),
-                               0,
-                               device=self.device),
-                ], )
-                positions = torch.cat([
-                    positions,
-                    torch.full((batch_padding_size, positions.shape[-1]),
-                               0,
-                               device=self.device),
-                ])
+                # decode batch padding
+                input_ids = rbln_utils.pad(input_ids, 0, self.max_num_seqs)
+                positions = rbln_utils.pad(positions, -2, self.max_num_seqs)
 
             model_output = self.model_executable(
                 input_ids=input_ids,
@@ -1775,7 +1761,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
             # FIXME(jiwoo.park) This is a temporary workaround;
             # we must resolve the batch dimension.
-            hidden_states = hidden_states.view(input_ids.numel(), -1)
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
 
             # Broadcast PP output for external_launcher (torchrun)
             # to make sure we are synced across pp ranks
@@ -2473,7 +2459,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             # the attention backends
             if attn_module.attn_type == AttentionType.DECODER:
                 if attn_module.sliding_window is not None:
-                    kv_cache_spec[layer_name] = SlidingWindowSpec(
+                    kv_cache_spec[layer_name] = RBLNSlidingWindowSpec(
                         block_size=block_size,
                         num_kv_heads=attn_module.num_kv_heads,
                         head_size=attn_module.head_size,

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-from typing import Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -30,7 +30,8 @@ from vllm.multimodal.utils import group_mm_kwargs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
-from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
+from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader,
+                        is_pin_memory_available)
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
@@ -40,7 +41,7 @@ from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsLists,
 from vllm.v1.sample.logits_processor import build_logitsprocs
 from vllm.v1.sample.sampler import Sampler
 from vllm.v1.utils import record_function_or_nullcontext
-from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+from vllm.v1.worker.gpu_input_batch import CachedRequestState
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 from vllm.v1.worker.utils import AttentionGroup
 
@@ -49,16 +50,23 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
-from vllm_rbln.prefix_cache_manager.optimum_prefix_cache_manager import (
-    RBLNPrefixKVCacheManager)
+from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
+from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
+
+if TYPE_CHECKING:
+    import xgrammar as xgr
+    from vllm.v1.core.sched.output import SchedulerOutput
+else:
+    xgr = LazyLoader("xgr", globals(), "xgrammar")
 
 logger = init_logger(__name__)
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
+    input_batch: RBLNInputBatch
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
         # FIXME: For RBLN support Enc-only model which based on enc-dec config.
@@ -133,11 +141,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
+            self.pooled_tensors: dict[int, torch.Tensor] = {}
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
             )
-            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         else:
             logger.info("Using default vLLM sampler.")
             sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
@@ -165,7 +173,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # solution, we initialize the input batch here, and re-initialize it
         # in `initialize_kv_cache` if the block_sizes here is different from
         # the block_sizes in the kv cache config.
-        self.input_batch = InputBatch(
+        self.input_batch = RBLNInputBatch(
             max_num_reqs=self.max_num_reqs,
             max_model_len=self.max_model_len,
             max_num_batched_tokens=self.max_num_tokens,
@@ -179,6 +187,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.is_pooling_model,
                 self.vllm_config.model_config.logits_processors),
             is_pooling_model=self.is_pooling_model,
+            use_rbln_sampler=self.use_rbln_sampler,
         )
 
         # Cache the device properties.
@@ -228,14 +237,30 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if self.use_optimum_lora:
             self.valid_lora_ids = list(
                 range(len(self.model.rbln_model_config.lora_config.adapters)))
-        if self.enable_prefix_caching:
-            self.prefix_cache_manager = RBLNPrefixKVCacheManager(
-                ob_size=self.vllm_config.additional_config["attn_block_size"],
-                ib_size=self.cache_config.block_size,
-                max_model_len=self.max_model_len,
-                num_ob=self.model.kv_block_adapter.
-                get_available_num_outer_blocks(),
-            )
+        # NOTE(eunji.lee):
+        # Set bucket sizes and pooled tensors for RBLN sampler
+        # if use_multiple_decoder is True, use decoder_batch_sizes
+        # otherwise, use max_num_seqs
+        if self.use_rbln_sampler:
+            use_multiple_decoder = getattr(self.model.model.rbln_config,
+                                           "use_multiple_decoder", False)
+            if use_multiple_decoder:
+                self.bucket_sizes = self.model.decoder_batch_sizes
+            else:
+                batch_size = self.vllm_config.scheduler_config.max_num_seqs
+                self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
+            logger.debug("Bucket sizes for RBLN sampler: %s",
+                         self.bucket_sizes)
+            for bucket_size in self.bucket_sizes:
+                self.pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, self.model_config.get_vocab_size()),
+                    dtype=torch.float32,
+                )
+            torch._dynamo.config.recompile_limit = len(
+                self.bucket_sizes) * len(WARM_UP_CONFIGS)
+            self.sampler = torch.compile(self.sampler,
+                                         dynamic=False,
+                                         fullgraph=False)
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -267,18 +292,36 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         with record_function_or_nullcontext("Forward"):
             hidden_states = self.model(model_input)
 
-        if self.is_pooling_model:
-            return self._pool(hidden_states, num_scheduled_tokens,
-                              num_scheduled_tokens_np)
-        # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
-        hidden_states = hidden_states.squeeze(1)
-        logits = self.model.compute_logits(hidden_states, None)
+        with record_function_or_nullcontext("Postprocess"):
+            if self.is_pooling_model:
+                return self._pool(hidden_states, num_scheduled_tokens,
+                                  num_scheduled_tokens_np)
+            # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
+            hidden_states = hidden_states.squeeze(1)
+            logits = self.model.compute_logits(hidden_states, None)
+            if scheduler_output.grammar_bitmask is not None:
+                self.apply_grammar_bitmask(
+                    scheduler_output,
+                    logits,
+                )
 
         with record_function_or_nullcontext("Sample"):
+            if self.use_rbln_sampler:
+                num_reqs = self.input_batch.num_reqs
+                padded_logits = self.pooled_tensors[self.bucket_size]
+                padded_logits[:num_reqs].copy_(logits)
+            else:
+                padded_logits = logits
             sampler_output = self.sampler(
-                logits=logits,
+                logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
+            if self.use_rbln_sampler:
+                sampler_output.sampled_token_ids = \
+                    sampler_output.sampled_token_ids[:num_reqs]
+                if sampler_output.logprobs_tensors is not None:
+                    sampler_output.logprobs_tensors = \
+                        sampler_output.logprobs_tensors[:num_reqs]
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -411,7 +454,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             pooling_metadata=None,  # FIXME
             cached_block_tables=cached_block_tables,
             cached_lengths=cached_lengths,
-            is_prompt=is_prefill)
+            is_prompt=is_prefill,
+            dummy_block=scheduler_output.dummy_block)
         return model_input, num_scheduled_tokens
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
@@ -486,7 +530,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_index = self.input_batch.req_id_to_index[req_id]
             prompt_tokens = np.array(scheduled.prompt_token_ids)
             block_ids = scheduled.block_ids[0]
-            num_computed_tokens = scheduled.num_computed_tokens
         elif scheduler_output.scheduled_cached_reqs.num_reqs == 1:
             # Preempted request resumed
             req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
@@ -496,8 +539,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             prompt_tokens = self.input_batch.token_ids_cpu[
                 req_index][:num_token]
             block_ids = scheduler_output.scheduled_cached_reqs.new_block_ids[0]
-            num_computed_tokens = \
-                scheduler_output.scheduled_cached_reqs.num_computed_tokens[0]
         else:
             raise RuntimeError(
                 "Prefill stage request cannot processed with other requests.")
@@ -506,18 +547,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         input_positions = list(range(seq_len))
         num_blocks = num_blocks_per_req[req_index]
         if self.enable_prefix_caching:
-            block_table, cached_block_table, cached_length = \
-                self.prefix_cache_manager.get_block_table_prefill(
-                    req_id,
-                    scheduler_output.new_computed_blocks,
-                    num_computed_tokens,
-                    block_ids
-                )
             logger.debug(
                 "Request %s is now scheduled. Prompt tokens: %s, "
                 "Already generated tokens: %s, Allocated block(s): %s", req_id,
                 len(self.requests[req_id].prompt_token_ids),
                 len(self.requests[req_id].output_token_ids), block_ids)
+            block_table = scheduler_output.block_table_dict[req_id]
+            cached_block_table = scheduler_output.cached_block_table
+            cached_length = scheduler_output.cached_length
             total_cached_length = sum(cached_length)
             if total_cached_length > 0:
                 prompt_tokens = prompt_tokens[total_cached_length:]
@@ -545,7 +582,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         block_table = block_table.unsqueeze(0)
         # NOTE The cached_block_table is not unsqueezed for convenience.
         # It is used only for prefill
-
         return input_tokens, input_positions, block_table, cached_block_table, \
         cached_length, batched_mm_inputs, running_request_ids
 
@@ -562,21 +598,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
 
-        if self.enable_prefix_caching:
-            scheduled_cached_reqs = scheduler_output.scheduled_cached_reqs
-            new_blocks_ids = {
-                req_id: new_block_ids[0] if new_block_ids is not None else []
-                for req_id, new_block_ids in zip(
-                    scheduled_cached_reqs.req_ids,
-                    scheduled_cached_reqs.new_block_ids)
-            }
-            num_computed_tokens = {
-                req_id: num_computed_tokens
-                for req_id, num_computed_tokens in zip(
-                    scheduled_cached_reqs.req_ids,
-                    scheduled_cached_reqs.num_computed_tokens)
-            }
-
         req_ids = self.input_batch.req_ids
         for req_id in req_ids:
             req_index = self.input_batch.req_id_to_index[req_id]
@@ -587,15 +608,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_positions.append([input_position])
             num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
-                block_table = \
-                    self.prefix_cache_manager.get_block_table_decode(
-                        req_id,
-                        num_computed_tokens[req_id],
-                        new_blocks_ids[req_id])
+                block_tables_list.append(
+                    scheduler_output.block_table_dict[req_id])
             else:
                 block_table = block_tables_cpu[req_index]
                 block_table = self.mask_block_table(block_table, num_blocks)
-            block_tables_list.append(block_table)
+                block_tables_list.append(block_table)
             running_request_ids.append(req_id)
 
         input_tokens = torch.tensor(input_tokens)
@@ -614,14 +632,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         The SamplingMetadata is updated and copied to the NPU if there is a
         new/resumed/paused/finished request in the batch.
         """
-        # Update prefix_cache_manager if preemption happened
-        if self.enable_prefix_caching:
-            for req_id in scheduler_output.preempted_req_ids:
-                self.prefix_cache_manager.free_request(req_id, preemption=True)
-
         # Remove finished requests from the cached states.
         for req_id in scheduler_output.finished_req_ids:
-            if logger.isEnabledFor(logging.DEBUG):
+            if logger.isEnabledFor(logging.DEBUG) and req_id in self.requests:
                 if self.enable_prefix_caching:
                     block_ids = self.requests[req_id].block_ids[0]
                 else:
@@ -634,8 +647,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     "Generated tokens: %s, Freed block(s): %s", req_id,
                     len(self.requests[req_id].prompt_token_ids),
                     len(self.requests[req_id].output_token_ids), block_ids)
-            if self.enable_prefix_caching:
-                self.prefix_cache_manager.free_request(req_id)
+
             self.requests.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
         # NOTE(woosuk): There could be an edge case where finished_req_ids and
@@ -789,7 +801,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.input_batch.condense()
 
         # Refresh batch metadata with any pending updates.
-        self.input_batch.refresh_metadata()
+        if self.use_rbln_sampler:
+            # To pad sampling metadata for RBLN sampler
+            self.bucket_size = select_bucket_size(self.input_batch.num_reqs,
+                                                  self.bucket_sizes)
+            self.input_batch.refresh_metadata_rbln(self.bucket_size)
+        else:
+            self.input_batch.refresh_metadata()
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         pass
@@ -860,7 +878,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_batch.presence_penalties_reqs.clear()
 
         def dummy_run_batches(base_config):
-            for batch_size in range(1, self.input_batch.max_num_reqs + 1):
+            for batch_size in self.bucket_sizes:
                 input_batch = self.input_batch
                 populate_reqs(input_batch, base_config, batch_size)
 
@@ -875,10 +893,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                                             dtype=torch.long,
                                                             device="cpu")
 
-                logger.info(
+                logger.debug(
                     "Running dummy compile with batch_size=%d, vocab_size=%d",
                     batch_size, input_batch.vocab_size)
-                logger.info("Sampling metadata: %s", metadata)
+                logger.debug("Sampling metadata: %s", metadata)
 
                 with torch.inference_mode():
                     empty_logits = torch.empty(batch_size,
@@ -904,7 +922,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
             dummy_run_batches(config)
 
-    def set_active_loras(self, input_batch: InputBatch,
+    def set_active_loras(self, input_batch: RBLNInputBatch,
                          is_prefill: bool) -> None:
         num_reqs = self.input_batch.num_reqs
         req_lora_mapping_list = input_batch.request_lora_mapping[:
@@ -1127,3 +1145,81 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self.transfer_event.record()
         # self.transfer_event.synchronize()
         return pinned.tolist()
+
+    def apply_grammar_bitmask(
+        self,
+        scheduler_output: "SchedulerOutput",
+        logits: torch.Tensor,
+    ):
+        valid_logits = logits[:self.input_batch.num_reqs].clone()
+        grammar_bitmask = scheduler_output.grammar_bitmask
+        if grammar_bitmask is None:
+            return
+
+        # We receive the structured output bitmask from the scheduler,
+        # compacted to contain bitmasks only for structured output requests.
+        # The order of the requests in the bitmask is not guaranteed to be the
+        # same as the order of the requests in the gpu runner's batch. We need
+        # to sort the bitmask to match the order of the requests used here.
+
+        # Get the batch indices of the structured output requests.
+        # Keep track of the number of speculative tokens scheduled for every
+        # request in the batch, as the logit indices are offset by this amount.
+        struct_out_req_batch_indices: dict[str, int] = {}
+        cumulative_offset = 0
+        seq = sorted(self.input_batch.req_id_to_index.items(),
+                     key=lambda x: x[1])
+        for req_id, batch_index in seq:
+            logit_index = batch_index + cumulative_offset
+            cumulative_offset += len(
+                scheduler_output.scheduled_spec_decode_tokens.get(req_id, []))
+            if req_id in scheduler_output.structured_output_request_ids:
+                struct_out_req_batch_indices[req_id] = logit_index
+
+        out_indices = []
+
+        # Reorder the bitmask to match the order of the requests in the batch.
+        sorted_bitmask = np.full(shape=(valid_logits.shape[0],
+                                        grammar_bitmask.shape[1]),
+                                 fill_value=-1,
+                                 dtype=grammar_bitmask.dtype)
+        cumulative_index = 0
+        seq = sorted(scheduler_output.structured_output_request_ids.items(),
+                     key=lambda x: x[1])
+        for req_id, _ in seq:
+            logit_index = struct_out_req_batch_indices[req_id]
+            num_spec_tokens = len(
+                scheduler_output.scheduled_spec_decode_tokens.get(req_id, []))
+            for i in range(1 + num_spec_tokens):
+                sorted_bitmask[logit_index + i] = \
+                    grammar_bitmask[cumulative_index + i]
+                out_indices.append(logit_index + i)
+            cumulative_index += 1 + num_spec_tokens
+        grammar_bitmask = sorted_bitmask
+
+        # If the length of out indices and the logits have the same shape
+        # we don't need to pass indices to the kernel,
+        # since the bitmask is already aligned with the logits.
+        skip_out_indices = len(out_indices) == valid_logits.shape[0]
+
+        # Serialization of np.ndarray is much more efficient than a tensor,
+        # so we receive it in that format.
+        grammar_bitmask = torch.from_numpy(grammar_bitmask).contiguous()
+
+        xgr.apply_token_bitmask_inplace(
+            valid_logits,
+            grammar_bitmask.to(self.device, non_blocking=True),
+            indices=out_indices if not skip_out_indices else None,
+        )
+        logits[:valid_logits.shape[0]].copy_(valid_logits)
+
+    @staticmethod
+    def get_bucket_sizes(max_num_seqs: int) -> list[int]:
+        bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
+        if max_num_seqs >= 8:
+            # Step size 8 for small batch sizes, up to 256(not included)
+            bucket_sizes += list(range(8, min(max_num_seqs + 1, 256), 8))
+        if max_num_seqs >= 256:
+            # Step size 16 for larger batch sizes
+            bucket_sizes += list(range(256, max_num_seqs + 1, 16))
+        return bucket_sizes
