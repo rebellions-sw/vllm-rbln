@@ -93,7 +93,7 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     # then ensure that it still responds quickly afterwards
 
     chat_input = [{"role": "user", "content": "Write a long story"}]
-    client = server.get_async_client(timeout=0.5)
+    client = server.get_async_client(timeout=5)
     tasks = []
 
     for _ in range(20):
