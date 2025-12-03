@@ -95,7 +95,7 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     chat_input = [{"role": "user", "content": "Write a long story"}]
     client = server.get_async_client(timeout=0.001)
     tasks = []
-
+    # To make timeout while generating tokens
     for _ in range(10):
         task = asyncio.create_task(
             client.chat.completions.create(messages=chat_input,
