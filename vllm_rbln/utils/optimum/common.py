@@ -11,3 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import bisect
+from functools import cache
+
+
+@cache
+def select_bucket_size(original_batch_size: int, bucket_sizes: tuple):
+    index = bisect.bisect_left(bucket_sizes, original_batch_size)
+    return bucket_sizes[index]

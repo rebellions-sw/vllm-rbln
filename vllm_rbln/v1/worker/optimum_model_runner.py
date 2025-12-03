@@ -41,7 +41,7 @@ from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsLists,
 from vllm.v1.sample.logits_processor import build_logitsprocs
 from vllm.v1.sample.sampler import Sampler
 from vllm.v1.utils import record_function_or_nullcontext
-from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+from vllm.v1.worker.gpu_input_batch import CachedRequestState
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 from vllm.v1.worker.utils import AttentionGroup
 
@@ -50,9 +50,11 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
+from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
+from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -64,6 +66,7 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
+    input_batch: RBLNInputBatch
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
         # FIXME: For RBLN support Enc-only model which based on enc-dec config.
@@ -138,15 +141,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
-            # NOTE(eunji.lee): Set recompile limit for RBLN sampler
-            batch_size = self.vllm_config.scheduler_config.max_num_seqs
-            torch._dynamo.config.recompile_limit = batch_size * len(
-                WARM_UP_CONFIGS)
+            self.pooled_tensors: dict[int, torch.Tensor] = {}
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
             )
-            sampler = torch.compile(sampler, dynamic=False, fullgraph=False)
         else:
             logger.info("Using default vLLM sampler.")
             sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
@@ -174,7 +173,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # solution, we initialize the input batch here, and re-initialize it
         # in `initialize_kv_cache` if the block_sizes here is different from
         # the block_sizes in the kv cache config.
-        self.input_batch = InputBatch(
+        self.input_batch = RBLNInputBatch(
             max_num_reqs=self.max_num_reqs,
             max_model_len=self.max_model_len,
             max_num_batched_tokens=self.max_num_tokens,
@@ -188,6 +187,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.is_pooling_model,
                 self.vllm_config.model_config.logits_processors),
             is_pooling_model=self.is_pooling_model,
+            use_rbln_sampler=self.use_rbln_sampler,
         )
 
         # Cache the device properties.
@@ -237,6 +237,30 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if self.use_optimum_lora:
             self.valid_lora_ids = list(
                 range(len(self.model.rbln_model_config.lora_config.adapters)))
+        # NOTE(eunji.lee):
+        # Set bucket sizes and pooled tensors for RBLN sampler
+        # if use_multiple_decoder is True, use decoder_batch_sizes
+        # otherwise, use max_num_seqs
+        if self.use_rbln_sampler:
+            use_multiple_decoder = getattr(self.model.model.rbln_config,
+                                           "use_multiple_decoder", False)
+            if use_multiple_decoder:
+                self.bucket_sizes = self.model.decoder_batch_sizes
+            else:
+                batch_size = self.vllm_config.scheduler_config.max_num_seqs
+                self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
+            logger.debug("Bucket sizes for RBLN sampler: %s",
+                         self.bucket_sizes)
+            for bucket_size in self.bucket_sizes:
+                self.pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, self.model_config.get_vocab_size()),
+                    dtype=torch.float32,
+                )
+            torch._dynamo.config.recompile_limit = len(
+                self.bucket_sizes) * len(WARM_UP_CONFIGS)
+            self.sampler = torch.compile(self.sampler,
+                                         dynamic=False,
+                                         fullgraph=False)
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -282,10 +306,22 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
         with record_function_or_nullcontext("Sample"):
+            if self.use_rbln_sampler:
+                num_reqs = self.input_batch.num_reqs
+                padded_logits = self.pooled_tensors[self.bucket_size]
+                padded_logits[:num_reqs].copy_(logits)
+            else:
+                padded_logits = logits
             sampler_output = self.sampler(
-                logits=logits,
+                logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
+            if self.use_rbln_sampler:
+                sampler_output.sampled_token_ids = \
+                    sampler_output.sampled_token_ids[:num_reqs]
+                if sampler_output.logprobs_tensors is not None:
+                    sampler_output.logprobs_tensors = \
+                        sampler_output.logprobs_tensors[:num_reqs]
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -765,7 +801,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.input_batch.condense()
 
         # Refresh batch metadata with any pending updates.
-        self.input_batch.refresh_metadata()
+        if self.use_rbln_sampler:
+            # To pad sampling metadata for RBLN sampler
+            self.bucket_size = select_bucket_size(self.input_batch.num_reqs,
+                                                  self.bucket_sizes)
+            self.input_batch.refresh_metadata_rbln(self.bucket_size)
+        else:
+            self.input_batch.refresh_metadata()
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
         pass
@@ -836,7 +878,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             input_batch.presence_penalties_reqs.clear()
 
         def dummy_run_batches(base_config):
-            for batch_size in range(1, self.input_batch.max_num_reqs + 1):
+            for batch_size in self.bucket_sizes:
                 input_batch = self.input_batch
                 populate_reqs(input_batch, base_config, batch_size)
 
@@ -851,10 +893,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                                             dtype=torch.long,
                                                             device="cpu")
 
-                logger.info(
+                logger.debug(
                     "Running dummy compile with batch_size=%d, vocab_size=%d",
                     batch_size, input_batch.vocab_size)
-                logger.info("Sampling metadata: %s", metadata)
+                logger.debug("Sampling metadata: %s", metadata)
 
                 with torch.inference_mode():
                     empty_logits = torch.empty(batch_size,
@@ -880,7 +922,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
             dummy_run_batches(config)
 
-    def set_active_loras(self, input_batch: InputBatch,
+    def set_active_loras(self, input_batch: RBLNInputBatch,
                          is_prefill: bool) -> None:
         num_reqs = self.input_batch.num_reqs
         req_lora_mapping_list = input_batch.request_lora_mapping[:
@@ -1109,6 +1151,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         logits: torch.Tensor,
     ):
+        valid_logits = logits[:self.input_batch.num_reqs].clone()
         grammar_bitmask = scheduler_output.grammar_bitmask
         if grammar_bitmask is None:
             return
@@ -1136,7 +1179,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         out_indices = []
 
         # Reorder the bitmask to match the order of the requests in the batch.
-        sorted_bitmask = np.full(shape=(logits.shape[0],
+        sorted_bitmask = np.full(shape=(valid_logits.shape[0],
                                         grammar_bitmask.shape[1]),
                                  fill_value=-1,
                                  dtype=grammar_bitmask.dtype)
@@ -1157,14 +1200,26 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # If the length of out indices and the logits have the same shape
         # we don't need to pass indices to the kernel,
         # since the bitmask is already aligned with the logits.
-        skip_out_indices = len(out_indices) == logits.shape[0]
+        skip_out_indices = len(out_indices) == valid_logits.shape[0]
 
         # Serialization of np.ndarray is much more efficient than a tensor,
         # so we receive it in that format.
         grammar_bitmask = torch.from_numpy(grammar_bitmask).contiguous()
 
         xgr.apply_token_bitmask_inplace(
-            logits,
+            valid_logits,
             grammar_bitmask.to(self.device, non_blocking=True),
             indices=out_indices if not skip_out_indices else None,
         )
+        logits[:valid_logits.shape[0]].copy_(valid_logits)
+
+    @staticmethod
+    def get_bucket_sizes(max_num_seqs: int) -> list[int]:
+        bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
+        if max_num_seqs >= 8:
+            # Step size 8 for small batch sizes, up to 256(not included)
+            bucket_sizes += list(range(8, min(max_num_seqs + 1, 256), 8))
+        if max_num_seqs >= 256:
+            # Step size 16 for larger batch sizes
+            bucket_sizes += list(range(256, max_num_seqs + 1, 16))
+        return bucket_sizes
