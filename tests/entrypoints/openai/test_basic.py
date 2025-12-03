@@ -98,11 +98,10 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
 
     for _ in range(10):
         task = asyncio.create_task(
-            client.chat.completions.create(
-                messages=chat_input,
-                model=MODEL_NAME,
-                max_tokens=MAX_TOKENS,
-                extra_body={"min_tokens": 2}))
+            client.chat.completions.create(messages=chat_input,
+                                           model=MODEL_NAME,
+                                           max_tokens=MAX_TOKENS,
+                                           extra_body={"min_tokens": 2}))
         tasks.append(task)
 
     done, pending = await asyncio.wait(tasks,
