@@ -1,0 +1,100 @@
+import json
+from typing import Optional
+
+import jsonschema
+import openai  # use the official client for correctness check
+import pytest
+import pytest_asyncio
+import regex as re
+import requests
+import torch
+from openai import BadRequestError
+
+from utils import RemoteOpenAIServer
+import os
+
+MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
+MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
+MAX_TOKENS = 1
+
+@pytest.fixture(scope="module")
+def monkeypatch_module():
+    from _pytest.monkeypatch import MonkeyPatch
+    mpatch = MonkeyPatch()
+    yield mpatch
+    mpatch.undo()
+
+
+@pytest.fixture(scope="module", params=[False, True])
+def server(
+        request,
+        monkeypatch_module):
+
+    use_v1 = request.param
+    monkeypatch_module.setenv('VLLM_USE_V1', '1' if use_v1 else '0')
+    args = []
+    with RemoteOpenAIServer(MODEL_NAME, args) as remote_server:
+        yield remote_server
+
+
+@pytest.fixture
+def is_v1_server(server):
+    import os
+    assert os.environ['VLLM_USE_V1'] in ['0', '1']
+    return os.environ['VLLM_USE_V1'] == '1'
+
+
+@pytest_asyncio.fixture
+async def client(server):
+    async with server.get_async_client() as async_client:
+        yield async_client
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    # just test 1 lora hereafter
+    "model_name",
+    [MODEL_NAME],
+)
+async def test_chat_streaming(client: openai.AsyncOpenAI, model_name: str):
+    messages = [{
+        "role": "system",
+        "content": "you are a helpful assistant"
+    }, {
+        "role": "user",
+        "content": "what is 1+1?"
+    }]
+
+    # test single completion
+    chat_completion = await client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_completion_tokens=10,
+        temperature=0.0,
+    )
+    output = chat_completion.choices[0].message.content
+
+    stop_reason = chat_completion.choices[0].finish_reason
+
+    # test streaming
+    stream = await client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_completion_tokens=10,
+        temperature=0.0,
+        stream=True,
+    )
+    chunks: list[str] = []
+    finish_reason_count = 0
+    async for chunk in stream:
+        delta = chunk.choices[0].delta
+        if delta.role:
+            assert delta.role == "assistant"
+        if delta.content:
+            chunks.append(delta.content)
+        if chunk.choices[0].finish_reason is not None:
+            finish_reason_count += 1
+    # finish reason should only return in last block
+    assert finish_reason_count == 1
+    assert chunk.choices[0].finish_reason == stop_reason
+    # assert delta.content
+    assert "".join(chunks) == output
