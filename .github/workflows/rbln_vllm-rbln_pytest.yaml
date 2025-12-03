@@ -166,6 +166,8 @@ jobs:
         if: steps.should_skip.outputs.skip != 'true'
         env:
           VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
+          REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
+
         run: |
           case "${{ matrix.test_type }}" in
             "core")
@@ -180,3 +182,8 @@ jobs:
         if: steps.should_skip.outputs.skip == 'true'
         run: |
           echo "Found [skip-${{ matrix.test_type }}] in commit message, skipping CI"
+
+      - name: Run OpenAI test
+        run: |
+          cd tests/entrypoints/openai
+          pytest -s

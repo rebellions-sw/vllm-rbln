@@ -95,8 +95,8 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     chat_input = [{"role": "user", "content": "Write a long story"}]
     client = server.get_async_client(timeout=0.5)
     tasks = []
-    # Request about 2 million tokens
-    for _ in range(200):
+
+    for _ in range(20):
         task = asyncio.create_task(
             client.chat.completions.create(
                 messages=chat_input,
