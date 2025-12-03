@@ -221,7 +221,7 @@ class RBLNWorker(WorkerBase):
             logger.warning("skipping compile_or_warm_up_model")
             return
 
-        self.model_runner.warmup_model()
+        self.model_runner.warm_up_model()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
@@ -268,6 +268,9 @@ class RBLNWorker(WorkerBase):
         output.kv_connector_output = kv_connector_output
         return output
 
+    def execute_dummy_batch(self) -> None:
+        return
+
     def profile(self, is_start: bool = True):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
@@ -306,15 +309,27 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
+    world_size = parallel_config.world_size
 
     # Set envs for RCCL
     os.environ['LOCAL_RANK'] = str(local_rank)
-    os.environ['WORLD_SIZE'] = str(parallel_config.world_size)
+    os.environ['WORLD_SIZE'] = str(world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
+    if parallel_config.data_parallel_size > 1:
+        world_size_across_dp = parallel_config.world_size_across_dp
+        dp_rank = parallel_config.data_parallel_rank
+        rank_across_dp = dp_rank * world_size
+        rank_across_dp += local_rank
+        logger.info("world_size_across_dp = %s, rank_across_dp = %s",
+                    world_size_across_dp, rank_across_dp)
+        # consider across_dp
+        os.environ['LOCAL_RANK'] = str(rank_across_dp)
+        os.environ['WORLD_SIZE'] = str(world_size_across_dp)
+
     init_distributed_environment(
-        parallel_config.world_size,
+        world_size,
         rank,
         distributed_init_method,
         local_rank,

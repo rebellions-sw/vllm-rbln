@@ -30,9 +30,8 @@ from vllm.config import VllmConfig, get_layers_from_vllm_config
 from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
-from vllm.distributed.parallel_state import (
-    get_dp_group, get_pp_group, get_tp_group,
-    prepare_communication_buffer_for_model)
+from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
+                                             get_tp_group)
 from vllm.forward_context import (BatchDescriptor, DPMetadata,
                                   set_forward_context)
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -385,8 +384,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         self.max_prefill_batch_size = 1
         self.max_num_batched_tokens = (
             self.scheduler_config.max_num_batched_tokens)
-
-        self._accumulative_compilation_count = 0
 
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],
@@ -1142,39 +1139,51 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
     def sync_and_slice_intermediate_tensors(
         self,
-        num_tokens: int,
+        batch_size: int,
+        seq_len: int,
         intermediate_tensors: IntermediateTensors,
         sync_self: bool,
     ) -> IntermediateTensors:
-        assert self.intermediate_tensors is not None
-
+        # FIXME - RBLN does not support intermediate tensor slicing
         tp = self.vllm_config.parallel_config.tensor_parallel_size
         enabled_sp = self.compilation_config.pass_config. \
             enable_sequence_parallelism
-        if enabled_sp:
-            # When sequence parallelism is enabled, we always pad num_tokens
-            # to be a multiple of tensor_parallel_size (tp) earlier
-            assert num_tokens % tp == 0
-        is_residual_scattered = tp > 1 and enabled_sp \
-            and num_tokens % tp == 0
 
-        # When sequence parallelism is enabled, the "residual" tensor is sharded
-        # across tensor parallel ranks, so each rank only needs its own slice.
-        if sync_self:
-            assert intermediate_tensors is not None
+        if intermediate_tensors is None:
+            # for warm_up, from empty dummy intermediate tensors
+            assert self.intermediate_tensors is not None
+            assert batch_size > 0
+            assert seq_len > 0
+            num_tokens = batch_size * seq_len
+            if enabled_sp:
+                # When sequence parallelism is enabled, we always pad num_tokens
+                # to be a multiple of tensor_parallel_size (tp) earlier
+                assert num_tokens % tp == 0
+            residual_scatter = tp > 1 and enabled_sp \
+                and num_tokens % tp == 0
+            assert not enabled_sp, "RBLN warm_up = !sp(sequence_parallel)"
+            assert not residual_scatter, "RBLN warm_up = !residual_scatter"
+            assert not sync_self, "RBLN warm_up = !sync self(from dummy)"
+            logger.info("warm_up, num_tokens=%s, batch_size=%s, seq_len=%s",
+                        num_tokens, batch_size, seq_len)
+            return IntermediateTensors({
+                k: v.reshape((batch_size, seq_len, -1))
+                for k, v in self.intermediate_tensors.items()
+            })
+        else:
+            # for execution, from input intermediate tensors
+            assert batch_size == -1
+            assert seq_len == -1
+            assert sync_self, "RBLN execute = sync self(from input)"
             for k, v in intermediate_tensors.items():
-                is_scattered = k == "residual" and is_residual_scattered
-                copy_len = num_tokens // tp if is_scattered else \
-                    num_tokens
-                self.intermediate_tensors[k][:copy_len].copy_(
-                    v[:copy_len], non_blocking=True)
-
-        return IntermediateTensors({
-            k:
-            v[:num_tokens // tp]
-            if k == "residual" and is_residual_scattered else v[:num_tokens]
-            for k, v in self.intermediate_tensors.items()
-        })
+                logger.info(
+                    "pp execute intermediate tensors, key=%s val.shape=%s", k,
+                    v.shape)
+                break
+            return IntermediateTensors({
+                k: v
+                for k, v in intermediate_tensors.items()
+            })
 
     def get_dp_padding(self,
                        num_tokens: int) -> tuple[int, Optional[torch.Tensor]]:
@@ -1267,7 +1276,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             intermediate_tensors = None
         else:
             intermediate_tensors = self.sync_and_slice_intermediate_tensors(
-                num_input_tokens, intermediate_tensors, True)
+                -1, -1, intermediate_tensors, True)
 
         if (self.model_config.is_encoder_decoder
                 and scheduler_output.scheduled_encoder_inputs):
@@ -1394,7 +1403,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         )
 
     @torch.inference_mode()
-    def warmup_model(self) -> None:
+    def warm_up_model(self) -> None:
         # compile prefill graph
         prefill_seq_len = (self.scheduler_config.max_num_batched_tokens
                            if self.scheduler_config.chunked_prefill_enabled
@@ -1441,11 +1450,26 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             grammar_bitmask=None,
             kv_connector_metadata=None)
         logger.info("V1, model warm-up prefill execution")
-        self.execute_model(dummy_prefill_schedule)
-        self.execute_model(dummy_prefill_cleanup)
+        if get_pp_group().is_first_rank:
+            intermediate_tensors = None
+        else:
+            # make RBLN prefill dummy intermediate tensors
+            # FIXME - based on assumption, single batch prefill
+            batch_size = 1
+            seq_len = prefill_seq_len
+            if self.intermediate_tensors is None:
+                self.intermediate_tensors = (
+                    self.model.make_empty_intermediate_tensors(
+                        batch_size=batch_size * seq_len,
+                        dtype=self.model_config.dtype,
+                        device=self.device))
 
-        num_prefill_graphs = self._accumulative_compilation_count
-        logger.info("Compiled %d graph(s) for prefill", num_prefill_graphs)
+            intermediate_tensors = self.sync_and_slice_intermediate_tensors(
+                batch_size, seq_len, None, False)
+
+        self.execute_model(dummy_prefill_schedule, intermediate_tensors)
+        self.execute_model(dummy_prefill_cleanup, intermediate_tensors)
+        self.intermediate_tensors = None
 
         # compile decode graph
         decode_max_batch_size = self.scheduler_config.max_num_seqs
@@ -1497,11 +1521,26 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             grammar_bitmask=None,
             kv_connector_metadata=None)
         logger.info("V1, model warm-up decode execution")
-        self.execute_model(dummy_decode_schedule)
-        self.execute_model(dummy_decode_cleanup)
+        if get_pp_group().is_first_rank:
+            intermediate_tensors = None
+        else:
+            # make RBLN decode dummy intermediate tensors
+            # FIXME - based on assumption, multiple batch decode
+            batch_size = decode_max_batch_size
+            seq_len = 1
+            if self.intermediate_tensors is None:
+                self.intermediate_tensors = (
+                    self.model.make_empty_intermediate_tensors(
+                        batch_size=batch_size * seq_len,
+                        dtype=self.model_config.dtype,
+                        device=self.device))
 
-        logger.info("Compiled %d graph(s) for decode",
-                    self._accumulative_compilation_count - num_prefill_graphs)
+            intermediate_tensors = self.sync_and_slice_intermediate_tensors(
+                batch_size, seq_len, None, False)
+
+        self.execute_model(dummy_decode_schedule, intermediate_tensors)
+        self.execute_model(dummy_decode_cleanup, intermediate_tensors)
+        self.intermediate_tensors = None
 
     def _bookkeeping_sync(
         self, scheduler_output: "SchedulerOutput",
@@ -1576,7 +1615,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             # Mask out the sampled tokens that should not be sampled.
             logger.debug("V1, valid_sampled_token_ids=%s",
                          valid_sampled_token_ids)
-            logger.debug("v1, discard_sampled_tokens_req_indices=%s",
+            logger.debug("V1, discard_sampled_tokens_req_indices=%s",
                          discard_sampled_tokens_req_indices)
             for i in discard_sampled_tokens_req_indices:
                 if i < len(valid_sampled_token_ids):
@@ -1706,11 +1745,11 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             positions = positions.view(num_reqs, -1)
             is_prefills = (self.input_batch.num_computed_tokens_cpu
                            < self.input_batch.num_prompt_tokens)
-            logger.info("V1, input_batch.num_computed_tokens_cpu = %s",
-                        self.input_batch.num_computed_tokens_cpu)
-            logger.info("V1, input_batch.num_prompt_tokens = %s",
-                        self.input_batch.num_prompt_tokens)
-            logger.info("V1, is_prefills = %s", is_prefills)
+            logger.debug("V1, input_batch.num_computed_tokens_cpu = %s",
+                         self.input_batch.num_computed_tokens_cpu)
+            logger.debug("V1, input_batch.num_prompt_tokens = %s",
+                         self.input_batch.num_prompt_tokens)
+            logger.debug("V1, is_prefills = %s", is_prefills)
 
             token_indices = None
             # The prefill and decode cannot be mixed.
@@ -1941,7 +1980,11 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         #         self.model.get_eagle3_aux_hidden_state_layers()
         #     )
 
-        prepare_communication_buffer_for_model(self.model)
+        # FIXME - device specific communication buffer (CUDA)?
+        # disable communication buffer for RBLN (NYI)
+        # communication buffers for efficient communication
+        # TODO - RBLN communication buffer can be defined
+        # prepare_communication_buffer_for_model(self.model)
 
         if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
             self.model_executable = model_wrapper
