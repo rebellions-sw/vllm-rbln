@@ -1,19 +1,31 @@
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import asyncio
+import os
 from http import HTTPStatus
 
 import openai
 import pytest
 import pytest_asyncio
 import requests
-
-from vllm.version import __version__ as VLLM_VERSION
-
 from utils import RemoteOpenAIServer
-import os
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
 MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
 MAX_TOKENS = 1
+
 
 @pytest.fixture(scope='module')
 def server_args(request: pytest.FixtureRequest) -> list[str]:
@@ -66,12 +78,12 @@ async def client(server):
     async with server.get_async_client() as async_client:
         yield async_client
 
+
 @pytest.mark.parametrize(
     "server_args",
     [
-        pytest.param(
-            ["--disable-frontend-multiprocessing"],
-            id="disable-frontend-multiprocessing")
+        pytest.param(["--disable-frontend-multiprocessing"],
+                     id="disable-frontend-multiprocessing")
     ],
     indirect=True,
 )
@@ -86,10 +98,11 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     # Request about 2 million tokens
     for _ in range(200):
         task = asyncio.create_task(
-            client.chat.completions.create(messages=chat_input,
-                                           model=MODEL_NAME,
-                                           max_tokens=MAX_TOKENS,
-                                           extra_body={"min_tokens": MAX_TOKENS}))
+            client.chat.completions.create(
+                messages=chat_input,
+                model=MODEL_NAME,
+                max_tokens=MAX_TOKENS,
+                extra_body={"min_tokens": MAX_TOKENS}))
         tasks.append(task)
 
     done, pending = await asyncio.wait(tasks,

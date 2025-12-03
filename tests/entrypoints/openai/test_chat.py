@@ -1,21 +1,28 @@
-import json
-from typing import Optional
+# Copyright 2025 Rebellions Inc. All rights reserved.
 
-import jsonschema
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+
 import openai  # use the official client for correctness check
 import pytest
 import pytest_asyncio
-import regex as re
-import requests
-import torch
-from openai import BadRequestError
-
 from utils import RemoteOpenAIServer
-import os
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
 MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
 MAX_TOKENS = 1
+
 
 @pytest.fixture(scope="module")
 def monkeypatch_module():
@@ -26,9 +33,7 @@ def monkeypatch_module():
 
 
 @pytest.fixture(scope="module", params=[False, True])
-def server(
-        request,
-        monkeypatch_module):
+def server(request, monkeypatch_module):
 
     use_v1 = request.param
     monkeypatch_module.setenv('VLLM_USE_V1', '1' if use_v1 else '0')
@@ -48,6 +53,7 @@ def is_v1_server(server):
 async def client(server):
     async with server.get_async_client() as async_client:
         yield async_client
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

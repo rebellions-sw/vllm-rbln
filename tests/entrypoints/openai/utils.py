@@ -1,48 +1,36 @@
-import asyncio
-import contextlib
-import copy
-import functools
-import importlib
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import json
 import os
-import signal
 import subprocess
 import sys
-import tempfile
 import time
-import warnings
-from contextlib import ExitStack, contextmanager, suppress
-from multiprocessing import Process
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Union
-from unittest.mock import patch
+from typing import Any, Optional
 
-import cloudpickle
 import httpx
 import openai
-import pytest
 import requests
-import torch
-import torch.nn.functional as F
-from openai.types.completion import Completion
-from typing_extensions import ParamSpec
-
-import vllm.envs as envs
 # from tests.models.utils import TextTextLogprobs
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
-from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.entrypoints.cli.serve import ServeSubcommand
-from vllm.model_executor.model_loader import get_model_loader
 from vllm.platforms import current_platform
-from vllm.transformers_utils.tokenizer import get_tokenizer
-from vllm.utils import (FlexibleArgumentParser, GB_bytes,
-                        cuda_device_count_stateless, get_open_port)
+from vllm.utils import FlexibleArgumentParser, get_open_port
 
 if current_platform.is_rocm():
-    from amdsmi import (amdsmi_get_gpu_vram_usage,
-                        amdsmi_get_processor_handles, amdsmi_init,
-                        amdsmi_shut_down)
+    from amdsmi import amdsmi_init, amdsmi_shut_down
 
     @contextmanager
     def _nvml():
@@ -52,9 +40,7 @@ if current_platform.is_rocm():
         finally:
             amdsmi_shut_down()
 elif current_platform.is_cuda():
-    from vllm.third_party.pynvml import (nvmlDeviceGetHandleByIndex,
-                                         nvmlDeviceGetMemoryInfo, nvmlInit,
-                                         nvmlShutdown)
+    from vllm.third_party.pynvml import nvmlInit, nvmlShutdown
 
     @contextmanager
     def _nvml():
