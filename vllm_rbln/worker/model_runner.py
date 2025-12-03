@@ -483,6 +483,11 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
             "process_group_dict": process_group_dict
         }
+        if not get_pp_group().is_last_rank:
+            options["out_device_type"] = "rbln"
+        else:
+            options["out_device_type"] = "cpu"
+
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
                         "the cached compiled binary will be reused.")
@@ -491,23 +496,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
-        # Initialize world group with rbln-ccl backend before torch.compile
-        # This ensures RCCL is properly initialized before compilation
-        # All devices (PP, TP, DP all included) participate in this all_reduce
-        try:
-            logger.info("[RBLN] Initializing rbln-ccl process group for world")
-            world_size = dist.get_world_size()
-            all_ranks = list(range(world_size))
+        if get_pp_group().is_last_rank:
+            self.model.model.to(device="rbln")
 
-            rbln_world_group = dist.new_group(all_ranks, backend="rbln-ccl")
-            # Warm up RCCL with a dummy all_reduce across all devices
-            dummy_tensor = torch.zeros(1, dtype=torch.float16, device="rbln")
-            dist.all_reduce(dummy_tensor,
-                            group=rbln_world_group,
-                            op=dist.ReduceOp.SUM)
-        except Exception as e:
-            logger.warning(
-                "[RBLN] Failed to initialize rbln-ccl process group : %s", e)
 
         compiled_model = torch.compile(
             model,
@@ -570,6 +561,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 inputs_embeds=inputs_embeds)
 
             if get_pp_group().is_last_rank:
+                self.compute_logits_model.to("rbln")
                 # last rank create real model output
                 if selected_token_indices is not None:
                     # aten::select -> adv_index -->
@@ -704,6 +696,12 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 model_input.attn_metadata.kv_caches = kv_caches
 
             start_time = time.perf_counter()
+            if get_pp_group().is_last_rank:
+                if model_input.input_tokens is not None:
+                    model_input.input_tokens.to("rbln")
+                if model_input.input_positions is not None:
+                    model_input.input_positions.to("rbln")
+
             logits_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
@@ -791,7 +789,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     self.model.make_empty_intermediate_tensors(
                     batch_size=batch_size * seq_len,
                     dtype=self.model_config.dtype,
-                    device=self.device)
+                    device="rbln")
                 intermediate_tensors = IntermediateTensors({
                     key:
                     val.reshape((batch_size, seq_len, -1))
