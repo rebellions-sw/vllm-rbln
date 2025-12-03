@@ -90,7 +90,7 @@ jobs:
           echo "optimum-rbln $VERSION"
 
       - name: Run OpenAI test
-        run: >
+        run: |
           cd tests/entrypoints/openai
           pytest -s
 
