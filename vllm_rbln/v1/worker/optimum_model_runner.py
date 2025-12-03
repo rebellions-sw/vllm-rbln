@@ -242,11 +242,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # if use_multiple_decoder is True, use decoder_batch_sizes
         # otherwise, use max_num_seqs
         if self.use_rbln_sampler:
-            _torch_dtype = self.model.model.rbln_config._torch_dtype
-            if "bfloat16" in _torch_dtype:
-                dtype = torch.bfloat16
-            elif "float32":
-                dtype = torch.float32
             use_multiple_decoder = getattr(self.model.model.rbln_config,
                                            "use_multiple_decoder", False)
             if use_multiple_decoder:
@@ -259,7 +254,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             for bucket_size in self.bucket_sizes:
                 self.pooled_tensors[bucket_size] = torch.empty(
                     (bucket_size, self.model_config.get_vocab_size()),
-                    dtype=dtype,
+                    dtype=self.model.dtype,
                 )
             torch._dynamo.config.recompile_limit = len(
                 self.bucket_sizes) * len(WARM_UP_CONFIGS)

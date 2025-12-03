@@ -104,6 +104,15 @@ class KVCacheBlockAdapter:
         new_estimated = (self._estimated_num_blocks() - 1) * blk_ratio + 1
         return new_estimated if self.use_v1 else max(0, new_estimated - 1)
 
+    @property
+    def dtype(self) -> torch.dtype:
+        _torch_dtype = self.model.rbln_config._torch_dtype
+        if "bfloat16" in _torch_dtype:
+            return torch.bfloat16
+        elif "float32":
+            return torch.float32
+        raise ValueError(f"Unsupported dtype: {_torch_dtype}")
+
 
 class RBLNOptimumModelBase(nn.Module):
 

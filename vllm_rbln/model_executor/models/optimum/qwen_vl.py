@@ -70,8 +70,6 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
         Returns:
             Tuple of (inputs_embeds, position_embed, rope_deltas)
         """
-        # NOTE(eunji.lee): It is a patch for bfloat16 support.
-        dtype = self.rbln_model_config.torch_dtype
 
         if image_input is not None:
             assert image_input["pixel_values"] is not None
@@ -229,7 +227,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
             position_ids = position_ids.add(delta)
             position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
             position_embed = self.model._get_position_embeddings(
-                torch.zeros(1, dtype=torch.float32), position_ids)
+                torch.zeros(1, dtype=self.dtype), position_ids)
             position_embeds.append(position_embed)
 
         for _ in range(padded_batch_size - len(running_requests_ids)):
