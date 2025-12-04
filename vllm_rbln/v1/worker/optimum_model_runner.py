@@ -321,7 +321,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     sampler_output.sampled_token_ids[:num_reqs]
                 if sampler_output.logprobs_tensors is not None:
                     sampler_output.logprobs_tensors = \
-                        sampler_output.logprobs_tensors[:num_reqs]
+                        self.post_process_logprobs_tensors(
+                            sampler_output.logprobs_tensors,
+                            num_reqs
+                        )
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -1223,3 +1226,15 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # Step size 16 for larger batch sizes
             bucket_sizes += list(range(256, max_num_seqs + 1, 16))
         return bucket_sizes
+
+    def post_process_logprobs_tensors(self, logprobs_tensors: LogprobsTensors,
+                                      num_reqs: int) -> LogprobsTensors:
+        # NOTE(eunji.lee):
+        # This implementation is not efficient but kept for debugging purposes.
+        # TODO: Refactor this code in the next version when the shape of
+        # logprobs_tensors changes.
+        dict = {}
+        for field_name in logprobs_tensors._fields:
+            tensor = getattr(logprobs_tensors, field_name)
+            dict[field_name] = tensor[:num_reqs]
+        return LogprobsTensors(**dict)
