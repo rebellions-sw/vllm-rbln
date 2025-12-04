@@ -104,3 +104,29 @@ async def test_chat_streaming(client: openai.AsyncOpenAI, model_name: str):
     assert chunk.choices[0].finish_reason == stop_reason
     # assert delta.content
     assert "".join(chunks) == output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model_name",
+    [MODEL_NAME],
+)
+async def test_some_logprobs_chat(client: openai.AsyncOpenAI, model_name: str):
+    messages = [
+        {"role": "system", "content": "you are a helpful assistant"},
+        {"role": "user", "content": "what is 1+1?"},
+    ]
+
+    chat_completion = await client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_completion_tokens=MAX_TOKENS,
+        temperature=0.0,
+        logprobs=True,
+        top_logprobs=5,
+    )
+
+    choice = chat_completion.choices[0]
+    assert choice.logprobs is not None
+    assert choice.logprobs.content is not None
+    assert len(choice.logprobs.content[0].top_logprobs) == 5
