@@ -26,35 +26,7 @@ import openai
 import requests
 # from tests.models.utils import TextTextLogprobs
 from vllm.entrypoints.cli.serve import ServeSubcommand
-from vllm.platforms import current_platform
 from vllm.utils import FlexibleArgumentParser, get_open_port
-
-if current_platform.is_rocm():
-    from amdsmi import amdsmi_init, amdsmi_shut_down
-
-    @contextmanager
-    def _nvml():
-        try:
-            amdsmi_init()
-            yield
-        finally:
-            amdsmi_shut_down()
-elif current_platform.is_cuda():
-    from vllm.third_party.pynvml import nvmlInit, nvmlShutdown
-
-    @contextmanager
-    def _nvml():
-        try:
-            nvmlInit()
-            yield
-        finally:
-            nvmlShutdown()
-else:
-
-    @contextmanager
-    def _nvml():
-        yield
-
 
 VLLM_PATH = Path(__file__).parent.parent
 """Path to root of the vLLM repository."""
@@ -68,9 +40,6 @@ class RemoteOpenAIServer:
         """Subclasses override this method to customize server process launch
         """
         env = os.environ.copy()
-        # the current process might initialize cuda,
-        # to be safe, we should use spawn method
-        # env['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
         # NOTE(eunji.lee): To pass warmup for test.
         env["VLLM_RBLN_ENABLE_WARM_UP"] = "False"
         if env_dict is not None:
