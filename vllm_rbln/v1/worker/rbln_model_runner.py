@@ -1823,8 +1823,11 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     assert selected_token_indices.dim() == 1
                     assert selected_token_indices.size(0) == 1
                     if is_prefills[0]:  # prefill
-                        if selected_token_indices[0] == (self.max_num_tokens -
-                                                         1):
+                        num_computed = self.input_batch.num_computed_tokens_cpu
+                        num_prompted = self.input_batch.num_prompt_tokens
+                        is_last_prefill = (num_computed +
+                                           self.max_num_tokens) >= num_prompted
+                        if not is_last_prefill:
                             selected_token_indices = torch.tensor(
                                 [], dtype=selected_token_indices.dtype)
                             # chunked prefill(#0~#N-1, intermediate)
