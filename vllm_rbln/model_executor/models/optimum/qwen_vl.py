@@ -82,7 +82,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
             "image_grid_thw":
             image_input["image_grid_thw"] if image_input is not None else None,
             "pixel_values_videos":
-            video_input["pixel_values_videos"] if video_input is not None else None,
+            video_input["pixel_values_videos"]
+            if video_input is not None else None,
             "video_grid_thw":
             video_input["video_grid_thw"] if video_input is not None else None,
         }
