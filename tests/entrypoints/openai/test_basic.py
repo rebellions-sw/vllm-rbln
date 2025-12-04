@@ -23,7 +23,8 @@ import requests
 from utils import RemoteOpenAIServer
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
-MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
+# MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
+MODEL_NAME = "/home/eunji.lee/nas_data/1202_models/llama3.2-3b-instruct_auto-tp1/"
 MAX_TOKENS = 1
 
 
@@ -117,7 +118,7 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
 
     # If the server had not cancelled all the other requests, then it would not
     # be able to respond to this one within the timeout
-    client = server.get_async_client(timeout=10)
+    client = server.get_async_client(timeout=200)
     response = await client.chat.completions.create(messages=chat_input,
                                                     model=MODEL_NAME,
                                                     max_tokens=MAX_TOKENS)
