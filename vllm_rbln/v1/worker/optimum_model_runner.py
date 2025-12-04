@@ -1231,7 +1231,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                       num_reqs: int) -> LogprobsTensors:
         # NOTE(eunji.lee):
         # This implementation is not efficient but kept for debugging purposes.
-        # TODO: Refactor this code in the next version when the shape of
+        # TODO: Modify this code in the next version when the shape of
         # logprobs_tensors changes.
         dict = {}
         for field_name in logprobs_tensors._fields:
