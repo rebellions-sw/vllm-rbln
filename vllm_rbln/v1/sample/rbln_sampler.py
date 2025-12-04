@@ -241,6 +241,8 @@ class RBLNSampler(VLLMSampler):
         [1, 2, 4] + list(range(8, 256, 8)) + list(
             range(256, max_num_seqs + 1, 16))
         """
+        # FIXME(eunji.lee)
+        # Not used. To be removed.
         bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
         if max_num_seqs >= 8:
             # Step size 8 for small batch sizes, up to 256(not included)
