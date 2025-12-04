@@ -1821,13 +1821,13 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 else:
                     selected_token_indices = logits_indices
                     assert selected_token_indices.dim() == 1
-                    assert selected_token_indices.size(0) == 1
                     if is_prefills[0]:  # prefill
+                        assert selected_token_indices.size(0) == 1
                         num_computed = self.input_batch.num_computed_tokens_cpu
                         num_prompted = self.input_batch.num_prompt_tokens
                         is_last_prefill = (num_computed +
                                            self.max_num_tokens) >= num_prompted
-                        if not is_last_prefill:
+                        if not is_last_prefill[0]:
                             selected_token_indices = torch.tensor(
                                 [], dtype=selected_token_indices.dtype)
                             # chunked prefill(#0~#N-1, intermediate)
@@ -1840,6 +1840,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                             # selected_token_indices == token_indices
                             logits = hidden_states
                     else:  # decode
+                        decode_batch = self.scheduler_config.max_num_seqs
+                        assert selected_token_indices.size(0) == decode_batch
                         # token_indices == None, selected = torch.tensor([0])
                         logits = hidden_states[selected_token_indices]
                     logger.info("token indices = %s", token_indices)
