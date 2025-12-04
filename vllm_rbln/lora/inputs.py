@@ -12,17 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import ClassVar
+
 import torch
 
 
 class LoRAInputs:
-    sampler_indices_padded: torch.Tensor
+    sampler_indices_padded: ClassVar[torch.Tensor]
 
-    @staticmethod
+    @classmethod
     def set_sampler_indices_padded(
-            sampler_indices_padded: torch.Tensor) -> None:
-        LoRAInputs.sampler_indices_padded = sampler_indices_padded
+            cls, sampler_indices_padded: torch.Tensor) -> None:
+        cls.sampler_indices_padded = sampler_indices_padded
 
-    @staticmethod
-    def get_sampler_indices_padded() -> torch.Tensor:
-        return LoRAInputs.sampler_indices_padded
+    @classmethod
+    def get_sampler_indices_padded(cls) -> torch.Tensor:
+        return cls.sampler_indices_padded

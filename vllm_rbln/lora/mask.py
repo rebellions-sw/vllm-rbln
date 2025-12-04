@@ -12,16 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import ClassVar
+
 import torch
 
 
 class LoRAMask:
-    lora_mask: torch.Tensor  # [batch_size, max_loras * max_rank]
+    lora_mask: ClassVar[torch.Tensor]  # [batch_size, max_loras * max_rank]
 
-    @staticmethod
-    def set_lora_mask(mask: torch.Tensor) -> None:
-        LoRAMask.lora_mask = mask
+    @classmethod
+    def set_lora_mask(cls, mask: torch.Tensor) -> None:
+        cls.lora_mask = mask
 
-    @staticmethod
-    def get_lora_mask() -> torch.Tensor:
-        return LoRAMask.lora_mask
+    @classmethod
+    def get_lora_mask(cls) -> torch.Tensor:
+        return cls.lora_mask
