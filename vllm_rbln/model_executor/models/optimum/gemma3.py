@@ -235,6 +235,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
+        else:
             pixel_values = None
 
         return pixel_values
