@@ -23,8 +23,7 @@ import requests
 from utils import RemoteOpenAIServer
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
-# MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
-MODEL_NAME = "/home/eunji.lee/nas_data/1202_models/llama3.2-3b-instruct_auto-tp1/"
+MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
 MAX_TOKENS = 1
 
 
