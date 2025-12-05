@@ -370,6 +370,22 @@ class RBLNScheduler(Scheduler):
                     # The request cannot be scheduled.
                     break
 
+                # Note(RBLN): By calling allocate_slots with request.num_tokens
+                # instead of (num_new_tokens + num_external_computed_tokens),
+                # we pre-allocate slots for all tokens that this request will
+                # prefill. If allocated slots end up filling a block, the
+                # block hash would also would be written down.
+                # However, since this iteration may not actually compute all
+                # tokens, the block may not be fully computed.
+                # Therefore, if the block is not finalized in this iteration,
+                # we must clear the block hash.
+                for blocks, num_full_block in zip(new_blocks.blocks, [
+                        num_new_tokens // group.kv_cache_spec.block_size
+                        for group in self.kv_cache_config.kv_cache_groups
+                ]):
+                    for i in range(num_full_block, len(blocks)):
+                        blocks[i].reset_hash()
+
                 # KVTransfer: the connector uses this info to determine
                 # if a load is needed. Note that
                 # This information is used to determine if a load is
@@ -434,11 +450,29 @@ class RBLNScheduler(Scheduler):
                 # if it cannot finish within a single step),
                 # this request will be scheduled together with the other
                 # running requests in the decoding phase.
+                # We also clear the block hash written in previous
+                # allocate_slots because this request and its tokens will be
+                # scheduled again, and allocate_slots will be invoked once
+                # more and the logic that writes the block hash will run again.
+                # Without clearing it here, an assertion error would occur
+                # because a block hash would already exist.
                 for req in scheduled_running_reqs:
                     req_to_new_blocks.pop(req.request_id)
                     num_scheduled_tokens.pop(req.request_id)
                     scheduled_spec_decode_tokens.pop(req.request_id, None)
                     scheduled_encoder_inputs.pop(req.request_id, None)
+
+                    for blocks, num_full_block in zip(
+                            self.kv_cache_manager.get_blocks(
+                                req.request_id).blocks,
+                        [
+                            req.num_computed_tokens //
+                            group.kv_cache_spec.block_size
+                            for group in self.kv_cache_config.kv_cache_groups
+                        ]):
+                        for i in range(num_full_block, len(blocks)):
+                            blocks[i].reset_hash()
+
                 scheduled_running_reqs.clear()
                 token_budget = prefill_token_budget
 
