@@ -172,6 +172,17 @@ class RBLNOptimumModelBase(nn.Module):
         self.attn_impl = model.get_attn_impl() if hasattr(
             model, "get_attn_impl") else None
 
+    @property
+    def dtype(self) -> torch.dtype:
+        assert self.model.rbln_config._torch_dtype is not None
+
+        _torch_dtype = self.model.rbln_config._torch_dtype
+        if "bfloat16" in _torch_dtype:
+            return torch.bfloat16
+        elif "float32":
+            return torch.float32
+        raise ValueError(f"Unsupported dtype: {_torch_dtype}")
+
 
 class RBLNOptimumDecoderMixin:
 
