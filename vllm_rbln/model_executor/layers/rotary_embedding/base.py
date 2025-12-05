@@ -78,8 +78,7 @@ def rope_forward_oot(
     rotate_fn = rotate_neox if self.is_neox_style else rotate_gptj
 
     positions_flat = positions.flatten()
-    positions_flat = positions_flat.to(self.cos_cache.device)
-    
+
     cos = self.cos_cache.index_select(0, positions_flat).view(
         batch_size, 1, seq_len, -1)
     sin = self.sin_cache.index_select(0, positions_flat).view(

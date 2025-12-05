@@ -483,10 +483,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
             "process_group_dict": process_group_dict
         }
+        options["out_device_type"] = "cpu"
+        options["use_compiler_output_ptr"] = True
         if not get_pp_group().is_last_rank:
             options["out_device_type"] = "rbln"
-        else:
-            options["out_device_type"] = "cpu"
 
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
@@ -498,7 +498,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         if get_pp_group().is_last_rank:
             self.model.model.to(device="rbln")
-
+            self.compute_logits_model.to(device="rbln")
 
         compiled_model = torch.compile(
             model,
@@ -561,7 +561,6 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 inputs_embeds=inputs_embeds)
 
             if get_pp_group().is_last_rank:
-                self.compute_logits_model.to("rbln")
                 # last rank create real model output
                 if selected_token_indices is not None:
                     # aten::select -> adv_index -->
@@ -697,10 +696,15 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
             start_time = time.perf_counter()
             if get_pp_group().is_last_rank:
+                # model_input is a frozen dataclass, so we need to create a new instance
+                updated_fields = {}
                 if model_input.input_tokens is not None:
-                    model_input.input_tokens.to("rbln")
+                    updated_fields['input_tokens'] = model_input.input_tokens.to("rbln")
                 if model_input.input_positions is not None:
-                    model_input.input_positions.to("rbln")
+                    updated_fields['input_positions'] = model_input.input_positions.to("rbln")
+
+                if updated_fields:
+                    model_input = dataclasses.replace(model_input, **updated_fields)
 
             logits_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
