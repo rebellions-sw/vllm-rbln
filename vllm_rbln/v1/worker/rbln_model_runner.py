@@ -14,6 +14,7 @@
 
 import itertools
 import math
+import time
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -84,6 +85,7 @@ from vllm.v1.worker.utils import (AttentionGroup, MultiModalBudget,
 import vllm_rbln.rbln_envs as envs
 import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
+from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -384,6 +386,10 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         self.max_prefill_batch_size = 1
         self.max_num_batched_tokens = (
             self.scheduler_config.max_num_batched_tokens)
+
+        if envs.VLLM_RBLN_METRICS:
+            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker.register_cleanup()
 
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],
@@ -1597,8 +1603,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
         sampled_token_ids = sampler_output.sampled_token_ids
-        logger.debug("V1, num_sampled_tokens=%s", num_sampled_tokens)
-        logger.debug("V1, sampled_token_ids=%s", sampled_token_ids)
         invalid_req_indices = []
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
@@ -1613,10 +1617,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     self.input_batch.vocab_size,
                 )
             # Mask out the sampled tokens that should not be sampled.
-            logger.debug("V1, valid_sampled_token_ids=%s",
-                         valid_sampled_token_ids)
-            logger.debug("V1, discard_sampled_tokens_req_indices=%s",
-                         discard_sampled_tokens_req_indices)
             for i in discard_sampled_tokens_req_indices:
                 if i < len(valid_sampled_token_ids):
                     valid_sampled_token_ids[i].clear()
@@ -1745,11 +1745,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             positions = positions.view(num_reqs, -1)
             is_prefills = (self.input_batch.num_computed_tokens_cpu
                            < self.input_batch.num_prompt_tokens)
-            logger.debug("V1, input_batch.num_computed_tokens_cpu = %s",
-                         self.input_batch.num_computed_tokens_cpu)
-            logger.debug("V1, input_batch.num_prompt_tokens = %s",
-                         self.input_batch.num_prompt_tokens)
-            logger.debug("V1, is_prefills = %s", is_prefills)
 
             token_indices = None
             # The prefill and decode cannot be mixed.
@@ -1770,6 +1765,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 input_ids = rbln_utils.pad(input_ids, 0, self.max_num_seqs)
                 positions = rbln_utils.pad(positions, -2, self.max_num_seqs)
 
+            start_time = time.perf_counter()
             model_output = self.model_executable(
                 input_ids=input_ids,
                 positions=positions,
@@ -1778,6 +1774,16 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
+            end_time = time.perf_counter()
+            if envs.VLLM_RBLN_METRICS:
+                # Record performance metrics
+                execution_time = end_time - start_time
+                if is_prefills[0]:
+                    self.performance_tracker.record_prefill(
+                        execution_time, num_scheduled_tokens)
+                else:
+                    self.performance_tracker.record_decode(
+                        execution_time, num_scheduled_tokens)
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
@@ -1844,10 +1850,6 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                         assert selected_token_indices.size(0) == decode_batch
                         # token_indices == None, selected = torch.tensor([0])
                         logits = hidden_states[selected_token_indices]
-                    logger.info("token indices = %s", token_indices)
-                    logger.info("selected token indices = %s",
-                                selected_token_indices)
-                    logger.info("logits shape = %s", logits.shape)
 
             if broadcast_pp_output:
                 model_output_broadcast_data = {
