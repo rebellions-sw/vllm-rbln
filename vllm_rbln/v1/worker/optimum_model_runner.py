@@ -254,7 +254,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             for bucket_size in self.bucket_sizes:
                 self.pooled_tensors[bucket_size] = torch.empty(
                     (bucket_size, self.model_config.get_vocab_size()),
-                    dtype=torch.float32,
+                    dtype=self.model.dtype,
                 )
             torch._dynamo.config.recompile_limit = len(
                 self.bucket_sizes) * len(WARM_UP_CONFIGS)

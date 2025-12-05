@@ -61,7 +61,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         # Encoder
         if batch_idx is not None:
             enc_attention_mask = torch.zeros(
-                1, self.model.rbln_config.enc_max_seq_len, dtype=torch.float32)
+                1, self.model.rbln_config.enc_max_seq_len, dtype=self.dtype)
             enc_attention_mask[0][:enc_lengths[batch_idx] + 1] = 1
 
             padding_need = (self.model.rbln_config.enc_max_seq_len -
@@ -90,12 +90,12 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             enc_attention_mask = torch.zeros(
                 self.model.rbln_config.batch_size,
                 self.model.rbln_config.enc_max_seq_len,
-                dtype=torch.float32,
+                dtype=self.dtype,
             )
             dec_attention_mask = torch.zeros(
                 self.model.rbln_config.batch_size,
                 self.model.rbln_config.dec_max_seq_len,
-                dtype=torch.float32,
+                dtype=self.dtype,
             )
 
             for batch_idx in range(self.model.rbln_config.batch_size):
