@@ -218,7 +218,8 @@ class RBLNWorker(WorkerBase):
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def compile_or_warm_up_model(self) -> None:
-        if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
+        if (self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL
+                or not envs.VLLM_RBLN_ENABLE_WARM_UP):
             logger.warning("skipping compile_or_warm_up_model")
             return
 

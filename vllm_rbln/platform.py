@@ -143,6 +143,11 @@ class RblnPlatform(Platform):
             model_config.dtype = torch.float
             assert model_config.dtype == torch.float
             logger.info("RBLN enforce model_config.dtype as torch.float")
+
+            if (lora_config := vllm_config.lora_config) is not None:
+                lora_config.lora_dtype = torch.float
+                logger.info(
+                    "RBLN enforce lora_config.lora_dtype as torch.float")
         else:
             dtype = model_config.dtype
             logger.info("original model_config.dtype = %s", dtype)
@@ -184,6 +189,8 @@ class RblnPlatform(Platform):
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
 
+                if (lora_config := vllm_config.lora_config) is not None:
+                    lora_config.lora_dtype = torch.float16
         else:
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
@@ -311,3 +318,11 @@ class RblnPlatform(Platform):
     @classmethod
     def support_hybrid_kv_cache(cls) -> bool:
         return True
+
+    @classmethod
+    def get_punica_wrapper(cls) -> str:
+        return "vllm_rbln.lora.punica_wrapper.punica_rbln.PunicaWrapperRBLN"
+
+    @classmethod
+    def can_update_inplace(cls) -> bool:
+        return False
