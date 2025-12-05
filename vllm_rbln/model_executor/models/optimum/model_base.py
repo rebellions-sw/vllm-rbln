@@ -174,7 +174,8 @@ class RBLNOptimumModelBase(nn.Module):
 
     @property
     def dtype(self) -> torch.dtype:
-        assert self.model is not None
+        assert self.model.rbln_config._torch_dtype is not None
+
         _torch_dtype = self.model.rbln_config._torch_dtype
         if "bfloat16" in _torch_dtype:
             return torch.bfloat16
