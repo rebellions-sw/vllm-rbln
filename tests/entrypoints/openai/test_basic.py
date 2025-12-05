@@ -92,16 +92,16 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     # clunky test: send an ungodly amount of load in with short timeouts
     # then ensure that it still responds quickly afterwards
 
-    chat_input = [{"role": "user", "content": "Write a long story"}]
+    prompt = "Write a long story"
     client = server.get_async_client(timeout=0.1)
     tasks = []
     # To make timeout while generating tokens
     for _ in range(10):
         task = asyncio.create_task(
-            client.chat.completions.create(messages=chat_input,
-                                           model=MODEL_NAME,
-                                           max_tokens=100,
-                                           extra_body={"min_tokens": 100}))
+            client.completions.create(prompt=prompt,
+                                      model=MODEL_NAME,
+                                      max_tokens=100,
+                                      extra_body={"min_tokens": 100}))
         tasks.append(task)
 
     done, pending = await asyncio.wait(tasks,
@@ -118,9 +118,9 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     # If the server had not cancelled all the other requests, then it would not
     # be able to respond to this one within the timeout
     client = server.get_async_client(timeout=200)
-    response = await client.chat.completions.create(messages=chat_input,
-                                                    model=MODEL_NAME,
-                                                    max_tokens=MAX_TOKENS)
+    response = await client.completions.create(prompt=prompt,
+                                               model=MODEL_NAME,
+                                               max_tokens=MAX_TOKENS)
 
     assert len(response.choices) == 1
 
@@ -128,17 +128,17 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
 @pytest.mark.asyncio
 async def test_request_wrong_content_type(server: RemoteOpenAIServer):
 
-    chat_input = [{"role": "user", "content": "Write a long story"}]
+    prompt = "Write a long story"
     client = server.get_async_client()
 
     with pytest.raises(openai.APIStatusError):
-        await client.chat.completions.create(
-            messages=chat_input,
-            model=MODEL_NAME,
-            max_tokens=MAX_TOKENS,
-            extra_headers={
-                "Content-Type": "application/x-www-form-urlencoded"
-            })
+        await client.completions.create(prompt=prompt,
+                                        model=MODEL_NAME,
+                                        max_tokens=MAX_TOKENS,
+                                        extra_headers={
+                                            "Content-Type":
+                                            "application/x-www-form-urlencoded"
+                                        })
 
 
 @pytest.mark.parametrize(
