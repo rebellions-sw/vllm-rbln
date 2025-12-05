@@ -148,6 +148,11 @@ class RblnPlatform(Platform):
                 model_config.dtype = torch.float
                 assert model_config.dtype == torch.float
                 logger.info("RBLN enforce model_config.dtype as torch.float")
+
+                if (lora_config := vllm_config.lora_config) is not None:
+                    lora_config.lora_dtype = torch.float
+                    logger.info(
+                        "RBLN enforce lora_config.lora_dtype as torch.float")
             else:
                 dtype = model_config.dtype
                 logger.info("original model_config.dtype = %s", dtype)
