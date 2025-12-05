@@ -354,11 +354,12 @@ class RBLNScheduler(Scheduler):
                 # Note(RBLN): Even when chunked prefill is enabled,
                 # we should schedule a new prefill request only if there is
                 # enough KV cache space to accommodate the full token count.
-                # Therefore, we allocate based on request.num_tokens,
+                # Therefore, we allocate based on
+                # request.num_tokens - num_computed_tokens,
                 # not num_new_tokens + num_external_computed_tokens.
                 new_blocks = self.kv_cache_manager.allocate_slots(
                     request,
-                    request.num_tokens,
+                    request.num_tokens - num_computed_tokens,
                     num_new_local_computed_tokens,
                     new_computed_blocks,
                     num_lookahead_tokens=effective_lookahead_tokens,
