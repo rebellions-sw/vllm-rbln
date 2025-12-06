@@ -30,7 +30,7 @@ logger = init_logger(__name__)
 
 
 def get_rbln_params(vllm_config: VllmConfig,
-                    rbln_config: dict) -> tuple[int, int, int]:
+                    rbln_config: dict) -> tuple[int, int, int, int]:
     if is_enc_dec_arch(vllm_config.model_config.hf_config):
         max_seq_len = rbln_config.get("dec_max_seq_len")
         kvcache_block_size = max_seq_len
@@ -72,12 +72,47 @@ def get_rbln_params(vllm_config: VllmConfig,
     assert max_seq_len is not None, (
         "max_seq_len must be specified in rbln_config.json")
 
-    return kvcache_block_size, batch_size, max_seq_len
+    prefill_chunk_size = rbln_config.get("prefill_chunk_size")
+    assert prefill_chunk_size is not None, (
+        "prefill_chunk_size must be specified in rbln_config.json")
+
+    return kvcache_block_size, batch_size, max_seq_len, prefill_chunk_size
+
+
+def set_block_size_for_prefix_caching(vllm_config: VllmConfig,
+                                      kvcache_block_size: int,
+                                      prefill_chunk_size: int) -> None:
+    # If user set prefix_block_size in additional_config, use it.
+    # Otherwise, set it to prefill_chunk_size.
+    prefix_block_size = vllm_config.additional_config.get(
+        "prefix_block_size", None)
+    if prefix_block_size is None:
+        prefix_block_size = prefill_chunk_size
+        logger.debug(
+            "Prefix block size is set to %s based on prefill_chunk_size",
+            prefix_block_size)
+    else:
+        if prefix_block_size % prefill_chunk_size != 0:
+            raise ValueError("prefix_block_size (%s) is not divisible "
+                             "by prefill_chunk_size (%s)."
+                             "Please check the value of prefill_chunk_size "
+                             "in rbln_config.json")
+        logger.debug(
+            "Prefix block size is set to %s based on additional_config",
+            prefix_block_size)
+    if kvcache_block_size % prefix_block_size != 0:
+        raise ValueError(
+            "kvcache_block_size (%s) is not divisible "
+            "by prefix_block_size (%s)."
+            "Please check the value of prefix_block_size in rbln_config.json")
+    vllm_config.cache_config.block_size = prefix_block_size
+    vllm_config.additional_config["attn_block_size"] = kvcache_block_size
 
 
 def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
                                         batch_size: int, max_model_len: int,
-                                        kvcache_block_size: int) -> None:
+                                        kvcache_block_size: int,
+                                        prefill_chunk_size: int) -> None:
     if vllm_config.scheduler_config.max_num_seqs != batch_size:
         logger.info(
             "Updating scheduler_config.max_num_seqs from %s to %s "
@@ -103,19 +138,8 @@ def update_vllm_config_with_rbln_params(vllm_config: VllmConfig,
         vllm_config.scheduler_config.max_model_len = max_model_len
 
     if vllm_config.cache_config.enable_prefix_caching:
-        if vllm_config.cache_config.block_size != 128:
-            logger.info(
-                "The block size is set to 128 for prefix caching in RBLN.")
-        vllm_config.cache_config.block_size = 128
-        if ("attn_block_size" in vllm_config.additional_config
-                and vllm_config.additional_config["attn_block_size"]
-                != kvcache_block_size):
-            logger.info(
-                "Updating attention block_size from %s to %s "
-                "based on rbln_config.json",
-                vllm_config.additional_config["attn_block_size"],
-                kvcache_block_size)
-        vllm_config.additional_config["attn_block_size"] = kvcache_block_size
+        set_block_size_for_prefix_caching(vllm_config, kvcache_block_size,
+                                          prefill_chunk_size)
     else:
         if vllm_config.cache_config.block_size != kvcache_block_size:
             logger.info(
@@ -152,7 +176,8 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
         raise RuntimeError("Failed to get RBLN config: %s", e) from e
 
     if rbln_config is not None:
-        kvcache_block_size, batch_size, max_model_len = \
+        kvcache_block_size, batch_size, max_model_len, prefill_chunk_size = \
             get_rbln_params(vllm_config, rbln_config)
         update_vllm_config_with_rbln_params(vllm_config, batch_size,
-                                            max_model_len, kvcache_block_size)
+                                            max_model_len, kvcache_block_size,
+                                            prefill_chunk_size)
