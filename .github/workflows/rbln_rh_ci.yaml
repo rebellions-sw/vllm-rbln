@@ -130,7 +130,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv add rebel-compiler==0.9.3.dev128+g2f4cc397.latestumd triton-rbln==3.2.0+rbln.git617682d1
+          uv add --index-strategy unsafe-best-match rebel-compiler==0.9.3.dev128+g2f4cc397.latestumd triton-rbln==3.2.0+rbln.git617682d1
           uv pip install --index-strategy unsafe-best-match --no-binary vllm -e ".[test]"
           uv pip list | grep -E "(vllm|rebel|torch|triton)"
 
