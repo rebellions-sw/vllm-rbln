@@ -299,6 +299,12 @@ class RBLNWorker(WorkerBase):
         # worker will always be healthy as long as it's running.
         return
 
+    def shutdown(self) -> None:
+        logger.info("v1 rbln_worker shutdown called")
+        if envs.VLLM_RBLN_METRICS:
+            # FIXME - performance tracker atexit is not called
+            self.model_runner.performance_tracker.print_final_stats()
+
 
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,

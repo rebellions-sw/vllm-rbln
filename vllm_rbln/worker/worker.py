@@ -652,3 +652,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             self.parallel_config.tensor_parallel_size,
             self.parallel_config.pipeline_parallel_size,
         )
+
+    def shutdown(self) -> None:
+        logger.info("v0 rbln_worker shutdown called")
+        if envs.VLLM_RBLN_METRICS:
+            # FIXME - performance tracker atexit is not called
+            self.model_runner.performance_tracker.print_final_stats()
