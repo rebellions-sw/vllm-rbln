@@ -39,14 +39,12 @@ def get_rbln_params(vllm_config: VllmConfig,
     if is_enc_dec_arch(vllm_config.model_config.hf_config):
         max_seq_len = rbln_config.get("dec_max_seq_len")
         kvcache_block_size = max_seq_len
-        prefill_chunk_size = rbln_config.get("prefill_chunk_size")
         batch_size = rbln_config.get("batch_size")
     elif is_multi_modal(vllm_config.model_config.hf_config):
         # Get configurations from main module (e.g. Qwen2.5-VL, Whisper)
         kvcache_block_size = rbln_config.get("kvcache_block_size")
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
-        prefill_chunk_size = rbln_config.get("prefill_chunk_size")
         if max_seq_len is None:  # Whisper FIXME to be moved to enc-dec
             max_seq_len = rbln_config.get("dec_max_seq_len")
         # Get configurations from submodule
@@ -56,8 +54,6 @@ def get_rbln_params(vllm_config: VllmConfig,
                 if submodule in rbln_config:
                     kvcache_block_size = rbln_config[submodule].get(
                         "kvcache_block_size", None)
-                    prefill_chunk_size = rbln_config[submodule].get(
-                        "prefill_chunk_size", None)
                     batch_size = rbln_config[submodule].get("batch_size", None)
                     max_seq_len = rbln_config[submodule].get(
                         "max_seq_len", None)
@@ -67,7 +63,6 @@ def get_rbln_params(vllm_config: VllmConfig,
     elif is_pooling_arch(vllm_config.model_config.hf_config):
         max_seq_len = rbln_config.get("max_seq_len")
         kvcache_block_size = max_seq_len
-        prefill_chunk_size = rbln_config.get("prefill_chunk_size")
         batch_size = rbln_config.get("batch_size")
     else:
         # decoder
@@ -82,15 +77,17 @@ def get_rbln_params(vllm_config: VllmConfig,
         "batch_size must be specified in rbln_config.json")
     assert max_seq_len is not None, (
         "max_seq_len must be specified in rbln_config.json")
-    assert prefill_chunk_size is not None, (
-        "prefill_chunk_size must be specified in rbln_config.json")
-
+    # NOTE:
+    # prefill_chunk_size is only used for decoder-only models
+    # with prefix caching
     return kvcache_block_size, batch_size, max_seq_len, prefill_chunk_size
 
 
 def set_block_size_for_prefix_caching(vllm_config: VllmConfig,
                                       kvcache_block_size: int,
                                       prefill_chunk_size: int) -> None:
+    assert prefill_chunk_size is not None, (
+        "prefill_chunk_size must be specified in rbln_config.json")
     # If user set prefix_block_size in additional_config, use it.
     # Otherwise, set it to prefill_chunk_size.
     prefix_block_size = vllm_config.additional_config.get(
