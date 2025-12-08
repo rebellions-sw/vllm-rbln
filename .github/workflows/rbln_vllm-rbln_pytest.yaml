@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
-        test_type: [core, worker]
+        test_type: [core, worker, openai]
     steps:
       - name: Checkout the vllm-rbln repository
         uses: actions/checkout@v4
@@ -156,7 +156,7 @@ jobs:
 
       - name: Install local vllm-rbln package and dependencies
         run: |
-          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest
+          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
           VERSION=${{ inputs.optimum_rbln_version }}
           pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
@@ -166,6 +166,8 @@ jobs:
         if: steps.should_skip.outputs.skip != 'true'
         env:
           VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
+          REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
+
         run: |
           case "${{ matrix.test_type }}" in
             "core")
@@ -173,6 +175,9 @@ jobs:
               ;;
             "worker")
               pytest tests/v1/worker -vv --durations 0
+              ;;
+            "openai")
+              pytest tests/entrypoints/openai -vv --durations 0
               ;;
           esac
 
