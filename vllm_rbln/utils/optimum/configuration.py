@@ -61,7 +61,7 @@ def get_rbln_params(vllm_config: VllmConfig,
     elif is_pooling_arch(vllm_config.model_config.hf_config):
         max_seq_len = rbln_config.get("max_seq_len")
         kvcache_block_size = max_seq_len
-        prefill_chunk_size = rbln_config.get("prefill_chunk_size")s
+        prefill_chunk_size = rbln_config.get("prefill_chunk_size")
         batch_size = rbln_config.get("batch_size")
     else:
         # decoder
