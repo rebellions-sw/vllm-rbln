@@ -62,6 +62,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     os.environ["VLLM_DP_MASTER_PORT"] = str(dp_master_port)
 
     if not vllm_use_v1:
+        # in v0 worker, each process has distinct RBLN_DEVICES
         rbln_devices = ""
         start_index = local_dp_rank * tp_size
         end_index = start_index + tp_size
@@ -70,12 +71,11 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
                 rbln_devices += ","
             rbln_devices += str(index)
 
-        print(f"RBLN_DEVICES = {rbln_devices}")
         os.environ["RBLN_DEVICES"] = rbln_devices
     else:
         rbln_devices = os.environ.get("RBLN_DEVICES")
-        print(f"RBLN_DEVICES = {rbln_devices}")
 
+    print(f"local RBLN_DEVICES = {rbln_devices}")
     # CUDA_VISIBLE_DEVICES for each DP rank is set automatically inside the
     # engine processes.
 
@@ -135,13 +135,6 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
 
 
 if __name__ == "__main__":
-    vllm_use_v1 = (int(os.environ.get("VLLM_USE_V1", "0")) == 1)
-    if vllm_use_v1:
-        print("VLLM_USE_V1")
-        assert os.environ.get(
-            "RBLN_DEVICES", "") != "", "RBLN_DEVICES is not set in VLLM_USE_V1"
-    else:
-        print("VLLM_USE_V0")
     import argparse
     parser = argparse.ArgumentParser(description="Data Parallel Inference")
     parser.add_argument("--model",
@@ -192,6 +185,23 @@ if __name__ == "__main__":
 
     assert dp_size % node_size == 0, "dp_size should be divisible by node_size"
     dp_per_node = dp_size // node_size
+
+    vllm_use_v1 = (int(os.environ.get("VLLM_USE_V1", "0")) == 1)
+    if vllm_use_v1:
+        print("VLLM_USE_V1")
+        # in v1 worker, entire processes SHOULD have global RBLN_DEVICES
+        rbln_devices = ""
+        start_index = 0
+        end_index = start_index + tp_size * dp_size
+        for index in range(start_index, end_index):
+            if rbln_devices:
+                rbln_devices += ","
+            rbln_devices += str(index)
+
+        print(f"global RBLN_DEVICES = {rbln_devices}")
+        os.environ["RBLN_DEVICES"] = rbln_devices
+    else:
+        print("VLLM_USE_V0")
 
     from multiprocessing import Process
     procs = []
