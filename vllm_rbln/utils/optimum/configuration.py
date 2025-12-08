@@ -42,6 +42,7 @@ def get_rbln_params(vllm_config: VllmConfig,
         max_seq_len = rbln_config.get("max_seq_len")
         if max_seq_len is None:  # Whisper FIXME to be moved to enc-dec
             max_seq_len = rbln_config.get("dec_max_seq_len")
+            prefill_chunk_size = rbln_config.get("prefill_chunk_size")
         # Get configurations from submodule
         if kvcache_block_size is None:
             submodules = ["language_model", "text_model"]
@@ -49,6 +50,8 @@ def get_rbln_params(vllm_config: VllmConfig,
                 if submodule in rbln_config:
                     kvcache_block_size = rbln_config[submodule].get(
                         "kvcache_block_size", None)
+                    prefill_chunk_size = rbln_config[submodule].get(
+                        "prefill_chunk_size", None)
                     batch_size = rbln_config[submodule].get("batch_size", None)
                     max_seq_len = rbln_config[submodule].get(
                         "max_seq_len", None)
@@ -62,6 +65,7 @@ def get_rbln_params(vllm_config: VllmConfig,
     else:
         # decoder
         kvcache_block_size = rbln_config.get("kvcache_block_size")
+        prefill_chunk_size = rbln_config.get("prefill_chunk_size")
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
 
@@ -71,8 +75,6 @@ def get_rbln_params(vllm_config: VllmConfig,
         "batch_size must be specified in rbln_config.json")
     assert max_seq_len is not None, (
         "max_seq_len must be specified in rbln_config.json")
-
-    prefill_chunk_size = rbln_config.get("prefill_chunk_size")
     assert prefill_chunk_size is not None, (
         "prefill_chunk_size must be specified in rbln_config.json")
 
