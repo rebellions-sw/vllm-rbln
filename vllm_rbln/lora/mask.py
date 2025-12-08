@@ -11,3 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+from typing import ClassVar
+
+import torch
+
+
+class LoRAMask:
+    lora_mask: ClassVar[torch.Tensor]  # [batch_size, max_loras * max_rank]
+
+    @classmethod
+    def set_lora_mask(cls, mask: torch.Tensor) -> None:
+        cls.lora_mask = mask
+
+    @classmethod
+    def get_lora_mask(cls) -> torch.Tensor:
+        return cls.lora_mask

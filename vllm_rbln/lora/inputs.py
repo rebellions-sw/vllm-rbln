@@ -11,3 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+from typing import ClassVar
+
+import torch
+
+
+class LoRAInputs:
+    sampler_indices_padded: ClassVar[torch.Tensor]
+
+    @classmethod
+    def set_sampler_indices_padded(
+            cls, sampler_indices_padded: torch.Tensor) -> None:
+        cls.sampler_indices_padded = sampler_indices_padded
+
+    @classmethod
+    def get_sampler_indices_padded(cls) -> torch.Tensor:
+        return cls.sampler_indices_padded
