@@ -97,6 +97,11 @@ def set_block_size_for_prefix_caching(vllm_config: VllmConfig,
                              "by prefill_chunk_size (%s)."
                              "Please check the value of prefill_chunk_size "
                              "in rbln_config.json")
+        if prefix_block_size > kvcache_block_size:
+            raise ValueError("prefix_block_size (%s) is greater than "
+                             "kvcache_block_size (%s)."
+                             "Please check the value of kvcache_block_size "
+                             "in rbln_config.json")
         logger.debug(
             "Prefix block size is set to %s based on additional_config",
             prefix_block_size)
