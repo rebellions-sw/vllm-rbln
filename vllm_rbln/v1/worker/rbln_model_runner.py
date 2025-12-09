@@ -1198,7 +1198,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 logger.info(
                     "pp execute intermediate tensors, key=%s val.shape=%s", k,
                     v.shape)
-                break
             return IntermediateTensors({
                 k: v
                 for k, v in intermediate_tensors.items()
@@ -1863,8 +1862,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 if not broadcast_pp_output:
                     hidden_states.kv_connector_output = kv_connector_output
                     return hidden_states
-                get_pp_group().send_tensor_dict(
-                    hidden_states.tensors, all_gather_group=get_tp_group())
+                # NOTE - DO NOT all_gather_group for RBLN pp
+                get_pp_group().send_tensor_dict(hidden_states.tensors)
                 logits = None
             else:
                 # for last-pipeline stages, return hidden states

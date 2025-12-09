@@ -23,7 +23,7 @@ from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment,
                               set_custom_all_reduce)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
-from vllm.distributed.parallel_state import get_pp_group, get_tp_group
+from vllm.distributed.parallel_state import get_pp_group
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
@@ -238,9 +238,9 @@ class RBLNWorker(WorkerBase):
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         if forward_pass and not get_pp_group().is_first_rank:
+            # NOTE - DO NOT all_gather_group for RBLN pp
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict(
-                    all_gather_group=get_tp_group()))
+                get_pp_group().recv_tensor_dict())
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
@@ -252,9 +252,8 @@ class RBLNWorker(WorkerBase):
         assert parallel_config.distributed_executor_backend != (
             "external_launcher") and not get_pp_group().is_last_rank
 
-        get_pp_group().send_tensor_dict(output.tensors,
-                                        all_gather_group=get_tp_group())
-
+        # NOTE - DO NOT all_gather_group for RBLN pp
+        get_pp_group().send_tensor_dict(output.tensors)
         kv_connector_output = output.kv_connector_output
         if not kv_connector_output:
             return None
