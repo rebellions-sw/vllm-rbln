@@ -1879,8 +1879,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                             # selected_token_indices == token_indices
                             logits = hidden_states
                     else:  # decode
-                        decode_batch = self.scheduler_config.max_num_seqs
-                        assert selected_token_indices.size(0) == decode_batch
+                        # selected_token_indices is for valid decode tokens
+                        assert selected_token_indices.size(
+                            0) <= self.max_batch_size
                         # token_indices == None, selected = torch.tensor([0])
                         logits = hidden_states[selected_token_indices]
 
