@@ -109,7 +109,7 @@ class RBLNCacheEngine:
             self.model_config.is_attention_free,
         )
 
-        logger.info("[RBLN] initialize cache engine")
+        logger.info("initialize cache engine")
         # Initialize the cache.
         # TODO : cpu_cache will be replaced with dev_cache
         self.cpu_cache = self._allocate_kv_cache(
@@ -123,17 +123,15 @@ class RBLNCacheEngine:
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_heads, self.head_size)
         kv_cache: List[torch.Tensor] = []
-        logger.info("[RBLN] attention backend get_kv_cache_shape = %s",
+        logger.info("attention backend get_kv_cache_shape = %s",
                     kv_cache_shape)
-        logger.info("[RBLN] allocate kv cache shape = %s", kv_cache_shape)
+        logger.info("allocate kv cache shape = %s", kv_cache_shape)
         kv_cache_size = 1
         for dim in kv_cache_shape:
             kv_cache_size *= dim
-        logger.info("[RBLN] 1 layer : allocate kv cache size = %d",
-                    kv_cache_size)
+        logger.info("1 layer : allocate kv cache size = %d", kv_cache_size)
         kv_cache_size *= self.num_layers
-        logger.info("[RBLN] all layers : allocate kv cache size = %d",
-                    kv_cache_size)
+        logger.info("all layers : allocate kv cache size = %d", kv_cache_size)
 
         # allocate kv cache onto RBLN device
         # RBLN device tensor allocation
@@ -141,7 +139,7 @@ class RBLNCacheEngine:
             kv_cache.append(
                 torch.empty(kv_cache_shape,
                             dtype=self.dtype).to(self.device_config.device))
-        logger.info("[RBLN] allocate kv cache length = %d", len(kv_cache))
+        logger.info("allocate kv cache length = %d", len(kv_cache))
 
         return kv_cache
 
@@ -152,7 +150,7 @@ class RBLNCacheEngine:
         raise NotImplementedError("Swap is not supported in RBLNCacheEngine.")
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:
-        logger.info("[RBLN] copy kv cache")
+        logger.info("copy kv cache")
         self.attn_backend.copy_blocks(self.cpu_cache, src_to_dsts)
 
     @staticmethod
@@ -180,7 +178,7 @@ class RBLNCacheEngine:
             dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_dtype]
         dtype_size = torch.tensor([], dtype=dtype).element_size()
         total_size = dtype_size * total
-        logger.info("[RBLN] get kv cache block size = %d", total_size)
+        logger.info("get kv cache block size = %d", total_size)
         return total_size
 
 

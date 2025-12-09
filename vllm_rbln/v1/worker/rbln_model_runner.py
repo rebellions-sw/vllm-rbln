@@ -1046,22 +1046,19 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         TP = get_tp_group()
         PP = get_pp_group()
         DP = get_dp_group()
-        logger.info("[RBLN] TP group unique_name = %s", TP.unique_name)
-        logger.info("[RBLN] TP group ranks = %s, local rank = %s", TP.ranks,
-                    TP.rank)
-        logger.info("[RBLN] TP device group id = %s, cpu group id = %s",
+        logger.info("TP group unique_name = %s", TP.unique_name)
+        logger.info("TP group ranks = %s, local rank = %s", TP.ranks, TP.rank)
+        logger.info("TP device group id = %s, cpu group id = %s",
                     TP.device_group.group_name, TP.cpu_group.group_name)
 
-        logger.info("[RBLN] PP group unique_name = %s", PP.unique_name)
-        logger.info("[RBLN] PP group ranks = %s, local rank = %s", PP.ranks,
-                    PP.rank)
-        logger.info("[RBLN] PP device group id = %s, cpu group id = %s",
+        logger.info("PP group unique_name = %s", PP.unique_name)
+        logger.info("PP group ranks = %s, local rank = %s", PP.ranks, PP.rank)
+        logger.info("PP device group id = %s, cpu group id = %s",
                     PP.device_group.group_name, PP.cpu_group.group_name)
 
-        logger.info("[RBLN] DP group unique_name = %s", DP.unique_name)
-        logger.info("[RBLN] DP group ranks = %s, local rank = %s", DP.ranks,
-                    DP.rank)
-        logger.info("[RBLN] DP device group id = %s, cpu group id = %s",
+        logger.info("DP group unique_name = %s", DP.unique_name)
+        logger.info("DP group ranks = %s, local rank = %s", DP.ranks, DP.rank)
+        logger.info("DP device group id = %s, cpu group id = %s",
                     DP.device_group.group_name, DP.cpu_group.group_name)
 
         process_group_dict = {}
@@ -1072,7 +1069,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         process_group_dict[DP.device_group.group_name] = DP.ranks
         process_group_dict[DP.cpu_group.group_name] = DP.ranks
 
-        logger.info("[RBLN] process_group_dict = %s", process_group_dict)
+        logger.info("process_group_dict = %s", process_group_dict)
         options = {
             "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
@@ -1809,7 +1806,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
             start_time = time.perf_counter()
             if self.lora_config is not None:
-                model_output = self.model_executable(
+                logits_or_intermediate_states = self.model_executable(
                     input_ids=input_ids,
                     positions=positions,
                     intermediate_tensors=intermediate_tensors,
@@ -1817,7 +1814,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     **model_kwargs,
                 )
             else:
-                model_output = self.model_executable(
+                logits_or_intermediate_states = self.model_executable(
                     input_ids=input_ids,
                     positions=positions,
                     intermediate_tensors=intermediate_tensors,
@@ -1838,9 +1835,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
-                hidden_states, aux_hidden_states = model_output
+                hidden_states, aux_hidden_states = logits_or_intermediate_states
             else:
-                hidden_states = model_output
+                hidden_states = logits_or_intermediate_states
                 aux_hidden_states = None
 
             if self.lora_config is not None:
@@ -2002,8 +1999,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         else:
             self.logits_processor = self.model.logits_processor
 
-        logger.info("[RBLN] load_model = %s", self.model)
-        logger.info("[RBLN] model_config.num_layers = %d",
+        logger.info("load_model = %s", self.model)
+        logger.info("model_config.num_layers = %d",
                     self.model_config.get_num_layers(self.parallel_config))
 
         def model_wrapper(
