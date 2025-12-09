@@ -109,11 +109,13 @@ class RBLNSampler(VLLMSampler):
                  seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
+        self._compile_context = rebel.CompileContext()
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
             fullgraph=True,
             backend="rbln",
+            options={"compile_context": self._compile_context},
         )
         self.logprobs_mode = logprobs_mode
 
