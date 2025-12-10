@@ -111,8 +111,9 @@ class RBLNSampler(VLLMSampler):
                  seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
-
+        self._compile_context = rebel.CompileContext()
         options = {
+            "compile_context": self._compile_context,
             "cache_dir": os.path.join(envs.VLLM_CACHE_ROOT, "rbln_sampler")
         }
         self._compiled_rbln_topp_sampler = torch.compile(
