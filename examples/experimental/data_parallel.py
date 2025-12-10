@@ -191,8 +191,12 @@ if __name__ == "__main__":
         print("VLLM_USE_V1")
         # in v1 worker, entire processes SHOULD have global RBLN_DEVICES
         rbln_devices = ""
+        if os.environ.get("VLLM_RBLN_TP_SIZE") is None:
+            rsd_size = 1
+        else:
+            rsd_size = int(os.environ.get("VLLM_RBLN_TP_SIZE"))
         start_index = 0
-        end_index = start_index + tp_size * dp_size
+        end_index = start_index + tp_size * dp_size * rsd_size
         for index in range(start_index, end_index):
             if rbln_devices:
                 rbln_devices += ","
