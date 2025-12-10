@@ -35,9 +35,12 @@ def custom_moe_glu(
     gate_proj_weight: torch.Tensor,
     up_proj_weight: torch.Tensor,
     down_proj_weight: torch.Tensor,
-    masked_routing_weight: torch.Tensor,
+    router_logits: torch.Tensor,
+    k : int,
+    renormalize: bool,
+    expert_map: Optional[torch.Tensor],
     # act_fn: str,
-    expert_select_count: torch.Tensor,
+    expert_select_count: Optional[torch.Tensor] = None,
     gate_proj_bias: Optional[torch.Tensor] = None,
     up_proj_bias: Optional[torch.Tensor] = None,
     down_proj_bias: Optional[torch.Tensor] = None,
@@ -50,20 +53,124 @@ def custom_moe_glu(
     - gate_proj_weight: [hidden_size, num_experts * intermediate_size]
     - up_proj_weight: [hidden_size, num_experts * intermediate_size]
     - down_proj_weight: [num_experts * intermediate_size, hidden_size]
-    - masked_routing_weight: [batch * seq_len, num_experts]
+    - router_logits: [batch * seq_len, num_experts]
 
     Returns:
         torch.Tensor: [batch * seq_len, hidden_size]
     """
 
+    # ============================================================================
+    # Step 1: Softmax on ALL router logits to get routing probabilities
+    # ============================================================================
+    # router_logits: [num_tokens, n_expert] (e.g., [8, 8])
+    # routing_weights: [num_tokens, n_expert] (e.g., [8, 8])
+    #   - Each row sums to 1.0 (probability distribution over experts)
+    routing_weights = torch.nn.functional.softmax(router_logits, dim=1, dtype=torch.float)
+    
+    # ============================================================================
+    # Step 2: Select top-k experts for each token
+    # ============================================================================
+    # selected_weights: [num_tokens, k] (e.g., [8, 2]) - top-k probability values
+    # selected_experts: [num_tokens, k] (e.g., [8, 2]) - indices of top-k experts
+    #   Example: selected_experts = [[2, 4], [3, 1], ...] means token 0 selected expert 2 and 4
+    selected_weights, selected_experts = torch.topk(routing_weights, k=k, dim=-1)
+
+    # ============================================================================
+    # Step 3: Create masked routing weights
+    # ============================================================================
+    # masked_routing_weights: [num_tokens, n_expert] (e.g., [8, 8])
+    #   - Only selected expert indices have non-zero values
+    #   - Non-selected experts have 0.0
+    #   Example: If token 0 selected expert 2 (weight=0.3) and 4 (weight=0.2):
+    #     masked_routing_weights[0] = [0.0, 0.0, 0.3, 0.0, 0.2, 0.0, 0.0, 0.0]
+    masked_routing_weights = torch.zeros_like(router_logits, dtype=torch.float32)
+    masked_routing_weights.scatter_(1, selected_experts, selected_weights)
+    
+    # ============================================================================
+    # Step 4: Renormalize (optional) - make selected weights sum to 1.0
+    # ============================================================================
+    # After renormalize, the sum of non-zero weights in each row equals 1.0
+    #   Example: [0.0, 0.0, 0.3, 0.0, 0.2, ...] -> [0.0, 0.0, 0.6, 0.0, 0.4, ...]
+    #     because 0.3/(0.3+0.2) = 0.6, 0.2/(0.3+0.2) = 0.4
+    if renormalize:
+        masked_routing_weights = masked_routing_weights / masked_routing_weights.sum(dim=-1, keepdim=True)
+
+    # ============================================================================
+    # Step 5: Apply expert_map for Expert Parallelism (EP) sharding
+    # ============================================================================
+    # expert_map is used when experts are distributed across multiple GPUs (EP)
+    # expert_map: [n_expert] (e.g., [8]) - maps global expert index to local expert index
+    #   Example for GPU 0 with EP_size=2 (4 experts per GPU):
+    #     expert_map = [0, 1, 2, 3, -1, -1, -1, -1]
+    #       - Global expert 0 -> Local expert 0
+    #       - Global expert 1 -> Local expert 1
+    #       - Global expert 4~7 -> -1 (not on this GPU)
+    if expert_map is not None:
+        # n_expert: total number of global experts (e.g., 8)
+        n_expert = router_logits.shape[1]
+        
+        # Step 5a: Handle out-of-bounds values (-1) by mapping to n_expert-1
+        # expert_map_within_bounds: [n_expert] (e.g., [8])
+        #   Example: [0, 1, 2, 3, -1, -1, -1, -1] -> [0, 1, 2, 3, 7, 7, 7, 7]
+        #   This maps "not my GPU" experts to a dummy index (7) that will be ignored
+        expert_map_within_bounds = torch.where(
+            expert_map < 0, 
+            n_expert - 1, 
+            expert_map
+        ).to(torch.int64)
+        
+        # Step 5b: Scatter routing weights from global to local expert indices
+        # zeros: [num_tokens, n_expert] (e.g., [8, 8]) - all zeros
+        # expert_map_within_bounds_: [num_tokens, n_expert] - expanded for batch dimension
+        #   Each row is the same: [0, 1, 2, 3, 7, 7, 7, 7]
+        zeros = torch.zeros_like(masked_routing_weights)
+        expert_map_within_bounds_ = expert_map_within_bounds.expand_as(masked_routing_weights).to(torch.int64)
+        
+        # torch.scatter rearranges values based on index mapping:
+        # For each position j in the source, place the value at position expert_map_within_bounds_[j]
+        #   Example: 
+        #     Before: masked_routing_weights[0] = [0.0, 0.0, 0.6, 0.0, 0.4, 0.0, 0.0, 0.0]
+        #                                          (E0)      (E2)      (E4)
+        #     expert_map = [0, 1, 2, 3, 7, 7, 7, 7]
+        #     After:  masked_routing_weights[0] = [0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0, 0.4]
+        #                                          (L0)      (L2)                    (L7=dummy)
+        #     - E2 (global) -> L2 (local): 0.6 stays at index 2
+        #     - E4 (global) -> L7 (local): 0.4 moves to index 7 (will be ignored)
+        masked_routing_weights = torch.scatter(
+            zeros, 
+            dim=1, 
+            index=expert_map_within_bounds_, 
+            src=masked_routing_weights
+        )
+
+    # ============================================================================
+    # Step 6: Compute MoE output - weighted sum of expert FFN outputs
+    # ============================================================================
+    # out: [num_tokens, hidden_size] - final output, initialized to zeros
+    # expert_cnt: number of local experts to process (from weight tensor shape)
+    #   - Without EP: expert_cnt = n_expert (all experts)
+    #   - With EP: expert_cnt = n_expert / EP_size (only local experts)
     out = torch.zeros_like(hidden_states)
     expert_cnt = gate_proj_weight.shape[0]
+    
     for i in range(expert_cnt):
+        # FFN computation for expert i:
+        # gate: [num_tokens, intermediate_size] - gate projection
+        # up: [num_tokens, intermediate_size] - up projection  
+        # mul: [num_tokens, intermediate_size] - SiLU(gate) * up (GLU mechanism)
+        # down: [num_tokens, hidden_size] - down projection back to hidden_size
         gate = torch.nn.functional.linear(hidden_states, gate_proj_weight[i])
         up = torch.nn.functional.linear(hidden_states, up_proj_weight[i])
         mul = torch.nn.functional.silu(gate) * up
         down = torch.nn.functional.linear(mul, down_proj_weight[i])
-        out += down * masked_routing_weight[:, i:i+1]
+        
+        # Weighted sum: multiply by routing weight and accumulate
+        # masked_routing_weights[:, i:i+1]: [num_tokens, 1] - weight for expert i
+        #   - If token didn't select expert i, weight is 0.0 (no contribution)
+        #   - If token selected expert i, weight is the normalized probability
+        # With EP + expert_map: indices beyond local expert range have weights 
+        #   moved to index n_expert-1, so they contribute 0 to local computation
+        out += down * masked_routing_weights[:, i : i + 1]
 
     return out
 
@@ -74,14 +181,33 @@ def custom_moe_glu_fake(
     gate_proj_weight: torch.Tensor,
     up_proj_weight: torch.Tensor,
     down_proj_weight: torch.Tensor,
-    masked_routing_weight: torch.Tensor,
-    expert_select_count: torch.Tensor,
-    # act_fn: ACT_TYPES,
+    router_logits: torch.Tensor,
+    k : int,
+    renormalize: bool,
+    expert_map: Optional[torch.Tensor],
+    # act_fn: str,
+    expert_select_count: Optional[torch.Tensor] = None,
     gate_proj_bias: Optional[torch.Tensor] = None,
     up_proj_bias: Optional[torch.Tensor] = None,
     down_proj_bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
+
+
+# @custom_moe_glu.register_fake
+# def custom_moe_glu_fake(
+#     hidden_states: torch.Tensor,
+#     gate_proj_weight: torch.Tensor,
+#     up_proj_weight: torch.Tensor,
+#     down_proj_weight: torch.Tensor,
+#     masked_routing_weight: torch.Tensor,
+#     expert_select_count: torch.Tensor,
+#     # act_fn: ACT_TYPES,
+#     gate_proj_bias: Optional[torch.Tensor] = None,
+#     up_proj_bias: Optional[torch.Tensor] = None,
+#     down_proj_bias: Optional[torch.Tensor] = None,
+# ) -> torch.Tensor:
+#     return torch.empty_like(hidden_states)
 
 
 def unquantized_fused_moe_method_forward_rbln_rsd(
@@ -262,14 +388,17 @@ def unquantized_fused_moe_method_forward_rbln_custom(
     router_logits = router_logits.reshape(num_tokens, -1)
 
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/qwen3_moe_architecture.py
-    masked_routing_weights, expert_select_count = get_masked_routing_weights(router_logits, top_k, renormalize, expert_map)
+    # masked_routing_weights, expert_select_count = get_masked_routing_weights(router_logits, top_k, renormalize, expert_map)
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
         hidden_states,
         gate_proj_weight,
         up_proj_weight,
         down_proj_weight,
-        masked_routing_weights,
-        expert_select_count)
+        router_logits,
+        top_k,
+        renormalize,
+        expert_map,
+        )
     return final_hidden_states.reshape(orig_shape)
 
 

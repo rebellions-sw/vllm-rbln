@@ -700,18 +700,30 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             )
             end_time = time.perf_counter()
             if envs.RBLN_METRICS:
-                # Record performance metrics
+                # Record performance metrics with detailed information
                 execution_time = end_time - start_time
+                seq_lens = list(model_input.seq_lens) if model_input.seq_lens else []
+                query_lens = list(model_input.query_lens) if model_input.query_lens else []
+                
                 if model_input.is_prompt:
-                    total_tokens = sum(model_input.query_lens
-                                       ) if model_input.query_lens else 0
+                    total_tokens = sum(query_lens) if query_lens else 0
+                    batch_size = len(query_lens) if query_lens else 0
                     self.performance_tracker.record_prefill(
-                        execution_time, total_tokens)
+                        latency=execution_time,
+                        token_count=total_tokens,
+                        batch_size=batch_size,
+                        seq_lens=seq_lens,
+                        query_lens=query_lens,
+                    )
                 else:
-                    num_seqs = len(
-                        model_input.seq_lens) if model_input.seq_lens else 0
+                    num_seqs = len(seq_lens) if seq_lens else 0
                     self.performance_tracker.record_decode(
-                        execution_time, num_seqs)
+                        latency=execution_time,
+                        token_count=num_seqs,
+                        batch_size=num_seqs,
+                        seq_lens=seq_lens,
+                        query_lens=query_lens,
+                    )
             if get_pp_group().is_last_rank and not envs.RBLN_LOGITS_ALL_GATHER:
                 # Gather logits for TP
                 logits_processor = self.compute_logits_model.logits_processor
