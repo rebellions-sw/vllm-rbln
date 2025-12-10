@@ -564,9 +564,12 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         intermediate_tensors = None
         orig_model_execute_time = 0.0
         if not get_pp_group().is_first_rank:
+            start = time.perf_counter()
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict(
-                    all_gather_group=get_tp_group()))
+                get_pp_group().recv_tensor_dict())
+            
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            print(f"Elapsed receive time: {elapsed_ms:.3f} ms")
             if (self.observability_config is not None
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
@@ -589,8 +592,13 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 output.tensors["model_execute_time"] = torch.tensor(
                     model_execute_time + orig_model_execute_time)
-            get_pp_group().send_tensor_dict(output.tensors,
-                                            all_gather_group=get_tp_group())
+            
+
+            start = time.perf_counter()
+            get_pp_group().send_tensor_dict(output.tensors)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            print(f"Elapsed send time: {elapsed_ms:.3f} ms")
+
             return [None]
         if (self.observability_config is not None
                 and self.observability_config.collect_model_execute_time
@@ -629,16 +637,17 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             rank=self.rank,
             local_rank=self.local_rank,
             distributed_init_method=self.distributed_init_method,
-            backend="gloo",
+            backend="rbln-ccl",
+            # backend="gloo",
         )
 
-        # warm up test for torch.distributed
-        # all_reduce test
-        torch.distributed.all_reduce(torch.zeros(1, dtype=torch.float16).cpu())
-        # broadcast test
-        # NOTE - broadcast DOES NOT support torch.int16 data type
-        tensor_temp = torch.empty((1, 128), dtype=torch.int)
-        torch.distributed.broadcast(tensor_temp, src=0)
+        # # warm up test for torch.distributed
+        # # all_reduce test
+        # torch.distributed.all_reduce(torch.zeros(1, dtype=torch.float16).cpu())
+        # # broadcast test
+        # # NOTE - broadcast DOES NOT support torch.int16 data type
+        # tensor_temp = torch.empty((1, 128), dtype=torch.int)
+        # torch.distributed.broadcast(tensor_temp, src=0)
         ensure_model_parallel_initialized(
             self.parallel_config.tensor_parallel_size,
             self.parallel_config.pipeline_parallel_size,

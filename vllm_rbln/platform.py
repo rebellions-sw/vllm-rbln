@@ -56,7 +56,8 @@ class RblnPlatform(Platform):
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
     current_stream = _StreamPlaceholder
-
+    dist_backend = "rbln-ccl"
+    
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
         return rebel.get_npu_name(device_id)
