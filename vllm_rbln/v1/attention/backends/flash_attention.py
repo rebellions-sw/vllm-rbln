@@ -761,12 +761,6 @@ class RBLNFlashAttentionMetadataBuilder(
             if local_block_tables is not None else None,
         )
 
-        logger.debug("RBLNAttentionMetadata = %s", attn_metadata)
-        logger.debug("\tslot_mapping size = %s", slot_mapping.size())
-        logger.debug("\tblock_tables size = %s", block_tables_tensor.size())
-        logger.debug("\tattn_masks size = %s", attn_masks.size())
-        logger.debug("\tattn_masks = %s", attn_masks[:, :, :, :, :32])
-        logger.debug("\tseq_lens_tensor size= %s", seq_lens_tensor.size())
         return attn_metadata
 
     def use_cascade_attention(self, *args, **kwargs) -> bool:

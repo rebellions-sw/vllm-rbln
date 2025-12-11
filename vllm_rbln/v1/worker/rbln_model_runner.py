@@ -1025,20 +1025,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if self.lora_config:
             self.set_active_loras(self.input_batch, num_scheduled_tokens)
 
-        logger.debug("num_reqs: %s", num_reqs)
-        logger.debug("token_indices: %s", token_indices)
-        logger.debug("input_batch: %s", vars(self.input_batch))
-        logger.debug(
-            "input_ids: %s",
-            self.input_ids.cpu[:scheduler_output.total_num_scheduled_tokens],
-        )
-        logger.debug(
-            "positions: %s",
-            self.positions.cpu[:scheduler_output.total_num_scheduled_tokens],
-        )
-        logger.debug("attn_metadata: %s", next(iter(attn_metadata.items())))
-        logger.debug("logits_indices: %s", logits_indices)
-
         return (attn_metadata, logits_indices, spec_decode_metadata,
                 num_scheduled_tokens, spec_decode_common_attn_metadata,
                 max_num_scheduled_tokens)
@@ -1047,20 +1033,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         TP = get_tp_group()
         PP = get_pp_group()
         DP = get_dp_group()
-        logger.info("TP group unique_name = %s", TP.unique_name)
-        logger.info("TP group ranks = %s, local rank = %s", TP.ranks, TP.rank)
-        logger.info("TP device group id = %s, cpu group id = %s",
-                    TP.device_group.group_name, TP.cpu_group.group_name)
-
-        logger.info("PP group unique_name = %s", PP.unique_name)
-        logger.info("PP group ranks = %s, local rank = %s", PP.ranks, PP.rank)
-        logger.info("PP device group id = %s, cpu group id = %s",
-                    PP.device_group.group_name, PP.cpu_group.group_name)
-
-        logger.info("DP group unique_name = %s", DP.unique_name)
-        logger.info("DP group ranks = %s, local rank = %s", DP.ranks, DP.rank)
-        logger.info("DP device group id = %s, cpu group id = %s",
-                    DP.device_group.group_name, DP.cpu_group.group_name)
 
         process_group_dict = {}
         process_group_dict[TP.device_group.group_name] = TP.ranks
@@ -1070,7 +1042,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         process_group_dict[DP.device_group.group_name] = DP.ranks
         process_group_dict[DP.cpu_group.group_name] = DP.ranks
 
-        logger.info("process_group_dict = %s", process_group_dict)
         options = {
             "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
@@ -1180,8 +1151,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             assert not enabled_sp, "RBLN warm_up = !sp(sequence_parallel)"
             assert not residual_scatter, "RBLN warm_up = !residual_scatter"
             assert not sync_self, "RBLN warm_up = !sync self(from dummy)"
-            logger.info("warm_up, num_tokens=%s, batch_size=%s, seq_len=%s",
-                        num_tokens, batch_size, seq_len)
             return IntermediateTensors({
                 k: v.reshape((batch_size, seq_len, -1))
                 for k, v in self.intermediate_tensors.items()
@@ -1191,10 +1160,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             assert batch_size == -1
             assert seq_len == -1
             assert sync_self, "RBLN execute = sync self(from input)"
-            for k, v in intermediate_tensors.items():
-                logger.info(
-                    "pp execute intermediate tensors, key=%s val.shape=%s", k,
-                    v.shape)
             return IntermediateTensors({
                 k: v
                 for k, v in intermediate_tensors.items()
@@ -1465,7 +1430,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
-        logger.info("V1, model warm-up prefill execution")
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
         else:
@@ -1537,7 +1501,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             structured_output_request_ids={},
             grammar_bitmask=None,
             kv_connector_metadata=None)
-        logger.info("V1, model warm-up decode execution")
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
         else:

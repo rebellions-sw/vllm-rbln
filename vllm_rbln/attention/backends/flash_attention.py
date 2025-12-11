@@ -478,15 +478,6 @@ class RBLNAttentionMetadataBuilder(
             attn_masks=attn_masks,
             kv_caches=None,
         )
-        logger.debug("RBLNAttentionMetadata = %s", attn_metadata)
-        logger.debug("\tslot_mapping size = %s", slot_mapping.size())
-        logger.debug("\tblock_tables size = %s", block_tables.size())
-        if not envs.VLLM_RBLN_FLASH_CAUSAL_ATTN and attn_masks is not None:
-            logger.debug("\tattn_masks size = %s", attn_masks.size())
-            logger.debug("\tattn_masks = %s", attn_masks[:, :, :, :, :32])
-        else:
-            assert attn_masks is None
-        logger.debug("\tseq_lens_tensor size= %s", seq_lens_tensor.size())
         return attn_metadata
 
 
