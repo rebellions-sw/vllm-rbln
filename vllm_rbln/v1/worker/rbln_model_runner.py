@@ -1522,6 +1522,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.execute_model(dummy_decode_cleanup, intermediate_tensors)
         self.intermediate_tensors = None
 
+        # FIXME(RBLN): To reduce dynamo cache lookup overhead, make dyanmo
+        # evaluate a minimal set of guards required for dispatching compiled
+        # functions. This assumes that the model does not change.
+        torch.compiler.set_stance("default", skip_guard_eval_unsafe=True)
+
     def _bookkeeping_sync(
         self, scheduler_output: "SchedulerOutput",
         sampler_output: SamplerOutput, logits: Optional[torch.Tensor],

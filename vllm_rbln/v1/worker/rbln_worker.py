@@ -235,9 +235,6 @@ class RBLNWorker(WorkerBase):
         self,
         scheduler_output: "SchedulerOutput",
     ) -> Optional[Union[ModelRunnerOutput, AsyncModelRunnerOutput]]:
-        # FIXME(RBLN) - ensures model warm-up to skip guard evaluation
-        # it can reduce dynamo cache lookup overhead
-        torch.compiler.set_stance("default", skip_guard_eval_unsafe=True)
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         if forward_pass and not get_pp_group().is_first_rank:
