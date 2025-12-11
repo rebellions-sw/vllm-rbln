@@ -21,6 +21,8 @@ import rebel
 from vllm.config import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
+import os
+import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
 
@@ -109,11 +111,16 @@ class RBLNSampler(VLLMSampler):
                  seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
+
+        options = {
+            "cache_dir": os.path.join(envs.VLLM_CACHE_ROOT, "rbln_sampler")
+        }
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
             fullgraph=True,
             backend="rbln",
+            options=options,
         )
         self.logprobs_mode = logprobs_mode
 
@@ -241,6 +248,8 @@ class RBLNSampler(VLLMSampler):
         [1, 2, 4] + list(range(8, 256, 8)) + list(
             range(256, max_num_seqs + 1, 16))
         """
+        # FIXME(eunji.lee)
+        # Not used. To be removed.
         bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
         if max_num_seqs >= 8:
             # Step size 8 for small batch sizes, up to 256(not included)

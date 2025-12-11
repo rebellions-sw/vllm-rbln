@@ -59,9 +59,9 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
         pad_token = self.info.get_hf_processor().tokenizer.pad_token
         pad_token_id = self.info.get_hf_processor().tokenizer.pad_token_id
-
-        prompt_ids = prompt_ids + [pad_token_id] * padded_seq_len
-        prompt = prompt + pad_token * padded_seq_len
+        # NOTE: Left padding for Gemma3
+        prompt_ids = [pad_token_id] * padded_seq_len + prompt_ids
+        prompt = pad_token * padded_seq_len + prompt
         return prompt_ids, prompt
 
     def apply(self, *args, **kwargs):
@@ -235,10 +235,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
-                # NOTE(eunji.lee): It is a patch for bfloat16 support.
-                dtype = self.rbln_model_config.language_model.torch_dtype
-                if dtype != pixel_values.dtype:
-                    pixel_values = pixel_values.to(dtype)
         else:
             pixel_values = None
 

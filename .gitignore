@@ -176,3 +176,6 @@ cython_debug/
 .vscode/
 actionlint
 shellcheck*/
+
+# auto generated package versioning file
+_version.py

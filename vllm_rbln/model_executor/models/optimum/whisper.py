@@ -119,7 +119,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             # OR just generate pooled tensor in the model instance?
             decoder_attention_mask = torch.zeros(self.batch_size,
                                                  self.dec_max_seq_len,
-                                                 dtype=torch.float32)
+                                                 dtype=self.dtype)
             # Generate cache_position using dec_lengths
             for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
@@ -143,10 +143,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         input_features = kwargs.pop("input_features", None)
         if input_features is not None:
             input_features = input_features.squeeze(0)
-            # NOTE(eunji.lee): It is a patch for bfloat16 support.
-            dtype = self.rbln_model_config.torch_dtype
-            if dtype != input_features.dtype:
-                input_features = input_features.to(dtype)
         return input_features
 
     def clear_dict_table(self):

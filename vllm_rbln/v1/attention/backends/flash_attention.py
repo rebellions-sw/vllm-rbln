@@ -631,7 +631,7 @@ class RBLNFlashAttentionMetadataBuilder(
         common_prefix_len: int,
         common_attn_metadata: CommonAttentionMetadata,
         fast_build: bool = False,
-        num_prompt_tokens=None,
+        num_tokens=None,
         positions=None,
     ) -> RBLNFlashAttentionMetadata:
         num_reqs = common_attn_metadata.num_reqs
@@ -666,11 +666,11 @@ class RBLNFlashAttentionMetadataBuilder(
                                               partition_len).to(torch.int16)
         seq_lens_tensor = dyn_size_for_partitions
 
-        assert num_prompt_tokens is not None, (
-            "num_prompt_tokens is required for RBLN Attention Backend")
+        assert num_tokens is not None, (
+            "num_tokens is required for RBLN Attention Backend")
         is_prefills = (
             common_attn_metadata.num_computed_tokens_cpu[:num_reqs].numpy()
-            < num_prompt_tokens[:num_reqs])
+            < num_tokens[:num_reqs] - 1)
         # The prefill and decode cannot be mixed.
         assert len(is_prefills) > 0 and all(
             is_prefill == is_prefills[0]
