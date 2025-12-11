@@ -38,12 +38,11 @@ def custom_moe_glu(
     router_logits: torch.Tensor,
     k : int,
     renormalize: bool,
-    expert_map: Optional[torch.Tensor],
     # act_fn: str,
-    expert_select_count: Optional[torch.Tensor] = None,
     gate_proj_bias: Optional[torch.Tensor] = None,
     up_proj_bias: Optional[torch.Tensor] = None,
     down_proj_bias: Optional[torch.Tensor] = None,
+    expert_map: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Customized MoE GLU operation.
@@ -92,8 +91,8 @@ def custom_moe_glu(
     # After renormalize, the sum of non-zero weights in each row equals 1.0
     #   Example: [0.0, 0.0, 0.3, 0.0, 0.2, ...] -> [0.0, 0.0, 0.6, 0.0, 0.4, ...]
     #     because 0.3/(0.3+0.2) = 0.6, 0.2/(0.3+0.2) = 0.4
-    if renormalize:
-        masked_routing_weights = masked_routing_weights / masked_routing_weights.sum(dim=-1, keepdim=True)
+    # if renormalize:
+    #     masked_routing_weights = masked_routing_weights / masked_routing_weights.sum(dim=-1, keepdim=True)
 
     # ============================================================================
     # Step 5: Apply expert_map for Expert Parallelism (EP) sharding
@@ -184,12 +183,11 @@ def custom_moe_glu_fake(
     router_logits: torch.Tensor,
     k : int,
     renormalize: bool,
-    expert_map: Optional[torch.Tensor],
     # act_fn: str,
-    expert_select_count: Optional[torch.Tensor] = None,
     gate_proj_bias: Optional[torch.Tensor] = None,
     up_proj_bias: Optional[torch.Tensor] = None,
     down_proj_bias: Optional[torch.Tensor] = None,
+    expert_map: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
@@ -386,7 +384,7 @@ def unquantized_fused_moe_method_forward_rbln_custom(
     # expected tensor shape - [num_tokens, -1]
     hidden_states = x.reshape(num_tokens, -1)
     router_logits = router_logits.reshape(num_tokens, -1)
-
+    print("expert_map:", expert_map)
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/qwen3_moe_architecture.py
     # masked_routing_weights, expert_select_count = get_masked_routing_weights(router_logits, top_k, renormalize, expert_map)
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
@@ -492,7 +490,6 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
         # gather all inputs via torch.distributed.all_gather
         all_gather_buffer = get_dp_group().all_gather(x, dim=0)
         return all_gather_buffer
-
 if not envs.RBLN_MOE_CUSTOM_KERNEL:
     logger.info("[RBLN] fused moe, pytorch native kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_forward_rbln_rsd
