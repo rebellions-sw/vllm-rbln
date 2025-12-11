@@ -308,7 +308,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 sampler_logits = torch.empty(
                     self.bucket_size,
                     self.model_config.get_vocab_size(),
-                    dtype=self.model.dtype)
+                    dtype=logits.dtype)
                 sampler_logits[:num_reqs] = logits
             else:
                 sampler_logits = logits
