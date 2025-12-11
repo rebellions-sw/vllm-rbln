@@ -310,10 +310,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
-                sampler_logits = padded_logits
+                sampler_logits = padded_logits.detach().clone()
             else:
                 sampler_logits = logits
-            sampler_logits = sampler_logits.detach().clone()
             sampler_output = self.sampler(
                 logits=sampler_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
