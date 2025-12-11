@@ -141,7 +141,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
-            self.pooled_tensors: dict[int, torch.Tensor] = {}
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
@@ -251,11 +250,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
             logger.debug("Bucket sizes for RBLN sampler: %s",
                          self.bucket_sizes)
-            for bucket_size in self.bucket_sizes:
-                self.pooled_tensors[bucket_size] = torch.empty(
-                    (bucket_size, self.model_config.get_vocab_size()),
-                    dtype=self.model.dtype,
-                )
             torch._dynamo.config.recompile_limit = len(
                 self.bucket_sizes) * len(WARM_UP_CONFIGS)
             self.sampler = torch.compile(self.sampler,
@@ -308,9 +302,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         with record_function_or_nullcontext("Sample"):
             if self.use_rbln_sampler:
                 num_reqs = self.input_batch.num_reqs
-                padded_logits = self.pooled_tensors[self.bucket_size]
-                padded_logits[:num_reqs].copy_(logits)
-                sampler_logits = padded_logits.detach().clone()
+                # Avoid in-place operations on pooled tensor
+                # to prevent dispatch key mismatch
+                # Create a new tensor
+                sampler_logits = torch.empty(
+                    self.bucket_size,
+                    self.model_config.get_vocab_size(),
+                    dtype=self.model.dtype)
+                sampler_logits[:num_reqs] = logits
             else:
                 sampler_logits = logits
             sampler_output = self.sampler(
