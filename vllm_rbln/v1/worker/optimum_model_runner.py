@@ -1242,6 +1242,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if max_num_seqs >= 256:
             # Step size 16 for larger batch sizes
             bucket_sizes += list(range(256, max_num_seqs + 1, 16))
+        if max_num_seqs not in bucket_sizes:
+            bucket_sizes.append(max_num_seqs)
         return bucket_sizes
 
     def post_process_logprobs_tensors(self, logprobs_tensors: LogprobsTensors,
