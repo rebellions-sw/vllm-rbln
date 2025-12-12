@@ -621,6 +621,8 @@ class RBLNFlashAttentionMetadataBuilder(
         self.enforce_eager = (
             get_current_vllm_config().model_config.enforce_eager)
 
+        self.is_causal = envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
+
     def reorder_batch(self, input_batch: "InputBatch",
                       scheduler_output: "SchedulerOutput") -> bool:
         return False
@@ -679,7 +681,7 @@ class RBLNFlashAttentionMetadataBuilder(
         if is_prefills[0]:
             # NOTE(jiwoo.park) prefill's block_tables must be a 1D tensor.
             block_tables_tensor = block_tables_tensor[0]
-            if not envs.VLLM_RBLN_FLASH_CAUSAL_ATTN:
+            if not self.is_causal:
                 prefill_chunk_size = (
                     self.chunked_prefill_size if self.chunked_prefill else 1 <<
                     (math.ceil(math.log2(query_max_seq_len))))
@@ -709,7 +711,7 @@ class RBLNFlashAttentionMetadataBuilder(
                 seq_lens_tensor, 0, self.scheduler_config.max_num_seqs)
             block_tables_tensor = rbln_utils.pad(
                 block_tables_tensor, 0, self.scheduler_config.max_num_seqs)
-            if not envs.VLLM_RBLN_FLASH_CAUSAL_ATTN:
+            if not self.is_causal:
                 decode_attention_mask = torch.zeros(
                     self.scheduler_config.max_num_seqs,
                     1,
