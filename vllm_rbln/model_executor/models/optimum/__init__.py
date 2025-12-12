@@ -19,14 +19,15 @@ from vllm.logger import init_logger
 
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.utils.optimum.registry import (_RBLN_MULTIMODAL_MODELS,
-                                              is_enc_dec_arch, is_multi_modal,
-                                              is_pooling_arch)
+                                              is_enc_dec_arch, is_hybrid_arch,
+                                              is_multi_modal, is_pooling_arch)
 
 from .blip2 import RBLNOptimumBlip2ForConditionalGeneration  # noqa: F401
 from .decoder_only import RBLNOptimumForCausalLM
 from .encoder import RBLNOptimumForEncoderModel
 from .encoder_decoder import RBLNOptimumEncoderDecoder
 from .gemma3 import RBLNOptimumGemma3ForConditionalGeneration  # noqa: F401
+from .hybrid import RBLNOptimumHybridAttentionForCausalLM  # noqa: F401
 from .idefics3 import RBLNOptimumIdefics3ForConditionalGeneration  # noqa: F401
 from .llava import RBLNOptimumLlavaForConditionalGeneration  # noqa: F401
 from .llava_next import (  # noqa: F401
@@ -77,17 +78,24 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
             "`enable_prefix_caching` to False.")
         rbln_model = RBLNOptimumForEncoderModel(vllm_config)
     else:
-        if getattr(model_config.hf_config,
-                   "sliding_window", None) is not None and getattr(
-                       model_config.hf_config, "use_sliding_window", True):
-            logger.info(
-                "The model is initialized with Sliding Window Attention.")
+        use_sliding_window = getattr(model_config.hf_config, "sliding_window",
+                                     None) is not None and getattr(
+                                         model_config.hf_config,
+                                         "use_sliding_window", True)
+        is_hybrid = is_hybrid_arch(model_config.hf_config)
+        if use_sliding_window:
             assert vllm_config.cache_config.enable_prefix_caching in (
                 False, None), (
                     "Prefix caching is not supported with sliding window "
                     "attention. Please set `enable_prefix_caching` to False.")
-            rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
-                vllm_config)
+            if is_hybrid:
+                logger.info("The model is initialized with Hybrid Attention.")
+                rbln_model = RBLNOptimumHybridAttentionForCausalLM(vllm_config)
+            else:
+                logger.info(
+                    "The model is initialized with Sliding Window Attention.")
+                rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
+                    vllm_config)
         else:
             rbln_model = RBLNOptimumForCausalLM(vllm_config)
     return rbln_model.eval()

@@ -30,6 +30,7 @@ _RBLN_GENERATION_MODELS: dict[str, tuple[str, str]] = {
     "Qwen2ForCausalLM": ("qwen2", "RBLNQwen2ForCausalLM"),
     "OPTForCausalLM": ("opt", "RBLNOPTForCausalLM"),
     "Qwen3ForCausalLM": ("qwen3", "RBLNQwen3ForCausalLM"),
+    "GptOssForCausalLM": ("gpt-oss", "RBLNGptOssForCausalLM"),
 }
 
 _RBLN_ENCODER_DECODER_MODELS: dict[str, tuple[str, str]] = {
@@ -95,6 +96,16 @@ def is_arch_supported(config: PretrainedConfig,
     architectures = getattr(config, "architectures", [])
     return any(arch in _RBLN_SUPPORTED_MODELS and arch in model_set
                for arch in architectures)
+
+
+def is_hybrid_arch(config: PretrainedConfig) -> bool:
+    architectures = getattr(config, "architectures", [])
+    # NOTE: gemma3 is not included because it is multi-modal model
+    # FIXME: robust model detection
+    hybrid_archs = [
+        "GptOssForCausalLM",
+    ]
+    return any(arch in hybrid_archs for arch in architectures)
 
 
 def get_rbln_model_info(config: PretrainedConfig) -> tuple[str, str]:
