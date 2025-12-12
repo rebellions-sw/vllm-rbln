@@ -251,11 +251,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
             logger.debug("Bucket sizes for RBLN sampler: %s",
                          self.bucket_sizes)
-            for bucket_size in self.bucket_sizes:
-                self.pooled_tensors[bucket_size] = torch.empty(
-                    (bucket_size, self.model_config.get_vocab_size()),
-                    dtype=self.model.dtype,
-                )
+            with torch.inference_mode():
+                for bucket_size in self.bucket_sizes:
+                    self.pooled_tensors[bucket_size] = torch.empty(
+                        (bucket_size, self.model_config.get_vocab_size()),
+                        dtype=self.model.dtype,
+                    )
             torch._dynamo.config.recompile_limit = len(
                 self.bucket_sizes) * len(WARM_UP_CONFIGS)
             self.sampler = torch.compile(self.sampler,
