@@ -67,7 +67,7 @@ from vllm import LLM, SamplingParams
 from vllm.transformers_utils.config import get_hf_text_config
 
 hf_overrides_kw = {
-    "num_hidden_layers": 2,
+    "num_hidden_layers": 1,
 }
 
 # update config of multi-modal language model num_hidden_layers
@@ -108,7 +108,7 @@ llm = LLM(
     enable_chunked_prefill=True,
     max_num_batched_tokens=128,
     max_num_seqs=4,
-trust_remote_code=True,
+    trust_remote_code=True,
     tensor_parallel_size=tensor_parallel_size,
     pipeline_parallel_size=pipeline_parallel_size,
     data_parallel_size=data_parallel_size,

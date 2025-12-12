@@ -192,22 +192,6 @@ def custom_moe_glu_fake(
     return torch.empty_like(hidden_states)
 
 
-# @custom_moe_glu.register_fake
-# def custom_moe_glu_fake(
-#     hidden_states: torch.Tensor,
-#     gate_proj_weight: torch.Tensor,
-#     up_proj_weight: torch.Tensor,
-#     down_proj_weight: torch.Tensor,
-#     masked_routing_weight: torch.Tensor,
-#     expert_select_count: torch.Tensor,
-#     # act_fn: ACT_TYPES,
-#     gate_proj_bias: Optional[torch.Tensor] = None,
-#     up_proj_bias: Optional[torch.Tensor] = None,
-#     down_proj_bias: Optional[torch.Tensor] = None,
-# ) -> torch.Tensor:
-#     return torch.empty_like(hidden_states)
-
-
 def unquantized_fused_moe_method_forward_rbln_rsd(
     self,
     layer: torch.nn.Module,
@@ -230,7 +214,6 @@ def unquantized_fused_moe_method_forward_rbln_rsd(
     # selected_experts
     w1 = layer.w13_weight
     w2 = layer.w2_weight
-
     orig_shape = x.shape  # noqa: F841
     hidden_size = x.shape[-1]
     num_tokens = x.shape[:-1].numel()  # noqa: F841
@@ -384,7 +367,15 @@ def unquantized_fused_moe_method_forward_rbln_custom(
     # expected tensor shape - [num_tokens, -1]
     hidden_states = x.reshape(num_tokens, -1)
     router_logits = router_logits.reshape(num_tokens, -1)
-    print("expert_map:", expert_map)
+    
+    # Convert expert_map to a constant by extracting values and creating new tensor
+    # This prevents torch.compile from treating it as a dynamic input
+    expert_map_const = None
+    if expert_map is not None:
+        # Extract numpy array and create a fresh constant tensor
+        expert_map_list = expert_map.tolist()
+        expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
+    
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/qwen3_moe_architecture.py
     # masked_routing_weights, expert_select_count = get_masked_routing_weights(router_logits, top_k, renormalize, expert_map)
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
@@ -395,7 +386,7 @@ def unquantized_fused_moe_method_forward_rbln_custom(
         router_logits,
         top_k,
         renormalize,
-        expert_map,
+        expert_map_const,
         )
     return final_hidden_states.reshape(orig_shape)
 
