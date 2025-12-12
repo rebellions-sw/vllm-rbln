@@ -305,7 +305,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
+        start_time = time.perf_counter()
         self.model_runner.load_model()
+        elapsed_time = time.perf_counter() - start_time
+        logger.info("load_model completed in %.6f seconds (%.3f ms)",
+                    elapsed_time, elapsed_time * 1000)
 
     @torch.inference_mode()
     def determine_num_available_blocks(self) -> Tuple[int, int]:
@@ -415,7 +419,12 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             return
 
         assert self.kv_cache is not None
+
+        start_time = time.perf_counter()
         self.model_runner._dummy_run(model_inputs, self.kv_cache[0])
+        elapsed_time = time.perf_counter() - start_time
+        logger.info("compilation completed in %.6f seconds (%.3f ms)",
+                    elapsed_time, elapsed_time * 1000)
 
     def _prepare_dummy_input(
         self,
