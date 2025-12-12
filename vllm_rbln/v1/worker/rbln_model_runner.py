@@ -394,6 +394,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.max_num_batched_tokens = (
             self.scheduler_config.max_num_batched_tokens)
 
+        self.performance_tracker = None
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
@@ -1790,9 +1791,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     inputs_embeds=inputs_embeds,
                     **model_kwargs,
                 )
-            end_time = time.perf_counter()
-            if envs.VLLM_RBLN_METRICS:
+            if self.performance_tracker is not None:
                 # Record performance metrics
+                end_time = time.perf_counter()
                 execution_time = end_time - start_time
                 if is_prefills[0]:
                     self.performance_tracker.record_prefill(
