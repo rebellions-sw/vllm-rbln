@@ -16,43 +16,41 @@ import pytest
 from vllm.platforms import current_platform
 
 from .utils import (_schedule_cached_reqs, _schedule_new_request,
-                    create_grammar_bitmask, create_model_runner, make_request)
+                    create_grammar_bitmask, create_model_runner,
+                    fake_load_model, make_request)
 
 DEVICE = current_platform.device_type
 
-# @pytest.mark.parametrize(
-#     "num_seqs, expected_bucket_sizes",
-#     [
-#         pytest.param(1, [1], id="1_seq"),
-#     pytest.param(2, [1, 2], id="2_seq"),
-#     pytest.param(4, [1, 2, 4], id="4_seq"),
-#     pytest.param(8, [1, 2, 4, 8], id="8_seq"),
-#     pytest.param(16, [1, 2, 4, 8, 16], id="16_seq"),
-#     # pytest.param(32, [1, 2, 4, 8, 16, 32], id="32_seq"),
-#     pytest.param(64, [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64],
-#                  id="64_seq"),
-#     pytest.param(129, [
-#         1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112,
-#         120, 128
-#     ],
-#                  id="129_seq"),
-#     # pytest.param(256, [1, 2, 4, 8, 16, 32, 64, 128, 256], id="256_seq"),
-#     pytest.param(512, [
-#         1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112,
-#         120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216,
-#         224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384,
-#         400, 416, 432, 448, 464, 480, 496, 512
-#     ],
-#                  id="512_seq"),
-# ])
-# def test_get_bucket_sizes(monkeypatch, num_seqs: int,
-#                           expected_bucket_sizes: list[int]):
-#     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1")
-#     runner = create_model_runner(max_num_seqs=num_seqs)
-#     load_model(runner)
-#     bucket_sizes = runner.get_bucket_sizes(num_seqs)
-#     assert bucket_sizes == expected_bucket_sizes
-#     assert len(runner.pooled_tensors) == len(expected_bucket_sizes)
+
+@pytest.mark.parametrize("num_seqs, expected_bucket_sizes", [
+    pytest.param(1, [1], id="1_seq"),
+    pytest.param(2, [1, 2], id="2_seq"),
+    pytest.param(16, [1, 2, 4, 8, 16], id="16_seq"),
+    pytest.param(17, [1, 2, 4, 8, 16, 17], id="17_seq"),
+    pytest.param(61, [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 61], id="64_seq"),
+    pytest.param(512, [
+        1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120,
+        128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232,
+        240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432,
+        448, 464, 480, 496, 512
+    ],
+                 id="512_seq"),
+    pytest.param(515, [
+        1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120,
+        128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232,
+        240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432,
+        448, 464, 480, 496, 512, 515
+    ],
+                 id="515_seq"),
+])
+def test_get_bucket_sizes(monkeypatch, num_seqs: int,
+                          expected_bucket_sizes: list[int]):
+    monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1")
+    runner = create_model_runner(max_num_seqs=num_seqs)
+    fake_load_model(runner)
+    bucket_sizes = runner.get_bucket_sizes(num_seqs)
+    assert bucket_sizes == expected_bucket_sizes
+    assert len(runner.pooled_tensors) == len(expected_bucket_sizes)
 
 
 @pytest.mark.parametrize("use_rbln_sampler, use_structured_output", [
@@ -71,8 +69,10 @@ def test_forward_decode(monkeypatch, use_rbln_sampler, use_structured_output):
     # Prefill
     for i in range(3):
         req_id = f"req_{i}"
-        reqs.append(make_request(request_id=req_id, prompt_token_ids=[1, 2,
-                                                                      3]))
+        reqs.append(
+            make_request(request_id=req_id,
+                         prompt_token_ids=[1, 2, 3],
+                         top_p=0.5))
 
     for i, req in enumerate(reqs):
         req_id = req.request_id

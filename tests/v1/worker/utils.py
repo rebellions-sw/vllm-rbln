@@ -65,6 +65,10 @@ class MockModelWrapper(nn.Module):
         super().__init__()
         self.model = self.MockModel()
 
+    @property
+    def dtype(self):
+        return torch.float32
+
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         return hidden_states
@@ -77,7 +81,7 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
         current_vocab_size = runner.model_config.get_vocab_size()
 
         return torch.randn((current_num_reqs, 1, current_vocab_size),
-                           dtype=torch.float32,
+                           dtype=runner.model.dtype,
                            device=runner.device)
 
     runner.model = MockModelWrapper()
@@ -87,11 +91,12 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
     if runner.use_rbln_sampler:
         runner.bucket_sizes = tuple(
             runner.get_bucket_sizes(runner.max_num_reqs))
-        for bucket_size in runner.bucket_sizes:
-            runner.pooled_tensors[bucket_size] = torch.empty(
-                (bucket_size, runner.model_config.get_vocab_size()),
-                dtype=torch.float32,
-            )
+        with torch.inference_mode():
+            for bucket_size in runner.bucket_sizes:
+                runner.pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, runner.model_config.get_vocab_size()),
+                    dtype=runner.model.dtype,
+                )
         torch._dynamo.config.recompile_limit = len(
             runner.bucket_sizes) * len(WARM_UP_CONFIGS)
         runner.sampler = torch.compile(runner.sampler,
@@ -121,6 +126,7 @@ def make_request(
     mm_hashes: Optional[list[str]] = None,
     prompt_logprobs: Optional[int] = None,
     cache_salt: Optional[str] = None,
+    top_p: Optional[float] = None,
 ):
     mm_features = []
     if mm_positions is not None:
@@ -132,12 +138,16 @@ def make_request(
                 identifier=identifier,
                 modality="image")
             mm_features.append(mm_feature)
-
+    sampling_dict = {}
+    if top_p is not None:
+        sampling_dict["top_p"] = top_p
+    sampling_params = SamplingParams(max_tokens=17,
+                                     prompt_logprobs=prompt_logprobs,
+                                     **sampling_dict)
     return Request(request_id=request_id,
                    prompt_token_ids=prompt_token_ids,
                    mm_features=mm_features if mm_features else None,
-                   sampling_params=SamplingParams(
-                       max_tokens=17, prompt_logprobs=prompt_logprobs),
+                   sampling_params=sampling_params,
                    pooling_params=None,
                    eos_token_id=100,
                    lora_request=None,
