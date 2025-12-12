@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+import time
 from typing import TYPE_CHECKING, Optional, Union, cast
 
 import numpy as np
@@ -55,6 +56,7 @@ from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
+from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -221,6 +223,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             device="cpu",
             pin_memory=self.pin_memory)
 
+        if envs.VLLM_RBLN_METRICS:
+            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker.register_cleanup()
+
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
             self.model = get_optimum_model(vllm_config=self.vllm_config)
@@ -290,7 +296,18 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 scheduler_output)
 
         with record_function_or_nullcontext("Forward"):
+            start_time = time.perf_counter()
             hidden_states = self.model(model_input)
+            end_time = time.perf_counter()
+            if envs.VLLM_RBLN_METRICS:
+                # Record performance metrics
+                execution_time = end_time - start_time
+                if model_input.is_prompt:
+                    self.performance_tracker.record_prefill(
+                        execution_time, num_scheduled_tokens)
+                else:
+                    self.performance_tracker.record_decode(
+                        execution_time, num_scheduled_tokens)
 
         with record_function_or_nullcontext("Postprocess"):
             if self.is_pooling_model:
