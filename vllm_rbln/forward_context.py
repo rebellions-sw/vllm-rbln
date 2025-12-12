@@ -43,7 +43,6 @@ class RBLNDPMetadata(DPMetadata):
     ) -> "RBLNDPMetadata":
 
         parallel_config = vllm_config.parallel_config
-        # assert parallel_config.data_parallel_size > 1
         dp_size = parallel_config.data_parallel_size
         dp_rank = parallel_config.data_parallel_rank
 
