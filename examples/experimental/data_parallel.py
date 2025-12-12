@@ -47,6 +47,8 @@ from time import sleep
 from vllm import LLM, SamplingParams
 from vllm.utils import get_open_port
 
+os.environ['VLLM_TORCH_PROFILER_DIR'] = './profile'
+
 hf_overrides_kw = {
     "num_hidden_layers": 2,
 }
@@ -64,8 +66,13 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     if not vllm_use_v1:
         # in v0 worker, each process has distinct RBLN_DEVICES
         rbln_devices = ""
-        start_index = local_dp_rank * tp_size
-        end_index = start_index + tp_size
+        if os.environ.get("VLLM_RBLN_TP_SIZE") is None:
+            rsd_size = 1
+        else:
+            rsd_size = int(os.environ.get("VLLM_RBLN_TP_SIZE"))
+        rsd_tp_size = tp_size * rsd_size
+        start_index = local_dp_rank * rsd_tp_size
+        end_index = start_index + rsd_tp_size
         for index in range(start_index, end_index):
             if rbln_devices:
                 rbln_devices += ","
@@ -122,7 +129,9 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
         #data_parallel_size=dp_size,
         #enforce_eager=True,
     )
+    llm.start_profile()
     outputs = llm.generate(prompts, sampling_params)
+    llm.stop_profile()
     # Print the outputs.
     for i, output in enumerate(outputs):
         prompt = output.prompt
