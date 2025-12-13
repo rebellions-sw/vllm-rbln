@@ -150,20 +150,8 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
         Generate attention mask and position ids for gemma.
         """
         max_seq_len = rbln_model_config.max_seq_len
-        if rbln_model_config.use_attention_mask:
-            if rbln_model_config.attn_mask_type == "2D":
-                seq_range = torch.arange(max_seq_len).unsqueeze(
-                    0)  # (1, max_seq_len,)
-                attention_mask = (seq_range <= cache_position).to(
-                    rbln_model_config.torch_dtype)
-            else:
-                attention_mask = torch.zeros(
-                    padded_batch_size,
-                    1,
-                    rbln_model_config.prefill_chunk_size,
-                    rbln_model_config.max_seq_len,
-                    dtype=rbln_model_config.torch_dtype)
-        else:
-            attention_mask = None
+        seq_range = torch.arange(max_seq_len).unsqueeze(0)  # (1, max_seq_len,)
+        attention_mask = (seq_range
+                          <= cache_position).to(rbln_model_config.torch_dtype)
         position_ids = cache_position.clone()
         return attention_mask, position_ids

@@ -15,18 +15,24 @@
 import asyncio
 
 import fire
-import requests
-from PIL import Image
+from datasets import load_dataset
 from transformers import AutoTokenizer
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
 def generate_prompts(batch_size: int):
-    # FIXME: add more prompts and images
-    texts = ["caption es"]
-    url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg?download=true"
-    image = Image.open(requests.get(url, stream=True).raw)
-    images = [image]
+    images = []
+    texts = []
+    dataset = load_dataset("takara-ai/image_captions",
+                           split="train",
+                           streaming=True).take(batch_size).shuffle(seed=42)
+
+    for example in dataset:
+        images.append(example["image"])
+    # NOTE
+    # "caption en" means "generate caption in English"
+    # "caption es" means "generate caption in Spanish"
+    texts = ["caption en"] * batch_size
 
     return [{
         "prompt": text,
@@ -83,7 +89,7 @@ async def main(
 
 def entry_point(
     num_input_prompt: int = 10,
-    model_id: str = "./paligemma_b4",
+    model_id: str = "/home/eunji.lee/nas_data/1212_models/paligemma_b2",
 ):
     asyncio.run(main(
         num_input_prompt=num_input_prompt,
