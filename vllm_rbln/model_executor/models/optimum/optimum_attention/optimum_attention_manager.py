@@ -71,9 +71,6 @@ class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
         self._s.clear()
 
 
-HybridAttentionManager = AttentionManager
-
-
 class HybridAttentionImageManager(
         AttentionManager[HybridAttentionImageStrategy,
                          HybridAttentionImageEntry, HybridR1, HybridR2]):

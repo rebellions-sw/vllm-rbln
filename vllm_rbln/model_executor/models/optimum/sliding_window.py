@@ -29,6 +29,13 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         RBLNOptimumModelBase,
         RBLNOptimumDecoderMixin,
 ):
+    """
+    Text-only generation model support
+    - Sliding window attention
+    - Hybrid attention (full + sliding window layers)
+    
+    Note: Gemma3 uses hybrid attention but is multi-modal.
+    """
 
     def __init__(
         self,

@@ -239,8 +239,6 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, InnerR1,
         )
 
 
-HybridAttentionStrategy = InnerAttentionStrategy
-
 HybridR1 = tuple[list[int], list[int], list[torch.Tensor]]
 HybridR2 = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
