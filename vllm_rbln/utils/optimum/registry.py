@@ -98,16 +98,6 @@ def is_arch_supported(config: PretrainedConfig,
                for arch in architectures)
 
 
-def is_hybrid_arch(config: PretrainedConfig) -> bool:
-    architectures = getattr(config, "architectures", [])
-    # NOTE: gemma3 is not included because it is multi-modal model
-    # FIXME: robust model detection
-    hybrid_archs = [
-        "GptOssForCausalLM",
-    ]
-    return any(arch in hybrid_archs for arch in architectures)
-
-
 def get_rbln_model_info(config: PretrainedConfig) -> tuple[str, str]:
     architectures = getattr(config, "architectures", [])
     for arch in architectures:

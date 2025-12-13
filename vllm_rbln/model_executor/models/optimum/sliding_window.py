@@ -99,7 +99,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 input_ids=input_ids,
                 cache_position=cache_position,
                 local_block_tables=local_block_table_id,
-                block_tables=block_tables,
+                block_tables=block_tables if self.is_hybrid else None,
             )
             logits = output.logits
             assert len(running_requests_ids) == 1
@@ -120,7 +120,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 input_ids=input_ids,
                 cache_position=cache_position,
                 local_block_tables=local_block_table_id,
-                block_tables=block_tables,
+                block_tables=block_tables if self.is_hybrid else None,
             ).logits
 
         if not is_prompt:

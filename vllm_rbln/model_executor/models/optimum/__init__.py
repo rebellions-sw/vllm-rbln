@@ -19,8 +19,8 @@ from vllm.logger import init_logger
 
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.utils.optimum.registry import (_RBLN_MULTIMODAL_MODELS,
-                                              is_enc_dec_arch, is_hybrid_arch,
-                                              is_multi_modal, is_pooling_arch)
+                                              is_enc_dec_arch, is_multi_modal,
+                                              is_pooling_arch)
 
 from .blip2 import RBLNOptimumBlip2ForConditionalGeneration  # noqa: F401
 from .decoder_only import RBLNOptimumForCausalLM
@@ -87,8 +87,7 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                     "Prefix caching is not supported with sliding window "
                     "attention. Please set `enable_prefix_caching` to False.")
             logger.info(
-                "The model is initialized with Sliding Window / Hybrid Attention."
-            )
+                "The model is initialized with Sliding Window Attention.")
             rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
                 vllm_config)
         else:
