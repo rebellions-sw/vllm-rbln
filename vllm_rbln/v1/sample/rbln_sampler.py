@@ -21,6 +21,8 @@ import rebel
 from vllm.config import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
+import os
+import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
 
@@ -109,11 +111,17 @@ class RBLNSampler(VLLMSampler):
                  seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
+
+        options = {
+            "cache_dir": os.path.join(envs.VLLM_CACHE_ROOT, "rbln_sampler")
+        }
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
             fullgraph=True,
-            backend="rbln")
+            backend="rbln",
+            options=options,
+        )
         self.logprobs_mode = logprobs_mode
 
     def apply_topp_sampler(
@@ -161,7 +169,6 @@ class RBLNSampler(VLLMSampler):
         The various logits processing functions called in this method
         may update the logits tensor in-place.
         """
-
         assert not (sampling_metadata.all_greedy
                     and sampling_metadata.all_random)
         if sampling_metadata.all_random:
@@ -191,7 +198,6 @@ class RBLNSampler(VLLMSampler):
         # Covering other cases with RBLN is work in progress.
         if (sampling_metadata.top_p is not None
                 and sampling_metadata.top_k is None):
-
             random_sampled, processed_logprobs = self.apply_topp_sampler(
                 logits, sampling_metadata.top_p)
 
@@ -231,6 +237,27 @@ class RBLNSampler(VLLMSampler):
                 sampling_metadata.output_token_ids,
             )
         return logits
+
+    @staticmethod
+    def get_bucket_sizes(max_num_seqs: int) -> list[int]:
+        """Get the bucket sizes for the sampler.
+        Args:
+            max_num_seqs (int): The maximum number of sequences.
+        Returns:
+            list[int]: The bucket sizes.
+        [1, 2, 4] + list(range(8, 256, 8)) + list(
+            range(256, max_num_seqs + 1, 16))
+        """
+        # FIXME(eunji.lee)
+        # Not used. To be removed.
+        bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
+        if max_num_seqs >= 8:
+            # Step size 8 for small batch sizes, up to 256(not included)
+            bucket_sizes += list(range(8, min(max_num_seqs + 1, 256), 8))
+        if max_num_seqs >= 256:
+            # Step size 16 for larger batch sizes
+            bucket_sizes += list(range(256, max_num_seqs + 1, 16))
+        return bucket_sizes
 
 
 WARM_UP_CONFIGS = [

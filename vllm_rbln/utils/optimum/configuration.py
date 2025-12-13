@@ -22,9 +22,9 @@ if TYPE_CHECKING:
 else:
     VllmConfig = None
 from vllm_rbln.logger import init_logger
-
-from .registry import (get_rbln_model_info, is_enc_dec_arch, is_multi_modal,
-                       is_pooling_arch)
+from vllm_rbln.utils.optimum.registry import (get_rbln_model_info,
+                                              is_enc_dec_arch, is_multi_modal,
+                                              is_pooling_arch)
 
 logger = init_logger(__name__)
 

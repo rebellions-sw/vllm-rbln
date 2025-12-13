@@ -4,4 +4,4 @@ pyyaml
 datasets
 qwen_vl_utils
 vllm==0.10.2
-optimum-rbln>=0.9.2a7
+optimum-rbln>=0.9.4a1

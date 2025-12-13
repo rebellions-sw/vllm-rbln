@@ -13,6 +13,7 @@
 # limitations under the License.
 """A RBLN worker class."""
 import os
+import time
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -20,11 +21,15 @@ import torch.distributed
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, VllmConfig)
-from vllm.distributed import (ensure_model_parallel_initialized,
+from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
                               init_distributed_environment)
+from vllm.forward_context import DPMetadata
 from vllm.model_executor import set_random_seed
+from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.platforms import current_platform
-from vllm.sequence import ExecuteModelRequest
+from vllm.sampling_params import SamplingParams
+from vllm.sequence import (ExecuteModelRequest, IntermediateTensors,
+                           SequenceGroupMetadata)
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, bind_kv_cache
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
@@ -34,6 +39,8 @@ try:
 except ImportError:
     from vllm.worker.worker_base import (
         LoraNotSupportedWorkerBase as LoRANotSupportedWorkerBase, )
+
+from vllm.worker.model_runner_base import BroadcastableModelInput
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -102,7 +109,7 @@ class RBLNCacheEngine:
             self.model_config.is_attention_free,
         )
 
-        logger.info("[RBLN] initialize cache engine")
+        logger.info("initialize cache engine")
         # Initialize the cache.
         # TODO : cpu_cache will be replaced with dev_cache
         self.cpu_cache = self._allocate_kv_cache(
@@ -116,17 +123,15 @@ class RBLNCacheEngine:
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_heads, self.head_size)
         kv_cache: List[torch.Tensor] = []
-        logger.info("[RBLN] attention backend get_kv_cache_shape = %s",
+        logger.info("attention backend get_kv_cache_shape = %s",
                     kv_cache_shape)
-        logger.info("[RBLN] allocate kv cache shape = %s", kv_cache_shape)
+        logger.info("allocate kv cache shape = %s", kv_cache_shape)
         kv_cache_size = 1
         for dim in kv_cache_shape:
             kv_cache_size *= dim
-        logger.info("[RBLN] 1 layer : allocate kv cache size = %d",
-                    kv_cache_size)
+        logger.info("1 layer : allocate kv cache size = %d", kv_cache_size)
         kv_cache_size *= self.num_layers
-        logger.info("[RBLN] all layers : allocate kv cache size = %d",
-                    kv_cache_size)
+        logger.info("all layers : allocate kv cache size = %d", kv_cache_size)
 
         # allocate kv cache onto RBLN device
         # RBLN device tensor allocation
@@ -134,7 +139,7 @@ class RBLNCacheEngine:
             kv_cache.append(
                 torch.empty(kv_cache_shape,
                             dtype=self.dtype).to(self.device_config.device))
-        logger.info("[RBLN] allocate kv cache length = %d", len(kv_cache))
+        logger.info("allocate kv cache length = %d", len(kv_cache))
 
         return kv_cache
 
@@ -145,7 +150,7 @@ class RBLNCacheEngine:
         raise NotImplementedError("Swap is not supported in RBLNCacheEngine.")
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:
-        logger.info("[RBLN] copy kv cache")
+        logger.info("copy kv cache")
         self.attn_backend.copy_blocks(self.cpu_cache, src_to_dsts)
 
     @staticmethod
@@ -173,7 +178,7 @@ class RBLNCacheEngine:
             dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_dtype]
         dtype_size = torch.tensor([], dtype=dtype).element_size()
         total_size = dtype_size * total
-        logger.info("[RBLN] get kv cache block size = %d", total_size)
+        logger.info("get kv cache block size = %d", total_size)
         return total_size
 
 
@@ -192,11 +197,12 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         is_driver_worker: bool = False,
     ) -> None:
         WorkerBase.__init__(self, vllm_config=vllm_config)
-        assert "rbln" in current_platform.get_device_name().lower()
 
         self.local_rank = local_rank
         self.rank = rank
         self.parallel_config.rank = rank
+        self.parallel_config.local_world_size = (
+            self.parallel_config.world_size // envs.VLLM_RBLN_NUM_RAY_NODES)
 
         distributed_backend = self.parallel_config.distributed_executor_backend
         if distributed_backend == "mp":
@@ -244,6 +250,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         else:
             self.profiler = None
 
+        self.is_dummy_execute_phase = False
+        self.dummy_execute_model_req: Optional[ExecuteModelRequest] = None
+
     def start_profile(self):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
@@ -255,12 +264,13 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.profiler.stop()
 
     def set_device(self) -> None:
-        world_size = self.parallel_config.world_size
+        world_size = self.parallel_config.local_world_size
         env_var = current_platform.device_control_env_var
 
         total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
-        if env_var not in os.environ:
+        distributed_backend = self.parallel_config.distributed_executor_backend
+        if env_var not in os.environ or distributed_backend == "ray":
             device_ids = [str(i) for i in range(total_device_count)]
         else:
             device_ids = os.environ[env_var].split(",")
@@ -268,7 +278,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # This check is only valid for single node mp backends, invalid for ray
         # ex) node#0 : RBLN_DEVICES=0,1
         #     node#1 : RBLN_DEVICES=2,3
-        distributed_backend = self.parallel_config.distributed_executor_backend
         if distributed_backend == "mp" and len(
                 device_ids) < total_device_count:
             raise RuntimeError(f"{env_var} has devices {device_ids}"
@@ -296,7 +305,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
+        start_time = time.perf_counter()
         self.model_runner.load_model()
+        elapsed_time = time.perf_counter() - start_time
+        logger.info("load_model completed in %.6f seconds (%.3f ms)",
+                    elapsed_time, elapsed_time * 1000)
 
     @torch.inference_mode()
     def determine_num_available_blocks(self) -> Tuple[int, int]:
@@ -364,6 +377,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # Initialize the cache.
         self._init_cache_engine()
 
+        self._warm_up_model()
+
     def _init_cache_engine(self):
         assert self.cache_config.num_gpu_blocks is not None
         # All cache engines share the same cpu_cache
@@ -396,6 +411,122 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             for kv_cache in cpu_cache:
                 self.model_runner.compile_context.mark_static_address(kv_cache)
 
+    def _warm_up_model(self) -> None:
+        model_inputs = self._prepare_dummy_input()
+        if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL \
+            or not envs.VLLM_RBLN_ENABLE_WARM_UP:
+            logger.warning("skipping _warm_up_model")
+            return
+
+        assert self.kv_cache is not None
+
+        start_time = time.perf_counter()
+        self.model_runner._dummy_run(model_inputs, self.kv_cache[0])
+        elapsed_time = time.perf_counter() - start_time
+        logger.info("compilation completed in %.6f seconds (%.3f ms)",
+                    elapsed_time, elapsed_time * 1000)
+
+    def _prepare_dummy_input(
+        self,
+        max_num_batched_tokens: int = 1,
+        max_num_seqs: int = 1
+    ) -> Tuple[BroadcastableModelInput, BroadcastableModelInput]:
+        prefill_req = None
+        decode_req = None
+        if self.is_driver_worker:
+            num_blocks = self.cache_config.num_gpu_blocks
+            sampling_params = SamplingParams()
+
+            prefill_seqs: List[SequenceGroupMetadata] = []
+            decode_seqs: List[SequenceGroupMetadata] = []
+
+            for group_id in range(max_num_seqs):
+                seq_len = max_num_batched_tokens
+
+                dummy_data = self.model_runner.input_registry \
+                    .dummy_data_for_profiling(self.model_config,
+                                            seq_len,
+                                            self.model_runner.mm_registry)
+                prefill_seq_data = dummy_data.seq_data
+                block_tables = {group_id: [num_blocks]}
+
+                prefill_seq = SequenceGroupMetadata(
+                    request_id=str(group_id),
+                    is_prompt=True,
+                    seq_data={group_id: prefill_seq_data},
+                    sampling_params=sampling_params,
+                    block_tables=block_tables,
+                )
+                prefill_seqs.append(prefill_seq)
+
+                decode_seq_data = prefill_seq_data.from_seqs(
+                    prefill_seq_data.get_prompt_token_ids(),
+                    prefill_seq_data.get_prompt_token_ids()[-1:],
+                )
+                decode_seq_data.update_num_computed_tokens(seq_len)
+
+                decode_seq = SequenceGroupMetadata(
+                    request_id=str(group_id),
+                    is_prompt=False,
+                    seq_data={group_id: decode_seq_data},
+                    sampling_params=sampling_params,
+                    block_tables=block_tables,
+                )
+                decode_seqs.append(decode_seq)
+
+            prefill_req = ExecuteModelRequest(prefill_seqs[:1])
+            decode_req = ExecuteModelRequest(decode_seqs)
+
+        if self.parallel_config.data_parallel_size > 1:
+            self.dummy_execute_model_req = prefill_req
+            max_num_batched_tokens = \
+                self.scheduler_config.max_num_batched_tokens
+            max_num_seqs = self.scheduler_config.max_num_seqs
+            if envs.VLLM_RBLN_DP_IMPL == "padded_decode":
+                # TODO: consider relaxing this constraint
+                assert max_num_batched_tokens % max_num_seqs == 0, \
+                    "max_num_batched_tokens must be divisible by max_num_seqs"
+
+        prefill_inputs = self.prepare_input(prefill_req)
+        decode_inputs = self.prepare_input(decode_req)
+        prefill_model_input, _, _ = prefill_inputs
+        decode_model_input, _, _ = decode_inputs
+        return (prefill_model_input, decode_model_input)
+
+    def _prepare_dp_model(self, model_input: BroadcastableModelInput) -> None:
+        dp_size = self.parallel_config.data_parallel_size
+        if self.is_dummy_execute_phase or dp_size <= 1:
+            return
+
+        dp_rank = self.parallel_config.data_parallel_rank
+        assert model_input.attn_metadata is not None
+        if model_input.attn_metadata.num_prefill_tokens > 0:
+            num_tokens = \
+                self.scheduler_config.max_num_batched_tokens
+        else:
+            num_tokens = self.scheduler_config.max_num_seqs
+
+        num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
+            num_tokens, dp_size, dp_rank)
+
+        if model_input.attn_metadata.num_prefill_tokens > 0:
+            return
+
+        def is_same_phase(val, tensors):
+            return all(t == val for t in tensors)
+
+        same_phase = is_same_phase(num_tokens, num_tokens_across_dp)
+        if same_phase:
+            return
+
+        self.is_dummy_execute_phase = True
+        while not same_phase:
+            self.execute_model(self.dummy_execute_model_req)
+            num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
+                num_tokens, dp_size, dp_rank)
+            same_phase = is_same_phase(num_tokens, num_tokens_across_dp)
+        self.is_dummy_execute_phase = False
+
     @property
     def do_metadata_broadcast(self) -> bool:
         return self.parallel_config.tensor_parallel_size > 1
@@ -422,6 +553,71 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                 worker_input.blocks_to_copy)
             """
 
+    def execute_model(
+        self,
+        execute_model_req: Optional[ExecuteModelRequest] = None,
+    ) -> Optional[List[SamplerOutput]]:
+        """Executes at least one model step on the given sequences, unless no
+        sequences are provided."""
+        start_time = time.perf_counter()
+
+        inputs = self.prepare_input(execute_model_req)
+        if inputs is None:
+            return None
+
+        model_input, worker_input, kwargs = inputs
+        num_steps = worker_input.num_steps
+
+        if envs.VLLM_RBLN_DP_IMPL == "dummy_prefill":
+            self._prepare_dp_model(model_input)
+
+        self.execute_worker(worker_input)
+
+        # If there is no input, we don't need to execute the model.
+        if worker_input.num_seq_groups == 0:
+            return []
+
+        intermediate_tensors = None
+        orig_model_execute_time = 0.0
+        if not get_pp_group().is_first_rank:
+            # NOTE - DO NOT all_gather_group for RBLN pp
+            intermediate_tensors = IntermediateTensors(
+                get_pp_group().recv_tensor_dict())
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_execute_time):
+                orig_model_execute_time = intermediate_tensors.tensors.get(
+                    "model_execute_time", torch.tensor(0)).item()
+
+        output = self.model_runner.execute_model(
+            model_input=model_input,
+            kv_caches=self.kv_cache[worker_input.virtual_engine]
+            if self.kv_cache is not None else None,
+            intermediate_tensors=intermediate_tensors,
+            num_steps=num_steps,
+            **kwargs,
+        )
+
+        model_execute_time = time.perf_counter() - start_time
+        if not get_pp_group().is_last_rank:
+            # output is IntermediateTensors
+            assert isinstance(output, IntermediateTensors)
+            if (self.observability_config is not None
+                    and self.observability_config.collect_model_execute_time):
+                output.tensors["model_execute_time"] = torch.tensor(
+                    model_execute_time + orig_model_execute_time)
+            # NOTE - DO NOT all_gather_group for RBLN pp
+            get_pp_group().send_tensor_dict(output.tensors)
+            return [None]
+        if (self.observability_config is not None
+                and self.observability_config.collect_model_execute_time
+                and output is not None):
+            for o in output:
+                o.model_execute_time = (orig_model_execute_time +
+                                        model_execute_time)
+
+        # output is List[SamplerOutput]
+        return output
+
     def get_cache_block_size_bytes(self) -> int:
         """Get the size of the KV cache block size in bytes."""
         return RBLNCacheEngine.get_cache_block_size(
@@ -435,6 +631,14 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # Set envs for RCCL
         os.environ['LOCAL_RANK'] = str(self.local_rank)
         os.environ['WORLD_SIZE'] = str(self.parallel_config.world_size)
+
+        if self.parallel_config.data_parallel_size > 1:
+            world_size = self.parallel_config.world_size
+            rank = self.parallel_config.data_parallel_rank * world_size
+            rank += self.local_rank
+            world_size = self.parallel_config.world_size_across_dp
+            os.environ['LOCAL_RANK'] = str(rank)
+            os.environ['WORLD_SIZE'] = str(world_size)
 
         init_distributed_environment(
             world_size=self.parallel_config.world_size,
@@ -455,3 +659,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             self.parallel_config.tensor_parallel_size,
             self.parallel_config.pipeline_parallel_size,
         )
+
+    def shutdown(self) -> None:
+        logger.info("v0 rbln_worker shutdown called")
+        if envs.VLLM_RBLN_METRICS:
+            # FIXME - performance tracker atexit is not called
+            self.model_runner.performance_tracker.print_final_stats()

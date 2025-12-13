@@ -20,7 +20,6 @@ import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
-from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.tasks import SupportedTask
@@ -31,6 +30,7 @@ from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.worker.worker_base import WorkerBase
 
 import vllm_rbln.rbln_envs as envs
+from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 logger = init_logger(__name__)
@@ -159,6 +159,12 @@ class RBLNOptimumWorker(WorkerBase):
 
     def pin_lora(self, lora_id: int) -> bool:
         raise RuntimeError("It is not required in vLLM RBLN.")
+
+    def shutdown(self) -> None:
+        logger.info("v1 optimum_worker shutdown called")
+        if envs.VLLM_RBLN_METRICS:
+            # FIXME - performance tracker atexit is not called
+            self.model_runner.performance_tracker.print_final_stats()
 
 
 def init_worker_distributed_environment(

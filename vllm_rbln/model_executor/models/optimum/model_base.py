@@ -11,10 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import bisect
 import math
 import os
-from functools import cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,6 +28,7 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
+from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 
 logger = init_logger(__name__)
@@ -174,6 +173,17 @@ class RBLNOptimumModelBase(nn.Module):
         self.attn_impl = model.get_attn_impl() if hasattr(
             model, "get_attn_impl") else None
 
+    @property
+    def dtype(self) -> torch.dtype:
+        assert self.model.rbln_config._torch_dtype is not None
+
+        _torch_dtype = self.model.rbln_config._torch_dtype
+        if "bfloat16" in _torch_dtype:
+            return torch.bfloat16
+        elif "float32":
+            return torch.float32
+        raise ValueError(f"Unsupported dtype: {_torch_dtype}")
+
 
 class RBLNOptimumDecoderMixin:
 
@@ -291,7 +301,7 @@ class RBLNOptimumDecoderMixin:
                     request_nums = input_ids.shape[0]
                 # Select lower-bounded batch size in case of multiple decoders
                 if self.use_multiple_decoder:
-                    padded_batch_size = self.select_lower_bounded_batch_size(
+                    padded_batch_size = select_bucket_size(
                         request_nums, self.decoder_batch_sizes)
 
             input_ids, cache_position, block_tables = self.pad_decoder_items(
@@ -354,16 +364,11 @@ class RBLNOptimumDecoderMixin:
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
+        # Only for V0
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
+    # It is required for decoder models in openai api server
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         return self.logits_processor(None, hidden_states, sampling_metadata)
-
-    @classmethod
-    @cache
-    def select_lower_bounded_batch_size(self, original_batch_size: int,
-                                        decoder_batch_sizes: tuple):
-        index = bisect.bisect_left(decoder_batch_sizes, original_batch_size)
-        return decoder_batch_sizes[index]

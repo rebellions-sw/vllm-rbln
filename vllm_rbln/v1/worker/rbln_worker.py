@@ -23,7 +23,7 @@ from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment,
                               set_custom_all_reduce)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
-from vllm.distributed.parallel_state import get_pp_group, get_tp_group
+from vllm.distributed.parallel_state import get_pp_group
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
@@ -65,7 +65,6 @@ class RBLNWorker(WorkerBase):
             distributed_init_method=distributed_init_method,
             is_driver_worker=is_driver_worker,
         )
-        assert "rbln" in current_platform.get_device_name().lower()
         self.device = torch.device(current_platform.device_type)
 
         if self.parallel_config.distributed_executor_backend == "ray":
@@ -218,11 +217,12 @@ class RBLNWorker(WorkerBase):
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def compile_or_warm_up_model(self) -> None:
-        if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
+        if (self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL
+                or not envs.VLLM_RBLN_ENABLE_WARM_UP):
             logger.warning("skipping compile_or_warm_up_model")
             return
 
-        self.model_runner.warmup_model()
+        self.model_runner.warm_up_model()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
@@ -238,9 +238,9 @@ class RBLNWorker(WorkerBase):
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         if forward_pass and not get_pp_group().is_first_rank:
+            # NOTE - DO NOT all_gather_group for RBLN pp
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict(
-                    all_gather_group=get_tp_group()))
+                get_pp_group().recv_tensor_dict())
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
@@ -252,9 +252,8 @@ class RBLNWorker(WorkerBase):
         assert parallel_config.distributed_executor_backend != (
             "external_launcher") and not get_pp_group().is_last_rank
 
-        get_pp_group().send_tensor_dict(output.tensors,
-                                        all_gather_group=get_tp_group())
-
+        # NOTE - DO NOT all_gather_group for RBLN pp
+        get_pp_group().send_tensor_dict(output.tensors)
         kv_connector_output = output.kv_connector_output
         if not kv_connector_output:
             return None
@@ -268,6 +267,9 @@ class RBLNWorker(WorkerBase):
         output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
         output.kv_connector_output = kv_connector_output
         return output
+
+    def execute_dummy_batch(self) -> None:
+        return
 
     def profile(self, is_start: bool = True):
         if self.profiler is None:
@@ -297,6 +299,12 @@ class RBLNWorker(WorkerBase):
         # worker will always be healthy as long as it's running.
         return
 
+    def shutdown(self) -> None:
+        logger.info("v1 rbln_worker shutdown called")
+        if envs.VLLM_RBLN_METRICS:
+            # FIXME - performance tracker atexit is not called
+            self.model_runner.performance_tracker.print_final_stats()
+
 
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
@@ -307,15 +315,27 @@ def init_worker_distributed_environment(
 ) -> None:
     """Initialize the distributed environment."""
     parallel_config = vllm_config.parallel_config
+    world_size = parallel_config.world_size
 
     # Set envs for RCCL
     os.environ['LOCAL_RANK'] = str(local_rank)
-    os.environ['WORLD_SIZE'] = str(parallel_config.world_size)
+    os.environ['WORLD_SIZE'] = str(world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
+    if parallel_config.data_parallel_size > 1:
+        world_size_across_dp = parallel_config.world_size_across_dp
+        dp_rank = parallel_config.data_parallel_rank
+        rank_across_dp = dp_rank * world_size
+        rank_across_dp += local_rank
+        logger.info("world_size_across_dp = %s, rank_across_dp = %s",
+                    world_size_across_dp, rank_across_dp)
+        # consider across_dp
+        os.environ['LOCAL_RANK'] = str(rank_across_dp)
+        os.environ['WORLD_SIZE'] = str(world_size_across_dp)
+
     init_distributed_environment(
-        parallel_config.world_size,
+        world_size,
         rank,
         distributed_init_method,
         local_rank,

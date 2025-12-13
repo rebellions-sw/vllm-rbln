@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import tempfile
 from collections.abc import Callable
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,25 +14,36 @@ from collections.abc import Callable
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from types import SimpleNamespace
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn as nn
-from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
+from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
+                         set_current_vllm_config)
+from vllm.distributed import (ensure_model_parallel_initialized,
+                              init_distributed_environment)
+from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
+from vllm.utils import LazyLoader, sha256
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher
 from vllm.v1.core.sched.output import CachedRequestData, NewRequestData
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.request import RequestStatus
-from vllm.v1.worker.gpu_input_batch import InputBatch
 
+from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
+from vllm_rbln.v1.sample import WARM_UP_CONFIGS
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
+
+if TYPE_CHECKING:
+    import xgrammar as xgr
+else:
+    xgr = LazyLoader("xgr", globals(), "xgrammar")
 
 MAX_NUM_SEQ = 2
 MAX_MODEL_LEN = 64
@@ -39,6 +51,53 @@ OB_SIZE = 16
 IB_SIZE = 4
 NUM_BLOCKS = MAX_MODEL_LEN // OB_SIZE * MAX_NUM_SEQ + 1
 DEVICE = current_platform.device_type
+
+
+class MockModelWrapper(nn.Module):
+
+    class MockModel:
+
+        def __init__(self):
+            self.kv_block_adapter = SimpleNamespace(
+                get_available_num_blocks=lambda: NUM_BLOCKS)
+
+    def __init__(self):
+        super().__init__()
+        self.model = self.MockModel()
+
+    def compute_logits(self, hidden_states: torch.Tensor,
+                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+        return hidden_states
+
+
+def fake_load_model(runner: RBLNOptimumModelRunner):
+
+    def fake_forward(model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
+        current_num_reqs = runner.input_batch.num_reqs
+        current_vocab_size = runner.model_config.get_vocab_size()
+
+        return torch.randn((current_num_reqs, 1, current_vocab_size),
+                           dtype=torch.float32,
+                           device=runner.device)
+
+    runner.model = MockModelWrapper()
+    runner.use_optimum_lora = False
+    # Assign the fake forward function to the model
+    runner.model.forward = fake_forward
+    if runner.use_rbln_sampler:
+        runner.bucket_sizes = tuple(
+            runner.get_bucket_sizes(runner.max_num_reqs))
+        with torch.inference_mode():
+            for bucket_size in runner.bucket_sizes:
+                runner.pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, runner.model_config.get_vocab_size()),
+                    dtype=torch.float32,
+                )
+        torch._dynamo.config.recompile_limit = len(
+            runner.bucket_sizes) * len(WARM_UP_CONFIGS)
+        runner.sampler = torch.compile(runner.sampler,
+                                       dynamic=False,
+                                       fullgraph=False)
 
 
 def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
@@ -57,8 +116,8 @@ def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
 def make_request(
     request_id: str,
     prompt_token_ids: list[int],
-    block_size: int,
-    hash_fn: Callable,
+    block_size: int = IB_SIZE,
+    hash_fn: Callable = sha256,
     mm_positions: Optional[list[PlaceholderRange]] = None,
     mm_hashes: Optional[list[str]] = None,
     prompt_logprobs: Optional[int] = None,
@@ -92,33 +151,12 @@ def finish_request(manager: KVCacheManager, request: Request):
     manager.free(request)
 
 
-def initialize_kv_cache(runner: RBLNOptimumModelRunner):
-    """
-    Only perform necessary steps in RBLNOptimumModelRunner.initialize_kv_cache()
-    """
-    kv_cache_config = make_kv_cache_config(
-        block_size=IB_SIZE,
-        num_blocks=NUM_BLOCKS * (OB_SIZE // IB_SIZE),
-    )
-    runner.kv_cache_config = kv_cache_config
-    runner.input_batch = InputBatch(
-        max_num_reqs=runner.max_num_reqs,
-        max_model_len=runner.max_model_len,
-        max_num_batched_tokens=runner.max_num_tokens,
-        device=runner.device,
-        pin_memory=runner.pin_memory,
-        vocab_size=runner.model_config.get_vocab_size(),
-        block_sizes=[
-            kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
-        ],
-    )
-
-
-def get_vllm_config(async_scheduling=False):
+def get_vllm_config(async_scheduling=False, max_num_seqs=None):
+    max_model_len = max_num_seqs if max_num_seqs is not None else MAX_MODEL_LEN
     scheduler_config = SchedulerConfig(
-        max_num_seqs=MAX_NUM_SEQ,
-        max_num_batched_tokens=MAX_MODEL_LEN,
-        max_model_len=MAX_MODEL_LEN,
+        max_num_seqs=max_num_seqs if max_num_seqs is not None else MAX_NUM_SEQ,
+        max_num_batched_tokens=max_model_len,
+        max_model_len=max_model_len,
         async_scheduling=async_scheduling,
     )
     model_config = ModelConfig(
@@ -144,24 +182,12 @@ def get_vllm_config(async_scheduling=False):
     return vllm_config
 
 
-class MockModelWrapper(nn.Module):
-
-    class MockModel:
-
-        def __init__(self):
-            self.kv_block_adapter = SimpleNamespace(
-                get_available_num_blocks=lambda: NUM_BLOCKS)
-
-    def __init__(self):
-        super().__init__()
-        self.model = self.MockModel()
-
-
 def _schedule_new_request(
     *req_ids: str,
-    token_ids: list[int],
-    block_ids: tuple[list[int], ...],
-    new_computed_tokens: int,
+    block_ids: list[int],
+    outer_block_ids: list[int],
+    new_computed_tokens: int = 0,
+    token_ids: Optional[list[int]] = None,
     finished_req_ids: Optional[list[str]] = None,
     new_computed_blocks: Optional[list[int]] = None,
     preempted_req_ids: Optional[list[str]] = None,
@@ -169,6 +195,9 @@ def _schedule_new_request(
     new_reqs = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
+    if token_ids is None:
+        token_ids = [1, 2, 3]
+    outer_block_ids = torch.tensor([outer_block_ids])
     for req_id in req_ids:
         new_reqs.append(
             NewRequestData(
@@ -198,8 +227,10 @@ def _schedule_new_request(
         free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
-        new_computed_blocks=new_computed_blocks if new_computed_blocks else [],
-        preempted_req_ids=preempted_req_ids if preempted_req_ids else [],
+        block_table_dict={req_id: outer_block_ids},
+        cached_block_table=[],
+        cached_length=[],
+        dummy_block=None,
     )
 
 
@@ -211,24 +242,25 @@ def _schedule_cached_reqs(
 ) -> RBLNSchedulerOutput:
     req_ids = []
     resumed_from_preemption = []
-    arr_new_token_ids = []
     arr_num_computed_tokens = []
     num_scheduled_tokens = {}
     total_num_scheduled_tokens = 0
-    for req in reqs:
+    block_table_dict = {}
+    outer_block_id = 0
+
+    for outer_block_id, req in enumerate(reqs):
+        block_table_dict[req.request_id] = torch.tensor([[outer_block_id]])
         num_computed_tokens = req.num_computed_tokens
-        new_token_ids = req.all_token_ids[num_computed_tokens:]
         req_ids.append(req.request_id)
         resumed_from_preemption.append(False)
-        arr_new_token_ids.append(new_token_ids)
         arr_num_computed_tokens.append(num_computed_tokens)
-        num_scheduled_tokens[req.request_id] = len(new_token_ids)
+        num_scheduled_tokens[req.request_id] = 1
         total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
 
     cached_req_data = CachedRequestData(
         req_ids=req_ids,
         resumed_from_preemption=resumed_from_preemption,
-        new_token_ids=arr_new_token_ids,
+        new_token_ids=[],
         new_block_ids=new_block_ids,
         num_computed_tokens=arr_num_computed_tokens,
     )
@@ -245,4 +277,32 @@ def _schedule_cached_reqs(
         free_encoder_mm_hashes=[],
         structured_output_request_ids={},
         grammar_bitmask=None,
+        block_table_dict=block_table_dict,
+        cached_block_table=[],
+        cached_length=[],
+        dummy_block=None,
     )
+
+
+def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ):
+    vllm_config = get_vllm_config(max_num_seqs=max_num_seqs)
+    with set_current_vllm_config(vllm_config, check_compile=False):
+        temp_file = tempfile.mkstemp()[1]
+        init_distributed_environment(
+            world_size=1,
+            rank=0,
+            local_rank=0,
+            distributed_init_method=f"file://{temp_file}",
+            backend="gloo",
+        )
+        ensure_model_parallel_initialized(
+            1,
+            1,
+        )
+    runner = RBLNOptimumModelRunner(vllm_config, DEVICE)
+    fake_load_model(runner)
+    return runner
+
+
+def create_grammar_bitmask(num_seqs: int, vocab_size: int):
+    return xgr.allocate_token_bitmask(num_seqs, vocab_size).numpy()

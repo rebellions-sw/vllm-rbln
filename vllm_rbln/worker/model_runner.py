@@ -14,6 +14,7 @@
 
 import dataclasses
 import math
+import time
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
@@ -24,12 +25,14 @@ import torch
 from torch import nn
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import VllmConfig
-from vllm.distributed import get_pp_group
+from vllm.distributed import get_dp_group, get_pp_group, get_tp_group
 from vllm.forward_context import set_forward_context
+from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
 from vllm.model_executor.model_loader import get_model
-from vllm.multimodal import MultiModalKwargs, MultiModalPlaceholderMap
+from vllm.multimodal import (MULTIMODAL_REGISTRY, MultiModalKwargs,
+                             MultiModalPlaceholderMap, MultiModalRegistry)
 from vllm.sequence import IntermediateTensors, SequenceGroupMetadata
 from vllm.utils import make_tensor_with_pad
 from vllm.worker.model_runner_base import (
@@ -44,6 +47,7 @@ if TYPE_CHECKING:
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
+from vllm_rbln.worker.metrics import PerformanceTracker
 
 logger = init_logger(__name__)
 
@@ -263,12 +267,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                dtype=torch.long,
                                                device=self.device)
 
-        logger.debug("[RBLN] model input builder, prepare_prompt")
-        logger.debug("\tpadded input_tokens = %s", input_tokens)
-        logger.debug("\tpadded input_positions = %s", input_positions)
-        logger.debug("\tinput_block_ids = %s", input_block_ids)
-        logger.debug("\tseq_lens = %s", data.seq_lens)
-        logger.debug("\tquery_lens = %s", data.query_lens)
         return (input_tokens, input_positions, input_block_ids)
 
     def _prepare_decode(
@@ -336,13 +334,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                dtype=torch.long,
                                                device=self.device)
 
-        logger.debug("[RBLN] model input builder, prepare_decode")
-        logger.debug("\tpadded input_tokens = %s", data.input_tokens)
-        logger.debug("\tpadded input_positions = %s", data.input_positions)
-        logger.debug("\tinput_block_ids = %s", input_block_ids)
-        logger.debug("\tseq_lens = %s", data.seq_lens)
-        logger.debug("\tquery_lens = %s", data.query_lens)
-
         assert input_tokens.shape[0] == self.max_num_seqs
         assert input_positions.shape[0] == self.max_num_seqs
         assert input_block_ids.shape[0] == self.max_num_seqs
@@ -391,6 +382,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         return_hidden_states: bool = False,
+        input_registry: InputRegistry = INPUT_REGISTRY,
+        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
         ModelRunnerBase.__init__(self, vllm_config)
         model_config = self.model_config
@@ -420,6 +413,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             self.model_config.is_attention_free,
         ) if needs_attn_backend else None)
 
+        # Multi-modal data support
+        self.input_registry = input_registry
+        self.mm_registry = mm_registry
+
         # Lazy initialization.
         self.model: nn.Module  # initialize after load_model.
 
@@ -432,16 +429,29 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # multi-step model runner does not have `_builder_cls`
             self.builder = self._builder_cls(
                 cast(RBLNModelRunner, weakref.proxy(self)))
+        if envs.VLLM_RBLN_METRICS:
+            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker.register_cleanup()
 
     def compile_model(self, model):
+        TP = get_tp_group()
+        PP = get_pp_group()
+        DP = get_dp_group()
+
+        process_group_dict = {}
+        process_group_dict[TP.device_group.group_name] = TP.ranks
+        process_group_dict[TP.cpu_group.group_name] = TP.ranks
+        process_group_dict[PP.device_group.group_name] = PP.ranks
+        process_group_dict[PP.cpu_group.group_name] = PP.ranks
+        process_group_dict[DP.device_group.group_name] = DP.ranks
+        process_group_dict[DP.cpu_group.group_name] = DP.ranks
+
         options = {
             "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
-            "mode": "strict",
+            "process_group_dict": process_group_dict
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
-            logger.info("Once the model is compiled for the first time, "
-                        "the cached compiled binary will be reused.")
             options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
                                     > 1 else "./cache_dir")
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
@@ -490,8 +500,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 self.model.get_language_model(), "logits_processor"):
             self.compute_logits_model = self.model.get_language_model()
 
-        logger.info("[RBLN] load_model = %s", self.model)
-        logger.info("[RBLN] model_config.num_layers = %d",
+        logger.info("load_model = %s", self.model)
+        logger.info("model_config.num_layers = %d",
                     self.model_config.get_num_layers(self.parallel_config))
 
         def model_wrapper(
@@ -517,10 +527,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     model_output = model_output[:, selected_token_indices]
                 logits = self.compute_logits_model.compute_logits(
                     model_output, None)
-                return logits
-            else:
-                # non last rank create intermediate tensors, bypass it
-                return model_output
+                return logits.view(-1, logits.size(-1))
+
+            # non last rank create intermediate tensors, bypass it
+            return model_output
 
         if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
             self.model_executable = model_wrapper
@@ -580,9 +590,6 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         is_prompt = seq_group_metadata_list[
             0].is_prompt if seq_group_metadata_list else None
-        logger.debug("[RBLN] num_requests = %d", len(seq_group_metadata_list))
-        logger.debug("[RBLN] input_ids = %s", model_input.input_tokens)
-        logger.debug("[RBLN] positions = %s", model_input.input_positions)
         return dataclasses.replace(model_input,
                                    sampling_metadata=sampling_metadata,
                                    virtual_engine=virtual_engine,
@@ -631,6 +638,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             if model_input.attn_metadata is not None:
                 model_input.attn_metadata.kv_caches = kv_caches
 
+            start_time = time.perf_counter()
             logits_or_intermediate_states = self.model_executable(
                 input_ids=model_input.input_tokens,
                 positions=model_input.input_positions,
@@ -638,22 +646,41 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 selected_token_indices=token_indices,
                 **execute_model_kwargs,
             )
+            end_time = time.perf_counter()
+            if envs.VLLM_RBLN_METRICS:
+                # Record performance metrics
+                execution_time = end_time - start_time
+                if model_input.is_prompt:
+                    total_tokens = sum(model_input.query_lens
+                                       ) if model_input.query_lens else 0
+                    self.performance_tracker.record_prefill(
+                        execution_time, total_tokens)
+                else:
+                    num_seqs = len(
+                        model_input.seq_lens) if model_input.seq_lens else 0
+                    self.performance_tracker.record_decode(
+                        execution_time, num_seqs)
+            if get_pp_group(
+            ).is_last_rank and not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
+                # Gather logits for TP
+                logits_processor = self.compute_logits_model.logits_processor
+                logits_or_intermediate_states = logits_or_intermediate_states \
+                                                .unsqueeze(0)
+                logits_or_intermediate_states = logits_processor._gather_logits(
+                    logits_or_intermediate_states)
+                logits_or_intermediate_states = logits_or_intermediate_states \
+                                                .squeeze(0)
 
-        if get_pp_group().is_last_rank:
-            # Gather logits for TP
-            logits_processor = self.compute_logits_model.logits_processor
-            logits = logits_processor._gather_logits(
-                logits_or_intermediate_states)
-            logits = logits.view(-1, logits.size(-1))
-
-        else:
+        if not get_pp_group().is_last_rank:
             intermediate_states = logits_or_intermediate_states
             assert isinstance(intermediate_states, IntermediateTensors)
             return intermediate_states
 
         # Compute the logits. -> moved to model executable
-        if not (num_prefills > 0 and len_token_indices != 0):
-            logits = logits[selected_token_indices]
+        if num_prefills > 0 and len_token_indices != 0:
+            logits = logits_or_intermediate_states
+        else:
+            logits = logits_or_intermediate_states[selected_token_indices]
 
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
@@ -684,3 +711,28 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
     @property
     def vocab_size(self) -> int:
         return self.model_config.get_vocab_size()
+
+    def _dummy_run(self,
+                   model_inputs: Tuple[ModelInputForRebelWithSamplingMetadata,
+                                       ModelInputForRebelWithSamplingMetadata],
+                   kv_caches: List[torch.Tensor]) -> None:
+        # Run the model with the dummy inputs.
+        for model_input in model_inputs:
+            assert model_input.input_tokens is not None
+            batch_size, seq_len = model_input.input_tokens.shape
+            intermediate_tensors = None
+            if not get_pp_group().is_first_rank:
+                intermediate_tensors = \
+                    self.model.make_empty_intermediate_tensors(
+                    batch_size=batch_size * seq_len,
+                    dtype=self.model_config.dtype,
+                    device=self.device)
+                intermediate_tensors = IntermediateTensors({
+                    key:
+                    val.reshape((batch_size, seq_len, -1))
+                    for key, val in intermediate_tensors.items()
+                })
+
+            self.execute_model(model_input, kv_caches, intermediate_tensors)
+
+        return
