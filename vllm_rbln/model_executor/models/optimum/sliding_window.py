@@ -50,6 +50,8 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                                                  InnerAttentionEntry, InnerR1,
                                                  InnerR2] = AttentionManager(
                                                      self.strategy)
+        self.is_hybrid = getattr(self.model.rbln_config, "cache_impl",
+                                 None) == "hybrid"
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -85,6 +87,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         # due to the padding space reserved for the sliding window.
         cache_position = kwargs.pop("cache_position")
         input_ids = kwargs.pop("input_ids")
+        block_tables = kwargs.pop("block_tables")
 
         if is_prompt:
             if self.model.prefill_decoder is None:
@@ -96,6 +99,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 input_ids=input_ids,
                 cache_position=cache_position,
                 local_block_tables=local_block_table_id,
+                block_tables=block_tables,
             )
             logits = output.logits
             assert len(running_requests_ids) == 1
@@ -116,6 +120,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 input_ids=input_ids,
                 cache_position=cache_position,
                 local_block_tables=local_block_table_id,
+                block_tables=block_tables,
             ).logits
 
         if not is_prompt:
