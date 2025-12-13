@@ -13,17 +13,18 @@
 # limitations under the License.
 
 from .optimum_attention_manager import (AttentionManager,
-                                        HybridAttentionImageManager,
-                                        HybridAttentionManager)
+                                        HybridAttentionImageManager)
 from .optimum_attention_strategy import (HybridAttentionImageStrategy,
-                                         HybridAttentionStrategy,
                                          InnerAttentionEntry,
                                          InnerAttentionStrategy, InnerR1,
                                          InnerR2)
 
 __all__ = [
-    "AttentionManager", "InnerAttentionEntry", "InnerAttentionStrategy",
-    "InnerR1", "InnerR2", "HybridAttentionManager",
-    "HybridAttentionImageManager", "HybridAttentionImageStrategy",
-    "HybridAttentionStrategy"
+    "AttentionManager",
+    "InnerAttentionEntry",
+    "InnerAttentionStrategy",
+    "InnerR1",
+    "InnerR2",
+    "HybridAttentionImageManager",
+    "HybridAttentionImageStrategy",
 ]
