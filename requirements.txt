@@ -1,3 +1,8 @@
+# NOTE: Dependencies are now primarily managed in pyproject.toml
+# This file is kept for backward compatibility and legacy workflows.
+# For UV-based installations, use: uv pip install -e .
+# For pip-based installations, dependencies will be read from pyproject.toml via setup.py
+
 setuptools>=64
 setuptools-scm>=8
 pyyaml
