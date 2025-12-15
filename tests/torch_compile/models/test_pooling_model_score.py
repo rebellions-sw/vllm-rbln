@@ -15,6 +15,8 @@
 import pytest
 from vllm import LLM
 
+from .utils import patch_and_run
+
 LLM_PARAMS = [
     {
         "model": "Qwen/Qwen3-Reranker-0.6B",
@@ -32,12 +34,7 @@ LLM_PARAMS = [
 ]
 
 
-@pytest.mark.parametrize("llm_params", LLM_PARAMS)
-def test_pooling_model_score(
-    monkeypatch: pytest.MonkeyPatch,
-    llm_params: dict,
-) -> None:
-
+def run_vllm_score(llm_kwargs: dict) -> None:
     prefix = '<|im_start|>system\nJudge whether the Document meets the ' + \
         'requirements based on the Query and the Instruct provided. ' + \
         'Note that the answer can only be "yes" or "no".<|im_end|>\n' + \
@@ -70,22 +67,32 @@ def test_pooling_model_score(
         document_template.format(doc=doc, suffix=suffix) for doc in documents
     ]
 
-    with monkeypatch.context() as m:
-        m.setenv("VLLM_RBLN_USE_VLLM_MODEL", "1")
-        m.setenv("VLLM_DISABLE_COMPILE_CACHE", "1")
-        m.setenv("VLLM_USE_V1", "1")
-        m.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
+    llm = LLM(runner="pooling", **llm_kwargs)
 
-        llm = LLM(runner="pooling", **llm_params)
+    outputs = llm.score(templated_queries, templated_documents)
 
-        outputs = llm.score(templated_queries, templated_documents)
+    assert outputs[0].outputs.score > 0.8, (
+        f"Score ({outputs[0].outputs.score}) should be large."
+        f" <Query>: {queries[0]} <Document>: {documents[0]}.")
+    assert outputs[1].outputs.score < 0.2, (
+        f"Score ({outputs[1].outputs.score}) should be small."
+        f" <Query>: {queries[1]} <Document>: {documents[1]}.")
+    assert outputs[2].outputs.score > 0.8, (
+        f"Score ({outputs[2].outputs.score}) should be large."
+        f" <Query>: {queries[2]} <Document>: {documents[2]}.")
 
-        assert outputs[0].outputs.score > 0.8, (
-            f"Score ({outputs[0].outputs.score}) should be large."
-            f" <Query>: {queries[0]} <Document>: {documents[0]}.")
-        assert outputs[1].outputs.score < 0.2, (
-            f"Score ({outputs[1].outputs.score}) should be small."
-            f" <Query>: {queries[1]} <Document>: {documents[1]}.")
-        assert outputs[2].outputs.score > 0.8, (
-            f"Score ({outputs[2].outputs.score}) should be large."
-            f" <Query>: {queries[2]} <Document>: {documents[2]}.")
+
+@pytest.mark.parametrize("llm_params", LLM_PARAMS)
+def test_pooling_model_score(
+    monkeypatch: pytest.MonkeyPatch,
+    llm_params: dict,
+) -> None:
+
+    env = {
+        "VLLM_RBLN_USE_VLLM_MODEL": "1",
+        "VLLM_DISABLE_COMPILE_CACHE": "1",
+        "VLLM_USE_V1": "1",
+        "VLLM_RBLN_COMPILE_STRICT_MODE": "1",
+    }
+
+    patch_and_run(monkeypatch, env, run_vllm_score, llm_kwargs=llm_params)

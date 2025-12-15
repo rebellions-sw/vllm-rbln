@@ -16,6 +16,8 @@ import pytest
 import torch
 from vllm import LLM
 
+from .utils import patch_and_run
+
 LLM_PARAMS = [
     {
         "model": "Qwen/Qwen3-Embedding-0.6B",
@@ -32,12 +34,7 @@ def get_detailed_instruct(task_description: str, query: str) -> str:
     return f'Instruct: {task_description}\nQuery:{query}'
 
 
-@pytest.mark.parametrize("llm_params", LLM_PARAMS)
-def test_pooling_model_embed(
-    monkeypatch: pytest.MonkeyPatch,
-    llm_params: dict,
-) -> None:
-
+def run_vllm_score(llm_kwargs: dict) -> None:
     task = 'Given a query, retrieve relevant passages that answer the query'
 
     queries = [
@@ -53,13 +50,8 @@ def test_pooling_model_embed(
     ]
     input_prompts = queries + documents
 
-    with monkeypatch.context() as m:
-        m.setenv("VLLM_RBLN_USE_VLLM_MODEL", "1")
-        m.setenv("VLLM_DISABLE_COMPILE_CACHE", "1")
-        m.setenv("VLLM_USE_V1", "1")
-        m.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
-
-        llm = LLM(task="embed", **llm_params)
+    try:
+        llm = LLM(task="embed", **llm_kwargs)
 
         outputs = llm.embed(input_prompts)
         embeddings = torch.tensor([o.outputs.embedding for o in outputs])
@@ -75,3 +67,22 @@ def test_pooling_model_embed(
             f'should be smaller than the score between the "{queries[1]}" '\
             f'and the "{documents[1]}".'
         )
+
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.parametrize("llm_params", LLM_PARAMS)
+def test_pooling_model_embed(
+    monkeypatch: pytest.MonkeyPatch,
+    llm_params: dict,
+) -> None:
+
+    env = {
+        "VLLM_RBLN_USE_VLLM_MODEL": "1",
+        "VLLM_DISABLE_COMPILE_CACHE": "1",
+        "VLLM_USE_V1": "1",
+        "VLLM_RBLN_COMPILE_STRICT_MODE": "1",
+    }
+
+    patch_and_run(monkeypatch, env, run_vllm_score, llm_kwargs=llm_params)

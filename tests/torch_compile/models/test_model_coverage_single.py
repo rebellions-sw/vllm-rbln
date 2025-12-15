@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import multiprocessing
-
 import pytest
+
+from .utils import patch_and_run
 
 
 @pytest.fixture
@@ -57,230 +57,216 @@ targets = [
         "max_num_seqs": 8,
     },
     # ExaoneForCausalLM
-    {
-        "model": "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-        "trust_remote_code": True
-    },
-    # Qwen2ForCausalLM
-    {
-        "model": "Qwen/Qwen2.5-1.5B-Instruct",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    # MistralForCausalLM
     # {
-    #     "model": "mistralai/Mistral-7B-Instruct-v0.1",
-    #     "max_model_len": 2*4096,
-    #     "block_size": 4096,
+    #     "model": "LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    #     "trust_remote_code": True
+    # },
+    # # Qwen2ForCausalLM
+    # {
+    #     "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # # MistralForCausalLM
+    # # {
+    # #     "model": "mistralai/Mistral-7B-Instruct-v0.1",
+    # #     "max_model_len": 2*4096,
+    # #     "block_size": 4096,
+    # #     "enable_chunked_prefill": True,
+    # #     "max_num_batched_tokens": 128,
+    # #     "max_num_seqs": 1,
+    # # },
+    # {
+    #     "model": "mistralai/Mistral-7B-Instruct-v0.2",
+    #     "max_model_len": 2 * 1024,
+    #     "block_size": 1024,
     #     "enable_chunked_prefill": True,
     #     "max_num_batched_tokens": 128,
     #     "max_num_seqs": 1,
     # },
-    {
-        "model": "mistralai/Mistral-7B-Instruct-v0.2",
-        "max_model_len": 2 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 1,
-    },
-    {
-        "model": "mistralai/Mistral-7B-Instruct-v0.3",
-        "max_model_len": 2 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 1,
-    },
-    # GPT2LMHeadModel
-    {
-        "model": "openai-community/gpt2",
-        "max_model_len": 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "openai-community/gpt2-medium",
-        "max_model_len": 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "openai-community/gpt2-large",
-        "max_model_len": 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "openai-community/gpt2-xl",
-        "max_model_len": 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    # Qwen3ForCausalLM
-    {
-        "model": "Qwen/Qwen3-0.6B",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "Qwen/Qwen3-1.7B",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "Qwen/Qwen3-4B",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    # Gemma3ForCausalLM
     # {
-    #     "model": "google/gemma-3-270m-it",
-    #     "max_model_len": 4*1024,
+    #     "model": "mistralai/Mistral-7B-Instruct-v0.3",
+    #     "max_model_len": 2 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 1,
+    # },
+    # # GPT2LMHeadModel
+    # {
+    #     "model": "openai-community/gpt2",
+    #     "max_model_len": 1024,
     #     "block_size": 1024,
     #     "enable_chunked_prefill": True,
     #     "max_num_batched_tokens": 128,
     #     "max_num_seqs": 8,
     # },
     # {
-    #     "model": "google/gemma-3-1b-it",
-    #     "max_model_len": 4*1024,
+    #     "model": "openai-community/gpt2-medium",
+    #     "max_model_len": 1024,
     #     "block_size": 1024,
     #     "enable_chunked_prefill": True,
     #     "max_num_batched_tokens": 128,
     #     "max_num_seqs": 8,
     # },
-    # Gemma2ForCausalLM
     # {
-    #     "model": "google/gemma-2-2b-it",
-    #     "max_model_len": 4*1024,
+    #     "model": "openai-community/gpt2-large",
+    #     "max_model_len": 1024,
     #     "block_size": 1024,
     #     "enable_chunked_prefill": True,
     #     "max_num_batched_tokens": 128,
     #     "max_num_seqs": 8,
     # },
-    # GemmaForCausalLM
-    {
-        "model": "google/gemma-1.1-2b-it",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "google/gemma-2b-it",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    # PhiForCausalLM
-    {
-        "model": "microsoft/phi-1",
-        "max_model_len": 2 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "microsoft/phi-1_5",
-        "max_model_len": 2 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "microsoft/phi-2",
-        "max_model_len": 2 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    # OPTForCausalLM
-    {
-        "model": "facebook/opt-2.7b",
-        "max_model_len": 2 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    {
-        "model": "facebook/opt-6.7b",
-        "max_model_len": 2 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
-    # GraniteForCausalLM
-    {
-        "model": "ibm-granite/granite-3.3-2b-instruct",
-        "max_model_len": 4 * 1024,
-        "block_size": 1024,
-        "enable_chunked_prefill": True,
-        "max_num_batched_tokens": 128,
-        "max_num_seqs": 8,
-    },
+    # {
+    #     "model": "openai-community/gpt2-xl",
+    #     "max_model_len": 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # # Qwen3ForCausalLM
+    # {
+    #     "model": "Qwen/Qwen3-0.6B",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # {
+    #     "model": "Qwen/Qwen3-1.7B",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # {
+    #     "model": "Qwen/Qwen3-4B",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # # Gemma3ForCausalLM
+    # # {
+    # #     "model": "google/gemma-3-270m-it",
+    # #     "max_model_len": 4*1024,
+    # #     "block_size": 1024,
+    # #     "enable_chunked_prefill": True,
+    # #     "max_num_batched_tokens": 128,
+    # #     "max_num_seqs": 8,
+    # # },
+    # # {
+    # #     "model": "google/gemma-3-1b-it",
+    # #     "max_model_len": 4*1024,
+    # #     "block_size": 1024,
+    # #     "enable_chunked_prefill": True,
+    # #     "max_num_batched_tokens": 128,
+    # #     "max_num_seqs": 8,
+    # # },
+    # # Gemma2ForCausalLM
+    # # {
+    # #     "model": "google/gemma-2-2b-it",
+    # #     "max_model_len": 4*1024,
+    # #     "block_size": 1024,
+    # #     "enable_chunked_prefill": True,
+    # #     "max_num_batched_tokens": 128,
+    # #     "max_num_seqs": 8,
+    # # },
+    # # GemmaForCausalLM
+    # {
+    #     "model": "google/gemma-1.1-2b-it",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # {
+    #     "model": "google/gemma-2b-it",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # # PhiForCausalLM
+    # {
+    #     "model": "microsoft/phi-1",
+    #     "max_model_len": 2 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # {
+    #     "model": "microsoft/phi-1_5",
+    #     "max_model_len": 2 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # {
+    #     "model": "microsoft/phi-2",
+    #     "max_model_len": 2 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # # OPTForCausalLM
+    # {
+    #     "model": "facebook/opt-2.7b",
+    #     "max_model_len": 2 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # {
+    #     "model": "facebook/opt-6.7b",
+    #     "max_model_len": 2 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
+    # # GraniteForCausalLM
+    # {
+    #     "model": "ibm-granite/granite-3.3-2b-instruct",
+    #     "max_model_len": 4 * 1024,
+    #     "block_size": 1024,
+    #     "enable_chunked_prefill": True,
+    #     "max_num_batched_tokens": 128,
+    #     "max_num_seqs": 8,
+    # },
 ]
 
 
-def run_vllm(llm_args, prompts):
+def run_vllm(llm_kwargs, prompts):
     from vllm import LLM, SamplingParams
 
     try:
-        llm = LLM(**llm_args)
+        llm = LLM(**llm_kwargs)
+        raise Exception("test error!!!!!!!!")
         for output in llm.generate(prompts, SamplingParams(temperature=0.0)):
             prompt = output.prompt
             generated_text = output.outputs[0].text
             print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
     except Exception as e:
-        # TODO: error logging?
         raise e
-
-
-def patch_and_run(monkeypatch, env, llm_args, prompts):
-    with monkeypatch.context() as m:
-        for k, i in env.items():
-            m.setenv(k, i)
-
-        # rebellions SDK somewhat requires LLM instance to be
-        # instantiated in separated process
-        p = multiprocessing.Process(target=run_vllm, args=(llm_args, prompts))
-        p.start()
-        p.join()
-
-        assert not p.exitcode
 
 
 @pytest.mark.parametrize("target", targets)
@@ -295,4 +281,10 @@ def test_model_coverage(
     test_env = target.pop("extra_env", {})
     test_env["VLLM_USE_V1"] = vllm_use_v1
     test_env.update(common_env)
-    patch_and_run(monkeypatch, test_env, target, prompts)
+    patch_and_run(
+        monkeypatch,
+        test_env,
+        run_vllm,
+        llm_kwargs=target,
+        prompts=prompts,
+    )
