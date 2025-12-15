@@ -369,9 +369,9 @@ class RBLNWorker(WorkerBase):
     ) -> str:
         """
         Return CPU ids to bind based on NUMA nodes.
-        Implements NCCL-style CPU affinity binding:
-        - If world_size <= NUMA node count: each rank gets independent CPU allocation
-        - If world_size > NUMA node count: ranks on same NUMA node share CPU affinity
+        Implements exclusive CPU allocation for all ranks:
+        - Each rank gets independent (exclusive) CPU allocation from its NUMA node
+        - If multiple ranks share the same NUMA node, CPUs are divided among them
         Args:
             cpu_selector: a callable object to select CPUs from a CPU list
             of a physical core. The input is a LogicalCPUInfo list, sorted by
@@ -435,34 +435,20 @@ class RBLNWorker(WorkerBase):
             selected_cpu_list.extend(cpu_selector(cpu_list))
         selected_cpu_list = sorted(selected_cpu_list, key=lambda x: x.id)
 
-        if world_size_across_dp <= len(available_numa_nodes):
-            # Case 1: world_size_across_dp <= NUMA node count
-            # Each rank gets independent CPU allocation from its NUMA node
-            # Divide NUMA node CPUs among ranks in this node
-            if len(ranks_in_same_numa) > 1:
-                # Multiple ranks share this NUMA node - divide CPUs
-                cpus_per_rank = len(selected_cpu_list) // len(ranks_in_same_numa)
-                remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
+        # Always divide CPUs among ranks in the same NUMA node for exclusive allocation
+        # This ensures each rank gets independent CPU allocation regardless of world_size
+        if len(ranks_in_same_numa) > 1:
+            # Multiple ranks share this NUMA node - divide CPUs for exclusive allocation
+            cpus_per_rank = len(selected_cpu_list) // len(ranks_in_same_numa)
+            remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
 
-                rank_position = ranks_in_same_numa.index(rank_across_dp)
-                start_idx = rank_position * cpus_per_rank + min(rank_position, remainder)
-                end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
-                logical_cpu_list = selected_cpu_list[start_idx:end_idx]
-            else:
-                # Only one rank in this NUMA node - use all CPUs
-                logical_cpu_list = selected_cpu_list
+            rank_position = ranks_in_same_numa.index(rank_across_dp)
+            start_idx = rank_position * cpus_per_rank + min(rank_position, remainder)
+            end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
+            logical_cpu_list = selected_cpu_list[start_idx:end_idx]
         else:
-            # Case 2: world_size_across_dp > NUMA node count
-            # Multiple ranks share the same NUMA node CPU affinity (NCCL policy)
-            # All ranks in the same NUMA node share the same CPU list
+            # Only one rank in this NUMA node - use all CPUs
             logical_cpu_list = selected_cpu_list
-
-            # Log which ranks share the same CPU
-            if len(ranks_in_same_numa) > 1:
-                logger.info(
-                    "NUMA node %d CPU sharing: ranks %s share CPUs %s",
-                    selected_numa_node, ranks_in_same_numa,
-                    ','.join(str(c.id) for c in logical_cpu_list))
 
         # Reserve CPUs for other processes
         reserve_cpu_num = envs.VLLM_CPU_NUM_OF_RESERVED_CPU
@@ -485,20 +471,20 @@ class RBLNWorker(WorkerBase):
             return "all"
 
         # Log binding information
-        if world_size_across_dp <= len(available_numa_nodes):
+        if len(ranks_in_same_numa) > 1:
             logger.info(
                 "auto thread-binding: rank %d (rank_across_dp %d) -> NUMA node %d, "
-                "CPUs: %s (independent allocation, id, physical core): %s",
+                "CPUs: %s (exclusive allocation, shared NUMA node with ranks %s, id, physical core): %s",
                 self.rank, rank_across_dp, selected_numa_node,
                 ','.join(str(x.id) for x in logical_cpu_list),
+                [r for r in ranks_in_same_numa if r != rank_across_dp],
                 [(x.id, x.physical_core) for x in logical_cpu_list])
         else:
             logger.info(
                 "auto thread-binding: rank %d (rank_across_dp %d) -> NUMA node %d, "
-                "CPUs: %s (shared with ranks %s, NCCL-style, id, physical core): %s",
+                "CPUs: %s (exclusive allocation, id, physical core): %s",
                 self.rank, rank_across_dp, selected_numa_node,
                 ','.join(str(x.id) for x in logical_cpu_list),
-                [r for r in ranks_in_same_numa if r != rank_across_dp],
                 [(x.id, x.physical_core) for x in logical_cpu_list])
 
         return ",".join([str(x.id) for x in logical_cpu_list])
