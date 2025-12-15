@@ -42,6 +42,7 @@ dependencies = [
     "qwen_vl_utils",
     "vllm==0.10.2",
     "optimum-rbln>=0.9.4a4",
+    "torch==2.8.0"
 ]
 
 [project.optional-dependencies]
