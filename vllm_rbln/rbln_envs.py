@@ -66,7 +66,7 @@ environment_variables = {
     "VLLM_RBLN_SAMPLER":
     (lambda: os.environ.get("VLLM_RBLN_SAMPLER", "True").lower() in
      ("true", "1")),
-    # Enable warmup
+    # Enable warm_up
     "VLLM_RBLN_ENABLE_WARM_UP":
     (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "True").lower() in
      ("true", "1")),

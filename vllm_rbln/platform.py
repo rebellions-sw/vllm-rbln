@@ -50,6 +50,7 @@ class RblnPlatform(Platform):
     # when torch.device(device_name) is called.
     # But we don't support the 'rbln'' device yet.
     # To support this, we must use PyTorch-RBLN
+    plugin_name: str = "rbln"
     device_name: str = "cpu"
     device_type: str = "cpu"
     dispatch_key: str = "CPU"

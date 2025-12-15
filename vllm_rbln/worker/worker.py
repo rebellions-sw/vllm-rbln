@@ -22,7 +22,7 @@ from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, ModelConfig,
                          ParallelConfig, VllmConfig)
 from vllm.distributed import (ensure_model_parallel_initialized, get_pp_group,
-                              get_tp_group, init_distributed_environment)
+                              init_distributed_environment)
 from vllm.forward_context import DPMetadata
 from vllm.model_executor import set_random_seed
 from vllm.model_executor.layers.sampler import SamplerOutput
@@ -109,7 +109,7 @@ class RBLNCacheEngine:
             self.model_config.is_attention_free,
         )
 
-        logger.info("[RBLN] initialize cache engine")
+        logger.info("initialize cache engine")
         # Initialize the cache.
         # TODO : cpu_cache will be replaced with dev_cache
         self.cpu_cache = self._allocate_kv_cache(
@@ -123,17 +123,15 @@ class RBLNCacheEngine:
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_heads, self.head_size)
         kv_cache: List[torch.Tensor] = []
-        logger.info("[RBLN] attention backend get_kv_cache_shape = %s",
+        logger.info("attention backend get_kv_cache_shape = %s",
                     kv_cache_shape)
-        logger.info("[RBLN] allocate kv cache shape = %s", kv_cache_shape)
+        logger.info("allocate kv cache shape = %s", kv_cache_shape)
         kv_cache_size = 1
         for dim in kv_cache_shape:
             kv_cache_size *= dim
-        logger.info("[RBLN] 1 layer : allocate kv cache size = %d",
-                    kv_cache_size)
+        logger.info("1 layer : allocate kv cache size = %d", kv_cache_size)
         kv_cache_size *= self.num_layers
-        logger.info("[RBLN] all layers : allocate kv cache size = %d",
-                    kv_cache_size)
+        logger.info("all layers : allocate kv cache size = %d", kv_cache_size)
 
         # allocate kv cache onto RBLN device
         # RBLN device tensor allocation
@@ -141,7 +139,7 @@ class RBLNCacheEngine:
             kv_cache.append(
                 torch.empty(kv_cache_shape,
                             dtype=self.dtype).to(self.device_config.device))
-        logger.info("[RBLN] allocate kv cache length = %d", len(kv_cache))
+        logger.info("allocate kv cache length = %d", len(kv_cache))
 
         return kv_cache
 
@@ -152,7 +150,7 @@ class RBLNCacheEngine:
         raise NotImplementedError("Swap is not supported in RBLNCacheEngine.")
 
     def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:
-        logger.info("[RBLN] copy kv cache")
+        logger.info("copy kv cache")
         self.attn_backend.copy_blocks(self.cpu_cache, src_to_dsts)
 
     @staticmethod
@@ -180,7 +178,7 @@ class RBLNCacheEngine:
             dtype = STR_DTYPE_TO_TORCH_DTYPE[cache_dtype]
         dtype_size = torch.tensor([], dtype=dtype).element_size()
         total_size = dtype_size * total
-        logger.info("[RBLN] get kv cache block size = %d", total_size)
+        logger.info("get kv cache block size = %d", total_size)
         return total_size
 
 
@@ -307,7 +305,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
+        start_time = time.perf_counter()
         self.model_runner.load_model()
+        elapsed_time = time.perf_counter() - start_time
+        logger.info("load_model completed in %.6f seconds (%.3f ms)",
+                    elapsed_time, elapsed_time * 1000)
 
     @torch.inference_mode()
     def determine_num_available_blocks(self) -> Tuple[int, int]:
@@ -417,7 +419,12 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             return
 
         assert self.kv_cache is not None
+
+        start_time = time.perf_counter()
         self.model_runner._dummy_run(model_inputs, self.kv_cache[0])
+        elapsed_time = time.perf_counter() - start_time
+        logger.info("compilation completed in %.6f seconds (%.3f ms)",
+                    elapsed_time, elapsed_time * 1000)
 
     def _prepare_dummy_input(
         self,
@@ -573,9 +580,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         intermediate_tensors = None
         orig_model_execute_time = 0.0
         if not get_pp_group().is_first_rank:
+            # NOTE - DO NOT all_gather_group for RBLN pp
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict(
-                    all_gather_group=get_tp_group()))
+                get_pp_group().recv_tensor_dict())
             if (self.observability_config is not None
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
@@ -598,8 +605,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 output.tensors["model_execute_time"] = torch.tensor(
                     model_execute_time + orig_model_execute_time)
-            get_pp_group().send_tensor_dict(output.tensors,
-                                            all_gather_group=get_tp_group())
+            # NOTE - DO NOT all_gather_group for RBLN pp
+            get_pp_group().send_tensor_dict(output.tensors)
             return [None]
         if (self.observability_config is not None
                 and self.observability_config.collect_model_execute_time
@@ -652,3 +659,9 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             self.parallel_config.tensor_parallel_size,
             self.parallel_config.pipeline_parallel_size,
         )
+
+    def shutdown(self) -> None:
+        logger.info("v0 rbln_worker shutdown called")
+        if envs.VLLM_RBLN_METRICS:
+            # FIXME - performance tracker atexit is not called
+            self.model_runner.performance_tracker.print_final_stats()

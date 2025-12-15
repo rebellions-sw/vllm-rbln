@@ -579,7 +579,6 @@ class RBLNFlashAttentionMetadata:
     prefix_scheduler_metadata: Optional[torch.Tensor] = None
 
     # For RBLN Attention
-    # TODO: construct only when not envs.RBLN_FLASH_CAUSAL_ATTN
     attn_masks: Optional[torch.Tensor] = None
     kv_caches: Optional[list[torch.Tensor]] = None
     # for sliding window attention
@@ -621,6 +620,8 @@ class RBLNFlashAttentionMetadataBuilder(
 
         self.enforce_eager = (
             get_current_vllm_config().model_config.enforce_eager)
+
+        self.is_causal = envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
 
     def reorder_batch(self, input_batch: "InputBatch",
                       scheduler_output: "SchedulerOutput") -> bool:
@@ -675,48 +676,56 @@ class RBLNFlashAttentionMetadataBuilder(
         assert len(is_prefills) > 0 and all(
             is_prefill == is_prefills[0]
             for is_prefill in is_prefills[:num_reqs])
+
+        attn_masks = None
         if is_prefills[0]:
             # NOTE(jiwoo.park) prefill's block_tables must be a 1D tensor.
             block_tables_tensor = block_tables_tensor[0]
-            prefill_chunk_size = (self.chunked_prefill_size
-                                  if self.chunked_prefill else 1 <<
-                                  (math.ceil(math.log2(query_max_seq_len))))
-            chunked_attention_mask = torch.zeros(
-                1,
-                1,
-                1,
-                prefill_chunk_size,
-                max_seq_len,
-                dtype=torch.float16 if self.enforce_eager else torch.float32,
-            )
-            causal_mask = 1 - torch.triu(
-                torch.ones(1, 1, prefill_chunk_size, prefill_chunk_size),
-                diagonal=1,
-            )
-            step = seq_idx[0]
-            if step >= prefill_chunk_size:
-                chunked_attention_mask[:, :, :, :, :step] = 1
-            chunked_attention_mask[:, :, :, :, step:step +
-                                   prefill_chunk_size] = causal_mask
-            attn_masks = chunked_attention_mask
+            if not self.is_causal:
+                prefill_chunk_size = (
+                    self.chunked_prefill_size if self.chunked_prefill else 1 <<
+                    (math.ceil(math.log2(query_max_seq_len))))
+                chunked_attention_mask = torch.zeros(
+                    1,
+                    1,
+                    1,
+                    prefill_chunk_size,
+                    max_seq_len,
+                    dtype=torch.float16
+                    if self.enforce_eager else torch.float32,
+                )
+                causal_mask = 1 - torch.triu(
+                    torch.ones(1, 1, prefill_chunk_size, prefill_chunk_size),
+                    diagonal=1,
+                )
+                step = seq_idx[0]
+                if step >= prefill_chunk_size:
+                    chunked_attention_mask[:, :, :, :, :step] = 1
+                chunked_attention_mask[:, :, :, :, step:step +
+                                       prefill_chunk_size] = causal_mask
+                attn_masks = chunked_attention_mask
+                attn_masks = attn_masks.to(self.device)
         else:
             # batch padding
             seq_lens_tensor = rbln_utils.pad(
                 seq_lens_tensor, 0, self.scheduler_config.max_num_seqs)
             block_tables_tensor = rbln_utils.pad(
                 block_tables_tensor, 0, self.scheduler_config.max_num_seqs)
-            decode_attention_mask = torch.zeros(
-                self.scheduler_config.max_num_seqs,
-                1,
-                1,
-                1,
-                max_seq_len,
-                dtype=torch.float16 if self.enforce_eager else torch.float32,
-            )
-            for batch_index, batch_step in enumerate(seq_lens):
-                decode_attention_mask[batch_index, :, :, :, :batch_step +
-                                      1] = 1
-            attn_masks = decode_attention_mask
+            if not self.is_causal:
+                decode_attention_mask = torch.zeros(
+                    self.scheduler_config.max_num_seqs,
+                    1,
+                    1,
+                    1,
+                    max_seq_len,
+                    dtype=torch.float16
+                    if self.enforce_eager else torch.float32,
+                )
+                for batch_index, batch_step in enumerate(seq_lens):
+                    decode_attention_mask[batch_index, :, :, :, :batch_step +
+                                          1] = 1
+                attn_masks = decode_attention_mask
+                attn_masks = attn_masks.to(self.device)
 
         cache_seq_lens, cache_offsets, local_block_tables = None, None, None
         if sliding_window := getattr(self.kv_cache_spec, "sliding_window",
@@ -752,7 +761,7 @@ class RBLNFlashAttentionMetadataBuilder(
             prefix_kv_lens=prefix_kv_lens,
             suffix_kv_lens=suffix_kv_lens,
             prefix_scheduler_metadata=prefix_scheduler_metadata,
-            attn_masks=attn_masks.to(self.device),
+            attn_masks=attn_masks,
             cache_seq_lens=cache_seq_lens.to(self.device)
             if cache_seq_lens is not None else None,
             cache_offsets=cache_offsets.to(self.device)
@@ -761,12 +770,6 @@ class RBLNFlashAttentionMetadataBuilder(
             if local_block_tables is not None else None,
         )
 
-        logger.debug("RBLNAttentionMetadata = %s", attn_metadata)
-        logger.debug("\tslot_mapping size = %s", slot_mapping.size())
-        logger.debug("\tblock_tables size = %s", block_tables_tensor.size())
-        logger.debug("\tattn_masks size = %s", attn_masks.size())
-        logger.debug("\tattn_masks = %s", attn_masks[:, :, :, :, :32])
-        logger.debug("\tseq_lens_tensor size= %s", seq_lens_tensor.size())
         return attn_metadata
 
     def use_cascade_attention(self, *args, **kwargs) -> bool:

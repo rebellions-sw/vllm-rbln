@@ -87,11 +87,12 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
     if runner.use_rbln_sampler:
         runner.bucket_sizes = tuple(
             runner.get_bucket_sizes(runner.max_num_reqs))
-        for bucket_size in runner.bucket_sizes:
-            runner.pooled_tensors[bucket_size] = torch.empty(
-                (bucket_size, runner.model_config.get_vocab_size()),
-                dtype=torch.float32,
-            )
+        with torch.inference_mode():
+            for bucket_size in runner.bucket_sizes:
+                runner.pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, runner.model_config.get_vocab_size()),
+                    dtype=torch.float32,
+                )
         torch._dynamo.config.recompile_limit = len(
             runner.bucket_sizes) * len(WARM_UP_CONFIGS)
         runner.sampler = torch.compile(runner.sampler,
