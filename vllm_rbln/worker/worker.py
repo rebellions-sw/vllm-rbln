@@ -407,6 +407,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                       self.cpu_cache)
         if not self.model_config.enforce_eager and envs.VLLM_RBLN_COMPILE_MODEL:
             for kv_cache in cpu_cache:
+                torch.rbln._get_metadata(kv_cache).set_dtype(torch.rbln.dtype.dlfloat16)
                 self.model_runner.compile_context.mark_static_address(kv_cache)
 
     def _warm_up_model(self) -> None:

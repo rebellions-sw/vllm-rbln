@@ -588,8 +588,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             # if tensor is set to have static address,
             # similar to RBLN kv cache binding
             from rebel.compile_context import CompileContext
-
-            self.compile_context = CompileContext(use_weight_sharing=True)
+            from rebel.core.torch_compile import get_or_create_compile_context
+            self.compile_context = get_or_create_compile_context(0)
             compiled_graph = self.compile_model(model_wrapper)
             self.model_executable = compiled_graph
 
