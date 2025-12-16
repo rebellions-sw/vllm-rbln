@@ -32,6 +32,7 @@ logger = init_logger(__name__)
 @dataclass
 class RBLNDPMetadata(DPMetadata):
     max_pads_across_dp: int = 0
+    num_tokens_across_dp_cpu: Optional[torch.Tensor] = None
 
     @staticmethod
     def make(
@@ -42,7 +43,6 @@ class RBLNDPMetadata(DPMetadata):
     ) -> "RBLNDPMetadata":
 
         parallel_config = vllm_config.parallel_config
-        assert parallel_config.data_parallel_size > 1
         dp_size = parallel_config.data_parallel_size
         dp_rank = parallel_config.data_parallel_rank
 
@@ -55,7 +55,9 @@ class RBLNDPMetadata(DPMetadata):
             batchsize = attn_metadata.num_prefill_tokens + \
                 attn_metadata.num_decode_tokens
 
-            if envs.VLLM_RBLN_DP_IMPL == "dummy_prefill" and \
+            disable_dp = dp_size == 1
+            use_dummy_prefill = envs.VLLM_RBLN_DP_IMPL == "dummy_prefill"
+            if (disable_dp or use_dummy_prefill) and \
                 attn_metadata.num_decode_tokens > 0:
                 max_pad = scheduler_config.max_num_seqs
         else:
@@ -73,7 +75,8 @@ class RBLNDPMetadata(DPMetadata):
         cu_tokens_across_dp_cpu = torch.cumsum(num_tokens_across_dp, dim=0)
         return RBLNDPMetadata(max_tokens_across_dp_cpu,
                               cu_tokens_across_dp_cpu,
-                              max_pads_across_dp=max_pad)
+                              max_pads_across_dp=max_pad,
+                              num_tokens_across_dp_cpu=num_tokens_across_dp)
 
 
 @contextmanager
@@ -93,8 +96,10 @@ def _set_forward_context(
     if need_to_track_batchsize:
         vfc.forward_start_time = time.perf_counter()
     dp_metadata: Optional[DPMetadata] = None
-    if vllm_config.parallel_config.data_parallel_size > 1 and (
-            attn_metadata is not None or num_tokens is not None):
+    enable_dp = vllm_config.parallel_config.data_parallel_size > 1
+    use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
+    if (enable_dp or use_moe_tokens_mask) and (attn_metadata is not None
+                                               or num_tokens is not None):
         dp_metadata = RBLNDPMetadata.make(vllm_config, attn_metadata,
                                           num_tokens or 0,
                                           num_tokens_across_dp)
