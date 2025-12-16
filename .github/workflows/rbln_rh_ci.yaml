@@ -41,7 +41,7 @@ jobs:
       - name: Calculate dependency hash
         id: dep_hash
         run: |
-          HASH=$(grep -E '^ARG (ATOM_DRIVER_VERSION|LLVM_VERSION|OPTIMUM_RBLN_VERSION|RAY_VERSION|REBEL_COMPILER_VERSION|TORCHVISION_VERSION|TORCH_VERSION|TRITON_VERSION|PYTHON_VERSION)=' Dockerfile.ubi.ci | sort | sha256sum | cut -c1-8)
+          HASH=$(grep -E '^ARG (ATOM_DRIVER_VERSION|LLVM_VERSION|OPTIMUM_RBLN_VERSION|RAY_VERSION|REBEL_COMPILER_VERSION|TORCHVISION_VERSION|TORCH_VERSION|TRITON_VERSION|PYTHON_VERSION)=' assets/Dockerfile.ubi.ci | sort | sha256sum | cut -c1-8)
           echo "hash=${HASH}" >> "${GITHUB_OUTPUT}"
           echo "Dependency hash: ${HASH}" >&2
 
@@ -83,7 +83,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.ubi.ci
+          file: ./assets/Dockerfile.ubi.ci
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:buildcache
