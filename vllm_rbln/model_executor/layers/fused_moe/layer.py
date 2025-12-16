@@ -181,19 +181,11 @@ def unquantized_fused_moe_method_rbln(
 def _get_tokens_mask():
     num_tokens = \
         get_forward_context().dp_metadata.num_tokens_across_dp_cpu
+    num_tokens = num_tokens.unsqueeze(1)
     max_pad = get_forward_context().dp_metadata.max_pads_across_dp
-    tokens_mask = None
-    max_tokens = torch.arange(max_pad, dtype=torch.int32)
-
-    for cur_tokens in num_tokens:
-        num_tokens_mask = torch.where(max_tokens < cur_tokens, 1.0, 0.0)
-        if tokens_mask is None:
-            tokens_mask = num_tokens_mask
-        else:
-            tokens_mask = torch.cat([tokens_mask, num_tokens_mask], dim=0)
-    assert tokens_mask is not None
-    tokens_mask = tokens_mask.unsqueeze(-1)
-
+    pos = torch.arange(max_pad, dtype=torch.int32).unsqueeze(0)  # [1, max_pad]
+    tokens_mask = torch.where(pos < num_tokens, 1.0, 0.0)  # [dp_size, max_pad]
+    tokens_mask = tokens_mask.reshape(-1, 1)  #[dp_size * max_pad, 1]
     return tokens_mask
 
 
