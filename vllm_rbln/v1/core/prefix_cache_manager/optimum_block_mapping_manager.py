@@ -236,8 +236,10 @@ class BlockMappingManager:
             for ib_id in cur_ib_segment:
                 if ib_id not in self._cached_inner_to_outers:
                     self._cached_inner_to_outers[ib_id] = []
-                assert cur_outer_block_id not in self._cached_inner_to_outers[ib_id], \
-                    f"OB: {cur_outer_block_id} already in cached in IB: {ib_id}="
+                assert cur_outer_block_id not in \
+                    self._cached_inner_to_outers[ib_id], \
+                    f"OB: {cur_outer_block_id} already in cached " \
+                    f"in IB: {ib_id}=" \
                     f"{self._cached_inner_to_outers[ib_id]}"
                 self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)
 
