@@ -453,8 +453,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             "process_group_dict": process_group_dict
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
-            options["cache_dir"] = os.path.join(envs.VLLM_CACHE_ROOT, ("rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
-                                    > 1 else "cache_dir"))
+            options["cache_dir"] = os.path.join(
+                envs.VLLM_CACHE_ROOT,
+                ("rsd_cache_dir"
+                 if envs.VLLM_RBLN_TP_SIZE > 1 else "cache_dir"))
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
