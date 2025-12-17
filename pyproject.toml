@@ -40,8 +40,8 @@ dependencies = [
     "datasets",
     "qwen_vl_utils",
     "vllm==0.10.2",
-    "optimum-rbln>=0.9.3",
-    "numpy<2"
+    "optimum-rbln>=0.9.4a4",
+    "torch==2.8.0"
 ]
 
 [project.optional-dependencies]
@@ -49,6 +49,7 @@ test = [
     "pytest",
     "pytest-asyncio",
     "pytest-xdist",
+    "pytest-cov",
 ]
 build = [
     "build",

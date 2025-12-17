@@ -63,6 +63,12 @@ DEFAULT_LOGGING_CONFIG = {
 
 
 @lru_cache
+def _print_debug_once(logger: Logger, msg: str) -> None:
+    # Set the stacklevel to 2 to print the original caller's line info
+    logger.debug(msg, stacklevel=2)
+
+
+@lru_cache
 def _print_info_once(logger: Logger, msg: str) -> None:
     # Set the stacklevel to 2 to print the original caller's line info
     logger.info(msg, stacklevel=2)
@@ -82,6 +88,13 @@ class _VllmLogger(Logger):
         instance to avoid conflicting with other libraries such as
         `intel_extension_for_pytorch.utils._logger`.
     """
+
+    def debug_once(self, msg: str) -> None:
+        """
+        As :meth:`debug`, but subsequent calls with the same message
+        are silently dropped.
+        """
+        _print_debug_once(self, msg)
 
     def info_once(self, msg: str) -> None:
         """
@@ -143,6 +156,7 @@ def init_logger(name: str) -> _VllmLogger:
     logger = logging.getLogger(f"vllm.{name}")
 
     methods_to_patch = {
+        "debug_once": _print_debug_once,
         "info_once": _print_info_once,
         "warning_once": _print_warning_once,
     }
