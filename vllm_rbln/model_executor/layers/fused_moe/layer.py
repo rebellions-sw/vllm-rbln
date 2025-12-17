@@ -450,7 +450,7 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
 
 FusedMoE.forward_oot = fused_moe_forward_rbln
 
-if envs.VLLM_RBLN_MOE_OPTIMIZE:
+if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
     logger.info("[RBLN] fused moe, RBLN optimize moe custom kernel")
     UnquantizedFusedMoEMethod.forward_oot = (
         unquantized_fused_optimize_moe_method_custom)
