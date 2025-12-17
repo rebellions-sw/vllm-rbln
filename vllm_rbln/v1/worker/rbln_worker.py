@@ -14,6 +14,7 @@
 """A RBLN worker class."""
 import copy
 import os
+import time
 import platform
 from importlib import util
 from collections.abc import Callable
@@ -160,9 +161,8 @@ class RBLNWorker(WorkerBase):
         )
 
     def init_device(self) -> None:
-        # Setup OpenMP threads affinity
-        omp_cpuids = envs.VLLM_CPU_OMP_THREADS_BIND
-        if omp_cpuids == "auto" and platform.system() == "Linux":
+        # Setup thread affinity based on NUMA nodes
+        if envs.VLLM_RBLN_NUMA and platform.system() == "Linux":
             cpu_arch = current_platform.get_cpu_architecture()
             if cpu_arch in (CpuArchEnum.POWERPC, CpuArchEnum.S390X):
                 # For S390X/POWERPC SMT-8/4/2
@@ -176,19 +176,10 @@ class RBLNWorker(WorkerBase):
                 )
             else:
                 self.local_omp_cpuid = "nobind"
-        elif omp_cpuids == "nobind":
-            self.local_omp_cpuid = "nobind"
         else:
-            local_dp_rank = self.parallel_config.data_parallel_rank_local
-            omp_cpuids_list = omp_cpuids.split("|")
-            if local_dp_rank is not None:
-                world_size = self.parallel_config.world_size
-                omp_cpuids_list = omp_cpuids_list[
-                    local_dp_rank * world_size : (local_dp_rank + 1) * world_size
-                ]
-            self.local_omp_cpuid = omp_cpuids_list[self.rank]
+            self.local_omp_cpuid = "nobind"
 
-        if self.local_omp_cpuid != "all":
+        if self.local_omp_cpuid not in ("all", "nobind"):
             # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
             cpu_ids = [int(cpu_id.strip()) for cpu_id in self.local_omp_cpuid.split(",")]
             # Set CPU affinity for current process
@@ -214,6 +205,11 @@ class RBLNWorker(WorkerBase):
                     self.rank, self.local_rank, str(e)
                 )
                 raise
+        elif self.local_omp_cpuid == "nobind":
+            logger.info(
+                "Skipping CPU affinity binding for rank %d (local_rank %d): nobind",
+                self.rank, self.local_rank
+            )
 
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.vllm_config, self.rank,
@@ -301,8 +297,10 @@ class RBLNWorker(WorkerBase):
             intermediate_tensors = IntermediateTensors(
                 get_pp_group().recv_tensor_dict())
 
+        start_time = time.time()
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
+        print(f"* start_time: {start_time * 1000}, total_num_scheduled_tokens: {scheduler_output.total_num_scheduled_tokens}, num_scheduled_tokens: {scheduler_output.num_scheduled_tokens}")
         if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
             return output
 

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A RBLN worker class."""
-from importlib import util
 import os
 import time
 from typing import Dict, List, Optional, Tuple
@@ -225,17 +224,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
             init_cached_hf_modules()
 
-        # # Setup OpenMP threads affinity.
-        omp_cpuids = envs.VLLM_CPU_OMP_THREADS_BIND
-        self.local_omp_cpuid = "all"
-        # if omp_cpuids == "auto":
-        #     self.local_omp_cpuid = self.get_cpus_id_binding_based_on_numa_nodes(
-        #     )
-        # else:
-        #     self.local_omp_cpuid = omp_cpuids.split("|")[rank]
-
-        # self.model_runner: RBLNModelRunner = RBLNModelRunner(
-        #     vllm_config=vllm_config, is_driver_worker=is_driver_worker)
+        self.model_runner: RBLNModelRunner = RBLNModelRunner(
+            vllm_config=vllm_config, is_driver_worker=is_driver_worker)
 
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
@@ -309,33 +299,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # os.environ["VLLM_DIST_IDENT"] = (
         #     self.distributed_init_method.split(":")[-1]
         # )
-
-        if self.local_omp_cpuid != "all":
-            # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
-            cpu_ids = [int(cpu_id.strip()) for cpu_id in self.local_omp_cpuid.split(",")]
-            # Set CPU affinity for current process
-            try:
-                os.sched_setaffinity(0, cpu_ids)
-                # Verify CPU affinity was set correctly
-                actual_cpu_ids = sorted(os.sched_getaffinity(0))
-                expected_cpu_ids = sorted(cpu_ids)
-                if actual_cpu_ids != expected_cpu_ids:
-                    logger.warning(
-                        "CPU affinity mismatch for rank %d (local_rank %d): "
-                        "expected %s, but got %s",
-                        self.rank, self.local_rank, expected_cpu_ids, actual_cpu_ids
-                    )
-                else:
-                    logger.info(
-                        "Set CPU affinity for rank %d (local_rank %d): CPUs %s",
-                        self.rank, self.local_rank, self.local_omp_cpuid
-                    )
-            except OSError as e:
-                logger.error(
-                    "Failed to set CPU affinity for rank %d (local_rank %d): %s",
-                    self.rank, self.local_rank, str(e)
-                )
-                raise
 
         self.init_distributed_environment()
         # Set random seed.
@@ -663,123 +626,6 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             self.model_config,
             self.parallel_config,
         )
-
-    def get_cpus_id_binding_based_on_numa_nodes(self) -> str:
-        """Return CPUs id binding based on NUMA nodes.
-        """
-        rank_to_cpus = self.local_omp_cpuid
-        # Setup OpenMP thread affinity based on NUMA nodes automatically
-        world_size = self.vllm_config.parallel_config.world_size
-        print(f"world_size: {world_size}")
-        libnuma_found = util.find_spec("numa") is not None
-        psutil_found = util.find_spec("psutil") is not None
-        if libnuma_found and psutil_found:
-            import psutil
-            import numa
-
-            # Get physical CPUs only (exclude hyperthreads)
-            physical_cpu_count = psutil.cpu_count(logical=False)
-            cpus_allow_list = psutil.Process().cpu_affinity()
-
-            # Filter physical CPUs only (exclude hyperthread CPUs >= physical_cpu_count)
-            physical_cpus = sorted([c for c in cpus_allow_list if c < physical_cpu_count])
-
-            if not physical_cpus:
-                logger.error(
-                    "Auto thread-binding failed: no physical CPUs available. "
-                    "Please try to bind threads manually.")
-                return rank_to_cpus
-
-            # Get NUMA node information
-            numa_size = numa.get_max_node() + 1
-
-            # Group physical CPUs by NUMA node
-            numa_node_cpus = {}
-            for i in range(numa_size):
-                node_cpus_all = set(numa.node_to_cpus(i))
-                # Filter to only physical CPUs in allowed list
-                node_physical_cpus = sorted([c for c in node_cpus_all
-                                           if c < physical_cpu_count and c in cpus_allow_list])
-                if node_physical_cpus:
-                    numa_node_cpus[i] = node_physical_cpus
-
-            if not numa_node_cpus:
-                logger.error(
-                    "Auto thread-binding failed: no available NUMA nodes "
-                    "with allowed CPUs. Please try to bind threads manually.")
-                return rank_to_cpus
-
-            # Original NUMA-based policy (non-exclusive mode)
-            # NCCL-style policy: rank -> NUMA node mapping (round-robin)
-            # Each rank belongs to a NUMA node based on rank % numa_size
-            numa_node_idx = self.rank % len(numa_node_cpus)
-            numa_node_cpu_list = numa_node_cpus[numa_node_idx]
-
-            # Determine which ranks share the same NUMA node (for logging)
-            ranks_in_same_numa = [r for r in range(world_size)
-                                 if r % len(numa_node_cpus) == numa_node_idx]
-
-            if world_size <= len(numa_node_cpus):
-                # Case 1: world_size <= numa node 개수
-                # Each rank gets independent CPU allocation from its NUMA node
-                # Divide NUMA node CPUs among ranks in this node
-                if len(ranks_in_same_numa) > 1:
-                    # Multiple ranks share this NUMA node - divide CPUs
-                    cpus_per_rank = len(numa_node_cpu_list) // len(ranks_in_same_numa)
-                    remainder = len(numa_node_cpu_list) % len(ranks_in_same_numa)
-
-                    rank_position = ranks_in_same_numa.index(self.rank)
-                    start_idx = rank_position * cpus_per_rank + min(rank_position, remainder)
-                    end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
-                    rank_to_cpus_list = numa_node_cpu_list[start_idx:end_idx]
-                else:
-                    # Only one rank in this NUMA node - use all CPUs
-                    rank_to_cpus_list = numa_node_cpu_list
-            else:
-                # Case 2: world_size > numa node 개수
-                # Multiple ranks share the same NUMA node CPU affinity (NCCL policy)
-                # All ranks in the same NUMA node share the same CPU list
-                rank_to_cpus_list = numa_node_cpu_list
-
-                # Log which ranks share the same CPU
-                if len(ranks_in_same_numa) > 1:
-                    logger.info(
-                        "NUMA node %d CPU sharing: ranks %s share CPUs %s",
-                        numa_node_idx, ranks_in_same_numa,
-                        ','.join(str(c) for c in rank_to_cpus_list))
-
-            # Apply CPU reservation if needed
-            num_of_reserved_cpu = min(envs.VLLM_CPU_NUM_OF_RESERVED_CPU,
-                                      len(rank_to_cpus_list) // 2)
-            if num_of_reserved_cpu > 0 and len(rank_to_cpus_list) > num_of_reserved_cpu:
-                rank_to_cpus_list = rank_to_cpus_list[:-num_of_reserved_cpu]
-
-            if not rank_to_cpus_list:
-                logger.warning(
-                    "Auto thread-binding: no CPUs allocated for rank %d. "
-                    "Falling back to default.", self.rank)
-            else:
-                rank_to_cpus = ','.join(str(x) for x in rank_to_cpus_list)
-
-                # Log binding information
-                if world_size <= len(numa_node_cpus):
-                    logger.info(
-                        "auto thread-binding: rank %d -> NUMA node %d, "
-                        "CPUs: %s (independent allocation)",
-                        self.rank, numa_node_idx, rank_to_cpus)
-                else:
-                    logger.info(
-                        "auto thread-binding: rank %d -> NUMA node %d, "
-                        "CPUs: %s (shared with ranks %s, NCCL-style)",
-                        self.rank, numa_node_idx, rank_to_cpus,
-                        [r for r in ranks_in_same_numa if r != self.rank])
-        else:
-            logger.warning(
-                "Auto thread-binding is not supported due to "
-                "the lack of package numa and psutil,"
-                "fallback to no thread-binding. To get better performance,"
-                "please try to manually bind threads.")
-        return rank_to_cpus
 
     def init_distributed_environment(self):
         # Set envs for RCCL
