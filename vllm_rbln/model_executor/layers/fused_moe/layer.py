@@ -459,5 +459,5 @@ elif envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_custom
 else:
     logger.info("[RBLN] fused moe, pytorch native kernel")
-    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_rbln    
+    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_rbln
 FusedMoE.naive_multicast = fused_moe_naive_multicast_rbln
