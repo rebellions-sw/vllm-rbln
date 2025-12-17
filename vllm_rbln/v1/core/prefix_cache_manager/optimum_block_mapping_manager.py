@@ -137,6 +137,8 @@ class BlockMappingManager:
         # outer_block_id anymore.
         for ib_id in cached_inner_block_ids:
             self._cached_inner_to_outers[ib_id].remove(outer_block_id)
+            if len(self._cached_inner_to_outers[ib_id]) == 0:
+                self._cached_inner_to_outers.pop(ib_id)
 
         # 3. Reset the outer_block_id to inner mapping
         mapping = self._block_mappings.pop(outer_block_id, None)
@@ -234,6 +236,9 @@ class BlockMappingManager:
             for ib_id in cur_ib_segment:
                 if ib_id not in self._cached_inner_to_outers:
                     self._cached_inner_to_outers[ib_id] = []
+                assert cur_outer_block_id not in self._cached_inner_to_outers[ib_id], \
+                    f"OB: {cur_outer_block_id} already in cached in IB: {ib_id}="
+                    f"{self._cached_inner_to_outers[ib_id]}"
                 self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)
 
     def get_longest_matched_block(self, cached_ib_segment: list[int],

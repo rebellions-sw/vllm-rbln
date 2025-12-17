@@ -187,12 +187,18 @@ class RBLNKVCacheManager(KVCacheManager):
             inner_block_ids,
         )
         # Set the computed blocks as cached blocks
-        self._set_prefix_cached_blocks(
-            request.request_id,
-            num_new_computed_tokens,
-            cached_blocks,
-            is_prefill,
-        )
+        # only cached blocks are not overlapped with inner blocks
+        intersection = set(cached_blocks) & set(inner_block_ids)
+        if len(intersection) == 0:
+            # Set the computed blocks as cached blocks
+            # only cached blocks are not overlapped with inner blocks
+            self._set_prefix_cached_blocks(
+                request.request_id,
+                num_new_computed_tokens,
+                cached_blocks,
+                is_prefill,
+            )
+            num_computed_tokens = 0
 
         # Set the newly allocated blocks as cached blocks
         self._set_prefix_cached_blocks(
