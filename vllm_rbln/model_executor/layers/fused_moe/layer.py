@@ -39,7 +39,7 @@ def custom_moe_glu(
     masked_routing_weight: torch.Tensor,
     # act_fn: str,
     topk: int,
-    post_norm :bool,
+    post_norm: bool,
     expert_map: Optional[torch.Tensor] = None,
     gate_proj_bias: Optional[torch.Tensor] = None,
     up_proj_bias: Optional[torch.Tensor] = None,
@@ -79,7 +79,7 @@ def custom_moe_glu_fake(
     down_proj_weight: torch.Tensor,
     masked_routing_weight: torch.Tensor,
     topk: int,
-    post_norm :bool,
+    post_norm: bool,
     expert_map: Optional[torch.Tensor] = None,
     # act_fn: ACT_TYPES,
     gate_proj_bias: Optional[torch.Tensor] = None,
@@ -347,9 +347,8 @@ def unquantized_fused_optimize_moe_method_custom(
         top_k,
         renormalize,
         expert_map_const,
-        )
+    )
     return final_hidden_states.reshape(orig_shape)
-
 
 
 def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
@@ -455,7 +454,7 @@ if not envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
 elif envs.VLLM_RBLN_MOE_OPTIMIZE:
     logger.info("[RBLN] fused moe, RBLN optimize moe custom kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_optimize_moe_method_custom
-else :
+else:
     logger.info("[RBLN] fused moe, RBLN moe custom kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_custom
 FusedMoE.naive_multicast = fused_moe_naive_multicast_rbln
