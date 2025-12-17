@@ -101,7 +101,7 @@ environment_variables = {
      ("true", "1")),
     # enable moe optimization if RBLN_MoE_OPT is set to 1
     "VLLM_RBLN_MOE_OPTIMIZE":
-    (lambda: os.environ.get("VLLM_RBLN_MOE_OPTIMIZE", "True").lower() in
+    (lambda: os.environ.get("VLLM_RBLN_MOE_OPTIMIZE", "False").lower() in
      ("true", "1")),
 
     # DP_INPUT_ALL_GATHER, use DP input all_gather
