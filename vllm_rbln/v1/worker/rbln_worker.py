@@ -365,23 +365,11 @@ class RBLNWorker(WorkerBase):
     def _get_autobind_cpu_ids(
         self, cpu_selector: Callable[[list[LogicalCPUInfo]], list[LogicalCPUInfo]]
     ) -> str:
-        """
-        Return CPU ids to bind based on NUMA nodes.
-        Implements exclusive CPU allocation for all ranks:
-        - Each rank gets independent (exclusive) CPU allocation from its NUMA node
-        - If multiple ranks share the same NUMA node, CPUs are divided among them
-        Args:
-            cpu_selector: a callable object to select CPUs from a CPU list
-            of a physical core. The input is a LogicalCPUInfo list, sorted by
-            the LogicalCPUInfo.id. A selected LogicalCPUInfo list should be
-            returned.
-        """
-
         allowed_numa_nodes, logical_cpu_list = (
             CpuPlatform.get_allowed_cpu_core_node_list()
         )
 
-        # Calculate rank_across_dp for DP-aware CPU binding
+        # Calculate rank_across_dp for CPU binding
         # This ensures different DP groups get different CPU allocations
         world_size = self.parallel_config.world_size
         if self.parallel_config.data_parallel_size > 1:
@@ -409,7 +397,6 @@ class RBLNWorker(WorkerBase):
                 "with allowed CPUs. Please try to bind threads manually.")
             return "all"
 
-        # NCCL-style policy: rank -> NUMA node mapping (round-robin)
         # Use rank_across_dp to ensure DP groups get different CPU allocations
         # Each rank belongs to a NUMA node based on rank_across_dp % len(available_numa_nodes)
         numa_node_idx = rank_across_dp % len(available_numa_nodes)
@@ -434,9 +421,7 @@ class RBLNWorker(WorkerBase):
         selected_cpu_list = sorted(selected_cpu_list, key=lambda x: x.id)
 
         # Always divide CPUs among ranks in the same NUMA node for exclusive allocation
-        # This ensures each rank gets independent CPU allocation regardless of world_size
         if len(ranks_in_same_numa) > 1:
-            # Multiple ranks share this NUMA node - divide CPUs for exclusive allocation
             cpus_per_rank = len(selected_cpu_list) // len(ranks_in_same_numa)
             remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
 
@@ -445,22 +430,7 @@ class RBLNWorker(WorkerBase):
             end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
             logical_cpu_list = selected_cpu_list[start_idx:end_idx]
         else:
-            # Only one rank in this NUMA node - use all CPUs
             logical_cpu_list = selected_cpu_list
-
-        # Reserve CPUs for other processes
-        reserve_cpu_num = envs.VLLM_CPU_NUM_OF_RESERVED_CPU
-        if reserve_cpu_num is None:
-            need_reserve = (
-                self.parallel_config.world_size > 1
-                or self.parallel_config.data_parallel_size_local > 1
-            )
-            reserve_cpu_num = 1 if need_reserve else 0
-
-        # Apply CPU reservation if needed
-        num_of_reserved_cpu = min(reserve_cpu_num, len(logical_cpu_list) // 2)
-        if num_of_reserved_cpu > 0 and len(logical_cpu_list) > num_of_reserved_cpu:
-            logical_cpu_list = logical_cpu_list[:-num_of_reserved_cpu]
 
         if not logical_cpu_list:
             logger.warning(
