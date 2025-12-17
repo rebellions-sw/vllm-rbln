@@ -17,9 +17,12 @@ from typing import Optional
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm.v1.metrics.stats import PrefixCacheStats
 from vllm.v1.request import Request
 
 from vllm_rbln.logger import init_logger
+from vllm_rbln.v1.core.optimum_kv_cache_coordinator import (
+    RBLNKVCacheCoordinator)
 from vllm_rbln.v1.core.prefix_cache_manager import RBLNPrefixKVCacheManager
 
 logger = init_logger(__name__)
@@ -44,15 +47,41 @@ class RBLNKVCacheManager(KVCacheManager):
         PrefixKVCacheManager manages the mapping
         between inner blocks and outer blocks for prefix caching.
         """
-        super().__init__(
-            kv_cache_config,
-            max_model_len,
-            enable_caching,
-            use_eagle,
-            log_stats,
-            enable_kv_cache_events,
-            dcp_world_size,
+        self.max_model_len = max_model_len
+
+        self.enable_caching = enable_caching
+        self.use_eagle = use_eagle
+        self.log_stats = log_stats
+        # FIXME: make prefix cache stats conditional on log_stats
+        self.prefix_cache_stats = PrefixCacheStats() if log_stats else None
+
+        self.block_size: Optional[int] = None
+        if self.enable_caching:
+            assert len(
+                set(g.kv_cache_spec.block_size
+                    for g in kv_cache_config.kv_cache_groups)
+            ) == 1, "Only one block size is supported for now"
+            self.block_size = kv_cache_config.kv_cache_groups[
+                0].kv_cache_spec.block_size
+
+            if dcp_world_size > 1:
+                assert len(kv_cache_config.kv_cache_groups) == 1
+                # Note(hc): need revisit. When both DCP and any future
+                # PCP are enabled, the block_size may need to be scaled
+                # by a factor of dcp_size × pcp_size?
+                self.block_size *= dcp_world_size
+
+        self.coordinator = RBLNKVCacheCoordinator(
+            kv_cache_config=kv_cache_config,
+            max_model_len=self.max_model_len,
+            use_eagle=self.use_eagle,
+            enable_caching=self.enable_caching,
+            enable_kv_cache_events=enable_kv_cache_events,
+            dcp_world_size=dcp_world_size,
         )
+        self.num_kv_cache_groups = len(kv_cache_config.kv_cache_groups)
+        self.block_pool = self.coordinator.block_pool
+        self.kv_cache_config = kv_cache_config
         if enable_caching:
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=attn_block_size,
@@ -83,15 +112,16 @@ class RBLNKVCacheManager(KVCacheManager):
         assert num_lookahead_tokens == 0
         assert not delay_cache_blocks
         assert num_encoder_tokens == 0
-
+        assert num_new_computed_tokens == 0
+        assert new_computed_blocks is None
         if num_new_tokens == 0:
             raise ValueError("num_new_tokens must be greater than 0")
 
-        if new_computed_blocks is not None:
-            new_computed_block_list = new_computed_blocks.blocks
-        else:
-            new_computed_block_list = tuple(
-                [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
+        # if new_computed_blocks is not None:
+        #     new_computed_block_list = new_computed_blocks.blocks
+        # else:
+        #     new_computed_block_list = tuple(
+        #         [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
         # NOTE `new_computed_block_list` is used only for touch
         # When allocating new blocks, we do not reuse the provided
         # `new_computed_blocks` and we need to allocate new blocks.
@@ -104,7 +134,6 @@ class RBLNKVCacheManager(KVCacheManager):
         # In decode,
         # `num_computed_tokens` = the length of prompt + generated text
         # `num_new_tokens` = 1.
-        is_prefill = (request.num_computed_tokens == 0)
         num_computed_tokens = request.num_computed_tokens
         num_tokens_need_slot = min(request.num_tokens, self.max_model_len)
         num_blocks_to_allocate = self.coordinator.get_num_blocks_to_allocate(
@@ -178,43 +207,43 @@ class RBLNKVCacheManager(KVCacheManager):
         # Allocate outer blocks for prefix caching
         # following the inner blocks allocation
         inner_block_ids = [block.block_id for block in new_blocks[0]]
-        cached_blocks = [
-            block.block_id for block in new_computed_block_list[0]
-        ]
+        # cached_blocks = [
+        #     block.block_id for block in new_computed_block_list[0]
+        # ]
         self.prefix_cache_manager.allocate_blocks(
             request.request_id,
             num_computed_tokens,
             inner_block_ids,
         )
-        # Set the computed blocks as cached blocks
-        # only cached blocks are not overlapped with inner blocks
-        intersection = set(cached_blocks) & set(inner_block_ids)
-        if len(intersection) == 0:
-            # Set the computed blocks as cached blocks
-            # only cached blocks are not overlapped with inner blocks
-            self._set_prefix_cached_blocks(
-                request.request_id,
-                num_new_computed_tokens,
-                cached_blocks,
-                is_prefill,
-            )
-            num_computed_tokens = 0
+        # # Set the computed blocks as cached blocks
+        # # only cached blocks are not overlapped with inner blocks
+        # intersection = set(cached_blocks) & set(inner_block_ids)
+        # if len(intersection) == 0:
+        #     # Set the computed blocks as cached blocks
+        #     # only cached blocks are not overlapped with inner blocks
+        #     self._set_prefix_cached_blocks(
+        #         request.request_id,
+        #         num_new_computed_tokens,
+        #         cached_blocks,
+        #         is_prefill,
+        #     )
+        #     num_computed_tokens = 0
 
-        # Set the newly allocated blocks as cached blocks
-        self._set_prefix_cached_blocks(
-            request.request_id,
-            num_new_computed_tokens,
-            inner_block_ids,
-            is_prefill,
-        )
+        # # Set the newly allocated blocks as cached blocks
+        # self._set_prefix_cached_blocks(
+        #     request.request_id,
+        #     num_new_computed_tokens,
+        #     inner_block_ids,
+        #     is_prefill,
+        # )
 
         # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
         # num_new_tokens, but must exclude "non-committable" tokens (e.g.,
         # draft tokens that could be rejected). Therefore, we cap the number
         # at `request.num_tokens`, ensuring only "finalized" tokens are cached.
-        num_tokens_to_cache = min(num_computed_tokens + num_new_tokens,
-                                  request.num_tokens)
-        self.coordinator.cache_blocks(request, num_tokens_to_cache)
+        # num_tokens_to_cache = min(num_computed_tokens + num_new_tokens,
+        #                           request.num_tokens)
+        self.coordinator.cache_blocks(request, num_new_tokens)
         return KVCacheBlocks(new_blocks)
 
     def get_prefix_cached_blocks(
@@ -238,18 +267,47 @@ class RBLNKVCacheManager(KVCacheManager):
     def get_dummy_block(self) -> int:
         return self.prefix_cache_manager.get_dummy_block()
 
+    def set_prefix_cached_blocks(
+        self,
+        request: Request,
+        num_new_computed_tokens: int,
+        new_blocks: Optional[KVCacheBlocks] = None,
+        new_computed_blocks: Optional[KVCacheBlocks] = None,
+    ) -> None:
+        request_id = request.request_id
+        if new_blocks is not None:
+            new_block_ids = [block.block_id for block in new_blocks.blocks[0]]
+        else:
+            new_block_ids = []
+
+        if new_computed_blocks is not None:
+            new_computed_block_ids = [
+                block.block_id for block in new_computed_blocks.blocks[0]
+            ]
+        else:
+            new_computed_block_ids = []
+
+        intersection = set(new_block_ids) & set(new_computed_block_ids)
+        assert len(intersection) == 0, \
+            "new_blocks and new_computed_blocks should " \
+            "not be None at the same time" \
+        "new_block_ids: {}, new_computed_block_ids: {}".format(
+            new_block_ids, new_computed_block_ids
+        )
+        self._set_prefix_cached_blocks(request_id, num_new_computed_tokens,
+                                       new_computed_block_ids)
+        self._set_prefix_cached_blocks(request_id, num_new_computed_tokens,
+                                       new_block_ids)
+
     def _set_prefix_cached_blocks(
         self,
         request_id: str,
         num_new_computed_tokens: int,
         cached_blocks: list[int],
-        is_prefill: bool,
     ) -> None:
         # NOTE Currently, this function is called only prefill
         # and prefix caching is hit in the original
         # kv cache manager.
-        if not is_prefill:
-            return
         allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(
             request_id)
         self.prefix_cache_manager.set_cached_blocks(
