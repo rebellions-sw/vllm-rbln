@@ -337,7 +337,8 @@ def unquantized_fused_optimize_moe_method_custom(
         expert_map_list = expert_map.tolist()
         expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
 
-    # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/qwen3_moe_architecture.py
+    # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/
+    # qwen3_moe_architecture.py
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
         hidden_states,
         gate_proj_weight,
@@ -453,7 +454,8 @@ if not envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_rbln
 elif envs.VLLM_RBLN_MOE_OPTIMIZE:
     logger.info("[RBLN] fused moe, RBLN optimize moe custom kernel")
-    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_optimize_moe_method_custom
+    UnquantizedFusedMoEMethod.forward_oot = (
+        unquantized_fused_optimize_moe_method_custom)
 else:
     logger.info("[RBLN] fused moe, RBLN moe custom kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_custom
