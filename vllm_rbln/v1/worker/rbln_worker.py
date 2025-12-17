@@ -397,14 +397,9 @@ class RBLNWorker(WorkerBase):
                 "with allowed CPUs. Please try to bind threads manually.")
             return "all"
 
-        # Use rank_across_dp to ensure DP groups get different CPU allocations
-        # Each rank belongs to a NUMA node based on rank_across_dp % len(available_numa_nodes)
         numa_node_idx = rank_across_dp % len(available_numa_nodes)
         selected_numa_node = available_numa_nodes[numa_node_idx]
         numa_node_cpu_list = numa_node_to_cpus[selected_numa_node]
-
-        # Determine which ranks share the same NUMA node (for logging)
-        # Use world_size_across_dp to consider all ranks across DP groups
         ranks_in_same_numa = [r for r in range(world_size_across_dp)
                              if r % len(available_numa_nodes) == numa_node_idx]
 
