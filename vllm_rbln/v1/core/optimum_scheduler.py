@@ -256,17 +256,17 @@ class RBLNOptimumScheduler(Scheduler):
                     # The request cannot be scheduled.
                     break
 
-                # FIXME: exclude itself
+                # FIXME new_computed_blocks -> not in case of prefix caching?
                 new_computed_blocks, num_new_local_computed_tokens = \
                     self.kv_cache_manager.get_computed_blocks(
                         request)
-
-                self.kv_cache_manager.set_prefix_cached_blocks(
-                    request,
-                    num_new_local_computed_tokens,
-                    new_blocks,
-                    new_computed_blocks,
-                )
+                if self.cache_config.enable_prefix_caching:
+                    self.kv_cache_manager.record_computed_blocks(
+                        request,
+                        num_new_local_computed_tokens,
+                        new_blocks,
+                        new_computed_blocks,
+                    )
 
                 # Get the cached blocks for prefix caching.
                 # using new_computed_blocks, num_new_local_computed_tokens

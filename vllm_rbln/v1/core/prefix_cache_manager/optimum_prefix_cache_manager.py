@@ -25,36 +25,12 @@ from vllm_rbln.logger import init_logger
 
 from .optimum_block_mapping_manager import BlockMappingManager, RBLNBlock
 from .optimum_eviction_policy import FIFOEvictionPolicy, LRUEvictionPolicy
+from .optimum_cache_history_manager import InnerBlockGroupManager
+from .optimum_block_configuration import BlockConfiguration
+from .optimum_cache_history_manager import CacheHistoryManager
 
 logger = init_logger(__name__)
 NO_MATCH_FOUND = -1
-
-
-@dataclass
-class BlockConfiguration:
-    ob_size: int
-    ib_size: int
-    max_model_len: int
-    max_num_seqs: int
-    num_ob: int
-
-    def __post_init__(self):
-        assert self.ob_size % self.ib_size == 0, \
-            "ob_size must be a multiple of ib_size"
-
-    @property
-    def block_ratio(self) -> int:
-        return self.ob_size // self.ib_size
-
-
-@dataclass
-class CacheSearchResult:
-    cached_outer_blocks: list[int]
-    cached_lengths: list[int]
-
-    @property
-    def has_cache_hit(self) -> bool:
-        return len(self.cached_outer_blocks) > 0
 
 
 class BlockAllocatorInterface(ABC):
@@ -114,104 +90,6 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
         return self._free_blocks[0].block_id
 
 
-class CacheSearchManager:
-    """
-    Search for cached blocks that can be reused.
-    It maintains a per-request cache of search results
-    until the request is freed.
-    """
-
-    def __init__(self, config: BlockConfiguration):
-        self._config = config
-
-    def find_cached_blocks(
-            self, request_id: str, cached_blocks: list[int],
-            skip_blocks: set[int], num_new_computed_tokens: int,
-            mapping_manager: BlockMappingManager) -> CacheSearchResult:
-        """
-        Find cached outer blocks that match the given inner blocks.
-        """
-
-        best_match = self._try_match_request(cached_blocks, skip_blocks,
-                                             mapping_manager)
-        # self._cached_blocks_per_request[request_id] = best_match
-        final_num_cached_tokens = sum(best_match.cached_lengths)
-
-        if logger.isEnabledFor(logging.DEBUG):
-            if final_num_cached_tokens < num_new_computed_tokens:
-                miss_rate = (
-                    (num_new_computed_tokens - final_num_cached_tokens) /
-                    num_new_computed_tokens *
-                    100) if num_new_computed_tokens > 0 else 0
-                logger.debug(
-                    "[PFX] [CACHE-PARTIAL] REQUEST=%s | "
-                    "REUSED=%d/%d tokens (%.1f%%) | "
-                    "MISSED=%d tokens (%.1f%%) | "
-                    "REASON=partial_cache_miss", request_id,
-                    final_num_cached_tokens, num_new_computed_tokens,
-                    (final_num_cached_tokens / num_new_computed_tokens * 100),
-                    num_new_computed_tokens - final_num_cached_tokens,
-                    miss_rate)
-
-            if best_match.has_cache_hit:
-                cached_blocks = []
-                ob_to_ib_mapping = {}
-
-                for i, (ob, cached_length) in \
-                    enumerate(zip(best_match.cached_outer_blocks,
-                        best_match.cached_lengths)):
-                    ibs = mapping_manager.get_cached_inner_blocks_for_outer(ob)
-                    cached_num_ib = cached_length // self._config.ib_size
-                    cached_inner_blocks = ibs[:cached_num_ib]
-                    cached_blocks.extend(cached_inner_blocks)
-                    ob_to_ib_mapping[ob] = len(cached_inner_blocks)
-
-                # TODO specify the hit ratio?
-                logger.debug(
-                    "[PFX] [CACHE-HIT] REQUEST=%s | "
-                    "OB_COUNT=%d OB=%s | "
-                    "IB_COUNT=%d IB=%s | "
-                    "OB_TO_IB_MAP=%s", request_id,
-                    len(best_match.cached_outer_blocks),
-                    best_match.cached_outer_blocks, len(cached_blocks),
-                    cached_blocks, ob_to_ib_mapping)
-
-        return best_match
-
-    def _calculate_cached_inner_blocks(self, cached_len_tokens: int) -> int:
-        """
-        Calculate the number of cached inner blocks
-        based on the cached length in tokens.
-        """
-        return cached_len_tokens // self._config.ib_size
-
-    def _try_match_request(
-            self, cached_ib: list[int], skip_blocks: set[int],
-            mapping_manager: BlockMappingManager) -> CacheSearchResult:
-        """
-        Try to find the best matching outer blocks for the given inner blocks.
-        NOTE Currently, we only support exact match of the inner blocks
-        """
-        cached_obs = []
-        cached_lengths = []
-        for start_ib_idx in range(0, len(cached_ib), self._config.block_ratio):
-            end_ib_idx = min(start_ib_idx + self._config.block_ratio,
-                             len(cached_ib))
-            cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
-            cached_ob, num_cached_ibs = \
-                mapping_manager.get_longest_matched_block(
-                cur_ib_segment, skip_blocks)
-            # FIXME simple stop condition
-            # Upgrade the readability later
-            if cached_ob == NO_MATCH_FOUND:
-                break
-            cached_obs.append(cached_ob)
-            cached_lengths.append(num_cached_ibs * self._config.ib_size)
-
-        return CacheSearchResult(cached_outer_blocks=cached_obs,
-                                 cached_lengths=cached_lengths)
-
-
 class MemoryPoolManager:
     """
     Manage a memory pool to return a tensor of block IDs.
@@ -243,9 +121,11 @@ class RBLNPrefixKVCacheManager:
                                           max_num_seqs, num_ob)
         self._allocator = RBLNBlockAllocator(num_ob)
         self._mapping_manager = BlockMappingManager()
-        self._cache_search_manager = CacheSearchManager(self._config)
+        self._cache_history_manager = CacheHistoryManager(self._config)
         self._memory_pool_manager = MemoryPoolManager(max_model_len, ob_size)
         self._eviction_policy = FIFOEvictionPolicy()
+        # manage cache history
+        # self._cache_manager = CacheManager()
 
     def is_full_block_available(self) -> bool:
         blocks_per_seq = math.ceil(self._config.max_model_len /
@@ -351,6 +231,8 @@ class RBLNPrefixKVCacheManager:
             if block:
                 self._allocator.deallocate(block)
                 self._eviction_policy.unregister_block(block_id)
+                ib_ids = mapping.inner_block_ids
+                self._cache_history_manager.unregister_inner_blocks(ib_ids)
                 logger.debug(
                     "[PFX] [EVICTION] OB=%d | "
                     "IB_COUNT=%d | "
@@ -417,7 +299,7 @@ class RBLNPrefixKVCacheManager:
         Get the matched outer blocks using inner blocks.
         """
         skip_blocks = set(self.get_block_ids(request_id))
-        result = self._cache_search_manager.find_cached_blocks(
+        result = self._cache_history_manager.find_cached_blocks(
             request_id, cached_blocks, skip_blocks, num_new_computed_tokens,
             self._mapping_manager)
 
@@ -491,14 +373,13 @@ class RBLNPrefixKVCacheManager:
             self._handle_prefill_allocation(request_id, num_new_ob,
                                             inner_blocks)
 
-    def set_cached_blocks(self, cached_blocks: list[int],
-                          allocated_outer_blocks: list[int]) -> None:
+    def register_cache_history(self, new_inner_blocks: list[int], cached_blocks: list[int],
+                          allocated_outer_blocks: list[int], num_new_computed_tokens: int) -> None:
         """
         Mark the blocks associated with the request as cached.
         """
-        self._mapping_manager.set_cached_blocks(cached_blocks,
-                                                allocated_outer_blocks,
-                                                self._config.block_ratio)
+        self._cache_history_manager.register_cached_blocks(new_inner_blocks, cached_blocks,
+                                                      allocated_outer_blocks, num_new_computed_tokens)
 
     def get_dummy_block(self) -> int:
         if not self.is_full_block_available():
@@ -519,3 +400,97 @@ class RBLNPrefixKVCacheManager:
             self._check_free_blocks(num_blocks_to_allocate)
             dummy_block = self._allocator.peek_dummy_block()
             return dummy_block
+
+
+# Cache manager
+
+    # def get_longest_matched_block(self, cached_ib_segment: list[int],
+    #                               skip_blocks: set[int]) -> tuple[int, int]:
+    #     """
+    #     Given a segment of cached inner block IDs,
+    #     return the outer block ID that has the longest matching prefix
+    #     with the cached inner block segment.
+    #     If no match is found, return tuple[-1, 0].
+    #     """
+    #     # Find the outer block IDs
+    #     # that match the first block of cached inner block segment
+    #     matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
+    #     logger.debug(
+    #         "[PFX] [MAPPING-SEARCH] QUERY_IB=%d | "
+    #         "SEGMENT_SIZE=%d SEGMENT=%s | "
+    #         "CANDIDATE_OBS=%s",
+    #         cached_ib_segment[0] if cached_ib_segment else -1,
+    #         len(cached_ib_segment), cached_ib_segment,
+    #         matched_obs if matched_obs else [])
+    #     final_outer_block_id = -1
+    #     final_num_ibs = 0
+    #     if matched_obs is not None:
+    #         alive_obs = [
+    #             ob for ob in matched_obs if ob in self._block_mappings
+    #         ]
+    #         # TODO It is not required. But it is a safety check.
+    #         assert len(matched_obs) == len(alive_obs)
+
+    #         alive_obs = [ob for ob in alive_obs if ob not in skip_blocks]
+    #         for outer_block_id in alive_obs:
+    #             cached_ibs = self._outer_to_cached_inner[outer_block_id]
+    #             prefix_ibs = self._get_common_prefix(cached_ibs,
+    #                                                  cached_ib_segment)
+    #             cache_hit_size = len(prefix_ibs)
+    #             if cache_hit_size > final_num_ibs:
+    #                 final_outer_block_id = outer_block_id
+    #                 final_num_ibs = cache_hit_size
+    #     return final_outer_block_id, final_num_ibs
+
+
+    # def _get_common_prefix(self, arr1: list[int],
+    #                        arr2: list[int]) -> list[int]:
+    #     """
+    #     Return the common prefix between two lists of integers.
+    #     """
+    #     common_prefix = []
+    #     min_length = min(len(arr1), len(arr2))
+    #     for i in range(min_length):
+    #         if arr1[i] == arr2[i]:
+    #             common_prefix.append(arr1[i])
+    #         else:
+    #             break
+    #     return common_prefix
+
+    # def set_cached_blocks(self, inner_blocks: list[int],
+    #                       outer_block_ids: list[int],
+    #                       block_ratio: int) -> None:
+    #     """
+    #     Set the cached blocks by mapping inner blocks to outer blocks.
+    #     inner_blocks: list[int]
+    #         List of inner block IDs that are cached
+    #         or newly allocated inner block IDs.
+    #     outer_block_ids: list[int]
+    #         List of outer block IDs.
+    #     """
+    #     if len(inner_blocks) == 0:
+    #         return
+
+    #     for cur_outer_block_idx, start_ib_idx in enumerate(
+    #             range(0, len(inner_blocks), block_ratio)):
+    #         end_ib_idx = min(start_ib_idx + block_ratio, len(inner_blocks))
+    #         cur_ib_segment = inner_blocks[start_ib_idx:end_ib_idx]
+    #         cur_outer_block_id = outer_block_ids[cur_outer_block_idx]
+    #         # if self._outer_to_cached_inner.get(cur_outer_block_id) is None:
+    #         #     # First segment
+    #         #     self._outer_to_cached_inner[
+    #         #         cur_outer_block_id] = cur_ib_segment
+    #         # else:
+    #         #     # Second segment
+    #         #     self._outer_to_cached_inner[cur_outer_block_id].extend(
+    #         #         cur_ib_segment)
+
+    #         for ib_id in cur_ib_segment:
+    #             if ib_id not in self._cached_inner_to_outers:
+    #                 self._cached_inner_to_outers[ib_id] = []
+    #             assert cur_outer_block_id not in \
+    #                 self._cached_inner_to_outers[ib_id], \
+    #                 f"OB: {cur_outer_block_id} already in cached " \
+    #                 f"in IB: {ib_id}=" \
+    #                 f"{self._cached_inner_to_outers[ib_id]}"
+    #             self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)

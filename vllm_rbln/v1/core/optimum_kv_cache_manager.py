@@ -267,7 +267,7 @@ class RBLNKVCacheManager(KVCacheManager):
     def get_dummy_block(self) -> int:
         return self.prefix_cache_manager.get_dummy_block()
 
-    def set_prefix_cached_blocks(
+    def record_computed_blocks(
         self,
         request: Request,
         num_new_computed_tokens: int,
@@ -286,7 +286,16 @@ class RBLNKVCacheManager(KVCacheManager):
             ]
         else:
             new_computed_block_ids = []
-
+        logger.debug(
+            "[PFX] [RECORD-COMPUTED-BLOCKS] REQUEST=%s | "
+            "NUM_NEW_COMPUTED_TOKENS=%d | "
+            "NEW_BLOCK_IDS=%s | "
+            "NEW_COMPUTED_BLOCK_IDS=%s",
+            request.request_id,
+            num_new_computed_tokens,
+            new_block_ids,
+            new_computed_block_ids,
+        )
         intersection = set(new_block_ids) & set(new_computed_block_ids)
         assert len(intersection) == 0, \
             "new_blocks and new_computed_blocks should " \
@@ -294,23 +303,10 @@ class RBLNKVCacheManager(KVCacheManager):
         "new_block_ids: {}, new_computed_block_ids: {}".format(
             new_block_ids, new_computed_block_ids
         )
-        self._set_prefix_cached_blocks(request_id, num_new_computed_tokens,
-                                       new_computed_block_ids)
-        self._set_prefix_cached_blocks(request_id, num_new_computed_tokens,
-                                       new_block_ids)
-
-    def _set_prefix_cached_blocks(
-        self,
-        request_id: str,
-        num_new_computed_tokens: int,
-        cached_blocks: list[int],
-    ) -> None:
-        # NOTE Currently, this function is called only prefill
-        # and prefix caching is hit in the original
-        # kv cache manager.
-        allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(
-            request_id)
-        self.prefix_cache_manager.set_cached_blocks(
-            cached_blocks,
+        allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(request_id)
+        self.prefix_cache_manager.register_cache_history(
+            new_block_ids,
+            new_computed_block_ids,
             allocated_outer_blocks,
+            num_new_computed_tokens,
         )
