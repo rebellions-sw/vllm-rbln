@@ -20,7 +20,11 @@ from .optimum_attention_strategy import (HybridAttentionImageStrategy,
                                          InnerR2)
 
 __all__ = [
-    "AttentionManager", "InnerAttentionEntry", "InnerAttentionStrategy",
-    "InnerR1", "InnerR2", "HybridAttentionImageManager",
-    "HybridAttentionImageStrategy"
+    "AttentionManager",
+    "InnerAttentionEntry",
+    "InnerAttentionStrategy",
+    "InnerR1",
+    "InnerR2",
+    "HybridAttentionImageManager",
+    "HybridAttentionImageStrategy",
 ]
