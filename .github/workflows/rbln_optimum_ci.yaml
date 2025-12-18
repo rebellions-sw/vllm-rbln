@@ -99,11 +99,16 @@ jobs:
 
       - name: Run decoder-only test (Flash-attention mode) (V1)
         run: >
-          python3 examples/optimum/run_decoder_only.py --max_seq_len 131072
+          python3 examples/optimum/run_decoder_only.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llama3_2-3b-128k_kv16k_batch4
           --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
           --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama3_2_3b_instruct_128k_copy_prompts.json
+
+      - name: Run Hybrid-attention mode (V1)
+        run: >
+          python3 examples/optimum/run_basic.py
+          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/gemma-2-2b-8k_batch4
 
       - name : Run Llava-next (Eager mode) (V1)
         run: >

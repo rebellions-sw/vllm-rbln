@@ -33,11 +33,13 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
     Supports text-only generation models with:
     - Sliding window attention
       - `block_tables` is not used because there is no full attention layer.
-      - `local_block_tables` is only used for the sliding window attention layer.
+      - `local_block_tables` is only used for
+        the sliding window attention layer.
     - Hybrid attention (full + sliding window layers)
       - `block_tables` and `local_block_tables` are both used.
 
-    Note: Gemma3 uses hybrid attention but is multi-modal, so it uses another exclusive class.
+    Note: Gemma3 uses hybrid attention but is multi-modal,
+            so it uses another exclusive class.
     """
 
     def __init__(
