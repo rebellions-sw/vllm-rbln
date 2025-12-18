@@ -16,10 +16,15 @@
 """
 Usage:
 Single node:
-    python examples/offline_inference/data_parallel.py \
-            --model="ibm-research/PowerMoE-3b" \
-            --dp-size=2 \
-            --tp-size=2
+    - To enable padded decode and MoE tokens mask,
+    set the following environment variables:
+        VLLM_RBLN_USE_MOE_TOKENS_MASK=1 \
+        VLLM_RBLN_DP_IMPL="padded_decode" \
+        and other VLLM_RBLN_* environment variables... \
+        python examples/experimental/data_parallel.py \
+                --model="Qwen/Qwen1.5-MoE-A2.7B" \
+                --dp-size=2 \
+                --tp-size=2 --ep
 
 Multi-node:
     Node 0 (assume the node has ip of 10.99.48.128):
@@ -89,7 +94,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     # Sample prompts.
     prompts = [
         "Hello, my name is",
-        "The capital of France is",
+        "The vLLM is",
         "The president of the United States is",
         "The future of AI is",
     ]
