@@ -36,11 +36,13 @@ class RBLNBlockPool(BlockPool):
             cached_blocks_one_group_values = cached_blocks_one_group.values()
             # NOTE(eunji.lee)
             # Exclude blocks allocated by the current request itself
-            if len(cached_blocks_one_group_values) == 1:
+            if len(cached_blocks_one_group_values) <= 1:
                 return None
-            first_block = next(iter(cached_blocks_one_group_values))
-            outer_block = []
-            for block in cached_blocks_one_group_values:
-                outer_block.append(block.block_id)
-            cached_blocks.append(first_block)
+            iterator = reversed(cached_blocks_one_group_values)
+            _ = next(iterator)
+            second_last_block = next(iterator)
+            # outer_block = []
+            # for block in cached_blocks_one_group_values:
+            #     outer_block.append(block.block_id)
+            cached_blocks.append(second_last_block)
         return cached_blocks
