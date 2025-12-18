@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import multiprocessing
-
 import pytest
+
+from .utils import patch_and_run
 
 
 @pytest.fixture
@@ -255,32 +255,17 @@ targets = [
 ]
 
 
-def run_vllm(llm_args, prompts):
+def run_vllm(llm_kwargs, prompts):
     from vllm import LLM, SamplingParams
 
     try:
-        llm = LLM(**llm_args)
+        llm = LLM(**llm_kwargs)
         for output in llm.generate(prompts, SamplingParams(temperature=0.0)):
             prompt = output.prompt
             generated_text = output.outputs[0].text
             print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
     except Exception as e:
-        # TODO: error logging?
         raise e
-
-
-def patch_and_run(monkeypatch, env, llm_args, prompts):
-    with monkeypatch.context() as m:
-        for k, i in env.items():
-            m.setenv(k, i)
-
-        # rebellions SDK somewhat requires LLM instance to be
-        # instantiated in separated process
-        p = multiprocessing.Process(target=run_vllm, args=(llm_args, prompts))
-        p.start()
-        p.join()
-
-        assert not p.exitcode
 
 
 @pytest.mark.parametrize("target", targets)
@@ -295,4 +280,10 @@ def test_model_coverage(
     test_env = target.pop("extra_env", {})
     test_env["VLLM_USE_V1"] = vllm_use_v1
     test_env.update(common_env)
-    patch_and_run(monkeypatch, test_env, target, prompts)
+    patch_and_run(
+        monkeypatch,
+        test_env,
+        run_vllm,
+        llm_kwargs=target,
+        prompts=prompts,
+    )

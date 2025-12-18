@@ -6,7 +6,6 @@ requires = [
     "packaging",
     "setuptools>=61",
     "setuptools-scm>=8.0",
-    "torch == 2.6.0",
     "wheel",
     "jinja2",
 ]
@@ -33,7 +32,36 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 requires-python = ">=3.9"
-dynamic = [ "version", "dependencies", "optional-dependencies"]
+dynamic = ["version"]
+dependencies = [
+    "setuptools>=64",
+    "setuptools-scm>=8",
+    "pyyaml",
+    "datasets",
+    "qwen_vl_utils",
+    "vllm==0.10.2",
+    "optimum-rbln>=0.9.4a4",
+    "torch==2.8.0"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "pytest-cov",
+]
+build = [
+    "build",
+    "setuptools-scm",
+]
+dev = [
+    "packaging",
+    "simphile",
+    "pynvml",
+    "huggingface_hub",
+    "fire",
+]
 
 [project.urls]
 Homepage="https://rebellions.ai"
@@ -123,3 +151,20 @@ plugins.md013.enabled = false # line-length
 plugins.md041.enabled = false # first-line-h1
 plugins.md033.enabled = false # inline-html
 plugins.md024.allow_different_nesting = true # no-duplicate-headers
+
+# Primary package index
+index-url = "https://pypi.org/simple"
+
+# Additional package indexes
+extra-index-url = [
+    "https://download.pytorch.org/whl/cpu"
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

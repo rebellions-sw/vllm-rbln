@@ -267,12 +267,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                dtype=torch.long,
                                                device=self.device)
 
-        logger.debug("[RBLN] model input builder, prepare_prompt")
-        logger.debug("\tpadded input_tokens = %s", input_tokens)
-        logger.debug("\tpadded input_positions = %s", input_positions)
-        logger.debug("\tinput_block_ids = %s", input_block_ids)
-        logger.debug("\tseq_lens = %s", data.seq_lens)
-        logger.debug("\tquery_lens = %s", data.query_lens)
         return (input_tokens, input_positions, input_block_ids)
 
     def _prepare_decode(
@@ -339,13 +333,6 @@ class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]
                                                pad=0,
                                                dtype=torch.long,
                                                device=self.device)
-
-        logger.debug("[RBLN] model input builder, prepare_decode")
-        logger.debug("\tpadded input_tokens = %s", data.input_tokens)
-        logger.debug("\tpadded input_positions = %s", data.input_positions)
-        logger.debug("\tinput_block_ids = %s", input_block_ids)
-        logger.debug("\tseq_lens = %s", data.seq_lens)
-        logger.debug("\tquery_lens = %s", data.query_lens)
 
         assert input_tokens.shape[0] == self.max_num_seqs
         assert input_positions.shape[0] == self.max_num_seqs
@@ -450,23 +437,6 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         TP = get_tp_group()
         PP = get_pp_group()
         DP = get_dp_group()
-        logger.info("[RBLN] TP group unique_name = %s", TP.unique_name)
-        logger.info("[RBLN] TP group ranks = %s, local rank = %s", TP.ranks,
-                    TP.rank)
-        logger.info("[RBLN] TP device group id = %s, cpu group id = %s",
-                    TP.device_group.group_name, TP.cpu_group.group_name)
-
-        logger.info("[RBLN] PP group unique_name = %s", PP.unique_name)
-        logger.info("[RBLN] PP group ranks = %s, local rank = %s", PP.ranks,
-                    PP.rank)
-        logger.info("[RBLN] PP device group id = %s, cpu group id = %s",
-                    PP.device_group.group_name, PP.cpu_group.group_name)
-
-        logger.info("[RBLN] DP group unique_name = %s", DP.unique_name)
-        logger.info("[RBLN] DP group ranks = %s, local rank = %s", DP.ranks,
-                    DP.rank)
-        logger.info("[RBLN] DP device group id = %s, cpu group id = %s",
-                    DP.device_group.group_name, DP.cpu_group.group_name)
 
         process_group_dict = {}
         process_group_dict[TP.device_group.group_name] = TP.ranks
@@ -476,15 +446,12 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         process_group_dict[DP.device_group.group_name] = DP.ranks
         process_group_dict[DP.cpu_group.group_name] = DP.ranks
 
-        logger.info("[RBLN] process_group_dict = %s", process_group_dict)
         options = {
             "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
             "process_group_dict": process_group_dict
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
-            logger.info("Once the model is compiled for the first time, "
-                        "the cached compiled binary will be reused.")
             options["cache_dir"] = ("./rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE
                                     > 1 else "./cache_dir")
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
@@ -533,8 +500,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 self.model.get_language_model(), "logits_processor"):
             self.compute_logits_model = self.model.get_language_model()
 
-        logger.info("[RBLN] load_model = %s", self.model)
-        logger.info("[RBLN] model_config.num_layers = %d",
+        logger.info("load_model = %s", self.model)
+        logger.info("model_config.num_layers = %d",
                     self.model_config.get_num_layers(self.parallel_config))
 
         def model_wrapper(
@@ -623,19 +590,6 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         is_prompt = seq_group_metadata_list[
             0].is_prompt if seq_group_metadata_list else None
-        if is_prompt:
-            logger.debug("[RBLN] Prefill step - requests: %s", [
-                seq_group_metadata.request_id
-                for seq_group_metadata in seq_group_metadata_list
-            ])
-        else:
-            logger.debug("[RBLN] Decode step - requests: %s", [
-                seq_group_metadata.request_id
-                for seq_group_metadata in seq_group_metadata_list
-            ])
-        logger.info("[RBLN] num_requests = %d", len(seq_group_metadata_list))
-        logger.info("[RBLN] input_ids = %s", model_input.input_tokens)
-        logger.info("[RBLN] positions = %s", model_input.input_positions)
         return dataclasses.replace(model_input,
                                    sampling_metadata=sampling_metadata,
                                    virtual_engine=virtual_engine,

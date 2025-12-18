@@ -59,9 +59,9 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
         pad_token = self.info.get_hf_processor().tokenizer.pad_token
         pad_token_id = self.info.get_hf_processor().tokenizer.pad_token_id
-
-        prompt_ids = prompt_ids + [pad_token_id] * padded_seq_len
-        prompt = prompt + pad_token * padded_seq_len
+        # NOTE: Left padding for Gemma3
+        prompt_ids = [pad_token_id] * padded_seq_len + prompt_ids
+        prompt = pad_token * padded_seq_len + prompt
         return prompt_ids, prompt
 
     def apply(self, *args, **kwargs):
