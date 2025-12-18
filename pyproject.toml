@@ -83,10 +83,6 @@ where = ["."]
 exclude = ["benchmarks", "csrc", "docs", "examples", "tests*"]
 namespaces = false
 
-[tool.ruff]
-# Allow lines to be as long as 80.
-line-length = 80
-
 [tool.ruff.lint.per-file-ignores]
 "vllm/third_party/**" = ["ALL"]
 # Python 3.8 typing. TODO: Remove these excludes after v1.0.0
@@ -109,7 +105,7 @@ select = [
     # flake8-simplify
     "SIM",
     # isort
-    # "I",
+    "I",
     "G",
 ]
 ignore = [
@@ -140,10 +136,6 @@ files = [
 [tool.codespell]
 ignore-words-list = "dout, te, indicies, subtile, ElementE"
 skip = "vllm/third_party/*"
-
-[tool.isort]
-use_parentheses = true
-skip_gitignore = true
 
 [tool.pymarkdown]
 plugins.md004.style = "sublist" # ul-style
