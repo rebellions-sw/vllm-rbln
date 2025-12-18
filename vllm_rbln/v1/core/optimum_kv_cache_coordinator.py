@@ -1,9 +1,11 @@
 from vllm.v1.core.kv_cache_coordinator import UnitaryKVCacheCoordinator
-from vllm_rbln.v1.core.optimum_block_pool import RBLNBlockPool
-from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
-                                        KVCacheSpec)
 from vllm.v1.core.single_type_kv_cache_manager import (
-    CrossAttentionManager, FullAttentionManager, get_manager_for_kv_cache_spec)
+    get_manager_for_kv_cache_spec)
+from vllm.v1.kv_cache_interface import KVCacheConfig
+
+from vllm_rbln.v1.core.optimum_block_pool import RBLNBlockPool
+
+
 class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
     """
     Coordinate the KV cache of different KV cache groups.
@@ -22,8 +24,8 @@ class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
         self.max_model_len = max_model_len
         self.enable_caching = enable_caching
 
-        self.block_pool = RBLNBlockPool(kv_cache_config.num_blocks, enable_caching,
-                                    enable_kv_cache_events)
+        self.block_pool = RBLNBlockPool(kv_cache_config.num_blocks,
+                                        enable_caching, enable_kv_cache_events)
 
         # Needs special handling for find_longest_cache_hit if eagle is enabled
         self.use_eagle = use_eagle

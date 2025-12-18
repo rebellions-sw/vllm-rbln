@@ -117,11 +117,6 @@ class RBLNKVCacheManager(KVCacheManager):
         if num_new_tokens == 0:
             raise ValueError("num_new_tokens must be greater than 0")
 
-        # if new_computed_blocks is not None:
-        #     new_computed_block_list = new_computed_blocks.blocks
-        # else:
-        #     new_computed_block_list = tuple(
-        #         [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
         # NOTE `new_computed_block_list` is used only for touch
         # When allocating new blocks, we do not reuse the provided
         # `new_computed_blocks` and we need to allocate new blocks.
@@ -147,23 +142,6 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new blocks
             return None
 
-        # Edge case
-        # removed_blocks refers the blocks
-        # that are removed from the free blocks
-        # after the touch function is called
-        # We need to check the free blocks will be enough
-        # after the touch function is called
-        # if self.enable_caching:
-        #     removed_blocks = 0
-        #     for blocks_per_group in new_computed_block_list:
-        #         for block in blocks_per_group:
-        #             if block.ref_cnt == 0 and not block.is_null:
-        #                 removed_blocks += 1
-
-        #     if num_blocks_to_allocate + removed_blocks > \
-        #         self.block_pool.get_num_free_blocks():
-        #         return None
-
         if self.enable_caching and \
             not self.prefix_cache_manager.can_allocate(
                     num_blocks_to_allocate,
@@ -171,21 +149,6 @@ class RBLNKVCacheManager(KVCacheManager):
             ):
             # Cannot allocate new outer blocks for prefix caching
             return None
-
-        # TODO (eunji): The touch function
-        # increases the ref_cnt. We don't need ref_cnt
-        # because we don't reuse the provided computed blocks
-        # and just copy the prefix matched blocks.
-        # But for consistency with original vllm and
-        # cache hit rate, we keep the touch function here.
-        # It triggers all blocks are not freed
-        # even though the request is freed.
-        # if self.enable_caching:
-        #     self.block_pool.touch(new_computed_block_list)
-        # else:
-        #     assert not any(new_computed_block_list), (
-        #         "Computed blocks should be empty when "
-        #         "prefix caching is disabled")
 
         # Generate req_to_blocks, num_cached_block
         # in the coordinator
@@ -207,42 +170,17 @@ class RBLNKVCacheManager(KVCacheManager):
         # Allocate outer blocks for prefix caching
         # following the inner blocks allocation
         inner_block_ids = [block.block_id for block in new_blocks[0]]
-        # cached_blocks = [
-        #     block.block_id for block in new_computed_block_list[0]
-        # ]
         self.prefix_cache_manager.allocate_blocks(
             request.request_id,
             num_computed_tokens,
             inner_block_ids,
         )
-        # # Set the computed blocks as cached blocks
-        # # only cached blocks are not overlapped with inner blocks
-        # intersection = set(cached_blocks) & set(inner_block_ids)
-        # if len(intersection) == 0:
-        #     # Set the computed blocks as cached blocks
-        #     # only cached blocks are not overlapped with inner blocks
-        #     self._set_prefix_cached_blocks(
-        #         request.request_id,
-        #         num_new_computed_tokens,
-        #         cached_blocks,
-        #         is_prefill,
-        #     )
-        #     num_computed_tokens = 0
 
-        # # Set the newly allocated blocks as cached blocks
-        # self._set_prefix_cached_blocks(
-        #     request.request_id,
-        #     num_new_computed_tokens,
-        #     inner_block_ids,
-        #     is_prefill,
-        # )
-
-        # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
-        # num_new_tokens, but must exclude "non-committable" tokens (e.g.,
-        # draft tokens that could be rejected). Therefore, we cap the number
-        # at `request.num_tokens`, ensuring only "finalized" tokens are cached.
-        # num_tokens_to_cache = min(num_computed_tokens + num_new_tokens,
-        #                           request.num_tokens)
+        # Generate hashed values of newly allocated blocks
+        # In prefill,
+        # `num_new_tokens` = the length of the input prompt.
+        # In decode,
+        # `num_new_tokens` = 1.
         self.coordinator.cache_blocks(request, num_new_tokens)
         return KVCacheBlocks(new_blocks)
 

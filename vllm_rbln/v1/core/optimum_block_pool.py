@@ -1,15 +1,14 @@
-from vllm.v1.core.block_pool import BlockPool
-from vllm.v1.core.kv_cache_utils import BlockHash, KVCacheBlock
 from typing import Optional
-from vllm.v1.core.kv_cache_utils import make_block_hash_with_group_id
-from vllm.v1.core.kv_cache_utils import (BlockHash, BlockHashWithGroupId,
-                                         ExternalBlockHash,
-                                         FreeKVCacheBlockQueue, KVCacheBlock,
-                                         get_block_hash,
-                                         make_block_hash_with_group_id,
-                                         maybe_convert_block_hash)
+
+from vllm.v1.core.block_pool import BlockPool
+from vllm.v1.core.kv_cache_utils import (BlockHash, KVCacheBlock,
+                                         make_block_hash_with_group_id)
+
 from vllm_rbln.logger import init_logger
+
 logger = init_logger(__name__)
+
+
 class RBLNBlockPool(BlockPool):
 
     def get_cached_block(
@@ -35,12 +34,13 @@ class RBLNBlockPool(BlockPool):
             if not cached_blocks_one_group:
                 return None
             cached_blocks_one_group_values = cached_blocks_one_group.values()
+            # NOTE(eunji.lee)
+            # Exclude blocks allocated by the current request itself
             if len(cached_blocks_one_group_values) == 1:
                 return None
             first_block = next(iter(cached_blocks_one_group_values))
             outer_block = []
             for block in cached_blocks_one_group_values:
                 outer_block.append(block.block_id)
-            logger.debug(f"Selected {first_block.block_id} | not_selected_blocks: {outer_block}")
             cached_blocks.append(first_block)
         return cached_blocks
