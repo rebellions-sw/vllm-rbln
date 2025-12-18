@@ -32,7 +32,7 @@ logger = init_logger(__name__)
 def get_rbln_params(vllm_config: VllmConfig,
                     rbln_config: dict) -> tuple[int, int, int, int]:
     kvcache_block_size = None
-    prefill_chunk_size = None
+    prefill_chunk_size = 128
     batch_size = None
     max_seq_len = None
 
