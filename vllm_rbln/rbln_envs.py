@@ -27,8 +27,10 @@ if TYPE_CHECKING:
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
     VLLM_RBLN_DISABLE_MM: bool = False
     VLLM_RBLN_DP_IMPL: str = "dummy_prefill"
+    VLLM_RBLN_USE_MOE_TOKENS_MASK: bool = False
     VLLM_RBLN_ENFORCE_MODEL_FP32: bool = False
     VLLM_RBLN_MOE_CUSTOM_KERNEL: bool = True
+    VLLM_RBLN_MOE_USE_OPT_KERNEL: bool = False
     VLLM_RBLN_DP_INPUT_ALL_GATHER: bool = True
     VLLM_RBLN_LOGITS_ALL_GATHER: bool = True
     VLLM_RBLN_NUM_RAY_NODES: int = 1
@@ -87,6 +89,9 @@ environment_variables = {
     # DP implementation, see choices in get_dp_impl
     "VLLM_RBLN_DP_IMPL":
     get_dp_impl,
+    # If true, it uses the tokens mask applied to moe expert kernel
+    "VLLM_RBLN_USE_MOE_TOKENS_MASK": (lambda: os.environ.get(
+        "VLLM_RBLN_USE_MOE_TOKENS_MASK", "False").lower() in ("true", "1")),
     # enforce model data type into fp32 not model_config.dtype
     "VLLM_RBLN_ENFORCE_MODEL_FP32":
     (lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower() in
@@ -95,6 +100,11 @@ environment_variables = {
     "VLLM_RBLN_MOE_CUSTOM_KERNEL":
     (lambda: os.environ.get("VLLM_RBLN_MOE_CUSTOM_KERNEL", "True").lower() in
      ("true", "1")),
+    # enable moe optimization if RBLN_MoE_OPT is set to 1
+    "VLLM_RBLN_MOE_USE_OPT_KERNEL":
+    (lambda: os.environ.get("VLLM_RBLN_MOE_USE_OPT_KERNEL", "False").lower() in
+     ("true", "1")),
+
     # DP_INPUT_ALL_GATHER, use DP input all_gather
     "VLLM_RBLN_DP_INPUT_ALL_GATHER":
     (lambda: os.environ.get("VLLM_RBLN_DP_INPUT_ALL_GATHER", "True").lower() in
