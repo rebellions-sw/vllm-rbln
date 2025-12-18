@@ -89,7 +89,7 @@ jobs:
           pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
           echo "optimum-rbln $VERSION"
 
-      - name: Run decoder-only test (eager attn)(V1)
+      - name: Run decoder-only test (eager attn) (V1)
         run: >
           python3 examples/optimum/run_decoder_only.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
