@@ -105,7 +105,7 @@ jobs:
           --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
           --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama3_2_3b_instruct_128k_copy_prompts.json
 
-      - name: Run Hybrid-attention mode (V1)
+      - name: Run gemma2 model (hybrid attention) (V1)
         run: >
           python3 examples/optimum/run_basic.py
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/gemma-2-2b-8k_batch4
