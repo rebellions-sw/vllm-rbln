@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A RBLN worker class."""
+
 import copy
 import os
 from typing import TYPE_CHECKING, Optional, Union
@@ -19,9 +20,11 @@ from typing import TYPE_CHECKING, Optional, Union
 import torch
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment,
-                              set_custom_all_reduce)
+from vllm.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+    set_custom_all_reduce,
+)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.lora.request import LoRARequest
@@ -31,8 +34,11 @@ from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
-from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
-                             ModelRunnerOutput)
+from vllm.v1.outputs import (
+    EMPTY_MODEL_RUNNER_OUTPUT,
+    AsyncModelRunnerOutput,
+    ModelRunnerOutput,
+)
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.worker_base import WorkerBase
 
@@ -68,8 +74,7 @@ class RBLNWorker(WorkerBase):
         self.device = torch.device(current_platform.device_type)
 
         if self.parallel_config.distributed_executor_backend == "ray":
-            logger.info(
-                "Running on Ray backend. Skipping device env var setup.")
+            logger.info("Running on Ray backend. Skipping device env var setup.")
         else:
             self._init_device_env()
 
@@ -86,8 +91,10 @@ class RBLNWorker(WorkerBase):
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: %s",
-                        torch_profiler_trace_dir)
+            logger.info(
+                "Profiling enabled. Traces will be saved to: %s",
+                torch_profiler_trace_dir,
+            )
             logger.debug(
                 "Profiler config: record_shapes=%s,"
                 "profile_memory=%s,with_stack=%s,with_flops=%s",
@@ -105,7 +112,9 @@ class RBLNWorker(WorkerBase):
                 with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
                 with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                    torch_profiler_trace_dir, use_gzip=True
+                ),
+            )
         else:
             self.profiler = None
 
@@ -119,8 +128,7 @@ class RBLNWorker(WorkerBase):
         logger.warning("sleep mode is not supported on RBLN, ignore it.")
         pass
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
@@ -139,10 +147,10 @@ class RBLNWorker(WorkerBase):
         # ex) node#0 : RBLN_DEVICES=0,1
         #     node#1 : RBLN_DEVICES=2,3
         distributed_backend = self.parallel_config.distributed_executor_backend
-        if distributed_backend == "mp" and len(
-                device_ids) < total_device_count:
-            raise RuntimeError(f"{env_var} has devices {device_ids}"
-                               f" but required {total_device_count}")
+        if distributed_backend == "mp" and len(device_ids) < total_device_count:
+            raise RuntimeError(
+                f"{env_var} has devices {device_ids} but required {total_device_count}"
+            )
 
         start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
         end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
@@ -157,16 +165,20 @@ class RBLNWorker(WorkerBase):
 
     def init_device(self) -> None:
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.vllm_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank,
-                                            current_platform.dist_backend)
+        init_worker_distributed_environment(
+            self.vllm_config,
+            self.rank,
+            self.distributed_init_method,
+            self.local_rank,
+            current_platform.dist_backend,
+        )
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
         # Construct the model runner
         self.model_runner: RBLNModelRunner = RBLNModelRunner(
-            self.vllm_config, self.device)
+            self.vllm_config, self.device
+        )
 
         if self.rank == 0:
             # If usage stat is enabled, collect relevant info.
@@ -187,19 +199,22 @@ class RBLNWorker(WorkerBase):
             kvcache_block_size=block_size,
             # quantization : 4 (This is an ad-hoc value. Need to fix it)
             nbits_per_param=16 if not self.model_config.quantization else 4,
-            n_model_params=sum(p.numel()
-                               for p in self.model_runner.model.parameters()),
+            n_model_params=sum(p.numel() for p in self.model_runner.model.parameters()),
             # 2 : 1 for prefill and decode each
-            num_runtimes=2)
+            num_runtimes=2,
+        )
 
         # for partition skip, we need dummy block slot.
         no_dummy_slots = 1
-        max_required_num_blocks = (self.model_config.max_model_len *
-                                   self.scheduler_config.max_num_seqs //
-                                   block_size) + no_dummy_slots
+        max_required_num_blocks = (
+            self.model_config.max_model_len
+            * self.scheduler_config.max_num_seqs
+            // block_size
+        ) + no_dummy_slots
         num_gpu_blocks = min(
             max_num_blocks * self.cache_config.gpu_memory_utilization,
-            max_required_num_blocks)
+            max_required_num_blocks,
+        )
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks)
@@ -217,8 +232,11 @@ class RBLNWorker(WorkerBase):
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def compile_or_warm_up_model(self) -> None:
-        if (self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL
-                or not envs.VLLM_RBLN_ENABLE_WARM_UP):
+        if (
+            self.model_config.enforce_eager
+            or not envs.VLLM_RBLN_COMPILE_MODEL
+            or not envs.VLLM_RBLN_ENABLE_WARM_UP
+        ):
             logger.warning("skipping compile_or_warm_up_model")
             return
 
@@ -240,17 +258,19 @@ class RBLNWorker(WorkerBase):
         if forward_pass and not get_pp_group().is_first_rank:
             # NOTE - DO NOT all_gather_group for RBLN pp
             intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict())
+                get_pp_group().recv_tensor_dict()
+            )
 
-        output = self.model_runner.execute_model(scheduler_output,
-                                                 intermediate_tensors)
+        output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)
         if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
             return output
 
         assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
-        assert parallel_config.distributed_executor_backend != (
-            "external_launcher") and not get_pp_group().is_last_rank
+        assert (
+            parallel_config.distributed_executor_backend != ("external_launcher")
+            and not get_pp_group().is_last_rank
+        )
 
         # NOTE - DO NOT all_gather_group for RBLN pp
         get_pp_group().send_tensor_dict(output.tensors)
@@ -260,8 +280,10 @@ class RBLNWorker(WorkerBase):
 
         # In case of PP with kv transfer, we need to pass through the
         # kv_connector_output
-        if (not kv_connector_output.finished_sending
-                and not kv_connector_output.finished_recving):
+        if (
+            not kv_connector_output.finished_sending
+            and not kv_connector_output.finished_recving
+        ):
             return EMPTY_MODEL_RUNNER_OUTPUT
 
         output = copy.copy(EMPTY_MODEL_RUNNER_OUTPUT)
@@ -280,8 +302,9 @@ class RBLNWorker(WorkerBase):
             self.profiler.stop()
             # only print profiler results on rank 0
             if self.local_rank == 0:
-                print(self.profiler.key_averages().table(
-                    sort_by="self_cuda_time_total"))
+                print(
+                    self.profiler.key_averages().table(sort_by="self_cuda_time_total")
+                )
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
@@ -318,8 +341,8 @@ def init_worker_distributed_environment(
     world_size = parallel_config.world_size
 
     # Set envs for RCCL
-    os.environ['LOCAL_RANK'] = str(local_rank)
-    os.environ['WORLD_SIZE'] = str(world_size)
+    os.environ["LOCAL_RANK"] = str(local_rank)
+    os.environ["WORLD_SIZE"] = str(world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
@@ -328,11 +351,14 @@ def init_worker_distributed_environment(
         dp_rank = parallel_config.data_parallel_rank
         rank_across_dp = dp_rank * world_size
         rank_across_dp += local_rank
-        logger.info("world_size_across_dp = %s, rank_across_dp = %s",
-                    world_size_across_dp, rank_across_dp)
+        logger.info(
+            "world_size_across_dp = %s, rank_across_dp = %s",
+            world_size_across_dp,
+            rank_across_dp,
+        )
         # consider across_dp
-        os.environ['LOCAL_RANK'] = str(rank_across_dp)
-        os.environ['WORLD_SIZE'] = str(world_size_across_dp)
+        os.environ["LOCAL_RANK"] = str(rank_across_dp)
+        os.environ["WORLD_SIZE"] = str(world_size_across_dp)
 
     init_distributed_environment(
         world_size,

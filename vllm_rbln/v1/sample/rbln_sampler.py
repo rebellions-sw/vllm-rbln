@@ -19,8 +19,9 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
 from vllm.config import LogprobsMode
-from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
-                                               rbln_apply_all_penalties)
+from vllm_rbln.v1.sample.ops.penalties import (
+    apply_all_penalties as rbln_apply_all_penalties,
+)
 import os
 import vllm_rbln.rbln_envs as envs
 
@@ -75,11 +76,12 @@ def top_p_sample(
     top_p_mask[:, -1] = False
     probs_sort.masked_fill_(top_p_mask, -float("inf"))
     # Re-sort the probabilities.
-    src = torch.arange(logits_idx.shape[-1],
-                       device=logits_idx.device).expand_as(logits_idx)
-    logits_idx_inv = torch.empty_like(logits_idx).scatter_(dim=-1,
-                                                           index=logits_idx,
-                                                           src=src)
+    src = torch.arange(logits_idx.shape[-1], device=logits_idx.device).expand_as(
+        logits_idx
+    )
+    logits_idx_inv = torch.empty_like(logits_idx).scatter_(
+        dim=-1, index=logits_idx, src=src
+    )
     logits = torch.gather(probs_sort, dim=-1, index=logits_idx_inv)
     # The `generators` argument is usually derived from `sampling_metadata`,
     # but in this mock implementation, an empty dictionary is passed
@@ -105,16 +107,13 @@ def top_p_only_fake(
 
 
 class RBLNSampler(VLLMSampler):
-
-    def __init__(self,
-                 logprobs_mode: LogprobsMode = "raw_logprobs",
-                 seed: int = 42):
+    def __init__(self, logprobs_mode: LogprobsMode = "raw_logprobs", seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
 
         options = {
             "cache_dir": os.path.join(envs.VLLM_CACHE_ROOT, "rbln_sampler"),
-            "compile_context": rebel.CompileContext()
+            "compile_context": rebel.CompileContext(),
         }
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
@@ -126,7 +125,7 @@ class RBLNSampler(VLLMSampler):
         self.logprobs_mode = logprobs_mode
 
     def apply_topp_sampler(
-            self, logits: torch.Tensor, top_p: torch.Tensor
+        self, logits: torch.Tensor, top_p: torch.Tensor
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         sampled = self.rbln_topp_sampler(logits, top_p)
         logits_to_return = None
@@ -137,8 +136,9 @@ class RBLNSampler(VLLMSampler):
         return sampled, logits_to_return
 
     @staticmethod
-    def _rbln_topp_sampler_impl(logits: torch.Tensor,
-                                top_p: torch.Tensor) -> torch.Tensor:
+    def _rbln_topp_sampler_impl(
+        logits: torch.Tensor, top_p: torch.Tensor
+    ) -> torch.Tensor:
         """
         Implementation of RBLN top-p sampling.
         To avoid self parameter issues when torch.compile is used,
@@ -151,8 +151,9 @@ class RBLNSampler(VLLMSampler):
         return sampled
 
     @torch.compiler.disable
-    def rbln_topp_sampler(self, logits: torch.Tensor,
-                          top_p: torch.Tensor) -> torch.Tensor:
+    def rbln_topp_sampler(
+        self, logits: torch.Tensor, top_p: torch.Tensor
+    ) -> torch.Tensor:
         """
         Wrapper for the compiled RBLN top-p sampler.
         To avoid recompile on runtime, we decorate this method with
@@ -170,8 +171,7 @@ class RBLNSampler(VLLMSampler):
         The various logits processing functions called in this method
         may update the logits tensor in-place.
         """
-        assert not (sampling_metadata.all_greedy
-                    and sampling_metadata.all_random)
+        assert not (sampling_metadata.all_greedy and sampling_metadata.all_random)
         if sampling_metadata.all_random:
             greedy_sampled = None
         else:
@@ -197,10 +197,10 @@ class RBLNSampler(VLLMSampler):
 
         # Currently, RBLN only supports top_p sampling.
         # Covering other cases with RBLN is work in progress.
-        if (sampling_metadata.top_p is not None
-                and sampling_metadata.top_k is None):
+        if sampling_metadata.top_p is not None and sampling_metadata.top_k is None:
             random_sampled, processed_logprobs = self.apply_topp_sampler(
-                logits, sampling_metadata.top_p)
+                logits, sampling_metadata.top_p
+            )
 
         else:
             # Apply top_k and/or top_p.
@@ -267,7 +267,7 @@ WARM_UP_CONFIGS = [
         "no_penalties": True,
         "all_greedy": True,
         "all_random": False,
-        "temperature": 0.0
+        "temperature": 0.0,
     },
     {
         "name": "no_penalty_topp",
@@ -275,7 +275,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_p": 0.9,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "no_penalty_topk",
@@ -283,7 +283,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "no_penalty_topp_topk",
@@ -292,7 +292,7 @@ WARM_UP_CONFIGS = [
         "all_random": True,
         "top_p": 0.9,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "penalty_greedy",
@@ -302,7 +302,7 @@ WARM_UP_CONFIGS = [
         "repetition_penalties": 1.0,
         "all_greedy": True,
         "all_random": False,
-        "temperature": 0.0
+        "temperature": 0.0,
     },
     {
         "name": "penalty_topp",
@@ -313,7 +313,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_p": 0.9,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "penalty_topk",
@@ -324,7 +324,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "penalty_topp_topk",
@@ -336,6 +336,6 @@ WARM_UP_CONFIGS = [
         "all_random": True,
         "top_p": 0.9,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
 ]

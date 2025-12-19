@@ -16,10 +16,10 @@ from vllm import LLM, SamplingParams
 
 # Sample prompts.
 prompts = [
-    #"Hello, my name is",
-    #"The president of the United States is",
+    # "Hello, my name is",
+    # "The president of the United States is",
     "The capital of France is",
-    #"The future of AI is",
+    # "The future of AI is",
 ]
 
 # Create a sampling params object.

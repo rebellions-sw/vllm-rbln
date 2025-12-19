@@ -32,22 +32,21 @@ VIDEO_URLS = [
 
 def generate_prompts_video(batch_size: int, model_id: str):
     processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
-    messages = [[
-        {
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "video",
-                    "video": VIDEO_URLS[i],
-                },
-                {
-                    "type": "text",
-                    "text": "Describe this video."
-                },
-            ],
-        },
-    ] for i in range(batch_size)]
+    messages = [
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": VIDEO_URLS[i],
+                    },
+                    {"type": "text", "text": "Describe this video."},
+                ],
+            },
+        ]
+        for i in range(batch_size)
+    ]
 
     texts = processor.apply_chat_template(
         messages,
@@ -60,56 +59,57 @@ def generate_prompts_video(batch_size: int, model_id: str):
     arr_video_kwargs = []
     for i in range(batch_size):
         image_inputs, video_inputs, video_kwargs = process_vision_info(
-            messages[i], return_video_kwargs=True)
+            messages[i], return_video_kwargs=True
+        )
         arr_image_inputs.append(image_inputs)
         arr_video_inputs.append(video_inputs)
         arr_video_kwargs.append(video_kwargs)
 
-    return [{
-        "prompt": text,
-        "multi_modal_data": {
-            "video": video_inputs,
-        },
-        "mm_processor_kwargs": {
-            "min_pixels": 1024 * 14 * 14,
-            "max_pixels": 5120 * 14 * 14,
-            **video_kwargs,
-        },
-    } for text, image_inputs, video_inputs, video_kwargs in zip(
-        texts, arr_image_inputs, arr_video_inputs, arr_video_kwargs)]
+    return [
+        {
+            "prompt": text,
+            "multi_modal_data": {
+                "video": video_inputs,
+            },
+            "mm_processor_kwargs": {
+                "min_pixels": 1024 * 14 * 14,
+                "max_pixels": 5120 * 14 * 14,
+                **video_kwargs,
+            },
+        }
+        for text, image_inputs, video_inputs, video_kwargs in zip(
+            texts, arr_image_inputs, arr_video_inputs, arr_video_kwargs
+        )
+    ]
 
 
 def generate_prompts_image(batch_size: int, model_id: str):
-    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild",
-                           split="train").shuffle(seed=42)
+    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild", split="train").shuffle(
+        seed=42
+    )
     processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
-    messages = [[
-        {
-            "role":
-            "system",
-            "content": [{
-                "type":
-                "text",
-                "text":
-                "You are a helpful assistant."
-                "Answer the each question based on the image.",
-            }],
-        },
-        {
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "image",
-                    "image": dataset[i]["image"]
-                },
-                {
-                    "type": "text",
-                    "text": dataset[i]["question"]
-                },
-            ],
-        },
-    ] for i in range(batch_size)]
+    messages = [
+        [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "You are a helpful assistant."
+                        "Answer the each question based on the image.",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": dataset[i]["image"]},
+                    {"type": "text", "text": dataset[i]["question"]},
+                ],
+            },
+        ]
+        for i in range(batch_size)
+    ]
 
     texts = processor.apply_chat_template(
         messages,
@@ -123,7 +123,8 @@ def generate_prompts_image(batch_size: int, model_id: str):
 
     for i in range(batch_size):
         image_inputs, video_inputs, video_kwargs = process_vision_info(
-            messages[i], return_video_kwargs=True)
+            messages[i], return_video_kwargs=True
+        )
         arr_image_inputs.append(image_inputs)
         arr_video_inputs.append(video_inputs)
         arr_video_kwargs.append(video_kwargs)
@@ -141,42 +142,40 @@ def generate_prompts_image(batch_size: int, model_id: str):
                 "padding": True,
                 **video_kwargs,
             },
-        } for text, image_inputs, video_inputs, video_kwargs in zip(
-            texts, arr_image_inputs, arr_video_inputs, arr_video_kwargs)
+        }
+        for text, image_inputs, video_inputs, video_kwargs in zip(
+            texts, arr_image_inputs, arr_video_inputs, arr_video_kwargs
+        )
     ]
 
 
 def generate_prompts_wo_processing(batch_size: int, model_id: str):
-    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild",
-                           split="train").shuffle(seed=42)
+    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild", split="train").shuffle(
+        seed=42
+    )
     processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
-    messages = [[
-        {
-            "role":
-            "system",
-            "content": [{
-                "type":
-                "text",
-                "text":
-                "You are a helpful assistant."
-                "Answer the each question based on the image.",
-            }],
-        },
-        {
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "image",
-                    "image": dataset[i]["image"]
-                },
-                {
-                    "type": "text",
-                    "text": dataset[i]["question"]
-                },
-            ],
-        },
-    ] for i in range(batch_size)]
+    messages = [
+        [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "You are a helpful assistant."
+                        "Answer the each question based on the image.",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": dataset[i]["image"]},
+                    {"type": "text", "text": dataset[i]["question"]},
+                ],
+            },
+        ]
+        for i in range(batch_size)
+    ]
     images = [[dataset[i]["image"]] for i in range(batch_size)]
 
     texts = processor.apply_chat_template(
@@ -185,26 +184,29 @@ def generate_prompts_wo_processing(batch_size: int, model_id: str):
         tokenize=False,
     )
 
-    return [{
-        "prompt": text,
-        "multi_modal_data": {
-            "image": image
-        },
-        "mm_processor_kwargs": {
-            "min_pixels": 1024 * 14 * 14,
-            "max_pixels": 5120 * 14 * 14,
+    return [
+        {
+            "prompt": text,
+            "multi_modal_data": {"image": image},
+            "mm_processor_kwargs": {
+                "min_pixels": 1024 * 14 * 14,
+                "max_pixels": 5120 * 14 * 14,
+            },
         }
-    } for text, image in zip(texts, images)]
+        for text, image in zip(texts, images)
+    ]
 
 
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     results_generator = engine.generate(
         request,
-        SamplingParams(temperature=0,
-                       ignore_eos=False,
-                       skip_special_tokens=True,
-                       stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=200),
+        SamplingParams(
+            temperature=0,
+            ignore_eos=False,
+            skip_special_tokens=True,
+            stop_token_ids=[tokenizer.eos_token_id],
+            max_tokens=200,
+        ),
         str(request_id),
     )
 
@@ -229,29 +231,28 @@ async def main(
     futures = []
     for request_id, request in enumerate(inputs):
         futures.append(
-            asyncio.create_task(
-                generate(engine, tokenizer, request_id, request)))
+            asyncio.create_task(generate(engine, tokenizer, request_id, request))
+        )
 
     results = await asyncio.gather(*futures)
 
     for i, result in enumerate(results):
         output = result.outputs[0].text
-        print(
-            f"===================== Output {i} ==============================")
+        print(f"===================== Output {i} ==============================")
         print(output)
-        print(
-            "===============================================================\n"
-        )
+        print("===============================================================\n")
 
 
 def entry_point(
     num_input_prompt: int = 1,
     model_id: str = "/qwen2_5-vl-7b-32k-b4-kv16k",
 ):
-    asyncio.run(main(
-        num_input_prompt=num_input_prompt,
-        model_id=model_id,
-    ))
+    asyncio.run(
+        main(
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        )
+    )
 
 
 if __name__ == "__main__":

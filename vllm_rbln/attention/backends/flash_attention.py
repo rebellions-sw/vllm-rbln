@@ -17,11 +17,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
-from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
-                                              AttentionLayer,
-                                              AttentionMetadata,
-                                              AttentionMetadataBuilder,
-                                              AttentionType)
+from vllm.attention.backends.abstract import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionLayer,
+    AttentionMetadata,
+    AttentionMetadataBuilder,
+    AttentionType,
+)
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.attention.ops.paged_attn import PagedAttentionMetadata
 from vllm.config import get_current_vllm_config
@@ -34,8 +37,9 @@ logger = init_logger(__name__)
 
 
 # RBLN custom op (flash attention naive prefill/decode)
-@torch.library.custom_op("rbln_custom_ops::flash_attention_naive_prefill",
-                         mutates_args=["kv_cache"])
+@torch.library.custom_op(
+    "rbln_custom_ops::flash_attention_naive_prefill", mutates_args=["kv_cache"]
+)
 def flash_attention_naive_prefill_impl(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -58,19 +62,16 @@ def flash_attention_naive_prefill_impl(
         e = s + seq_len
         # NOTE: this reference impl works only for single partition
         block = block_tables[0].to(torch.int32)
-        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
+        k_state = (
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
+        )
+        v_state = (
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
+        )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-        causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0,
-                                  -float("inf"))
+        causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0, -float("inf"))
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -94,8 +95,9 @@ def _(
     return torch.empty_like(q)
 
 
-@torch.library.custom_op("rbln_custom_ops::flash_attention_naive_decode",
-                         mutates_args=["kv_cache"])
+@torch.library.custom_op(
+    "rbln_custom_ops::flash_attention_naive_decode", mutates_args=["kv_cache"]
+)
 def flash_attention_naive_decode_impl(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -116,19 +118,16 @@ def flash_attention_naive_decode_impl(
         e = s + seq_len
         # NOTE: this reference impl works only for single partition
         block = block_tables[0][0].to(torch.int32)
-        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
+        k_state = (
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
+        )
+        v_state = (
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
+        )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-        causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0,
-                                  -float("inf"))
+        causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0, -float("inf"))
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -154,8 +153,8 @@ def _(
 
 # RBLN custom op (flash causal attention naive prefill/decode w/o attn mask)
 @torch.library.custom_op(
-    "rbln_custom_ops::flash_causal_attention_naive_prefill",
-    mutates_args=["kv_cache"])
+    "rbln_custom_ops::flash_causal_attention_naive_prefill", mutates_args=["kv_cache"]
+)
 def flash_causal_attention_naive_prefill_impl(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -175,22 +174,21 @@ def flash_causal_attention_naive_prefill_impl(
         e = s + seq_len
         # NOTE: this reference impl works only for single partition
         block = block_tables[0].to(torch.int32)
-        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
+        k_state = (
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
+        )
+        v_state = (
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
+        )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
         block_size = kv_cache.size(-2)
-        causal_mask = torch.triu(torch.ones(1, 1, 1, block_size, block_size),
-                                 diagonal=1)
+        causal_mask = torch.triu(
+            torch.ones(1, 1, 1, block_size, block_size), diagonal=1
+        )
         causal_mask = causal_mask[:, :, :, s:e, :]
-        causal_mask = torch.where(causal_mask > 0, float('-inf'), 0.0)
+        causal_mask = torch.where(causal_mask > 0, float("-inf"), 0.0)
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -199,8 +197,7 @@ def flash_causal_attention_naive_prefill_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_naive_prefill")
+@torch.library.register_fake("rbln_custom_ops::flash_causal_attention_naive_prefill")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -215,8 +212,8 @@ def _(
 
 
 @torch.library.custom_op(
-    "rbln_custom_ops::flash_causal_attention_naive_decode",
-    mutates_args=["kv_cache"])
+    "rbln_custom_ops::flash_causal_attention_naive_decode", mutates_args=["kv_cache"]
+)
 def flash_causal_attention_naive_decode_impl(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -235,22 +232,21 @@ def flash_causal_attention_naive_decode_impl(
         e = s + seq_len
         # NOTE: this reference impl works only for single partition
         block = block_tables[0][0].to(torch.int32)
-        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
+        k_state = (
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
+        )
+        v_state = (
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
+        )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
         block_size = kv_cache.size(-2)
-        causal_mask = torch.triu(torch.ones(1, 1, 1, block_size, block_size),
-                                 diagonal=1)
+        causal_mask = torch.triu(
+            torch.ones(1, 1, 1, block_size, block_size), diagonal=1
+        )
         causal_mask = causal_mask[:, :, :, s:e, :]
-        causal_mask = torch.where(causal_mask > 0, float('-inf'), 0.0)
+        causal_mask = torch.where(causal_mask > 0, float("-inf"), 0.0)
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -259,8 +255,7 @@ def flash_causal_attention_naive_decode_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_naive_decode")
+@torch.library.register_fake("rbln_custom_ops::flash_causal_attention_naive_decode")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -278,19 +273,20 @@ def _(
 # NYI, custom op interface is only registered for test
 # inputs = {cache, state, batch, seq}
 @torch.library.custom_op("rbln_custom_ops::rbln_cache_update", mutates_args=())
-def rbln_cache_update_impl(cache: torch.Tensor, state: torch.Tensor,
-                           slot_mapping: torch.Tensor) -> torch.Tensor:
+def rbln_cache_update_impl(
+    cache: torch.Tensor, state: torch.Tensor, slot_mapping: torch.Tensor
+) -> torch.Tensor:
     return torch.empty_like(cache)
 
 
 @torch.library.register_fake("rbln_custom_ops::rbln_cache_update")
-def _(cache: torch.Tensor, state: torch.Tensor,
-      slot_mapping: torch.Tensor) -> torch.Tensor:
+def _(
+    cache: torch.Tensor, state: torch.Tensor, slot_mapping: torch.Tensor
+) -> torch.Tensor:
     return torch.empty_like(cache)
 
 
 class RBLNAttentionBackend(AttentionBackend):
-
     @staticmethod
     def get_supported_head_sizes() -> List[int]:
         return [32, 64, 80, 96, 128, 160, 192, 224, 256]
@@ -335,8 +331,7 @@ class RBLNAttentionBackend(AttentionBackend):
         """
         # for partition skip, we need dummy block slot.
         no_dummy_slots = 1
-        return (2, num_blocks + no_dummy_slots, num_kv_heads, 1, block_size,
-                head_size)
+        return (2, num_blocks + no_dummy_slots, num_kv_heads, 1, block_size, head_size)
 
     @staticmethod
     def swap_blocks(
@@ -360,9 +355,7 @@ class RBLNAttentionMetadata(AttentionMetadata, PagedAttentionMetadata):
     kv_caches: Optional[List[torch.Tensor]]
 
 
-class RBLNAttentionMetadataBuilder(
-        AttentionMetadataBuilder[RBLNAttentionMetadata]):
-
+class RBLNAttentionMetadataBuilder(AttentionMetadataBuilder[RBLNAttentionMetadata]):
     def __init__(self, input_builder: ModelInputForRebelBuilder) -> None:
         self.chunked_prefill = input_builder.chunked_prefill
         self.chunked_prefill_size = input_builder.chunked_prefill_size
@@ -372,8 +365,7 @@ class RBLNAttentionMetadataBuilder(
         self.max_seq_len = input_builder.max_model_len
 
         self.device = get_current_vllm_config().device_config.device
-        self.enforce_eager = (
-            get_current_vllm_config().model_config.enforce_eager)
+        self.enforce_eager = get_current_vllm_config().model_config.enforce_eager
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
@@ -387,15 +379,14 @@ class RBLNAttentionMetadataBuilder(
     ) -> RBLNAttentionMetadata:
         input_data = self.input_data
         # slot_mapping is treated as constant buffer -> not aligned issue
-        slot_mapping = torch.tensor(input_data.slot_mapping,
-                                    dtype=torch.int32,
-                                    device="cpu")
+        slot_mapping = torch.tensor(
+            input_data.slot_mapping, dtype=torch.int32, device="cpu"
+        )
         # temporarily, following tensors is used for
         # RBLN flash attention based on paging
         # - seq_lens_tensor[1][num_partitions] = dynamic size for partitions
         # - block_tables[num_partitions] = block index for partitions
-        steps = [[input_positions[0]]
-                 for input_positions in input_data.input_positions]
+        steps = [[input_positions[0]] for input_positions in input_data.input_positions]
         seq_idx = torch.tensor(steps, dtype=torch.int32)
         partition_len = self.partition_len
         max_seq_len = self.max_seq_len
@@ -405,8 +396,9 @@ class RBLNAttentionMetadataBuilder(
         cs = seq_idx.repeat(1, num_partition)
         pidx = torch.arange(num_partition, dtype=torch.int32)
         # RBLN - seq_lens tensor dtype SHOULD be int16
-        dyn_size_for_partitions = torch.clamp(cs - pidx * partition_len, 0,
-                                              partition_len).to(torch.int32)
+        dyn_size_for_partitions = torch.clamp(
+            cs - pidx * partition_len, 0, partition_len
+        ).to(torch.int32)
         seq_lens_tensor = dyn_size_for_partitions
 
         # RBLN - block_tables tensor dtype SHOULD be int16
@@ -417,8 +409,7 @@ class RBLNAttentionMetadataBuilder(
         if len(input_data.multi_modal_inputs_list) != 0:
             placeholder_index_maps = {
                 modality: placeholder_map.index_map()
-                for modality, placeholder_map in
-                input_data.multi_modal_placeholder_maps.items()
+                for modality, placeholder_map in input_data.multi_modal_placeholder_maps.items()
             }
 
         # RBLN attention mask
@@ -429,23 +420,26 @@ class RBLNAttentionMetadataBuilder(
                 step = steps[0][0]
                 assert input_data.num_prefills == 1
                 prefill_chunk_size = (
-                    self.chunked_prefill_size if self.chunked_prefill else 1 <<
-                    (math.ceil(math.log2(input_data.seq_lens[0]))))
+                    self.chunked_prefill_size
+                    if self.chunked_prefill
+                    else 1 << (math.ceil(math.log2(input_data.seq_lens[0])))
+                )
                 chunked_attention_mask = torch.zeros(
                     1,
                     1,
                     1,
                     prefill_chunk_size,
                     max_seq_len,
-                    dtype=torch.float16
-                    if self.enforce_eager else torch.float32)
-                causal_mask = 1 - torch.triu(torch.ones(
-                    1, 1, prefill_chunk_size, prefill_chunk_size),
-                                             diagonal=1)
+                    dtype=torch.float16 if self.enforce_eager else torch.float32,
+                )
+                causal_mask = 1 - torch.triu(
+                    torch.ones(1, 1, prefill_chunk_size, prefill_chunk_size), diagonal=1
+                )
                 if step >= prefill_chunk_size:
                     chunked_attention_mask[:, :, :, :, :step] = 1
-                chunked_attention_mask[:, :, :, :, step:step +
-                                       prefill_chunk_size] = causal_mask
+                chunked_attention_mask[:, :, :, :, step : step + prefill_chunk_size] = (
+                    causal_mask
+                )
                 attn_masks = chunked_attention_mask
             else:
                 decode_attention_mask = torch.zeros(
@@ -454,11 +448,10 @@ class RBLNAttentionMetadataBuilder(
                     1,
                     1,
                     max_seq_len,
-                    dtype=torch.float16
-                    if self.enforce_eager else torch.float32)
+                    dtype=torch.float16 if self.enforce_eager else torch.float32,
+                )
                 for batch_index, batch_step in enumerate(steps):
-                    decode_attention_mask[
-                        batch_index, :, :, :, :batch_step[0] + 1] = 1
+                    decode_attention_mask[batch_index, :, :, :, : batch_step[0] + 1] = 1
                 attn_masks = decode_attention_mask
             attn_masks = attn_masks.to(self.device)
             assert attn_masks.dim() == 5
@@ -482,7 +475,6 @@ class RBLNAttentionMetadataBuilder(
 
 
 class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
-
     def __init__(
         self,
         num_heads: int,
@@ -498,8 +490,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         kv_sharing_target_layer_name: Optional[str] = None,
         use_irope: bool = False,
     ) -> None:
-        self.enforce_eager = (
-            get_current_vllm_config().model_config.enforce_eager)
+        self.enforce_eager = get_current_vllm_config().model_config.enforce_eager
         self.device = get_current_vllm_config().device_config.device
 
         self.num_heads = num_heads
@@ -514,18 +505,21 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
 
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
-        self.need_mask = (self.alibi_slopes is not None
-                          or self.sliding_window is not None)
+        self.need_mask = (
+            self.alibi_slopes is not None or self.sliding_window is not None
+        )
 
         supported_head_sizes = RBLNAttentionBackend.get_supported_head_sizes()
         if head_size not in supported_head_sizes:
             raise ValueError(
                 f"Head size {head_size} is not supported by PagedAttention. "
-                f"Supported head sizes are: {supported_head_sizes}.")
+                f"Supported head sizes are: {supported_head_sizes}."
+            )
         if kv_cache_dtype != "auto":
             raise NotImplementedError(
                 "Torch SDPA backend does not support FP8 KV cache. "
-                "Please use xFormers backend instead.")
+                "Please use xFormers backend instead."
+            )
         self.attn_type = attn_type
 
     def split_kv_cache(
@@ -579,15 +573,17 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         # 1. query reshape for custom operation
         # query = [b_size(batch), q_len(query len), num_heads * head_size]
         b_size, q_len, _ = query.size()
-        query = query.view(b_size, q_len, self.num_heads,
-                           self.head_size).transpose(1, 2)
-        query = query.view(b_size, self.num_kv_heads, self.num_queries_per_kv,
-                           q_len, self.head_size)
-        key = key.view(b_size, q_len, self.num_kv_heads,
-                       self.head_size).transpose(1, 2)
+        query = query.view(b_size, q_len, self.num_heads, self.head_size).transpose(
+            1, 2
+        )
+        query = query.view(
+            b_size, self.num_kv_heads, self.num_queries_per_kv, q_len, self.head_size
+        )
+        key = key.view(b_size, q_len, self.num_kv_heads, self.head_size).transpose(1, 2)
         key = key.view(b_size, self.num_kv_heads, 1, q_len, self.head_size)
-        value = value.view(b_size, q_len, self.num_kv_heads,
-                           self.head_size).transpose(1, 2)
+        value = value.view(b_size, q_len, self.num_kv_heads, self.head_size).transpose(
+            1, 2
+        )
         value = value.view(b_size, self.num_kv_heads, 1, q_len, self.head_size)
 
         # NOTE - for cache update,
@@ -623,26 +619,30 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         # actually non-flash paged attention DOES NOT use slot_mapping
         if envs.VLLM_RBLN_FLASH_CAUSAL_ATTN:
             if q_len == 1:
-                attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode(  # noqa: E501
-                    query,
-                    key,
-                    value,
-                    kv_cache,
-                    self.scale,
-                    attn_metadata.seq_lens_tensor.to(torch.int16),
-                    attn_metadata.block_tables.to(torch.int16),
-                    self.scale,  # dummy
+                attn_output = (
+                    torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        self.scale,
+                        attn_metadata.seq_lens_tensor.to(torch.int16),
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy
+                    )
                 )
             else:
-                attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill(  # noqa: E501
-                    query,
-                    key,
-                    value,
-                    kv_cache,
-                    self.scale,
-                    attn_metadata.seq_lens_tensor.to(torch.int16),
-                    attn_metadata.block_tables.to(torch.int16),
-                    self.scale,  # dummy
+                attn_output = (
+                    torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        self.scale,
+                        attn_metadata.seq_lens_tensor.to(torch.int16),
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy
+                    )
                 )
         else:
             if q_len == 1:
@@ -673,14 +673,18 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         # 2. attention output reshape for attention backend return
         # attn_output = [batch,H*4,L,D] -> [batch,L,H*4,D] -> [batch,L,H*4*D]
         if self.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
-            attn_output = attn_output.reshape(b_size, self.num_heads, q_len,
-                                              self.head_size).transpose(1, 2)
-            attn_output = attn_output.reshape(b_size, q_len,
-                                              self.num_heads * self.head_size)
+            attn_output = attn_output.reshape(
+                b_size, self.num_heads, q_len, self.head_size
+            ).transpose(1, 2)
+            attn_output = attn_output.reshape(
+                b_size, q_len, self.num_heads * self.head_size
+            )
         else:
-            attn_output = attn_output.view(b_size, self.num_heads, q_len,
-                                           self.head_size).transpose(1, 2)
-            attn_output = attn_output.view(b_size, q_len,
-                                           self.num_heads * self.head_size)
+            attn_output = attn_output.view(
+                b_size, self.num_heads, q_len, self.head_size
+            ).transpose(1, 2)
+            attn_output = attn_output.view(
+                b_size, q_len, self.num_heads * self.head_size
+            )
         # attn_output = [batch,L,H*4*D]
         return attn_output

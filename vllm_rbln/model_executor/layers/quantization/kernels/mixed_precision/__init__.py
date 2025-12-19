@@ -20,10 +20,13 @@ from typing import Optional
 import vllm.envs as envs
 import vllm.model_executor.layers.quantization.kernels.mixed_precision as mp
 from vllm.model_executor.layers.quantization.kernels.mixed_precision.MPLinearKernel import (  # noqa: E501
-    MPLinearKernel, MPLinearLayerConfig)
+    MPLinearKernel,
+    MPLinearLayerConfig,
+)
 
 from vllm_rbln.model_executor.layers.quantization.kernels.mixed_precision.unpacked import (  # noqa: E501
-    RBLNInt8UnpackedLinearKernel)
+    RBLNInt8UnpackedLinearKernel,
+)
 
 choose_mp_linear_kernel_original = mp.choose_mp_linear_kernel
 
@@ -45,7 +48,8 @@ def choose_mp_linear_kernel_rbln(
     for kernel in _POSSIBLE_KERNELS:
         if kernel.__name__ in envs.VLLM_DISABLED_KERNELS:
             failure_reasons.append(
-                f' {kernel.__name__} disabled by environment variable')
+                f" {kernel.__name__} disabled by environment variable"
+            )
             continue
 
         can_implement, failure_reason = kernel.can_implement(config)
@@ -53,13 +57,13 @@ def choose_mp_linear_kernel_rbln(
             return kernel
         else:
             failure_reasons.append(
-                f' {kernel.__name__} cannot implement due to: {failure_reason}'
+                f" {kernel.__name__} cannot implement due to: {failure_reason}"
             )
 
     raise ValueError(
-        "Failed to find a kernel that can implement the "\
-        "WNA16 linear layer. Reasons: \n"
-        + '\n'.join(failure_reasons))
+        "Failed to find a kernel that can implement the "
+        "WNA16 linear layer. Reasons: \n" + "\n".join(failure_reasons)
+    )
 
 
 mp.choose_mp_linear_kernel = choose_mp_linear_kernel_rbln

@@ -8,6 +8,7 @@
 
 import tempfile
 from collections.abc import Callable
+
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,21 +19,34 @@ from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn as nn
-from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
-                         set_current_vllm_config)
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
+from vllm.config import (
+    CacheConfig,
+    ModelConfig,
+    SchedulerConfig,
+    VllmConfig,
+    set_current_vllm_config,
+)
+from vllm.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.multimodal.inputs import (MultiModalFeatureSpec,
-                                    MultiModalKwargsItem, PlaceholderRange)
+from vllm.multimodal.inputs import (
+    MultiModalFeatureSpec,
+    MultiModalKwargsItem,
+    PlaceholderRange,
+)
 from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.utils import LazyLoader, sha256
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher
 from vllm.v1.core.sched.output import CachedRequestData, NewRequestData
-from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
-                                        KVCacheGroupSpec)
+from vllm.v1.kv_cache_interface import (
+    FullAttentionSpec,
+    KVCacheConfig,
+    KVCacheGroupSpec,
+)
 from vllm.v1.request import RequestStatus
 
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
@@ -54,50 +68,49 @@ DEVICE = current_platform.device_type
 
 
 class MockModelWrapper(nn.Module):
-
     class MockModel:
-
         def __init__(self):
             self.kv_block_adapter = SimpleNamespace(
-                get_available_num_blocks=lambda: NUM_BLOCKS)
+                get_available_num_blocks=lambda: NUM_BLOCKS
+            )
 
     def __init__(self):
         super().__init__()
         self.model = self.MockModel()
 
-    def compute_logits(self, hidden_states: torch.Tensor,
-                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    def compute_logits(
+        self, hidden_states: torch.Tensor, sampling_metadata: SamplingMetadata
+    ) -> torch.Tensor:
         return hidden_states
 
 
 def fake_load_model(runner: RBLNOptimumModelRunner):
-
     def fake_forward(model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         current_num_reqs = runner.input_batch.num_reqs
         current_vocab_size = runner.model_config.get_vocab_size()
 
-        return torch.randn((current_num_reqs, 1, current_vocab_size),
-                           dtype=torch.float32,
-                           device=runner.device)
+        return torch.randn(
+            (current_num_reqs, 1, current_vocab_size),
+            dtype=torch.float32,
+            device=runner.device,
+        )
 
     runner.model = MockModelWrapper()
     runner.use_optimum_lora = False
     # Assign the fake forward function to the model
     runner.model.forward = fake_forward
     if runner.use_rbln_sampler:
-        runner.bucket_sizes = tuple(
-            runner.get_bucket_sizes(runner.max_num_reqs))
+        runner.bucket_sizes = tuple(runner.get_bucket_sizes(runner.max_num_reqs))
         with torch.inference_mode():
             for bucket_size in runner.bucket_sizes:
                 runner.pooled_tensors[bucket_size] = torch.empty(
                     (bucket_size, runner.model_config.get_vocab_size()),
                     dtype=torch.float32,
                 )
-        torch._dynamo.config.recompile_limit = len(
-            runner.bucket_sizes) * len(WARM_UP_CONFIGS)
-        runner.sampler = torch.compile(runner.sampler,
-                                       dynamic=False,
-                                       fullgraph=False)
+        torch._dynamo.config.recompile_limit = len(runner.bucket_sizes) * len(
+            WARM_UP_CONFIGS
+        )
+        runner.sampler = torch.compile(runner.sampler, dynamic=False, fullgraph=False)
 
 
 def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
@@ -131,19 +144,21 @@ def make_request(
                 data=MultiModalKwargsItem.dummy("dummy_m"),
                 mm_position=position,
                 identifier=identifier,
-                modality="image")
+                modality="image",
+            )
             mm_features.append(mm_feature)
 
-    return Request(request_id=request_id,
-                   prompt_token_ids=prompt_token_ids,
-                   mm_features=mm_features if mm_features else None,
-                   sampling_params=SamplingParams(
-                       max_tokens=17, prompt_logprobs=prompt_logprobs),
-                   pooling_params=None,
-                   eos_token_id=100,
-                   lora_request=None,
-                   cache_salt=cache_salt,
-                   block_hasher=get_request_block_hasher(block_size, hash_fn))
+    return Request(
+        request_id=request_id,
+        prompt_token_ids=prompt_token_ids,
+        mm_features=mm_features if mm_features else None,
+        sampling_params=SamplingParams(max_tokens=17, prompt_logprobs=prompt_logprobs),
+        pooling_params=None,
+        eos_token_id=100,
+        lora_request=None,
+        cache_salt=cache_salt,
+        block_hasher=get_request_block_hasher(block_size, hash_fn),
+    )
 
 
 def finish_request(manager: KVCacheManager, request: Request):
@@ -211,7 +226,8 @@ def _schedule_new_request(
                 block_ids=block_ids,
                 num_computed_tokens=new_computed_tokens,
                 lora_request=None,
-            ))
+            )
+        )
         num_scheduled_tokens[req_id] = len(token_ids)
         total_num_scheduled_tokens += num_scheduled_tokens[req_id]
 

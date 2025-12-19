@@ -21,8 +21,9 @@ from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
 def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild",
-                           split="train").shuffle(seed=42)
+    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild", split="train").shuffle(
+        seed=42
+    )
 
     prompts = []
     for i in range(batch_size):
@@ -30,15 +31,9 @@ def generate_prompts(batch_size: int, model_id: str):
         question = dataset[i]["question"]
 
         # Use simple QA template because BLIP2 don't have default chat template.
-        text_prompt = (f"Question: {question}\n"
-                       "Answer:")
+        text_prompt = f"Question: {question}\nAnswer:"
 
-        prompts.append({
-            "prompt": text_prompt,
-            "multi_modal_data": {
-                "image": [image]
-            }
-        })
+        prompts.append({"prompt": text_prompt, "multi_modal_data": {"image": [image]}})
 
     return prompts
 
@@ -46,11 +41,13 @@ def generate_prompts(batch_size: int, model_id: str):
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     results_generator = engine.generate(
         request,
-        SamplingParams(temperature=0,
-                       ignore_eos=False,
-                       skip_special_tokens=True,
-                       stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=200),
+        SamplingParams(
+            temperature=0,
+            ignore_eos=False,
+            skip_special_tokens=True,
+            stop_token_ids=[tokenizer.eos_token_id],
+            max_tokens=200,
+        ),
         str(request_id),
     )
 
@@ -73,29 +70,28 @@ async def main(
     futures = []
     for request_id, request in enumerate(inputs):
         futures.append(
-            asyncio.create_task(
-                generate(engine, tokenizer, request_id, request)))
+            asyncio.create_task(generate(engine, tokenizer, request_id, request))
+        )
 
     results = await asyncio.gather(*futures)
 
     for i, result in enumerate(results):
         output = result.outputs[0].text
-        print(
-            f"===================== Output {i} ==============================")
+        print(f"===================== Output {i} ==============================")
         print(output)
-        print(
-            "===============================================================\n"
-        )
+        print("===============================================================\n")
 
 
 def entry_point(
     num_input_prompt: int = 10,
     model_id: str = "/blip2-opt-2.7b-2k-b4",
 ):
-    asyncio.run(main(
-        num_input_prompt=num_input_prompt,
-        model_id=model_id,
-    ))
+    asyncio.run(
+        main(
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -26,7 +26,6 @@ logger = init_logger(__name__)
 
 
 class RBLNKVCacheManager(KVCacheManager):
-
     def __init__(
         self,
         kv_cache_config: KVCacheConfig,
@@ -63,11 +62,11 @@ class RBLNKVCacheManager(KVCacheManager):
             )
 
     def free(self, request: Request, preemption: int = False) -> None:
-        """Free the blocks allocated for the request.
-        """
+        """Free the blocks allocated for the request."""
         if self.enable_caching:
-            self.prefix_cache_manager.free_request(request.request_id,
-                                                   preemption=preemption)
+            self.prefix_cache_manager.free_request(
+                request.request_id, preemption=preemption
+            )
         self.coordinator.free(request.request_id)
 
     def allocate_slots(
@@ -91,12 +90,14 @@ class RBLNKVCacheManager(KVCacheManager):
             new_computed_block_list = new_computed_blocks.blocks
         else:
             new_computed_block_list = tuple(
-                [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
+                [] for _ in range(len(self.kv_cache_config.kv_cache_groups))
+            )
         # NOTE `new_computed_block_list` is used only for touch
         # When allocating new blocks, we do not reuse the provided
         # `new_computed_blocks` and we need to allocate new blocks.
         empty_computed_block_list = tuple(
-            [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
+            [] for _ in range(len(self.kv_cache_config.kv_cache_groups))
+        )
 
         # In prefill,
         # `num_computed_tokens` = 0,
@@ -104,7 +105,7 @@ class RBLNKVCacheManager(KVCacheManager):
         # In decode,
         # `num_computed_tokens` = the length of prompt + generated text
         # `num_new_tokens` = 1.
-        is_prefill = (request.num_computed_tokens == 0)
+        is_prefill = request.num_computed_tokens == 0
         num_computed_tokens = request.num_computed_tokens
         num_tokens_need_slot = min(request.num_tokens, self.max_model_len)
         num_blocks_to_allocate = self.coordinator.get_num_blocks_to_allocate(
@@ -135,11 +136,10 @@ class RBLNKVCacheManager(KVCacheManager):
         #         self.block_pool.get_num_free_blocks():
         #         return None
 
-        if self.enable_caching and \
-            not self.prefix_cache_manager.can_allocate(
-                    num_blocks_to_allocate,
-                    num_computed_tokens,
-            ):
+        if self.enable_caching and not self.prefix_cache_manager.can_allocate(
+            num_blocks_to_allocate,
+            num_computed_tokens,
+        ):
             # Cannot allocate new outer blocks for prefix caching
             return None
 
@@ -168,7 +168,8 @@ class RBLNKVCacheManager(KVCacheManager):
         )
 
         new_blocks = self.coordinator.allocate_new_blocks(
-            request.request_id, num_tokens_need_slot, 0)
+            request.request_id, num_tokens_need_slot, 0
+        )
 
         # P/D: delay caching blocks if we have to recv from
         # remote. Update state for locally cached blocks.
@@ -178,9 +179,7 @@ class RBLNKVCacheManager(KVCacheManager):
         # Allocate outer blocks for prefix caching
         # following the inner blocks allocation
         inner_block_ids = [block.block_id for block in new_blocks[0]]
-        cached_blocks = [
-            block.block_id for block in new_computed_block_list[0]
-        ]
+        cached_blocks = [block.block_id for block in new_computed_block_list[0]]
         self.prefix_cache_manager.allocate_blocks(
             request.request_id,
             num_computed_tokens,
@@ -206,8 +205,9 @@ class RBLNKVCacheManager(KVCacheManager):
         # num_new_tokens, but must exclude "non-committable" tokens (e.g.,
         # draft tokens that could be rejected). Therefore, we cap the number
         # at `request.num_tokens`, ensuring only "finalized" tokens are cached.
-        num_tokens_to_cache = min(num_computed_tokens + num_new_tokens,
-                                  request.num_tokens)
+        num_tokens_to_cache = min(
+            num_computed_tokens + num_new_tokens, request.num_tokens
+        )
         self.coordinator.cache_blocks(request, num_tokens_to_cache)
         return KVCacheBlocks(new_blocks)
 
@@ -218,10 +218,12 @@ class RBLNKVCacheManager(KVCacheManager):
         num_new_computed_tokens: int,
     ) -> tuple[list[int], list[int]]:
         cached_blocks = new_computed_blocks.get_block_ids()[0]
-        cached_block_table, cached_length = \
+        cached_block_table, cached_length = (
             self.prefix_cache_manager.get_matched_outer_blocks(
-            request.request_id, cached_blocks,
-            num_new_computed_tokens,
+                request.request_id,
+                cached_blocks,
+                num_new_computed_tokens,
+            )
         )
 
         return cached_block_table, cached_length
@@ -244,8 +246,7 @@ class RBLNKVCacheManager(KVCacheManager):
         # kv cache manager.
         if not is_prefill:
             return
-        allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(
-            request_id)
+        allocated_outer_blocks = self.prefix_cache_manager.get_block_ids(request_id)
         self.prefix_cache_manager.set_cached_blocks(
             cached_blocks,
             allocated_outer_blocks,

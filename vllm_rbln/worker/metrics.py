@@ -23,6 +23,7 @@ logger = init_logger(__name__)
 @dataclass
 class StepMetrics:
     """Metrics for a single execution step."""
+
     latencies: list[float] = field(default_factory=list)
     token_counts: list[int] = field(default_factory=list)
 
@@ -52,8 +53,11 @@ class StepMetrics:
     def get_avg_latency(self, ignore_outlier: bool = True) -> float:
         """Get average latency in milliseconds,
         optionally ignoring one outlier."""
-        values = self._without_outlier_f(
-            self.latencies) if ignore_outlier else self.latencies
+        values = (
+            self._without_outlier_f(self.latencies)
+            if ignore_outlier
+            else self.latencies
+        )
         return sum(values) / len(values) * 1000 if values else 0.0
 
     def get_avg_throughput(self, ignore_outlier: bool = True) -> float:
@@ -61,10 +65,16 @@ class StepMetrics:
         optionally ignoring one outlier."""
         if not self.latencies or not self.token_counts:
             return 0.0
-        latencies = self._without_outlier_f(
-            self.latencies) if ignore_outlier else self.latencies
-        tokens = self._without_outlier_i(
-            self.token_counts) if ignore_outlier else self.token_counts
+        latencies = (
+            self._without_outlier_f(self.latencies)
+            if ignore_outlier
+            else self.latencies
+        )
+        tokens = (
+            self._without_outlier_i(self.token_counts)
+            if ignore_outlier
+            else self.token_counts
+        )
         total_time = sum(latencies)
         total_tokens = sum(tokens)
         return total_tokens / total_time if total_time > 0 else 0.0
@@ -104,14 +114,19 @@ class PerformanceTracker:
         # Prefill stats
         if self.prefill_metrics.get_call_counts() > 0:
             logger.info("PREFILL METRICS:")
-            logger.info("  Total call counts: %d",
-                        self.prefill_metrics.get_call_counts())
-            logger.info("  Total tokens processed: %d",
-                        sum(self.prefill_metrics.token_counts))
-            logger.info("  Average latency: %.2f ms",
-                        self.prefill_metrics.get_avg_latency())
-            logger.info("  Average throughput: %.2f tokens/sec",
-                        self.prefill_metrics.get_avg_throughput())
+            logger.info(
+                "  Total call counts: %d", self.prefill_metrics.get_call_counts()
+            )
+            logger.info(
+                "  Total tokens processed: %d", sum(self.prefill_metrics.token_counts)
+            )
+            logger.info(
+                "  Average latency: %.2f ms", self.prefill_metrics.get_avg_latency()
+            )
+            logger.info(
+                "  Average throughput: %.2f tokens/sec",
+                self.prefill_metrics.get_avg_throughput(),
+            )
         else:
             logger.info("PREFILL METRICS: No data recorded")
 
@@ -120,14 +135,19 @@ class PerformanceTracker:
         # Decode stats
         if self.decode_metrics.get_call_counts() > 0:
             logger.info("DECODE METRICS:")
-            logger.info("  Total call counts: %d",
-                        self.decode_metrics.get_call_counts())
-            logger.info("  Total tokens processed: %d",
-                        sum(self.decode_metrics.token_counts))
-            logger.info("  Average latency: %.2f ms",
-                        self.decode_metrics.get_avg_latency())
-            logger.info("  Average throughput: %.2f tokens/sec",
-                        self.decode_metrics.get_avg_throughput())
+            logger.info(
+                "  Total call counts: %d", self.decode_metrics.get_call_counts()
+            )
+            logger.info(
+                "  Total tokens processed: %d", sum(self.decode_metrics.token_counts)
+            )
+            logger.info(
+                "  Average latency: %.2f ms", self.decode_metrics.get_avg_latency()
+            )
+            logger.info(
+                "  Average throughput: %.2f tokens/sec",
+                self.decode_metrics.get_avg_throughput(),
+            )
         else:
             logger.info("DECODE METRICS: No data recorded")
 

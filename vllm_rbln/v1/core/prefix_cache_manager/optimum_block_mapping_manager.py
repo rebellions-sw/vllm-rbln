@@ -21,7 +21,6 @@ logger = init_logger(__name__)
 
 
 class RBLNBlock:
-
     def __init__(self, block_id: int):
         self.block_id = block_id
 
@@ -78,8 +77,7 @@ class BlockMappingManager:
         """
         return inner_block_id in self._inner_to_outer
 
-    def add_new_inner_to_outer(self, inner_block_id: int,
-                               outer_block_id: int) -> None:
+    def add_new_inner_to_outer(self, inner_block_id: int, outer_block_id: int) -> None:
         """
         Add a new mapping from an inner block ID to an outer block ID.
         And remove previous caching history of newly allocated
@@ -97,14 +95,17 @@ class BlockMappingManager:
 
         self._inner_to_outer[inner_block_id] = outer_block_id
 
-    def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
-                       request_id: str) -> None:
+    def create_mapping(
+        self, outer_block: RBLNBlock, inner_blocks: list[int], request_id: str
+    ) -> None:
         """
         Create a new block mapping.
         """
-        mapping = BlockMapping(outer_block_id=outer_block.block_id,
-                               inner_block_ids=inner_blocks.copy(),
-                               request_id=request_id)
+        mapping = BlockMapping(
+            outer_block_id=outer_block.block_id,
+            inner_block_ids=inner_blocks.copy(),
+            request_id=request_id,
+        )
         self._block_mappings[outer_block.block_id] = mapping
 
         # Update Inner to outer mapping
@@ -120,15 +121,16 @@ class BlockMappingManager:
         """
         Remove a mapping by outer block ID and return the removed mapping.
         """
-        cached_inner_block_ids = self.get_cached_inner_blocks_for_outer(
-            outer_block_id)
+        cached_inner_block_ids = self.get_cached_inner_blocks_for_outer(outer_block_id)
         inner_block_ids = self.get_inner_blocks_for_outer(outer_block_id)
         logger.debug(
-            "[PFX] [MAPPING-REMOVE] OB=%d | "
-            "IB_COUNT=%d IB=%s | "
-            "CACHED_IB_COUNT=%d %s",
-            outer_block_id, len(inner_block_ids), inner_block_ids,
-            len(cached_inner_block_ids), cached_inner_block_ids)
+            "[PFX] [MAPPING-REMOVE] OB=%d | IB_COUNT=%d IB=%s | CACHED_IB_COUNT=%d %s",
+            outer_block_id,
+            len(inner_block_ids),
+            inner_block_ids,
+            len(cached_inner_block_ids),
+            cached_inner_block_ids,
+        )
         # 1. Remove inner_block_id mapped to the removed outer_block_id
         for ib_id in inner_block_ids:
             self._inner_to_outer.pop(ib_id, None)
@@ -183,29 +185,28 @@ class BlockMappingManager:
         Return a list of inactive mappings.
         """
         return [
-            mapping for mapping in self._block_mappings.values()
+            mapping
+            for mapping in self._block_mappings.values()
             if not mapping.is_active
         ]
 
-    def get_cached_inner_blocks_for_outer(self,
-                                          outer_block_id: int) -> list[int]:
+    def get_cached_inner_blocks_for_outer(self, outer_block_id: int) -> list[int]:
         """
         Return the list of inner block IDs that are cached
         for a given outer block ID.
         """
         return self._outer_to_cached_inner.get(outer_block_id, [])
 
-    def get_outer_blocks_for_cached_inner(self,
-                                          inner_block_id: int) -> list[int]:
+    def get_outer_blocks_for_cached_inner(self, inner_block_id: int) -> list[int]:
         """
         Return the list of outer block IDs
         that map to a given cached inner block ID.
         """
         return self._cached_inner_to_outers.get(inner_block_id, [])
 
-    def set_cached_blocks(self, inner_blocks: list[int],
-                          outer_block_ids: list[int],
-                          block_ratio: int) -> None:
+    def set_cached_blocks(
+        self, inner_blocks: list[int], outer_block_ids: list[int], block_ratio: int
+    ) -> None:
         """
         Set the cached blocks by mapping inner blocks to outer blocks.
         inner_blocks: list[int]
@@ -218,26 +219,26 @@ class BlockMappingManager:
             return
 
         for cur_outer_block_idx, start_ib_idx in enumerate(
-                range(0, len(inner_blocks), block_ratio)):
+            range(0, len(inner_blocks), block_ratio)
+        ):
             end_ib_idx = min(start_ib_idx + block_ratio, len(inner_blocks))
             cur_ib_segment = inner_blocks[start_ib_idx:end_ib_idx]
             cur_outer_block_id = outer_block_ids[cur_outer_block_idx]
             if self._outer_to_cached_inner.get(cur_outer_block_id) is None:
                 # First segment
-                self._outer_to_cached_inner[
-                    cur_outer_block_id] = cur_ib_segment
+                self._outer_to_cached_inner[cur_outer_block_id] = cur_ib_segment
             else:
                 # Second segment
-                self._outer_to_cached_inner[cur_outer_block_id].extend(
-                    cur_ib_segment)
+                self._outer_to_cached_inner[cur_outer_block_id].extend(cur_ib_segment)
 
             for ib_id in cur_ib_segment:
                 if ib_id not in self._cached_inner_to_outers:
                     self._cached_inner_to_outers[ib_id] = []
                 self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)
 
-    def get_longest_matched_block(self, cached_ib_segment: list[int],
-                                  skip_blocks: set[int]) -> tuple[int, int]:
+    def get_longest_matched_block(
+        self, cached_ib_segment: list[int], skip_blocks: set[int]
+    ) -> tuple[int, int]:
         """
         Given a segment of cached inner block IDs,
         return the outer block ID that has the longest matching prefix
@@ -252,30 +253,28 @@ class BlockMappingManager:
             "SEGMENT_SIZE=%d SEGMENT=%s | "
             "CANDIDATE_OBS=%s",
             cached_ib_segment[0] if cached_ib_segment else -1,
-            len(cached_ib_segment), cached_ib_segment,
-            matched_obs if matched_obs else [])
+            len(cached_ib_segment),
+            cached_ib_segment,
+            matched_obs if matched_obs else [],
+        )
         final_outer_block_id = -1
         final_num_ibs = 0
         if matched_obs is not None:
-            alive_obs = [
-                ob for ob in matched_obs if ob in self._block_mappings
-            ]
+            alive_obs = [ob for ob in matched_obs if ob in self._block_mappings]
             # TODO It is not required. But it is a safety check.
             assert len(matched_obs) == len(alive_obs)
 
             alive_obs = [ob for ob in alive_obs if ob not in skip_blocks]
             for outer_block_id in alive_obs:
                 cached_ibs = self._outer_to_cached_inner[outer_block_id]
-                prefix_ibs = self._get_common_prefix(cached_ibs,
-                                                     cached_ib_segment)
+                prefix_ibs = self._get_common_prefix(cached_ibs, cached_ib_segment)
                 cache_hit_size = len(prefix_ibs)
                 if cache_hit_size > final_num_ibs:
                     final_outer_block_id = outer_block_id
                     final_num_ibs = cache_hit_size
         return final_outer_block_id, final_num_ibs
 
-    def _get_common_prefix(self, arr1: list[int],
-                           arr2: list[int]) -> list[int]:
+    def _get_common_prefix(self, arr1: list[int], arr2: list[int]) -> list[int]:
         """
         Return the common prefix between two lists of integers.
         """

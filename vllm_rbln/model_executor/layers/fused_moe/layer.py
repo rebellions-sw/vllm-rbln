@@ -19,7 +19,9 @@ import torch.nn.functional as F
 from vllm.distributed import get_dp_group
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.fused_moe.layer import (
-    FusedMoE, UnquantizedFusedMoEMethod)
+    FusedMoE,
+    UnquantizedFusedMoEMethod,
+)
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -64,12 +66,11 @@ if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
         out = torch.zeros_like(hidden_states)
         expert_cnt = gate_proj_weight.shape[0]
         for i in range(expert_cnt):
-            gate = torch.nn.functional.linear(hidden_states,
-                                              gate_proj_weight[i])
+            gate = torch.nn.functional.linear(hidden_states, gate_proj_weight[i])
             up = torch.nn.functional.linear(hidden_states, up_proj_weight[i])
             mul = torch.nn.functional.silu(gate) * up
             down = torch.nn.functional.linear(mul, down_proj_weight[i])
-            out += down * masked_routing_weight[:, i:i + 1]
+            out += down * masked_routing_weight[:, i : i + 1]
         return out
 
     @custom_moe_glu.register_fake
@@ -122,12 +123,11 @@ else:
         out = torch.zeros_like(hidden_states)
         expert_cnt = gate_proj_weight.shape[0]
         for i in range(expert_cnt):
-            gate = torch.nn.functional.linear(hidden_states,
-                                              gate_proj_weight[i])
+            gate = torch.nn.functional.linear(hidden_states, gate_proj_weight[i])
             up = torch.nn.functional.linear(hidden_states, up_proj_weight[i])
             mul = torch.nn.functional.silu(gate) * up
             down = torch.nn.functional.linear(mul, down_proj_weight[i])
-            out += down * masked_routing_weight[:, i:i + 1]
+            out += down * masked_routing_weight[:, i : i + 1]
         return out
 
     @custom_moe_glu.register_fake
@@ -196,8 +196,7 @@ def unquantized_fused_moe_method_rbln(
     # [1,num_tokens,hidden_size]
     hidden_states = hidden_states.reshape(1, num_tokens, -1)
     # [num_experts,1,1,1]
-    expert_idx_array = torch.arange(0,
-                                    num_experts).reshape(num_experts, 1, 1, 1)
+    expert_idx_array = torch.arange(0, num_experts).reshape(num_experts, 1, 1, 1)
     # [1,1,num_tokens,topk]
     selected_experts_array = selected_experts.reshape(-1, 1, num_tokens, top_k)
     # [num_experts,1,num_tokens,topk]
@@ -206,7 +205,8 @@ def unquantized_fused_moe_method_rbln(
     topk_weights_array = topk_weights.reshape(-1, 1, num_tokens, top_k)
     # [num_experts,1,num_tokens,1]
     expert_weights_array = (topk_weights_array * expert_mask_array).sum(
-        dim=-1, keepdim=True)
+        dim=-1, keepdim=True
+    )
     # [1,num_tokens,1]
     temp_expert_weights = expert_weights_array[0]
     # NOTE - make explicit dependence between hidden_states and expert_weights
@@ -216,7 +216,8 @@ def unquantized_fused_moe_method_rbln(
     # [num_experts,1,num_tokens,1] -> [num_experts,1,num_tokens,hidden_size]
     hidden_states = hidden_states.to(dtype)
     expert_weights_array = expert_weights_array.broadcast_to(
-        (num_experts, 1, num_tokens, hidden_size)).to(dtype)
+        (num_experts, 1, num_tokens, hidden_size)
+    ).to(dtype)
     # solution1. make custom operation for expert loop
     # solution2. add dummy use of expert_weights_array
     for expert_idx in range(num_experts):
@@ -239,13 +240,12 @@ def unquantized_fused_moe_method_rbln(
 
 
 def _get_tokens_mask():
-    num_tokens = \
-        get_forward_context().dp_metadata.num_tokens_across_dp_cpu
+    num_tokens = get_forward_context().dp_metadata.num_tokens_across_dp_cpu
     num_tokens = num_tokens.unsqueeze(1)
     max_pad = get_forward_context().dp_metadata.max_pads_across_dp
     pos = torch.arange(max_pad, dtype=torch.int32).unsqueeze(0)  # [1, max_pad]
     tokens_mask = torch.where(pos < num_tokens, 1.0, 0.0)  # [dp_size, max_pad]
-    tokens_mask = tokens_mask.reshape(-1, 1)  #[dp_size * max_pad, 1]
+    tokens_mask = tokens_mask.reshape(-1, 1)  # [dp_size * max_pad, 1]
     return tokens_mask
 
 
@@ -255,16 +255,14 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     # selected_experts: (batch * sequence_length, top_k)
     if renormalize:
         router_logits = router_logits.to(torch.float)
-        selected_weights, selected_experts = torch.topk(router_logits,
-                                                        k=top_k,
-                                                        dim=-1)
+        selected_weights, selected_experts = torch.topk(router_logits, k=top_k, dim=-1)
         selected_weights = torch.nn.functional.softmax(selected_weights, dim=1)
     else:
         routing_weights = torch.nn.functional.softmax(router_logits, dim=1)
         routing_weights = routing_weights.to(torch.float)
-        selected_weights, selected_experts = torch.topk(routing_weights,
-                                                        k=top_k,
-                                                        dim=-1)
+        selected_weights, selected_experts = torch.topk(
+            routing_weights, k=top_k, dim=-1
+        )
 
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if use_moe_tokens_mask:
@@ -273,15 +271,15 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
 
     n_expert = router_logits.shape[1]
     if expert_map is not None:
-        expert_map_within_bounds = torch.where(expert_map < 0, n_expert - 1,
-                                               expert_map).to(torch.int64)
+        expert_map_within_bounds = torch.where(
+            expert_map < 0, n_expert - 1, expert_map
+        ).to(torch.int64)
         selected_experts = expert_map_within_bounds[selected_experts]
 
     # masked_routing_weights=selected_weights w/ non selected indicies zeros
     # selected_weights      = [..., top_k]
     # masked_routing_weights= [..., n_experts], selected_experts has only value
-    masked_routing_weights = torch.zeros_like(router_logits,
-                                              dtype=torch.float32)
+    masked_routing_weights = torch.zeros_like(router_logits, dtype=torch.float32)
     masked_routing_weights.scatter_(1, selected_experts, selected_weights)
 
     ## count selected tokens for each expert index from selected_experts
@@ -295,10 +293,9 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     else:
         ones = torch.ones_like(selected_experts.view(-1), dtype=torch.int32)
 
-    expert_select_count = torch.scatter_add(zeros,
-                                            dim=0,
-                                            index=selected_experts.view(-1),
-                                            src=ones)
+    expert_select_count = torch.scatter_add(
+        zeros, dim=0, index=selected_experts.view(-1), src=ones
+    )
 
     return masked_routing_weights, expert_select_count
 
@@ -342,10 +339,16 @@ def unquantized_fused_moe_method_custom(
     router_logits = router_logits.reshape(num_tokens, -1)
 
     masked_routing_weights, expert_select_count = get_masked_routing_weights(
-        router_logits, top_k, renormalize, expert_map)
+        router_logits, top_k, renormalize, expert_map
+    )
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
-        hidden_states, gate_proj_weight, up_proj_weight, down_proj_weight,
-        masked_routing_weights, expert_select_count)
+        hidden_states,
+        gate_proj_weight,
+        up_proj_weight,
+        down_proj_weight,
+        masked_routing_weights,
+        expert_select_count,
+    )
     return final_hidden_states.reshape(orig_shape)
 
 
@@ -408,8 +411,9 @@ def unquantized_fused_optimize_moe_method_custom(
     return final_hidden_states.reshape(orig_shape)
 
 
-def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
-                           router_logits: torch.Tensor):
+def fused_moe_forward_rbln(
+    self, hidden_states: torch.Tensor, router_logits: torch.Tensor
+):
     assert self.quant_method is not None
 
     if self.dp_size > 1:
@@ -427,13 +431,12 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
         # 4. dp_group all reduce - {0+2}, {1+3}, {0+2}, {1+3}
         # 5. select each DP rank output
         # 6. to_group all reduce - {0+2+1+3}, {0+2+1+3}, {0+2+1+3}, {0+2+1+3}
-        cu_tokens_across_dp_cpu = get_forward_context(
-        ).dp_metadata.cu_tokens_across_dp_cpu
+        cu_tokens_across_dp_cpu = (
+            get_forward_context().dp_metadata.cu_tokens_across_dp_cpu
+        )
 
-        hidden_states = self.naive_multicast(hidden_states,
-                                             cu_tokens_across_dp_cpu)
-        router_logits = self.naive_multicast(router_logits,
-                                             cu_tokens_across_dp_cpu)
+        hidden_states = self.naive_multicast(hidden_states, cu_tokens_across_dp_cpu)
+        router_logits = self.naive_multicast(router_logits, cu_tokens_across_dp_cpu)
 
     # Matrix multiply.
     final_hidden_states = self.quant_method.apply(
@@ -471,8 +474,9 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     return final_hidden_states
 
 
-def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
-                                   cu_tokens_across_dp_cpu: torch.Tensor):
+def fused_moe_naive_multicast_rbln(
+    self, x: torch.Tensor, cu_tokens_across_dp_cpu: torch.Tensor
+):
     # as-is : [num_tokens, hidden_size]
     # to-be : buffer = [data_parallel_size*batch, seq, hidden_size], broadcast
     #         hidden = [batch, seq, hidden_size]
@@ -494,8 +498,11 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
         zeros = x - x
         for rank in range(get_dp_group().world_size):
             rank_tensor = x if rank == self.dp_rank else zeros
-            all_buffer = torch.cat((all_buffer, rank_tensor), dim=0) \
-                if all_buffer is not None else rank_tensor
+            all_buffer = (
+                torch.cat((all_buffer, rank_tensor), dim=0)
+                if all_buffer is not None
+                else rank_tensor
+            )
         output = get_dp_group().all_reduce(all_buffer)
         return output
     else:
@@ -508,8 +515,7 @@ FusedMoE.forward_oot = fused_moe_forward_rbln
 
 if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
     logger.info("[RBLN] fused moe, RBLN optimize moe custom kernel")
-    UnquantizedFusedMoEMethod.forward_oot = (
-        unquantized_fused_optimize_moe_method_custom)
+    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_optimize_moe_method_custom
 elif envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
     logger.info("[RBLN] fused moe, RBLN moe custom kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_custom

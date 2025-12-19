@@ -60,10 +60,10 @@ def _worker(device, q, llm_args):
         raise ValueError(f"Unknown device: {device}")
 
     from vllm import LLM, SamplingParams
-    sampling_params = SamplingParams(temperature=0.0,
-                                     logprobs=VOCAB_SIZE,
-                                     ignore_eos=True,
-                                     max_tokens=STEP)
+
+    sampling_params = SamplingParams(
+        temperature=0.0, logprobs=VOCAB_SIZE, ignore_eos=True, max_tokens=STEP
+    )
     llm = LLM(**llm_args)
     run_llm(llm, sampling_params, q)
 

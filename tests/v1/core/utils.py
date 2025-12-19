@@ -16,22 +16,29 @@ from typing import Optional, Union
 
 import torch
 from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
-from vllm.multimodal.inputs import (MultiModalFeatureSpec,
-                                    MultiModalKwargsItem, PlaceholderRange)
+from vllm.multimodal.inputs import (
+    MultiModalFeatureSpec,
+    MultiModalKwargsItem,
+    PlaceholderRange,
+)
 from vllm.sampling_params import GuidedDecodingParams, SamplingParams
 from vllm.utils import sha256
-from vllm.v1.core.kv_cache_utils import (get_request_block_hasher,
-                                         init_none_hash)
-from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
-                                        KVCacheGroupSpec)
+from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
+from vllm.v1.kv_cache_interface import (
+    FullAttentionSpec,
+    KVCacheConfig,
+    KVCacheGroupSpec,
+)
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request
 from vllm.v1.structured_output import StructuredOutputManager
 from vllm.v1.structured_output.request import StructuredOutputRequest
 
 from vllm_rbln.core.scheduler import RBLNScheduler
-from vllm_rbln.v1.core.optimum_scheduler import (RBLNOptimumScheduler,
-                                                 RBLNSchedulerOutput)
+from vllm_rbln.v1.core.optimum_scheduler import (
+    RBLNOptimumScheduler,
+    RBLNSchedulerOutput,
+)
 
 EOS_TOKEN_ID = 50256
 _none_hash_initialized = False
@@ -131,15 +138,18 @@ def create_requests(
 
     block_hasher = get_request_block_hasher(block_size, sha256)
     if sample_json_schema:
-        guided_decoding = GuidedDecodingParams(json=sample_json_schema,
-                                               backend="xgrammar")
+        guided_decoding = GuidedDecodingParams(
+            json=sample_json_schema, backend="xgrammar"
+        )
     else:
         guided_decoding = None
-    sampling_params = SamplingParams(ignore_eos=False,
-                                     max_tokens=max_tokens,
-                                     stop_token_ids=stop_token_ids,
-                                     prompt_logprobs=prompt_logprobs,
-                                     guided_decoding=guided_decoding)
+    sampling_params = SamplingParams(
+        ignore_eos=False,
+        max_tokens=max_tokens,
+        stop_token_ids=stop_token_ids,
+        prompt_logprobs=prompt_logprobs,
+        guided_decoding=guided_decoding,
+    )
     requests = []
     for i in range(num_requests):
         mm_features = []
@@ -153,33 +163,34 @@ def create_requests(
                     data=MultiModalKwargsItem.dummy("dummy_m"),
                     mm_position=position,
                     identifier=identifier,
-                    modality="image")
+                    modality="image",
+                )
                 mm_features.append(mm_feature)
 
-        prompt_token_ids = ([0] * num_tokens if same_prompt else [i] *
-                            num_tokens)
-        request = Request(request_id=f"{i}",
-                          prompt_token_ids=prompt_token_ids,
-                          sampling_params=sampling_params,
-                          pooling_params=None,
-                          mm_features=mm_features if mm_features else None,
-                          eos_token_id=EOS_TOKEN_ID,
-                          block_hasher=block_hasher,
-                          structured_output_request=StructuredOutputRequest(
-                              sampling_params=sampling_params))
+        prompt_token_ids = [0] * num_tokens if same_prompt else [i] * num_tokens
+        request = Request(
+            request_id=f"{i}",
+            prompt_token_ids=prompt_token_ids,
+            sampling_params=sampling_params,
+            pooling_params=None,
+            mm_features=mm_features if mm_features else None,
+            eos_token_id=EOS_TOKEN_ID,
+            block_hasher=block_hasher,
+            structured_output_request=StructuredOutputRequest(
+                sampling_params=sampling_params
+            ),
+        )
         requests.append(request)
     return requests
 
 
 def create_model_runner_output(
-    scheduler_output: RBLNSchedulerOutput, ) -> ModelRunnerOutput:
+    scheduler_output: RBLNSchedulerOutput,
+) -> ModelRunnerOutput:
     req_ids = list(scheduler_output.num_scheduled_tokens.keys())
     return ModelRunnerOutput(
         req_ids=req_ids,
-        req_id_to_index={
-            req_id: i
-            for i, req_id in enumerate(req_ids)
-        },
+        req_id_to_index={req_id: i for i, req_id in enumerate(req_ids)},
         sampled_token_ids=[[i] for i in range(len(req_ids))],
         logprobs=None,
         prompt_logprobs_dict={},

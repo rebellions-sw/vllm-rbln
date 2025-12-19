@@ -31,8 +31,7 @@ class RBLNInputBatch(InputBatch):
         super().__init__(*args, **kwargs)
         if use_rbln_sampler:
             # Overwrite sampling_metadata with RBLN sampling metadata
-            self.sampling_metadata = self._make_sampling_metadata_rbln(
-                self.num_reqs)
+            self.sampling_metadata = self._make_sampling_metadata_rbln(self.num_reqs)
 
     def refresh_metadata_rbln(self, bucket_size: int):
         """Apply any batch updates to sampling metadata."""
@@ -51,19 +50,18 @@ class RBLNInputBatch(InputBatch):
         for logit_proc in self.logitsprocs.all:
             logit_proc.update_state(batch_update)
         if batch_update:
-            self.sampling_metadata = self._make_sampling_metadata_rbln(
-                bucket_size)
+            self.sampling_metadata = self._make_sampling_metadata_rbln(bucket_size)
 
-    def _make_sampling_metadata_rbln(self,
-                                     bucket_size: int) -> SamplingMetadata:
+    def _make_sampling_metadata_rbln(self, bucket_size: int) -> SamplingMetadata:
         # NOTE(eunji.lee):
         # Use bucket_size instead of num_reqs
         # to pad sampling metadata for RBLN sampler.
         num_reqs = bucket_size
 
         if not self.all_greedy:
-            temperature = copy_slice(self.temperature_cpu_tensor,
-                                     self.temperature, num_reqs)
+            temperature = copy_slice(
+                self.temperature_cpu_tensor, self.temperature, num_reqs
+            )
         else:
             temperature = None
         if not self.no_top_p:
@@ -75,16 +73,22 @@ class RBLNInputBatch(InputBatch):
             # Since syncing these tensors is expensive only copy them
             # if necessary i.e. if there are requests which require
             # penalties to be applied during sampling.
-            copy_slice(self.frequency_penalties_cpu_tensor,
-                       self.frequency_penalties, num_reqs)
-            copy_slice(self.presence_penalties_cpu_tensor,
-                       self.presence_penalties, num_reqs)
-            copy_slice(self.repetition_penalties_cpu_tensor,
-                       self.repetition_penalties, num_reqs)
+            copy_slice(
+                self.frequency_penalties_cpu_tensor, self.frequency_penalties, num_reqs
+            )
+            copy_slice(
+                self.presence_penalties_cpu_tensor, self.presence_penalties, num_reqs
+            )
+            copy_slice(
+                self.repetition_penalties_cpu_tensor,
+                self.repetition_penalties,
+                num_reqs,
+            )
 
         needs_prompt_token_ids = (
             not self.no_penalties
-            or self.logits_processing_needs_token_ids[:num_reqs].any())
+            or self.logits_processing_needs_token_ids[:num_reqs].any()
+        )
         if needs_prompt_token_ids:
             # The prompt tokens are used only for applying penalties or
             # step pooling during the sampling/pooling process.
@@ -97,8 +101,11 @@ class RBLNInputBatch(InputBatch):
         allowed_token_ids_mask: Optional[torch.Tensor] = None
         if not self.no_allowed_token_ids:
             assert self.allowed_token_ids_mask is not None
-            copy_slice(self.allowed_token_ids_mask_cpu_tensor,
-                       self.allowed_token_ids_mask, num_reqs)
+            copy_slice(
+                self.allowed_token_ids_mask_cpu_tensor,
+                self.allowed_token_ids_mask,
+                num_reqs,
+            )
             allowed_token_ids_mask = self.allowed_token_ids_mask[:num_reqs]
 
         return SamplingMetadata(
