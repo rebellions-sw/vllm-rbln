@@ -158,6 +158,12 @@ jobs:
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/qwen2_5-vl-7b-32k-b4-kv16k
 
+      - name : Run PaliGemma (Eager mode) (V1)
+        run: >
+          python3 examples/optimum/run_paligemma.py
+          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
+          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/paligemma-3b-8k-b4
+
       - name : Run encoder-decoder (V1)
         run: >
           python3 examples/optimum/run_encoder_decoder.py
