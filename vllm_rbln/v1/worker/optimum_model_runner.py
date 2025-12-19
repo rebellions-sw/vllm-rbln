@@ -40,8 +40,6 @@ from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, LazyLoader, is_pin_memory_available
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheConfig, KVCacheSpec
-
-# yapf: enable
 from vllm.v1.outputs import (
     EMPTY_MODEL_RUNNER_OUTPUT,
     LogprobsLists,

@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# isort: off
+from vllm.model_executor.models import VllmModelForTextGeneration
+
 from optimum.rbln import (
     RBLNT5ForConditionalGeneration as _RBLNT5ForConditionalGeneration,
 )
-
-# isort: on
-from vllm.model_executor.models import VllmModelForTextGeneration
 
 
 class RBLNT5ForConditionalGeneration(

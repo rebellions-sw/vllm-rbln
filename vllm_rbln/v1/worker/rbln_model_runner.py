@@ -62,9 +62,6 @@ from vllm.v1.attention.backends.utils import (
     reorder_batch_to_split_decodes_and_prefills,
 )
 from vllm.v1.core.sched.output import CachedRequestData, NewRequestData, SchedulerOutput
-
-# yapf conflicts with isort for this block
-# yapf: disable
 from vllm.v1.kv_cache_interface import (
     AttentionSpec,
     ChunkedLocalAttentionSpec,
@@ -76,8 +73,6 @@ from vllm.v1.kv_cache_interface import (
     KVCacheSpec,
     MambaSpec,
 )
-
-# yapf: enable
 from vllm.v1.outputs import (
     EMPTY_MODEL_RUNNER_OUTPUT,
     AsyncModelRunnerOutput,
