@@ -603,6 +603,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             reqs_to_add.append(req_state)
 
         # Update the states of the running/resumed requests.
+        is_last_rank = get_pp_group().is_last_rank
         req_data = scheduler_output.scheduled_cached_reqs
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
@@ -613,7 +614,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # Update the cached states.
             req_state.num_computed_tokens = num_computed_tokens
 
-            if not get_pp_group().is_last_rank:
+            if not is_last_rank:
                 # When using PP, the scheduler sends the sampled tokens back,
                 # because there's no direct communication between the first-
                 # stage worker and the last-stage worker.
@@ -656,7 +657,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
             # For the last rank, we don't need to update the token_ids_cpu
             # because the sampled tokens are already cached.
-            if not get_pp_group().is_last_rank:
+            if not is_last_rank:
                 # Add new_token_ids to token_ids_cpu.
                 start_token_index = num_computed_tokens
                 end_token_index = num_computed_tokens + len(new_token_ids)
@@ -953,7 +954,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_draft_tokens = None
             spec_decode_metadata = None
         else:
-            pass
             # Get the number of draft tokens for each request.
             # Iterate over the dictionary rather than all requests since not all
             # requests have draft tokens.
@@ -2215,8 +2215,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self,
         tensorizer_config: "TensorizerConfig",
     ) -> None:
+        model = self.get_model()
         TensorizerLoader.save_model(
-            self.model,
+            model,
             tensorizer_config=tensorizer_config,
             model_config=self.model_config,
         )
@@ -2633,7 +2634,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self, kv_cache_config: KVCacheConfig
     ) -> None:
         """
-        Add layers that reuse KV cache to KV cache group of its target layer.
+        Add layers that re-use KV cache to KV cache group of its target layer.
         Mapping of KV cache tensors happens in `initialize_kv_cache_tensors()`
         """
         if not self.shared_kv_cache_layers:
