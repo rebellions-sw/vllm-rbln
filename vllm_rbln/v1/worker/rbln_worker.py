@@ -304,9 +304,6 @@ class RBLNWorker(WorkerBase):
         output.kv_connector_output = kv_connector_output
         return output
 
-    def execute_dummy_batch(self) -> None:
-        return
-
     def profile(self, is_start: bool = True):
         if self.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
@@ -318,6 +315,9 @@ class RBLNWorker(WorkerBase):
             if self.local_rank == 0:
                 print(self.profiler.key_averages().table(
                     sort_by="self_cuda_time_total"))
+
+    def execute_dummy_batch(self) -> None:
+        return
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
