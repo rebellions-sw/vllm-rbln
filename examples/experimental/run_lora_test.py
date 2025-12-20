@@ -14,6 +14,7 @@
 
 import os
 
+os.environ["VLLM_RBLN_ENFORCE_MODEL_FP32"] = "0"
 os.environ["RBLN_PROFILER"] = "0"
 os.environ["RBLN_KERNEL_MODE"] = "triton"
 os.environ["VLLM_USE_V1"] = "1"
