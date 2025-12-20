@@ -14,7 +14,6 @@
 
 import os
 
-os.environ["VLLM_RBLN_ENFORCE_MODEL_FP32"] = "0"
 os.environ["RBLN_PROFILER"] = "0"
 os.environ["RBLN_KERNEL_MODE"] = "triton"
 os.environ["VLLM_USE_V1"] = "1"
@@ -22,6 +21,7 @@ os.environ["VLLM_USE_V1"] = "1"
 os.environ["VLLM_RBLN_USE_VLLM_MODEL"] = "1"
 os.environ["VLLM_RBLN_ENABLE_WARM_UP"] = "0"
 os.environ["VLLM_RBLN_COMPILE_STRICT_MODE"] = "0"
+os.environ["VLLM_RBLN_ENFORCE_MODEL_FP32"] = "1"
 
 from huggingface_hub import snapshot_download
 from vllm import EngineArgs, LLMEngine, RequestOutput, SamplingParams
