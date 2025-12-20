@@ -233,8 +233,7 @@ def set_sampler_indices_padded(prompt_mapping: list[int],
 
 
 def rbln_compile(model):
-    return model
-    # return torch.compile(model, backend="rbln", dynamic=False)
+    return torch.compile(model, backend="rbln", dynamic=False)
 
 
 @torch.inference_mode()
@@ -291,7 +290,7 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
                       lora_config.max_lora_rank, lora_config.lora_dtype)
-        lora_result = lora_embedding(torch.cat(inputs))
+        lora_result = rbln_compile(lora_embedding)(torch.cat(inputs))
 
         expected_results: list[torch.Tensor] = []
         for input_, lora_id in zip(inputs, prompt_mapping):
