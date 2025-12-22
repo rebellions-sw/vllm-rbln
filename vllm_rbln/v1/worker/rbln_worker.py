@@ -32,7 +32,7 @@ from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
-                             ModelRunnerOutput)
+                             DraftTokenIds, ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.worker_base import WorkerBase
 
@@ -270,6 +270,9 @@ class RBLNWorker(WorkerBase):
 
     def execute_dummy_batch(self) -> None:
         return
+
+    def take_draft_token_ids(self) -> Optional[DraftTokenIds]:
+        return self.model_runner.take_draft_token_ids()
 
     def profile(self, is_start: bool = True):
         if self.profiler is None:
