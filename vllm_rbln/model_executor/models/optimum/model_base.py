@@ -175,14 +175,8 @@ class RBLNOptimumModelBase(nn.Module):
 
     @property
     def dtype(self) -> torch.dtype:
-        assert self.model.rbln_config._torch_dtype is not None
-
-        _torch_dtype = self.model.rbln_config._torch_dtype
-        if "bfloat16" in _torch_dtype:
-            return torch.bfloat16
-        elif "float32":
-            return torch.float32
-        raise ValueError(f"Unsupported dtype: {_torch_dtype}")
+        assert self.model.rbln_config.dtype is not None
+        return self.model.rbln_config.dtype
 
 
 class RBLNOptimumDecoderMixin:
