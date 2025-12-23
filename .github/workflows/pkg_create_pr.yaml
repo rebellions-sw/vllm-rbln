@@ -1,0 +1,69 @@
+name: Pkg Create PR for vllm-rbln
+on:
+    workflow_call:
+        inputs:
+            python-version:
+                description: "Python version to use"
+                required: true
+                type: string
+            optimum-version:
+                description: "Optimum version to update"
+                required: true
+                type: string
+        secrets:
+          REBEL_PYPI_USERNAME:
+            required: true
+          REBEL_PYPI_PASSWORD:
+            required: true
+          REBEL_SW_DEVELOP_USERNAME:
+            required: true
+          REBEL_SW_DEVELOP_PASSWORD:
+            required: true
+          PUSH_TOKEN:
+            required: true
+jobs:
+  create-pr:
+    runs-on: rebel-k8s-runner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          
+      - name: Update Optimum Version
+        id: uv-update-optimum-rbln
+        run: |
+          for i in {1..6}; do
+            uv add optimum-rbln==${{ inputs.optimum-version }} --no-cache && exit 0
+            sleep 10
+          done
+          echo "All retries with --cache-dir failed."
+          exit 1
+        env:
+          UV_INDEX_REBELLIONS_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
+          UV_INDEX_REBELLIONS_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
+
+      - name: Create PR for updated files
+        id: create-pr-step
+        if: ${{ steps.uv-update-optimum-rbln.outcome == 'success' }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.PUSH_TOKEN }}
+          commit-message: "Update optimum-rbln to ${{ inputs.optimum-version }}"
+          title: "Auto-update optimum-rbln to ${{ inputs.optimum-version }}"
+          body: "Updated optimum-rbln to ${{ inputs.optimum-version }}."
+          branch: auto-update-optimum-rbln-${{ inputs.optimum-version }}
+          base: dev
+          reviewers: rebel-seinpark
+    outputs:
+      success: ${{ steps.create-pr-step.outputs.success }}

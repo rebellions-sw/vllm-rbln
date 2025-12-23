@@ -1,0 +1,95 @@
+name: Pkg Update for vllm-rbln
+on:
+    workflow_call:
+      inputs:
+        python-version:
+            description: Python version to use
+            required: true
+            type: string
+        optimum-version:
+            description: Version of optimum-rbln to add
+            required: true
+            type: string
+
+jobs:
+    check-skip:
+        runs-on: rebel-k8s-runner
+        steps:
+          - name: Checkout
+            uses: actions/checkout@v4
+            with:
+              ref: ${{ github.ref }}
+          
+          - name: Set up Python
+            uses: actions/setup-python@v5
+            with:
+              python-version: "3.12"
+
+          - name: Install packaging library for parsing latest version
+            run: |
+              pip install packaging
+    
+          - name: Target Optimum Version
+            id: optimum-version
+            run: |
+              if [ "${{ inputs.optimum-version }}" == "latest" ]; then
+                # Get the latest version from PyPI
+                # Can be mismatched Version when it's not released to PyPI yet.
+                VERSION=$(curl -s https://pypi.org/pypi/optimum-rbln/json | \
+                          jq -r '.releases | keys | .[]' | \
+                          python .github/scripts/parsing_latest_version.py)
+              else
+                VERSION=${{ inputs.optimum-version }}
+              fi
+              echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          - name: Check Skip PR (vllm-rbln)
+            id: skip-pr
+            run: |
+                CURRENT_VERSION=$(grep -m 1 '"optimum-rbln' pyproject.toml | sed -E 's/.*optimum-rbln[<>=]{2}([^",]+).*/\1/' || echo "not_found")
+                if [ "$CURRENT_VERSION" == "${{ steps.optimum-version.outputs.version }}" ]; then
+                    SKIP_PR="true"
+                else
+                    SKIP_PR="false"
+                    fi
+                echo $CURRENT_VERSION
+                echo $SKIP_PR
+                echo "current-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+                echo "skip=$SKIP_PR" >> $GITHUB_OUTPUT
+
+        outputs:
+            skip-airflow: ${{ steps.skip-airflow.outputs.skip }}
+            prod-image-tag: ${{ steps.skip-airflow.outputs.var }}
+            skip-pr: ${{ steps.skip-pr.outputs.skip }}
+            current-version: ${{ steps.skip-pr.outputs.current-version }}
+            target-version: ${{ steps.optimum-version.outputs.version }}
+
+    vllm-rbln-pr:
+        uses: ./.github/workflows/pkg_create_pr.yaml
+        needs: check-skip
+        if: ${{ needs.check-skip.outputs.skip-pr == 'false' }}
+        with:
+            python-version: ${{ inputs.python-version }}
+            optimum-version: ${{ needs.check-skip.outputs.target-version }}
+        secrets:
+          REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
+          REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
+          REBEL_SW_DEVELOP_USERNAME: ${{ secrets.REBEL_SW_DEVELOP_USERNAME }}
+          REBEL_SW_DEVELOP_PASSWORD: ${{ secrets.REBEL_SW_DEVELOP_PASSWORD }}
+          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+
+    summary:
+        runs-on: rebel-k8s-runner
+        needs: [check-skip, rbln-executor-pr]
+        if: always() # Run even if dependencies fail or are skipped
+        env:
+          RBLN_EXEC_SUCCESS: ${{ needs.vllm-rbln-pr.result == 'success' && '✅' ||  needs.check-skip.outputs.skip-pr == 'true' && '✅' || '❌' }}
+          CURRENT_VERSION: ${{ needs.check-skip.outputs.current-version || 'N/A' }}
+          TARGET_VERSION: ${{ needs.check-skip.outputs.target-version  || 'N/A' }}
+        steps:
+          - name: Summary
+            run: |
+              echo "## Summary" >> $GITHUB_STEP_SUMMARY
+              echo "|  Component  | Before Version | Skip | After Version | Success |" >> $GITHUB_STEP_SUMMARY
+              echo "|-------------|--------|------|-------|-------|" >> $GITHUB_STEP_SUMMARY
+              echo "| optimum-rbln | ${{ env.CURRENT_VERSION}} | ${{ needs.check-skip.outputs.skip-pr }} | ${{ env.TARGET_VERSION }} | ${{ env.RBLN_EXEC_SUCCESS }}" >> $GITHUB_STEP_SUMMARY
