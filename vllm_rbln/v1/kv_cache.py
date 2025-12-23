@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass
+from typing import Sequence
 
 import vllm.v1.core.single_type_kv_cache_manager as single_type_kv_cache_manager
 from vllm.config import VllmConfig
@@ -28,7 +29,6 @@ class RBLNSlidingWindowSpec(AttentionSpec):
 
     def __post_init__(self):
         assert self.block_size == self.sliding_window
-        assert not self.use_mla, "MLA is not supported for sliding window"
 
     def max_memory_usage_bytes(self, vllm_config: VllmConfig) -> int:
         return self.page_size_bytes
@@ -45,7 +45,10 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
     """
 
     def get_num_blocks_to_allocate(
-        self, request_id: str, num_tokens: int, new_computed_blocks: list[KVCacheBlock]
+        self,
+        request_id: str,
+        num_tokens: int,
+        new_computed_blocks: Sequence[KVCacheBlock],
     ) -> int:
         return 0 if self.req_to_blocks[request_id] else 1
 
@@ -67,7 +70,9 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
         block_pool,
         kv_cache_spec,
         use_eagle,
+        alignment_tokens,
         dcp_world_size: int = 1,
+        pcp_world_size: int = 1,
     ) -> tuple[list[KVCacheBlock], ...]:
         return tuple([] for _ in kv_cache_group_ids)
 
@@ -77,9 +82,7 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
     def remove_skipped_blocks(self, request_id: str, num_computed_tokens: int) -> None:
         pass
 
-    def get_num_common_prefix_blocks(
-        self, request_id: str, num_running_requests: int
-    ) -> int:
+    def get_num_common_prefix_blocks(self, running_request_id: str) -> int:
         return 0
 
 

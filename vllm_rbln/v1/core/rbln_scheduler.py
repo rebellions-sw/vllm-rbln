@@ -333,7 +333,7 @@ class RBLNScheduler(Scheduler):
                     # chunked prefill has to be enabled explicitly to allow
                     # pooling requests to be chunked
                     if (
-                        not self.scheduler_config.chunked_prefill_enabled
+                        not self.scheduler_config.enable_chunked_prefill
                         and num_new_tokens > prefill_token_budget
                     ):
                         self.waiting.pop_request()
@@ -539,7 +539,7 @@ class RBLNScheduler(Scheduler):
             any_request = self.running[0]
             num_common_prefix_blocks = (
                 self.kv_cache_manager.get_num_common_prefix_blocks(
-                    any_request, len(self.running)
+                    any_request.request_id
                 )
             )
 
@@ -557,13 +557,6 @@ class RBLNScheduler(Scheduler):
             scheduled_spec_decode_tokens,
             req_to_new_blocks,
         )
-        # Note(RBLN): We generate grammar bitmask for scheduled requests only
-        active_running_reqs = (
-            scheduled_running_reqs + scheduled_new_reqs + scheduled_resumed_reqs
-        )
-        structured_output_request_ids, grammar_bitmask = self.get_grammar_bitmask(
-            active_running_reqs, scheduled_spec_decode_tokens
-        )
         scheduler_output = SchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=cached_reqs_data,
@@ -578,8 +571,6 @@ class RBLNScheduler(Scheduler):
             # the previous and the current steps.
             finished_req_ids=self.finished_req_ids,
             free_encoder_mm_hashes=self.encoder_cache_manager.get_freed_mm_hashes(),
-            structured_output_request_ids=structured_output_request_ids,
-            grammar_bitmask=grammar_bitmask,
         )
 
         # NOTE(Kuntai): this function is designed for multiple purposes:
