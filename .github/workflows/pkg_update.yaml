@@ -74,7 +74,7 @@ jobs:
           REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
           REBEL_SW_DEVELOP_USERNAME: ${{ secrets.REBEL_SW_DEVELOP_USERNAME }}
           REBEL_SW_DEVELOP_PASSWORD: ${{ secrets.REBEL_SW_DEVELOP_PASSWORD }}
-          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+          GIT_PAT: ${{ secrets.GIT_PAT }}
 
     summary:
         runs-on: ubuntu-latest-rbln

@@ -19,7 +19,7 @@ on:
             required: true
           REBEL_SW_DEVELOP_PASSWORD:
             required: true
-          PUSH_TOKEN:
+          GIT_PAT:
             required: true
 jobs:
   create-pr:
@@ -69,7 +69,7 @@ jobs:
         if: ${{ steps.uv-update-optimum-rbln.outcome == 'success' && steps.update-requirements-txt.outcome == 'success' }}
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.PUSH_TOKEN }}
+          token: ${{ secrets.GIT_PAT }}
           commit-message: "Update optimum-rbln to ${{ inputs.optimum-version }}"
           title: "Auto-update optimum-rbln to ${{ inputs.optimum-version }}"
           body: "Updated optimum-rbln to ${{ inputs.optimum-version }}."
