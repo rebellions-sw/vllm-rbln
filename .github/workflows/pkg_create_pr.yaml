@@ -60,7 +60,9 @@ jobs:
             echo "Error: requirements.txt not found"
             exit 1
           fi
-          sed -i 's/optimum-rbln>=.*/optimum-rbln>=${{ inputs.optimum-version }}/' requirements.txt
+          VERSION="${{ inputs.optimum-version }}"
+          VERSION="${VERSION#v}"
+          sed -i "s/optimum-rbln>=.*/optimum-rbln>=${VERSION}/" requirements.txt
           echo "Updated requirements.txt:"
           cat requirements.txt
 
