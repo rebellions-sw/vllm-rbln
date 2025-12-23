@@ -40,7 +40,7 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           
-      - name: Update Optimum Version
+      - name: Update Optimum Version in uv
         id: uv-update-optimum-rbln
         run: |
           for i in {1..6}; do
@@ -53,9 +53,20 @@ jobs:
           UV_INDEX_REBELLIONS_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
           UV_INDEX_REBELLIONS_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
 
+      - name: Update Optimum Version in requirements.txt
+        id: update-requirements-txt
+        run: |
+          if [ ! -f requirements.txt ]; then
+            echo "Error: requirements.txt not found"
+            exit 1
+          fi
+          sed -i 's/optimum-rbln>=.*/optimum-rbln>=${{ inputs.optimum-version }}/' requirements.txt
+          echo "Updated requirements.txt:"
+          cat requirements.txt
+
       - name: Create PR for updated files
         id: create-pr-step
-        if: ${{ steps.uv-update-optimum-rbln.outcome == 'success' }}
+        if: ${{ steps.uv-update-optimum-rbln.outcome == 'success' && steps.update-requirements-txt.outcome == 'success' }}
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.PUSH_TOKEN }}
