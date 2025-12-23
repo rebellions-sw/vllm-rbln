@@ -82,6 +82,6 @@ jobs:
           body: "Updated optimum-rbln to ${{ inputs.optimum-version }}."
           branch: auto-update-optimum-rbln-${{ inputs.optimum-version }}
           base: dev
-          reviewers: rebel-seinpark
+          reviewers: rebel-jonghewk, rebel-eunji, rebel-seinpark, rebel-sunwook
     outputs:
       success: ${{ steps.create-pr-step.outputs.success }}
