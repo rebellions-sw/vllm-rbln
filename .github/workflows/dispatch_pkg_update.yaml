@@ -16,15 +16,11 @@ on:
             description: Version of optimum-rbln to add
             default: "latest"
             type: string  
-        force-rebuild:
-            description: Whether to force-rebuild airflow image
-            default: false
-            type: boolean
+
 jobs:
   update-pkg:
     uses: ./.github/workflows/pkg-update.yaml
     with:
       python-version: ${{ inputs.python-version }}
       optimum-version: ${{ inputs.optimum-version }}
-      force-rebuild: ${{ inputs.force-rebuild}}
     secrets: inherit

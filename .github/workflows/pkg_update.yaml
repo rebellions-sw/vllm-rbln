@@ -58,8 +58,6 @@ jobs:
                 echo "skip=$SKIP_PR" >> $GITHUB_OUTPUT
 
         outputs:
-            skip-airflow: ${{ steps.skip-airflow.outputs.skip }}
-            prod-image-tag: ${{ steps.skip-airflow.outputs.var }}
             skip-pr: ${{ steps.skip-pr.outputs.skip }}
             current-version: ${{ steps.skip-pr.outputs.current-version }}
             target-version: ${{ steps.optimum-version.outputs.version }}
