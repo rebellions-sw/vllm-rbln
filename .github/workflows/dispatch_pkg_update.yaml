@@ -13,9 +13,9 @@ on:
           - "3.12"
           - "3.13"
       optimum-version:
-          description: Version of optimum-rbln to add
-          default: "latest"
-          type: string  
+        description: Version of optimum-rbln to add
+        default: "latest"
+        type: string  
 
   workflow_call:
     inputs:
