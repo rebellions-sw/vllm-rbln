@@ -40,7 +40,7 @@ class RemoteOpenAIServer:
         """
         env = os.environ.copy()
         # NOTE(eunji.lee): To pass warmup for test.
-        env["VLLM_RBLN_ENABLE_WARM_UP"] = "False"
+        # env["VLLM_RBLN_ENABLE_WARM_UP"] = "False"
         if env_dict is not None:
             env.update(env_dict)
         self.proc: subprocess.Popen = subprocess.Popen(
