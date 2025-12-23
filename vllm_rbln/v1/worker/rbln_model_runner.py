@@ -1761,6 +1761,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.lora_config.max_loras,
                     self.lora_config.max_lora_rank,
                     self.lora_config.lora_dtype,
+                    self.device,
                 )
                 sampler_indices_padded = create_sampler_indices_padded(
                     lora_ids,
@@ -1768,6 +1769,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.max_num_seqs,
                     is_prefills[0],
                     self.lora_config.max_loras,
+                    self.device,
                 )
                 LoRAMask.set_lora_mask(lora_mask)
                 LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
@@ -2862,14 +2864,23 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         return pinned.tolist()
 
 
-def create_lora_mask(input_ids: torch.Tensor, lora_ids: list[int],
-                     lora_index_to_id: list[int], max_loras: int,
-                     max_lora_rank: int,
-                     lora_dtype: torch.dtype) -> torch.Tensor:
+def create_lora_mask(
+    input_ids: torch.Tensor,
+    lora_ids: list[int],
+    lora_index_to_id: list[int],
+    max_loras: int,
+    max_lora_rank: int,
+    lora_dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
     lora_mask = torch.zeros(input_ids.shape[0] * input_ids.shape[1],
                             max_loras * max_lora_rank,
-                            dtype=lora_dtype)
-    ones = torch.ones(input_ids.shape[1], max_lora_rank, dtype=lora_dtype)
+                            dtype=lora_dtype,
+                            device=device)
+    ones = torch.ones(input_ids.shape[1],
+                      max_lora_rank,
+                      dtype=lora_dtype,
+                      device=device)
 
     for i in range(len(lora_ids)):
         if lora_ids[i] == 0:
@@ -2884,10 +2895,14 @@ def create_lora_mask(input_ids: torch.Tensor, lora_ids: list[int],
     return lora_mask
 
 
-def create_sampler_indices_padded(lora_ids: list[int],
-                                  lora_index_to_id: list[int],
-                                  max_num_seqs: int, is_prefill: bool,
-                                  max_loras: int) -> torch.Tensor:
+def create_sampler_indices_padded(
+    lora_ids: list[int],
+    lora_index_to_id: list[int],
+    max_num_seqs: int,
+    is_prefill: bool,
+    max_loras: int,
+    device: torch.device,
+) -> torch.Tensor:
     if is_prefill:
         assert len(lora_ids
                    ) == 1, "Only single LoRA is supported during prefill phase"
@@ -2897,11 +2912,13 @@ def create_sampler_indices_padded(lora_ids: list[int],
         if i < len(lora_ids) and lora_ids[i] > 0 else -1
         for i in range(len(lora_ids) if is_prefill else max_num_seqs)
     ]
-    sampler_indices_padded = torch.tensor(prompt_mapping, dtype=torch.long)
+    sampler_indices_padded = torch.tensor(prompt_mapping,
+                                          dtype=torch.long,
+                                          device=device)
     sampler_indices_padded = torch.where(sampler_indices_padded == -1,
                                          max_loras, sampler_indices_padded)
     sampler_indices_padded = torch.arange(
-        0, len(sampler_indices_padded), dtype=torch.long) + (
-            sampler_indices_padded * len(sampler_indices_padded))
+        0, len(sampler_indices_padded), dtype=torch.long,
+        device=device) + (sampler_indices_padded * len(sampler_indices_padded))
 
     return sampler_indices_padded
