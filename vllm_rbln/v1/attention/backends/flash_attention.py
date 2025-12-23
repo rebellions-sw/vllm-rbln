@@ -73,7 +73,7 @@ def flash_attention_naive_prefill_impl(
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
         causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0,
-                                  -float("inf"))
+                                  -float("inf")).to(attn_weights.dtype)
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -131,7 +131,7 @@ def flash_attention_naive_decode_impl(
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
         causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0,
-                                  -float("inf"))
+                                  -float("inf")).to(attn_weights.dtype)
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -193,7 +193,8 @@ def flash_causal_attention_naive_prefill_impl(
         causal_mask = torch.triu(torch.ones(1, 1, 1, block_size, block_size),
                                  diagonal=1)
         causal_mask = causal_mask[:, :, :, s:e, :]
-        causal_mask = torch.where(causal_mask > 0, float('-inf'), 0.0)
+        causal_mask = torch.where(causal_mask > 0, float('-inf'),
+                                  0.0).to(attn_weights.dtype)
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -253,7 +254,8 @@ def flash_causal_attention_naive_decode_impl(
         causal_mask = torch.triu(torch.ones(1, 1, 1, block_size, block_size),
                                  diagonal=1)
         causal_mask = causal_mask[:, :, :, s:e, :]
-        causal_mask = torch.where(causal_mask > 0, float('-inf'), 0.0)
+        causal_mask = torch.where(causal_mask > 0, float('-inf'),
+                                  0.0).to(attn_weights.dtype)
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -359,7 +361,7 @@ def sliding_window_attention_naive_prefill_impl(
     ones = torch.ones(window_size + seq_len, window_size + seq_len)
     mask_full = torch.tril(ones) - torch.tril(ones, diagonal=-window_size)
     mask = mask_full[None, None, None, cache_start:cache_start + seq_len, :]
-    mask = torch.where(mask > 0, 0.0, float('-inf'))
+    mask = torch.where(mask > 0, 0.0, float('-inf')).to(attn_weights.dtype)
 
     attn_weights = attn_weights + mask
     attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
@@ -459,7 +461,7 @@ def sliding_window_attention_naive_decode_impl(
         ones = torch.ones(window_size + 1, window_size + 1)
         mask_full = torch.tril(ones) - torch.tril(ones, diagonal=-window_size)
         mask = mask_full[None, None, None, cache_start:cache_start + 1, :]
-        mask = torch.where(mask > 0, 0.0, float('-inf'))
+        mask = torch.where(mask > 0, 0.0, float('-inf')).to(attn_weights.dtype)
 
         attn_weights = attn_weights + mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
