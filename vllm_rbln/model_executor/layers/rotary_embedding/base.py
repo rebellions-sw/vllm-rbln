@@ -79,9 +79,9 @@ def rope_forward_oot(
 
     positions_flat = positions.flatten()
     cos = self.cos_cache.index_select(0, positions_flat).view(
-        batch_size, 1, seq_len, -1)
+        batch_size, 1, seq_len, -1).to(query.dtype)
     sin = self.sin_cache.index_select(0, positions_flat).view(
-        batch_size, 1, seq_len, -1)
+        batch_size, 1, seq_len, -1).to(query.dtype)
 
     query_shape = query.shape
     query = query.view(batch_size, seq_len, -1, self.head_size)
