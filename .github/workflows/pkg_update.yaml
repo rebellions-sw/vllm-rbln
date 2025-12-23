@@ -80,7 +80,7 @@ jobs:
 
     summary:
         runs-on: rebel-k8s-runner
-        needs: [check-skip, rbln-executor-pr]
+        needs: [check-skip]
         if: always() # Run even if dependencies fail or are skipped
         env:
           RBLN_EXEC_SUCCESS: ${{ needs.vllm-rbln-pr.result == 'success' && '✅' ||  needs.check-skip.outputs.skip-pr == 'true' && '✅' || '❌' }}
