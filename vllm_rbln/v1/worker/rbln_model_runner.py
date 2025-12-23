@@ -19,7 +19,7 @@ import time
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from copy import deepcopy
+from copy import copy, deepcopy
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 import numpy as np
@@ -1050,7 +1050,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         options = {
             "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
-            "process_group_dict": process_group_dict
+            "process_group_dict": process_group_dict,
+            "guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe,
         }
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
@@ -1063,14 +1064,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.compute_logits = torch.compile(
             self.compute_logits,
             backend="rbln",
-            options=options,
+            options=copy(options),
             dynamic=False,
         )
 
         compiled_model = torch.compile(
             model,
             backend="rbln",
-            options=options,
+            options=copy(options),
             dynamic=False,
         )
 
@@ -1475,10 +1476,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
         )
 
-        # FIXME(RBLN): To reduce dynamo cache lookup overhead, make dyanmo
-        # evaluate a minimal set of guards required for dispatching compiled
-        # functions. This assumes that the model does not change.
-        torch.compiler.set_stance("default", skip_guard_eval_unsafe=True)
 
     def _add_dummy_requests(
         self,
