@@ -1476,7 +1476,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
         )
 
-
     def _add_dummy_requests(
         self,
         requests: list[NewRequestData],
