@@ -44,7 +44,7 @@ jobs:
         id: uv-update-optimum-rbln
         run: |
           for i in {1..6}; do
-            uv add optimum-rbln==${{ inputs.optimum-version }} --no-cache && exit 0
+            uv add "optimum-rbln>=${VERSION}" --no-cache && exit 0
             sleep 10
           done
           echo "All retries with --cache-dir failed."
