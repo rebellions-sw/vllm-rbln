@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
-                                              AttentionMetadata, AttentionType)
+                                              AttentionType)
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
                                               CommonAttentionMetadata)
@@ -501,8 +501,8 @@ def _(cache: torch.Tensor, state: torch.Tensor,
 
 class RBLNAttentionBackend(AttentionBackend):
 
-    @staticmethod
-    def get_supported_head_sizes() -> list[int]:
+    @classmethod
+    def get_supported_head_sizes(cls) -> list[int]:
         return [32, 64, 80, 96, 128, 160, 192, 224, 256]
 
     @staticmethod
@@ -514,10 +514,6 @@ class RBLNAttentionBackend(AttentionBackend):
         return RBLNFlashAttentionImpl
 
     @staticmethod
-    def get_metadata_cls() -> type["AttentionMetadata"]:
-        return RBLNFlashAttentionMetadata
-
-    @staticmethod
     def get_builder_cls() -> type["RBLNFlashAttentionMetadataBuilder"]:
         return RBLNFlashAttentionMetadataBuilder
 
@@ -527,6 +523,7 @@ class RBLNAttentionBackend(AttentionBackend):
         block_size: int,
         num_kv_heads: int,
         head_size: int,
+        cache_dtype_str: str = "auto",
     ) -> tuple[int, ...]:
         """kv cache shape
         # B - num_blocks == num_partitions
@@ -613,7 +610,7 @@ class RBLNFlashAttentionMetadataBuilder(
         self.headdim = self.model_config.get_head_size()
         self.block_size = kv_cache_spec.block_size
 
-        self.chunked_prefill = (self.scheduler_config.chunked_prefill_enabled
+        self.chunked_prefill = (self.scheduler_config.enable_chunked_prefill
                                 or self.cache_config.enable_prefix_caching)
         self.chunked_prefill_size = (
             self.scheduler_config.max_num_batched_tokens)

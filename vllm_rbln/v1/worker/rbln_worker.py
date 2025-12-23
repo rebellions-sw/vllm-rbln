@@ -14,7 +14,8 @@
 """A RBLN worker class."""
 import copy
 import os
-from typing import TYPE_CHECKING, Optional, Union
+from types import NoneType
+from typing import TYPE_CHECKING, Optional
 
 import torch
 import torch.nn as nn
@@ -44,7 +45,7 @@ from vllm_rbln.worker.utils import get_maximum_num_blocks
 logger = init_logger(__name__)
 
 if TYPE_CHECKING:
-    from vllm.v1.core.sched.output import SchedulerOutput
+    from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 
 
 class RBLNWorker(WorkerBase):
@@ -75,7 +76,7 @@ class RBLNWorker(WorkerBase):
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
-            from vllm.utils import init_cached_hf_modules
+            from vllm.utils.import_utils import init_cached_hf_modules
 
             init_cached_hf_modules()
 
@@ -206,7 +207,7 @@ class RBLNWorker(WorkerBase):
 
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
         num_layers = len(kv_cache_spec)
-        page_size = get_uniform_page_size(kv_cache_spec)
+        page_size = get_uniform_page_size(kv_cache_spec.values())
         return num_gpu_blocks * page_size * num_layers
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
@@ -231,10 +232,16 @@ class RBLNWorker(WorkerBase):
         return self.model_runner.get_supported_tasks()
 
     @torch.inference_mode()
+    def sample_tokens(
+        self, grammar_output: "GrammarOutput | None"
+    ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
+        return self.model_runner.sample_tokens(grammar_output)
+
+    @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Optional[Union[ModelRunnerOutput, AsyncModelRunnerOutput]]:
+    ) -> Optional[ModelRunnerOutput]:
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         if forward_pass and not get_pp_group().is_first_rank:
@@ -244,7 +251,7 @@ class RBLNWorker(WorkerBase):
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
-        if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
+        if isinstance(output, (ModelRunnerOutput, NoneType)):
             return output
 
         assert isinstance(output, IntermediateTensors)
