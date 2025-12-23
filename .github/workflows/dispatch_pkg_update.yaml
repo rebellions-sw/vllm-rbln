@@ -31,7 +31,7 @@ on:
 jobs:
   update-pkg:
     uses: ./.github/workflows/pkg_update.yaml
+    secrets: inherit
     with:
       python-version: ${{ inputs.python-version }}
       optimum-version: ${{ inputs.optimum-version }}
-    secrets: inherit
