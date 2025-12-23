@@ -40,8 +40,8 @@ dependencies = [
     "datasets",
     "qwen_vl_utils",
     "vllm==0.10.2",
-    "optimum-rbln>=0.9.4rc0",
-    "torch==2.8.0"
+    "optimum-rbln==0.9.4a5",
+    "torch==2.8.0",
 ]
 
 [project.optional-dependencies]
