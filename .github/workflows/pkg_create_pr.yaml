@@ -72,6 +72,9 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GIT_PAT }}
+          add-paths: |
+            pyproject.toml
+            requirements.txt
           commit-message: "Update optimum-rbln to ${{ inputs.optimum-version }}"
           title: "Auto-update optimum-rbln to ${{ inputs.optimum-version }}"
           body: "Updated optimum-rbln to ${{ inputs.optimum-version }}."
