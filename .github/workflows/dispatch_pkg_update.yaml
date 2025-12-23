@@ -30,7 +30,7 @@ on:
 
 jobs:
   update-pkg:
-    uses: ./.github/workflows/pkg-update.yaml
+    uses: ./.github/workflows/pkg_update.yaml
     with:
       python-version: ${{ inputs.python-version }}
       optimum-version: ${{ inputs.optimum-version }}
