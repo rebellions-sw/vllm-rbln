@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import time
+from typing import Optional
 
 from vllm.distributed.kv_events import KVEventBatch
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.v1.core.kv_cache_manager import KVCacheBlocks
+from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.request_queue import (SchedulingPolicy,
                                               create_request_queue)
@@ -33,6 +34,30 @@ def is_prefill(request: Request) -> bool:
     return request.num_computed_tokens < request.num_tokens - 1
 
 
+def undo_uncomputed_block_caching(
+    request: Request,
+    kv_cache_manager: KVCacheManager,
+    num_computed_tokens: Optional[int] = None,
+) -> None:
+    grouped_blocks = kv_cache_manager.get_blocks(request.request_id).blocks
+    num_computed_blocks = [
+        (num_computed_tokens or request.num_computed_tokens) //
+        group.kv_cache_spec.block_size
+        for group in kv_cache_manager.kv_cache_config.kv_cache_groups
+    ]
+    for blocks, num_full_block in zip(grouped_blocks, num_computed_blocks):
+        for block in blocks[num_full_block:]:
+            # NOTE(RBLN): this function call efficiently resets
+            # the block hash and evicts the corresponding block from the cache.
+            kv_cache_manager.block_pool._maybe_evict_cached_block(block)
+
+        for manager in kv_cache_manager.coordinator.single_type_managers:
+            # NOTE(RBLN): SingleTypeKVCacheManager instances track the number 
+            # of cached blocks of running requests in num_cached_block dictionary.
+            if request.request_id in manager.num_cached_block:
+                manager.num_cached_block[request.request_id] = num_full_block
+
+
 class RBLNScheduler(Scheduler):
 
     def schedule(self) -> SchedulerOutput:
@@ -41,7 +66,7 @@ class RBLNScheduler(Scheduler):
         # - Disable mixed batching
         # - Limit prefill batch size to 1
         # - Create grammar bitmask for scheduled requests only
-        # Search for Note(RBLN) for details
+        # Search for NOTE(RBLN) for details
 
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
@@ -72,7 +97,7 @@ class RBLNScheduler(Scheduler):
         scheduled_timestamp = time.monotonic()
 
         # First, schedule the RUNNING requests.
-        # Note(RBLN): Prioritize prefill requests.
+        # NOTE(RBLN): Prioritize prefill requests.
         # Given our constraint that the prefill batch size fixed to 1
         # if any prefill request is running,
         # there must be exactly one at the end of the list.
@@ -203,12 +228,12 @@ class RBLNScheduler(Scheduler):
         skipped_waiting_requests = create_request_queue(self.policy)
 
         # Next, schedule the WAITING requests.
-        # Note(RBLN): We do not attempt to schedule a new prefill request
+        # NOTE(RBLN): We do not attempt to schedule a new prefill request
         # when a running prefill request is already scheduled.
         if not preempted_reqs and not (scheduled_running_reqs and is_prefill(
                 scheduled_running_reqs[0])):
 
-            # Note(RBLN): refresh the token budget to determine whether we
+            # NOTE(RBLN): refresh the token budget to determine whether we
             # can schedule new prefill requests into the running batch.
             prefill_token_budget = self.max_num_scheduled_tokens
             while self.waiting and prefill_token_budget > 0:
@@ -351,7 +376,7 @@ class RBLNScheduler(Scheduler):
                 else:
                     num_encoder_tokens = 0
 
-                # Note(RBLN): Even when chunked prefill is enabled,
+                # NOTE(RBLN): Even when chunked prefill is enabled,
                 # we should schedule a new prefill request only if there is
                 # enough KV cache space to accommodate the full token count.
                 # Therefore, we allocate based on
@@ -371,7 +396,7 @@ class RBLNScheduler(Scheduler):
                     # The request cannot be scheduled.
                     break
 
-                # Note(RBLN): By calling allocate_slots with request.num_tokens
+                # NOTE(RBLN): By calling allocate_slots with request.num_tokens
                 # instead of (num_new_tokens + num_external_computed_tokens),
                 # we pre-allocate slots for all tokens that this request will
                 # prefill. If allocated slots end up filling a block, the
@@ -379,16 +404,15 @@ class RBLNScheduler(Scheduler):
                 # However, since this iteration may not actually compute all
                 # tokens, the block may not be fully computed.
                 # Therefore, if the block is not finalized in this iteration,
-                # we must clear the block hash.
-                for blocks, num_full_block in zip(new_blocks.blocks, [
-                        num_new_tokens // group.kv_cache_spec.block_size
-                        for group in self.kv_cache_config.kv_cache_groups
-                ]):
-                    for i in range(num_full_block, len(blocks)):
-                        blocks[i].reset_hash()
+                # we must clear the block hash and undo block caching.
+                undo_uncomputed_block_caching(
+                    request, 
+                    self.kv_cache_manager,
+                    num_computed_tokens + num_new_tokens
+                )
 
                 # KVTransfer: the connector uses this info to determine
-                # if a load is needed. Note that
+                # if a load is needed. NOTE that
                 # This information is used to determine if a load is
                 # needed for this request.
                 if self.connector is not None:
@@ -441,7 +465,7 @@ class RBLNScheduler(Scheduler):
                         self.encoder_cache_manager.allocate(request, i)
                     encoder_compute_budget = new_encoder_compute_budget
 
-                # Note(RBLN): Reaching this point means that this request
+                # NOTE(RBLN): Reaching this point means that this request
                 # can now be added to the running batch.
                 # However, since we do not support mixed batching for now,
                 # we remove all currently scheduled running requests
@@ -452,9 +476,10 @@ class RBLNScheduler(Scheduler):
                 # this request will be scheduled together with the other
                 # running requests in the decoding phase.
                 # We also clear the block hash written in previous
-                # allocate_slots because this request and its tokens will be
-                # scheduled again, and allocate_slots will be invoked once
-                # more and the logic that writes the block hash will run again.
+                # allocate_slots and undo block caching because this request
+                # and its tokens will be scheduled again, and allocate_slots
+                # will be invoked once more and the logic that writes the
+                # block hash will run again.
                 # Without clearing it here, an assertion error would occur
                 # because a block hash would already exist.
                 for req in scheduled_running_reqs:
@@ -462,22 +487,12 @@ class RBLNScheduler(Scheduler):
                     num_scheduled_tokens.pop(req.request_id)
                     scheduled_spec_decode_tokens.pop(req.request_id, None)
                     scheduled_encoder_inputs.pop(req.request_id, None)
-
-                    for blocks, num_full_block in zip(
-                            self.kv_cache_manager.get_blocks(
-                                req.request_id).blocks,
-                        [
-                            req.num_computed_tokens //
-                            group.kv_cache_spec.block_size
-                            for group in self.kv_cache_config.kv_cache_groups
-                        ]):
-                        for i in range(num_full_block, len(blocks)):
-                            blocks[i].reset_hash()
+                    undo_uncomputed_block_caching(req, self.kv_cache_manager)
 
                 scheduled_running_reqs.clear()
                 token_budget = prefill_token_budget
 
-                # Note(RBLN): we restrict the prefill batch size to 1 for now.
+                # NOTE(RBLN): we restrict the prefill batch size to 1 for now.
                 break
 
         # Put back any skipped requests at the head of the waiting queue
@@ -518,7 +533,7 @@ class RBLNScheduler(Scheduler):
             scheduled_spec_decode_tokens,
             req_to_new_blocks,
         )
-        # Note(RBLN): We generate grammar bitmask for scheduled requests only
+        # NOTE(RBLN): We generate grammar bitmask for scheduled requests only
         active_running_reqs = \
             scheduled_running_reqs + scheduled_new_reqs + scheduled_resumed_reqs
         structured_output_request_ids, grammar_bitmask = (
