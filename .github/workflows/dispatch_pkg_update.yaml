@@ -1,21 +1,38 @@
 name: Dispatch / Pkg Update
 on:
-    workflow_dispatch:
-      inputs:
-        python-version:
-          description: Python version to use
-          default: "3.12"
-          type: choice
-          options:
-            - "3.9"
-            - "3.10"
-            - "3.11"
-            - "3.12"
-            - "3.13"
-        optimum-version:
-            description: Version of optimum-rbln to add
-            default: "latest"
-            type: string  
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: Python version to use
+        default: "3.12"
+        type: choice
+        options:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+      optimum-version:
+          description: Version of optimum-rbln to add
+          default: "latest"
+          type: string  
+
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version to use
+        default: "3.12"
+        type: string
+        options:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+      optimum-version:
+        description: Version of optimum-rbln to add
+        default: "latest"
+        type: string
 
 jobs:
   update-pkg:
