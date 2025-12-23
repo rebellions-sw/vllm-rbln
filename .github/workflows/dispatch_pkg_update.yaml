@@ -23,12 +23,6 @@ on:
         description: Python version to use
         default: "3.12"
         type: string
-        options:
-          - "3.9"
-          - "3.10"
-          - "3.11"
-          - "3.12"
-          - "3.13"
       optimum-version:
         description: Version of optimum-rbln to add
         default: "latest"
