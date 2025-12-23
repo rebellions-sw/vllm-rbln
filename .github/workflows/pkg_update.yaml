@@ -78,7 +78,7 @@ jobs:
 
     summary:
         runs-on: ubuntu-latest-rbln
-        needs: [check-skip]
+        needs: [check-skip, vllm-rbln-pr]
         if: always() # Run even if dependencies fail or are skipped
         env:
           RBLN_EXEC_SUCCESS: ${{ needs.vllm-rbln-pr.result == 'success' && '✅' ||  needs.check-skip.outputs.skip-pr == 'true' && '✅' || '❌' }}
