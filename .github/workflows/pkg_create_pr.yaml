@@ -1,29 +1,29 @@
 name: Pkg Create PR for vllm-rbln
 on:
-    workflow_call:
-        inputs:
-            python-version:
-                description: "Python version to use"
-                required: true
-                type: string
-            optimum-version:
-                description: "Optimum version to update"
-                required: true
-                type: string
-        secrets:
-          REBEL_PYPI_USERNAME:
-            required: true
-          REBEL_PYPI_PASSWORD:
-            required: true
-          REBEL_SW_DEVELOP_USERNAME:
-            required: true
-          REBEL_SW_DEVELOP_PASSWORD:
-            required: true
-          PUSH_TOKEN:
-            required: true
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version to use"
+        required: true
+        type: string
+      optimum-version:
+        description: "Optimum version to update"
+        required: true
+        type: string
+    secrets:
+      REBEL_PYPI_USERNAME:
+        required: true
+      REBEL_PYPI_PASSWORD:
+        required: true
+      REBEL_SW_DEVELOP_USERNAME:
+        required: true
+      REBEL_SW_DEVELOP_PASSWORD:
+        required: true
+      GIT_PAT:
+        required: true
 jobs:
   create-pr:
-    runs-on: rebel-k8s-runner
+    runs-on: ubuntu-latest-rbln
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,8 +43,10 @@ jobs:
       - name: Update Optimum Version in uv
         id: uv-update-optimum-rbln
         run: |
+          VERSION="${{ inputs.optimum-version }}"
+          VERSION="${VERSION#v}"
           for i in {1..6}; do
-            uv add optimum-rbln==${{ inputs.optimum-version }} --no-cache && exit 0
+            uv add "optimum-rbln>=${VERSION}" --no-cache && exit 0
             sleep 10
           done
           echo "All retries with --cache-dir failed."
@@ -60,7 +62,9 @@ jobs:
             echo "Error: requirements.txt not found"
             exit 1
           fi
-          sed -i 's/optimum-rbln>=.*/optimum-rbln>=${{ inputs.optimum-version }}/' requirements.txt
+          VERSION="${{ inputs.optimum-version }}"
+          VERSION="${VERSION#v}"
+          sed -i "s/optimum-rbln>=.*/optimum-rbln>=${VERSION}/" requirements.txt
           echo "Updated requirements.txt:"
           cat requirements.txt
 
@@ -69,7 +73,10 @@ jobs:
         if: ${{ steps.uv-update-optimum-rbln.outcome == 'success' && steps.update-requirements-txt.outcome == 'success' }}
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.PUSH_TOKEN }}
+          token: ${{ secrets.GIT_PAT }}
+          add-paths: |
+            pyproject.toml
+            requirements.txt
           commit-message: "Update optimum-rbln to ${{ inputs.optimum-version }}"
           title: "Auto-update optimum-rbln to ${{ inputs.optimum-version }}"
           body: "Updated optimum-rbln to ${{ inputs.optimum-version }}."
