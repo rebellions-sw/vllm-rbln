@@ -14,9 +14,7 @@
 """A RBLN worker class."""
 import copy
 import os
-import time
 import platform
-from importlib import util
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -167,13 +165,11 @@ class RBLNWorker(WorkerBase):
             if cpu_arch in (CpuArchEnum.POWERPC, CpuArchEnum.S390X):
                 # For S390X/POWERPC SMT-8/4/2
                 self.local_omp_cpuid = self._get_autobind_cpu_ids(
-                    lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4]
-                )
+                    lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4])
             elif cpu_arch == CpuArchEnum.X86:
                 # For x86 SMT-2, use 1 CPU per core
                 self.local_omp_cpuid = self._get_autobind_cpu_ids(
-                    lambda cpus: cpus[-1:]
-                )
+                    lambda cpus: cpus[-1:])
             else:
                 self.local_omp_cpuid = "nobind"
         else:
@@ -181,7 +177,10 @@ class RBLNWorker(WorkerBase):
 
         if self.local_omp_cpuid not in ("all", "nobind"):
             # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
-            cpu_ids = [int(cpu_id.strip()) for cpu_id in self.local_omp_cpuid.split(",")]
+            cpu_ids = [
+                int(cpu_id.strip())
+                for cpu_id in self.local_omp_cpuid.split(",")
+            ]
             # Set CPU affinity for current process
             try:
                 os.sched_setaffinity(0, cpu_ids)
@@ -191,32 +190,31 @@ class RBLNWorker(WorkerBase):
                 if actual_cpu_ids != expected_cpu_ids:
                     logger.warning(
                         "CPU affinity mismatch for rank %d (local_rank %d): "
-                        "expected %s, but got %s",
-                        self.rank, self.local_rank, expected_cpu_ids, actual_cpu_ids
-                    )
+                        "expected %s, but got %s", self.rank, self.local_rank,
+                        expected_cpu_ids, actual_cpu_ids)
                 else:
                     logger.info(
                         "Set CPU affinity for rank %d (local_rank %d): CPUs %s",
-                        self.rank, self.local_rank, self.local_omp_cpuid
-                    )
+                        self.rank, self.local_rank, self.local_omp_cpuid)
             except OSError as e:
                 logger.error(
                     "Failed to set CPU affinity for rank %d (local_rank %d): %s",
-                    self.rank, self.local_rank, str(e)
-                )
+                    self.rank, self.local_rank, str(e))
                 raise
         elif self.local_omp_cpuid == "nobind":
             logger.info(
                 "Skipping CPU affinity binding for rank %d (local_rank %d): nobind",
-                self.rank, self.local_rank
-            )
+                self.rank, self.local_rank)
 
         # If OMP_NUM_THREADS is not defined in the environment, set it to 2.
         if "OMP_NUM_THREADS" not in os.environ:
             os.environ["OMP_NUM_THREADS"] = "2"
-            logger.info("Set OMP_NUM_THREADS to 2 for rank %d (local_rank %d)", self.rank, self.local_rank)
+            logger.info("Set OMP_NUM_THREADS to 2 for rank %d (local_rank %d)",
+                        self.rank, self.local_rank)
         else:
-            logger.info("OMP_NUM_THREADS is already defined for rank %d (local_rank %d): %s", self.rank, self.local_rank, os.environ["OMP_NUM_THREADS"])
+            logger.info(
+                "OMP_NUM_THREADS is already defined for rank %d (local_rank %d): %s",
+                self.rank, self.local_rank, os.environ["OMP_NUM_THREADS"])
 
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.vllm_config, self.rank,
@@ -368,11 +366,11 @@ class RBLNWorker(WorkerBase):
             self.model_runner.performance_tracker.print_final_stats()
 
     def _get_autobind_cpu_ids(
-        self, cpu_selector: Callable[[list[LogicalCPUInfo]], list[LogicalCPUInfo]]
+        self, cpu_selector: Callable[[list[LogicalCPUInfo]],
+                                     list[LogicalCPUInfo]]
     ) -> str:
         allowed_numa_nodes, logical_cpu_list = (
-            CpuPlatform.get_allowed_cpu_core_node_list()
-        )
+            CpuPlatform.get_allowed_cpu_core_node_list())
 
         # Calculate rank_across_dp for CPU binding
         # This ensures different DP groups get different CPU allocations
@@ -394,7 +392,9 @@ class RBLNWorker(WorkerBase):
             numa_node_to_cpus[numa_node].append(cpu_info)
 
         # Filter to only allowed NUMA nodes
-        available_numa_nodes = [n for n in allowed_numa_nodes if n in numa_node_to_cpus]
+        available_numa_nodes = [
+            n for n in allowed_numa_nodes if n in numa_node_to_cpus
+        ]
 
         if not available_numa_nodes:
             logger.error(
@@ -405,8 +405,10 @@ class RBLNWorker(WorkerBase):
         numa_node_idx = rank_across_dp % len(available_numa_nodes)
         selected_numa_node = available_numa_nodes[numa_node_idx]
         numa_node_cpu_list = numa_node_to_cpus[selected_numa_node]
-        ranks_in_same_numa = [r for r in range(world_size_across_dp)
-                             if r % len(available_numa_nodes) == numa_node_idx]
+        ranks_in_same_numa = [
+            r for r in range(world_size_across_dp)
+            if r % len(available_numa_nodes) == numa_node_idx
+        ]
 
         # Select CPUs from each physical core via cpu_selector
         core_to_cpus: dict[int, list[LogicalCPUInfo]] = {}
@@ -426,8 +428,10 @@ class RBLNWorker(WorkerBase):
             remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
 
             rank_position = ranks_in_same_numa.index(rank_across_dp)
-            start_idx = rank_position * cpus_per_rank + min(rank_position, remainder)
-            end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
+            start_idx = rank_position * cpus_per_rank + min(
+                rank_position, remainder)
+            end_idx = start_idx + cpus_per_rank + (1 if rank_position
+                                                   < remainder else 0)
             logical_cpu_list = selected_cpu_list[start_idx:end_idx]
         else:
             logical_cpu_list = selected_cpu_list
@@ -456,6 +460,7 @@ class RBLNWorker(WorkerBase):
                 [(x.id, x.physical_core) for x in logical_cpu_list])
 
         return ",".join([str(x.id) for x in logical_cpu_list])
+
 
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
