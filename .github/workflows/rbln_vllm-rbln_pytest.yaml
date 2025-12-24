@@ -89,7 +89,6 @@ jobs:
           retention-days: 7
 
   pytest:
-    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type }})
     runs-on: runner-vllm-ci
     needs: [build-vllm-rbln]
@@ -148,6 +147,7 @@ jobs:
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
           python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+          echo "rebel-compiler ${VERSION}"
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -158,9 +158,12 @@ jobs:
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
-          VERSION=${{ inputs.optimum_rbln_version }}
-          pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
-          echo "optimum-rbln $VERSION"
+          if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+            pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
+            echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+          else
+            pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }}
+          fi
 
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'

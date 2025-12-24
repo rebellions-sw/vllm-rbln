@@ -38,7 +38,6 @@ env:
 
 jobs:
   test_vllm_rbln:
-    if: ${{ inputs.rebel_compiler_version }}
     runs-on: runner-vllm-ci
     env:
       NUM_INPUT_PROMPT: 1
@@ -65,6 +64,7 @@ jobs:
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
           python3 -m pip install --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
+          echo "rebel-compiler ${VERSION}"
 
       - name: Checkout current repository
         uses: actions/checkout@v4
