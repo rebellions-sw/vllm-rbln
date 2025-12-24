@@ -209,7 +209,8 @@ class RBLNWorker(WorkerBase):
                     )
             except OSError as e:
                 logger.error(
-                    "Failed to set CPU affinity for rank %d (local_rank %d): %s",
+                    "Failed to set CPU affinity for rank %d (local_rank %d): "
+                    "%s",
                     self.rank,
                     self.local_rank,
                     str(e),
@@ -217,7 +218,8 @@ class RBLNWorker(WorkerBase):
                 raise
         elif self.local_omp_cpuid == "nobind":
             logger.info(
-                "Skipping CPU affinity binding for rank %d (local_rank %d): nobind",
+                "Skipping CPU affinity binding for rank %d (local_rank %d): "
+                "nobind",
                 self.rank,
                 self.local_rank,
             )
@@ -232,7 +234,8 @@ class RBLNWorker(WorkerBase):
             )
         else:
             logger.info(
-                "OMP_NUM_THREADS is already defined for rank %d (local_rank %d): %s",
+                "OMP_NUM_THREADS is already defined for rank %d "
+                "(local_rank %d): %s",
                 self.rank,
                 self.local_rank,
                 os.environ["OMP_NUM_THREADS"],
@@ -449,7 +452,8 @@ class RBLNWorker(WorkerBase):
             selected_cpu_list.extend(cpu_selector(cpu_list))
         selected_cpu_list = sorted(selected_cpu_list, key=lambda x: x.id)
 
-        # Always divide CPUs among ranks in the same NUMA node for exclusive allocation
+        # Always divide CPUs among ranks in the same NUMA node
+        # for exclusive allocation
         if len(ranks_in_same_numa) > 1:
             cpus_per_rank = len(selected_cpu_list) // len(ranks_in_same_numa)
             remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
@@ -465,8 +469,8 @@ class RBLNWorker(WorkerBase):
 
         if not logical_cpu_list:
             logger.warning(
-                "Auto thread-binding: no CPUs allocated for rank %d (rank_across_dp %d). "
-                "Falling back to default.",
+                "Auto thread-binding: no CPUs allocated for rank %d "
+                "(rank_across_dp %d). Falling back to default.",
                 self.rank,
                 rank_across_dp,
             )
@@ -475,8 +479,9 @@ class RBLNWorker(WorkerBase):
         # Log binding information
         if len(ranks_in_same_numa) > 1:
             logger.info(
-                "auto thread-binding: rank %d (rank_across_dp %d) -> NUMA node %d, "
-                "CPUs: %s (exclusive allocation, shared NUMA node with ranks %s, id, physical core): %s",
+                "auto thread-binding: rank %d (rank_across_dp %d) "
+                "-> NUMA node %d, CPUs: %s (exclusive allocation, "
+                "shared NUMA node with ranks %s, id, physical core): %s",
                 self.rank,
                 rank_across_dp,
                 selected_numa_node,
@@ -486,8 +491,9 @@ class RBLNWorker(WorkerBase):
             )
         else:
             logger.info(
-                "auto thread-binding: rank %d (rank_across_dp %d) -> NUMA node %d, "
-                "CPUs: %s (exclusive allocation, id, physical core): %s",
+                "auto thread-binding: rank %d (rank_across_dp %d) "
+                "-> NUMA node %d, CPUs: %s (exclusive allocation, "
+                "id, physical core): %s",
                 self.rank,
                 rank_across_dp,
                 selected_numa_node,
