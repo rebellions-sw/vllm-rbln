@@ -31,7 +31,6 @@ from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
-from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              ModelRunnerOutput)
@@ -222,7 +221,7 @@ class RBLNWorker(WorkerBase):
                                    self.scheduler_config.max_num_seqs //
                                    block_size) + no_dummy_slots
         num_gpu_blocks = min(
-            max_num_blocks * self.cache_config.gpu_memory_utilization,
+            int(max_num_blocks * self.cache_config.gpu_memory_utilization),
             max_required_num_blocks,
         )
 
@@ -231,7 +230,10 @@ class RBLNWorker(WorkerBase):
 
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
         num_layers = len(kv_cache_spec)
-        page_size = get_uniform_page_size(kv_cache_spec.values())
+        # TODO: Consider SWA hybrid models.
+        # Sync get_maximum_num_blocks with latest optimum-rbln.
+        page_size = max(spec.page_size_bytes
+                        for spec in kv_cache_spec.values())
         return num_gpu_blocks * page_size * num_layers
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
