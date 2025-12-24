@@ -168,7 +168,7 @@ jobs:
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
           if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
-            pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
+            pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}")
             echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
           else
             pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }}
