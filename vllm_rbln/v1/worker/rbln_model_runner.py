@@ -105,6 +105,7 @@ from vllm_rbln.lora.mask import LoRAMask
 from vllm_rbln.v1.attention.backends.flash_attention import (
     RBLNFlashAttentionMetadataBuilder,
 )
+from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
 from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
@@ -2620,6 +2621,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 kv_cache_spec = next(iter(kv_cache_spec.kv_cache_specs.values()))
             if isinstance(kv_cache_spec, EncoderOnlyAttentionSpec):
                 continue
+            elif isinstance(kv_cache_spec, RBLNSlidingWindowSpec):
+                kernel_block_sizes.append(kv_cache_spec.sliding_window)
             elif isinstance(kv_cache_spec, AttentionSpec):
                 # This is an attention backend that supports virtual
                 # block splitting. Get the supported block sizes from
