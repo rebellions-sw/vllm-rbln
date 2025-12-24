@@ -274,7 +274,6 @@ def _schedule_new_request_from_request(
         ))
     num_scheduled_tokens[req.request_id] = len(req.prompt_token_ids)
     total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
-
     return RBLNSchedulerOutput(
         scheduled_new_reqs=new_reqs,
         scheduled_cached_reqs=CachedRequestData.make_empty(),
@@ -285,8 +284,8 @@ def _schedule_new_request_from_request(
         num_common_prefix_blocks=0,
         finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids={},
-        grammar_bitmask=None,
+        structured_output_request_ids=None,  # FIXME
+        grammar_bitmask=None,  # FIXME
         block_table_dict={req.request_id: outer_block_ids},
         cached_block_table=[],
         cached_length=[],
@@ -377,7 +376,7 @@ def forward_steps(reqs: list[Request]):
             req, block_ids=([i], ), outer_block_ids=[i])
         if req.use_structured_output:
             vocab_size = runner.model_config.get_vocab_size()
-            scheduler_output.structured_output_request_ids = {req_id: i}
+            scheduler_output.structured_output_request_ids = {req_id: 0}
             scheduler_output.grammar_bitmask = create_grammar_bitmask(
                 1, vocab_size)
         runner_output = runner.execute_model(scheduler_output)
@@ -393,6 +392,11 @@ def forward_steps(reqs: list[Request]):
     scheduler_output = _schedule_cached_reqs(reqs,
                                              new_block_ids=[None, None, None])
     vocab_size = runner.model_config.get_vocab_size()
+    req_order = [1, 2, 0]
+    for i, req in enumerate(reqs):
+        if req.use_structured_output:
+            scheduler_output.structured_output_request_ids[
+                req.request_id] = req_order[i]
     scheduler_output.grammar_bitmask = create_grammar_bitmask(
         len(scheduler_output.structured_output_request_ids), vocab_size)
     runner_output = runner.execute_model(scheduler_output)
