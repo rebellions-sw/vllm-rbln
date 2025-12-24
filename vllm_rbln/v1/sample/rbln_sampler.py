@@ -112,10 +112,13 @@ class RBLNSampler(VLLMSampler):
         super().__init__()
         rebel.manual_seed(seed)
 
-        options = {
-            "cache_dir": os.path.join(envs.VLLM_CACHE_ROOT, "rbln_sampler"),
-            "compile_context": rebel.CompileContext()
-        }
+        options = {"compile_context": rebel.CompileContext()}
+
+        if not envs.VLLM_DISABLE_COMPILE_CACHE:
+            cache_dir = os.path.join(envs.VLLM_CACHE_ROOT, 'rbln_sampler')
+            logger.info("Compiling RBLN sampler with cache_dir: %s", cache_dir)
+            options["cache_dir"] = cache_dir
+
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
@@ -282,7 +285,7 @@ WARM_UP_CONFIGS = [
         "no_penalties": True,
         "all_greedy": False,
         "all_random": True,
-        "top_k": 1.0,
+        "top_k": 10,
         "temperature": 0.5
     },
     {
@@ -291,7 +294,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_p": 0.9,
-        "top_k": 1.0,
+        "top_k": 10,
         "temperature": 0.5
     },
     {
@@ -323,7 +326,7 @@ WARM_UP_CONFIGS = [
         "repetition_penalties": 1.0,
         "all_greedy": False,
         "all_random": True,
-        "top_k": 1.0,
+        "top_k": 100,
         "temperature": 0.5
     },
     {
@@ -335,7 +338,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_p": 0.9,
-        "top_k": 1.0,
+        "top_k": 50,
         "temperature": 0.5
     },
 ]

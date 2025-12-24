@@ -77,7 +77,7 @@ from vllm.v1.spec_decode.medusa import MedusaProposer
 from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.spec_decode.ngram_proposer import NgramProposer
 from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
-from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
+from vllm.v1.worker.gpu_input_batch import CachedRequestState
 from vllm.v1.worker.kv_connector_model_runner_mixin import (
     KVConnectorModelRunnerMixin, KVConnectorOutput)
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
@@ -93,6 +93,9 @@ from vllm_rbln.lora.mask import LoRAMask
 from vllm_rbln.v1.attention.backends.flash_attention import (
     RBLNFlashAttentionMetadataBuilder)
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
+from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
+from vllm_rbln.v1.worker.bucketing import get_bucketing_manager_class
+from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
@@ -226,10 +229,22 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.max_encoder_len = 0
 
         # Sampler
-        self.sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
+        self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
+        if self.use_rbln_sampler:
+            logger.info("Using RBLN sampler")
+            self.sampler = RBLNSampler(
+                logprobs_mode=self.model_config.logprobs_mode,
+                seed=self.vllm_config.model_config.seed,
+            )
+        else:
+            logger.info("Using default vLLM sampler")
+            self.sampler = Sampler(
+                logprobs_mode=self.model_config.logprobs_mode)
 
         # Lazy initialization
         self.compute_logits_model: nn.Module
+
+        self.is_prefill: bool = True
 
         self.eplb_state: Optional[EplbState] = None
         """
@@ -283,7 +298,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # solution, we initialize the input batch here, and re-initialize it
         # in `initialize_kv_cache` if the block_sizes here is different from
         # the block_sizes in the kv cache config.
-        self.input_batch = InputBatch(
+        self.input_batch = RBLNInputBatch(
             max_num_reqs=self.max_num_reqs,
             # We need to use the encoder length for encoder-decoer
             # because of KV cache for cross-attention.
@@ -299,6 +314,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self.is_pooling_model,
                 self.vllm_config.model_config.logits_processors),
             is_pooling_model=self.is_pooling_model,
+            use_rbln_sampler=self.use_rbln_sampler,
         )
 
         self.use_async_scheduling = self.scheduler_config.async_scheduling
@@ -327,6 +343,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                                   dtype=torch.int32)
         self.num_accepted_tokens = self._make_buffer(self.max_num_reqs,
                                                      dtype=torch.int64)
+
+        # the flag to indicate if the batch is all prefill
+        self.is_prefill: bool
 
         # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
         if self.uses_mrope:
@@ -401,6 +420,23 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
+
+        # the batch size for the current batch
+        self.batch_bucket_size: int
+
+        bucketing_manager_class = get_bucketing_manager_class(
+            envs.VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY)
+        self.bucketing_manager = bucketing_manager_class(
+            max_batch_size=self.max_num_seqs,
+            min_batch_size=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_MIN,
+            step=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_STEP,
+            limit=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT,
+        )
+
+        logger.info("Using %s bucketing manager",
+                    bucketing_manager_class.__name__)
+        logger.info("decode batch buckets: %s",
+                    self.bucketing_manager.decode_batch_buckets)
 
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],
@@ -656,8 +692,28 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.input_batch.condense()
         # Allow attention backend to reorder the batch, potentially
         self._may_reorder_batch(scheduler_output)
+
+        # update the prefill flag if the batch is all prefill or all decode
+        is_prefills = (self.input_batch.num_computed_tokens_cpu
+                       < self.input_batch.num_tokens - 1)
+
+        self.is_prefill = is_prefills[0]
+
+        assert len(is_prefills) > 0 and all(
+                is_prefill == is_prefills[0]
+                for is_prefill in is_prefills[:self.input_batch.num_reqs]), \
+                "The prefill and decode cannot be mixed."
+
         # Refresh batch metadata with any pending updates.
-        self.input_batch.refresh_metadata()
+        self.batch_bucket_size = (
+            1 if self.is_prefill else
+            self.bucketing_manager.find_decode_batch_bucket(
+                self.input_batch.num_reqs))
+
+        if self.use_rbln_sampler:
+            self.input_batch.refresh_metadata_rbln(self.batch_bucket_size)
+        else:
+            self.input_batch.refresh_metadata()
 
     def _update_states_after_model_execute(
             self, output_token_ids: torch.Tensor) -> None:
@@ -1056,7 +1112,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             logger.info("Once the model is compiled for the first time, "
                         "the cached compiled binary will be reused.")
-            options["cache_dir"] = os.path.join(envs.VLLM_CACHE_ROOT, 'rbln')
+            cache_dir = os.path.join(envs.VLLM_CACHE_ROOT, 'rbln')
+            logger.info("Compiling RBLN model with cache_dir: %s", cache_dir)
+            options["cache_dir"] = cache_dir
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
@@ -1075,6 +1133,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             dynamic=False,
         )
 
+        if self.use_rbln_sampler:
+            self.sampler = torch.compile(
+                self.sampler,
+                dynamic=False,
+                fullgraph=False,
+            )
         return compiled_model
 
     def get_model(self) -> nn.Module:
@@ -1429,7 +1493,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     @torch.inference_mode()
     def warm_up_model(self) -> None:
-        # compile prefill graph
+
+        logger.info("Warm up prefill graph")
         prefill_seq_len = (self.scheduler_config.max_num_batched_tokens
                            if self.scheduler_config.chunked_prefill_enabled
                            else self.scheduler_config.max_model_len)
@@ -1452,29 +1517,34 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                      dummy_prefill_num_scheduled_tokens)
 
         # compile decode graph
-        decode_max_batch_size = self.scheduler_config.max_num_seqs
-        decode_max_seq_len = self.scheduler_config.max_model_len
+        for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
+            logger.info("Warm up decode graph with batch_size: %d",
+                        batch_bucket_size)
+            decode_max_seq_len = self.scheduler_config.max_model_len
 
-        dummy_decode_requests = []
-        dummy_decode_num_scheduled_tokens = {}
-        for _ in range(decode_max_batch_size):
-            self._add_dummy_requests(
+            dummy_decode_requests = []
+            dummy_decode_num_scheduled_tokens = {}
+            for _ in range(batch_bucket_size):
+                self._add_dummy_requests(
+                    requests=dummy_decode_requests,
+                    num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
+                    total_tokens=decode_max_seq_len - 1,
+                    num_computed_tokens=decode_max_seq_len - 1,
+                    num_kv_cache_groups=num_kv_cache_groups,
+                    sampling_params=None if self.is_pooling_model else
+                    SamplingParams(temperature=0.0),
+                    pooling_params=PoolingParams(
+                        task=self.get_supported_pooling_tasks()[0])
+                    if self.is_pooling_model else None,
+                )
+
+            self._execute_dummy_requests(
                 requests=dummy_decode_requests,
                 num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
-                total_tokens=decode_max_seq_len - 1,
-                num_computed_tokens=decode_max_seq_len - 1,
-                num_kv_cache_groups=num_kv_cache_groups,
-                sampling_params=None
-                if self.is_pooling_model else SamplingParams(temperature=0.0),
-                pooling_params=PoolingParams(
-                    task=self.get_supported_pooling_tasks()[0])
-                if self.is_pooling_model else None,
             )
 
-        self._execute_dummy_requests(
-            requests=dummy_decode_requests,
-            num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
-        )
+        if self.use_rbln_sampler:
+            self.warm_up_sampler()
 
     def _add_dummy_requests(
         self,
@@ -1486,7 +1556,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         sampling_params: Optional[SamplingParams] = None,
         pooling_params: Optional[PoolingParams] = None,
     ) -> None:
-
+        """Add a dummy request to the input batch."""
         num_blocks = round_up(
             total_tokens,
             self.cache_config.block_size) // self.cache_config.block_size
@@ -1561,6 +1631,62 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.execute_model(cleanup_sched_output, intermediate_tensors)
         self.intermediate_tensors = None
 
+    def warm_up_sampler(self) -> None:
+
+        torch._dynamo.config.recompile_limit = len(WARM_UP_CONFIGS) * len(
+            self.bucketing_manager.batch_buckets)
+
+        for batch_size in self.bucketing_manager.batch_buckets:
+            for config in WARM_UP_CONFIGS:
+                logger.info("Warm up sampler with batch_size: %d, config: %s",
+                            batch_size, config)
+                sampling_metadata = self._prepare_sampling_metadata(
+                    batch_size=batch_size,
+                    sampling_params=SamplingParams(
+                        temperature=config.get("temperature", 1.0),
+                        top_p=config.get("top_p", 1.0),
+                        top_k=config.get("top_k", 0),
+                        presence_penalty=config.get("presence_penalty", 0.0),
+                        frequency_penalty=config.get("frequency_penalty", 0.0),
+                        repetition_penalty=config.get("repetition_penalty",
+                                                      1.0),
+                    ),
+                )
+                logger.debug("Sampling metadata: %s", sampling_metadata)
+                self.sampler(
+                    logits=torch.randn(batch_size,
+                                       self.model.config.vocab_size,
+                                       dtype=self.dtype),
+                    sampling_metadata=sampling_metadata,
+                )
+                for req_id in self.input_batch.req_ids:
+                    self.requests.pop(req_id, None)
+                    self.input_batch.remove_request(req_id)
+                self.input_batch.condense()
+                self.input_batch.refresh_metadata()
+
+    def _prepare_sampling_metadata(
+        self,
+        batch_size: int,
+        sampling_params: SamplingParams,
+    ):
+        for i in range(batch_size):
+            req_id = f"dummy_sampler_request_{i}"
+            self.input_batch.add_request(
+                CachedRequestState(req_id=req_id,
+                                   prompt_token_ids=list(range(10)),
+                                   mm_kwargs=[],
+                                   mm_hashes=[],
+                                   mm_positions=[],
+                                   block_ids=([0]),
+                                   sampling_params=sampling_params,
+                                   pooling_params=None,
+                                   generator=None,
+                                   num_computed_tokens=10,
+                                   output_token_ids=[]))
+
+        return self.input_batch._make_sampling_metadata()
+
     def _bookkeeping_sync(
         self, scheduler_output: "SchedulerOutput",
         sampler_output: SamplerOutput, logits: Optional[torch.Tensor],
@@ -1620,7 +1746,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
             max_gen_len = sampled_token_ids.shape[-1]
-            if max_gen_len == 1:
+            if max_gen_len <= 1:
                 # No spec decode tokens.
                 valid_sampled_token_ids = self._to_list(sampled_token_ids)
             else:
@@ -1756,19 +1882,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_reqs = self.input_batch.num_reqs
             input_ids = input_ids.view(num_reqs, -1).to(torch.long)
             positions = positions.view(num_reqs, -1)
-            is_prefills = (self.input_batch.num_computed_tokens_cpu
-                           < self.input_batch.num_tokens - 1)
-
             token_indices = None
-            if is_prefills[0]:
+            if self.is_prefill:
                 # DO NOT include compute logits if lora_config is enabled
                 token_indices = logits_indices
 
-            # The prefill and decode cannot be mixed.
-            assert len(is_prefills) > 0 and all(
-                is_prefill == is_prefills[0]
-                for is_prefill in is_prefills[:num_reqs])
-            if is_prefills[0]:
                 # prefill chunk padding
                 max_seq_len = int(self.seq_lens.np[:num_reqs].max())
                 prefill_size = (self.scheduler_config.max_num_batched_tokens if
@@ -1778,8 +1896,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 positions = rbln_utils.pad(positions, -1, prefill_size)
             else:
                 # decode batch padding
-                input_ids = rbln_utils.pad(input_ids, 0, self.max_num_seqs)
-                positions = rbln_utils.pad(positions, -2, self.max_num_seqs)
+                input_ids = rbln_utils.pad(input_ids, 0,
+                                           self.batch_bucket_size)
+                positions = rbln_utils.pad(positions, -2,
+                                           self.batch_bucket_size)
 
             if self.lora_config is not None:
                 lora_ids = [
@@ -1800,7 +1920,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     lora_ids,
                     self.lora_manager._adapter_manager.lora_index_to_id,
                     self.max_num_seqs,
-                    is_prefills[0],
+                    self.is_prefill,
                     self.lora_config.max_loras,
                 )
                 LoRAMask.set_lora_mask(lora_mask)
@@ -1828,7 +1948,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 # Record performance metrics
                 end_time = time.perf_counter()
                 execution_time = end_time - start_time
-                if is_prefills[0]:
+                if self.is_prefill:
                     self.performance_tracker.record_prefill(
                         execution_time, num_scheduled_tokens)
                 else:
@@ -1837,9 +1957,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
-                hidden_states, aux_hidden_states, logits = model_output
+                hidden_states, aux_hidden_states, padded_logits = model_output
             else:
-                hidden_states, logits = model_output
+                hidden_states, padded_logits = model_output
                 aux_hidden_states = None
 
             # Broadcast PP output for external_launcher (torchrun)
@@ -1871,20 +1991,25 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     # FIXME(jiwoo.park) This is a temporary workaround;
                     # SHOULD resolve the batch dimension.
                     hidden_states = hidden_states.flatten(0, -2)
+                    assert padded_logits is None, (
+                        "With lora, model wrapper's output should not contain "
+                        "compute logits")
 
-                    if is_prefills[0]:  # prefill
+                    if self.is_prefill:  # prefill
                         sample_hidden_states = hidden_states[logits_indices]
-                        logits = self.compute_logits(sample_hidden_states,
-                                                     None)
+                        padded_logits = self.compute_logits(
+                            sample_hidden_states, None)
+                        logits = padded_logits
                     else:  # decode
-                        logits = self.compute_logits(hidden_states, None)
-                        logits = logits[logits_indices]
+                        padded_logits = self.compute_logits(
+                            hidden_states, None)
+                        logits = padded_logits[logits_indices]
                     logits = self.logits_processor._gather_logits(logits)
                     logits = logits.view(-1, logits.size(-1))
                 else:
                     selected_token_indices = logits_indices
                     assert selected_token_indices.dim() == 1
-                    if is_prefills[0]:  # prefill
+                    if self.is_prefill:  # prefill
                         assert selected_token_indices.size(0) == 1
                         num_computed = self.input_batch.num_computed_tokens_cpu
                         num_prompted = self.input_batch.num_prompt_tokens
@@ -1896,18 +2021,18 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                             # chunked prefill(#0~#N-1, intermediate)
                             # token_indices = torch.tensor([max_num_seqs-1])
                             # selected = torch.tensor([])
-                            logits = logits[selected_token_indices]
+                            logits = padded_logits[selected_token_indices]
                         else:
                             # chunked prefill(#N, final)
                             # token_indices = torch.tensor([last_seq_idx-1])
                             # selected_token_indices == token_indices
-                            logits = logits
+                            logits = padded_logits
                     else:  # decode
                         # selected_token_indices is for valid decode tokens
                         assert selected_token_indices.size(
                             0) <= self.max_batch_size
                         # token_indices == None, selected = torch.tensor([0])
-                        logits = logits[selected_token_indices]
+                        logits = padded_logits[selected_token_indices]
 
             if broadcast_pp_output:
                 model_output_broadcast_data = {
@@ -1924,8 +2049,27 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self.apply_grammar_bitmask(scheduler_output, logits)
 
         with record_function_or_nullcontext("Sample"):
-            sampler_output = self._sample(logits, spec_decode_metadata)
+            if logits.size(0) == 0:
+                # empty logits, return empty sampler output
+                sampler_output = SamplerOutput(
+                    sampled_token_ids=torch.empty([0, 1], dtype=torch.int32),
+                    logprobs_tensors=None,
+                )
+            else:
+                sampler_output = self._sample(
+                    padded_logits if self.use_rbln_sampler else logits,
+                    spec_decode_metadata)
 
+                # post process for padded decode sampler output
+                if self.use_rbln_sampler and not self.is_prefill:
+                    sampler_output.sampled_token_ids = \
+                        sampler_output.sampled_token_ids[logits_indices]
+                    if sampler_output.logprobs_tensors is not None:
+                        sampler_output.logprobs_tensors = \
+                            self.post_process_logprobs_tensors(
+                                sampler_output.logprobs_tensors,
+                                logits_indices.size(0)
+                            )
         with record_function_or_nullcontext("Bookkeep"):
             (
                 num_nans_in_logits,
@@ -2316,7 +2460,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 "Cannot re-initialize the input batch when CPU weight "
                 "offloading is enabled. See https://github.com/vllm-project/vllm/pull/18298 "  # noqa: E501
                 "for more details.")
-            self.input_batch = InputBatch(
+            self.input_batch = RBLNInputBatch(
                 max_num_reqs=self.max_num_reqs,
                 max_model_len=max(self.max_model_len, self.max_encoder_len),
                 max_num_batched_tokens=self.max_num_tokens,
@@ -2330,6 +2474,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 num_speculative_tokens=(
                     self.vllm_config.speculative_config.num_speculative_tokens
                     if self.vllm_config.speculative_config else 0),
+                use_rbln_sampler=self.use_rbln_sampler,
             )
 
     def _allocate_kv_cache_tensors(
@@ -2704,6 +2849,18 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # self.transfer_event.record()
         # self.transfer_event.synchronize()
         return pinned.tolist()
+
+    def post_process_logprobs_tensors(self, logprobs_tensors: LogprobsTensors,
+                                      num_reqs: int) -> LogprobsTensors:
+        # NOTE(eunji.lee):
+        # This implementation is not efficient but kept for debugging purposes.
+        # TODO: Modify this code in the next version when the shape of
+        # logprobs_tensors changes.
+        dict = {}
+        for field_name in logprobs_tensors._fields:
+            tensor = getattr(logprobs_tensors, field_name)
+            dict[field_name] = tensor[:num_reqs]
+        return LogprobsTensors(**dict)
 
 
 def create_lora_mask(input_ids: torch.Tensor, lora_ids: list[int],
