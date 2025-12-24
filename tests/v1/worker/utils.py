@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import torch
+import torch._dynamo as dynamo
 import torch.nn as nn
 from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
                          set_current_vllm_config)
@@ -26,7 +27,7 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
-from vllm.sampling_params import SamplingParams
+from vllm.sampling_params import GuidedDecodingParams, SamplingParams
 from vllm.utils import LazyLoader, sha256
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher
@@ -82,6 +83,7 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
                            dtype=torch.float32,
                            device=runner.device)
 
+    dynamo.reset()  # recompile limit reset
     runner.model = MockModelWrapper()
     runner.use_optimum_lora = False
     # Assign the fake forward function to the model
@@ -108,7 +110,9 @@ def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
 def make_request(
     request_id: str,
     prompt_token_ids: list[int],
+    use_structured_output: bool = False,
     top_p: float = 1.0,
+    logprobs: int = 0,
     block_size: int = IB_SIZE,
     hash_fn: Callable = sha256,
     mm_positions: Optional[list[PlaceholderRange]] = None,
@@ -127,13 +131,21 @@ def make_request(
                 modality="image")
             mm_features.append(mm_feature)
 
+    if use_structured_output:
+        guided_decoding = GuidedDecodingParams(choice=["positive", "negative"])
+    else:
+        guided_decoding = None
+
+    sampling_params = SamplingParams(max_tokens=17,
+                                     prompt_logprobs=prompt_logprobs,
+                                     guided_decoding=guided_decoding,
+                                     top_p=top_p,
+                                     logprobs=logprobs)
+
     return Request(request_id=request_id,
                    prompt_token_ids=prompt_token_ids,
                    mm_features=mm_features if mm_features else None,
-                   sampling_params=SamplingParams(
-                       max_tokens=17,
-                       prompt_logprobs=prompt_logprobs,
-                       top_p=top_p),
+                   sampling_params=sampling_params,
                    pooling_params=None,
                    eos_token_id=100,
                    lora_request=None,
@@ -303,25 +315,15 @@ def create_grammar_bitmask(num_seqs: int, vocab_size: int):
     return xgr.allocate_token_bitmask(num_seqs, vocab_size).numpy()
 
 
-def unit_forward(use_structured_output: bool, top_p: float = 1.0):
+def forward_steps(reqs: list[Request]):
     runner = create_model_runner(max_num_seqs=4)
-
-    req_ids = [f"req_{i}" for i in range(3)]
-    reqs = []
     # Prefill
-    for i in range(3):
-        req_id = f"req_{i}"
-        reqs.append(
-            make_request(request_id=req_id,
-                         prompt_token_ids=[1, 2, 3],
-                         top_p=top_p))
-
     for i, req in enumerate(reqs):
         req_id = req.request_id
         scheduler_output = _schedule_new_request(req_id,
                                                  block_ids=([i], ),
                                                  outer_block_ids=[i])
-        if use_structured_output:
+        if req.use_structured_output:
             vocab_size = runner.model_config.get_vocab_size()
             scheduler_output.structured_output_request_ids = {req_id: i}
             scheduler_output.grammar_bitmask = create_grammar_bitmask(
@@ -338,18 +340,18 @@ def unit_forward(use_structured_output: bool, top_p: float = 1.0):
     # Decode
     scheduler_output = _schedule_cached_reqs(reqs,
                                              new_block_ids=[None, None, None])
-    if use_structured_output:
-        vocab_size = runner.model_config.get_vocab_size()
-        scheduler_output.structured_output_request_ids = {
-            req_id: i
-            for i, req_id in enumerate(req_ids)
-        }
-        scheduler_output.grammar_bitmask = create_grammar_bitmask(
-            3, vocab_size)
-
+    vocab_size = runner.model_config.get_vocab_size()
+    scheduler_output.grammar_bitmask = create_grammar_bitmask(
+        len(scheduler_output.structured_output_request_ids), vocab_size)
     runner_output = runner.execute_model(scheduler_output)
-
     assert runner_output is not None
     # req2 remains, and req0 and req1 are newly allocated in input_batch.req_ids
     assert runner_output.req_ids == ["req_2", "req_0", "req_1"]
     assert len(runner_output.sampled_token_ids) == 3
+
+    # FIXME check logprobs
+    # for i, req in enumerate(reqs):
+    #     if req.logprobs > 0:
+    #         assert runner_output.logprobs[i] is not None
+    #     else:
+    #         assert runner_output.logprobs[i] is None

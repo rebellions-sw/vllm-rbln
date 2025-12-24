@@ -15,7 +15,7 @@
 import pytest
 from vllm.platforms import current_platform
 
-from .utils import unit_forward
+from .utils import forward_steps, make_request
 
 DEVICE = current_platform.device_type
 
@@ -50,25 +50,36 @@ DEVICE = current_platform.device_type
 #     assert len(runner.pooled_tensors) == len(expected_bucket_sizes)
 
 
-@pytest.mark.parametrize(
-    "use_rbln_sampler, use_structured_output",
-    [
-        pytest.param(True, True, id="use_rbln_sampler_and_structured_output"),
-        # pytest.param(True, False, id="use_rbln_sampler_and_no_structured_output"), # noqa
-        # pytest.param(False, True, id="no_rbln_sampler_and_structured_output"), # noqa
-        # pytest.param(False, False, id="no_rbln_sampler_and_no_structured_output"), # noqa
-    ])
+@pytest.mark.parametrize("use_rbln_sampler", [True, False])
+@pytest.mark.parametrize("use_structured_output", [True, False])
 def test_forward_sampler_mode_and_structured_output(monkeypatch,
                                                     use_rbln_sampler,
                                                     use_structured_output):
     """Test sampler logic for both use_rbln_sampler=True and False."""
     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1" if use_rbln_sampler else "0")
-    unit_forward(use_structured_output)
+    reqs = []
+    for i in range(3):
+        reqs.append(
+            make_request(request_id=f"req_{i}",
+                         prompt_token_ids=[1, 2, 3],
+                         use_structured_output=use_structured_output,
+                         top_p=0.7))
+    forward_steps(reqs)
 
 
-# @pytest.mark.parametrize("use_structured_output, top_p", [
-#     pytest.param(True, 0.7, id="structured_output_top_p_0.7"),
-#     pytest.param(False, 0.7, id="no_structured_output_top_p_0.7"),
-# ])
-# def test_forward_structured_output_and_top_p(use_structured_output, top_p):
-#     unit_forward(use_structured_output, top_p)
+@pytest.mark.parametrize("use_structured_output", [True, False])
+@pytest.mark.parametrize("top_p", [1.0, 0.5])
+@pytest.mark.parametrize("logprobs", [0, 3])
+def test_forward_sampling_parameters(use_structured_output, top_p, logprobs):
+    reqs = []
+    for i in range(3):
+        reqs.append(
+            make_request(request_id=f"req_{i}",
+                         prompt_token_ids=[1, 2, 3],
+                         use_structured_output=use_structured_output,
+                         logprobs=logprobs,
+                         top_p=top_p))
+    forward_steps(reqs)
+
+
+# TODO mix the requests with different sampling parameters
