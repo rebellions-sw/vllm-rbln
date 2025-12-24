@@ -922,6 +922,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         assert kv_cache is not None
 
         if self.sliding_window is not None:
+            assert self.sliding_window == kv_cache.size(-2), (
+                "SWA kernel_block_size must match window_size")
             assert attn_metadata.cache_seq_lens is not None
             assert attn_metadata.cache_offsets is not None
             if envs.VLLM_RBLN_COMPILE_MODEL:
