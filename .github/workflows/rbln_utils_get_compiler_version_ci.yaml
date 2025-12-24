@@ -18,11 +18,25 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GIT_PAT }}
       run: |
+        echo "Listing recent runs..."
+        gh run list \
+          --repo rebellions-sw/vllm-rbln \
+          --workflow "rbln_utils_set_compiler_version_ci.yaml" \
+          --limit 5 \
+          --json databaseId,status,conclusion,createdAt
+
         RUN_ID=$(gh run list \
           --repo rebellions-sw/vllm-rbln \
           --workflow "rbln_utils_set_compiler_version_ci.yaml" \
+          --status success \
           --limit 1 \
           --json databaseId | jq -r '.[0].databaseId')
+        echo "Selected RUN_ID=${RUN_ID}"
+        
+        if [ "$RUN_ID" = "null" ] || [ -z "$RUN_ID" ]; then
+          echo "Error: No successful run found"
+          exit 1
+        fi
         echo "RUN_ID=${RUN_ID}" >> $GITHUB_OUTPUT
 
     - name: Restore compiler-version-for-vllm-rbln
