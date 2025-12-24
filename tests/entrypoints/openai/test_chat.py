@@ -128,6 +128,7 @@ async def test_some_logprobs_chat(client: openai.AsyncOpenAI, model_name: str):
         messages=messages,
         max_completion_tokens=MAX_TOKENS,
         temperature=0.0,
+        top_p=0.7,
         logprobs=True,
         top_logprobs=5,
     )
