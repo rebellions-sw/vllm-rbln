@@ -23,6 +23,7 @@ from typing import Any, Optional
 import httpx
 import openai
 import requests
+import torch._dynamo as dynamo
 # from tests.models.utils import TextTextLogprobs
 from vllm.entrypoints.cli.serve import ServeSubcommand
 from vllm.utils import FlexibleArgumentParser, get_open_port
@@ -39,6 +40,7 @@ class RemoteOpenAIServer:
         """Subclasses override this method to customize server process launch
         """
         env = os.environ.copy()
+        dynamo.reset()
         # NOTE(eunji.lee): To pass warmup for test.
         # env["VLLM_RBLN_ENABLE_WARM_UP"] = "False"
         if env_dict is not None:
