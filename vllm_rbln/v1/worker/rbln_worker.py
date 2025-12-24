@@ -211,6 +211,13 @@ class RBLNWorker(WorkerBase):
                 self.rank, self.local_rank
             )
 
+        # If OMP_NUM_THREADS is not defined in the environment, set it to 2.
+        if "OMP_NUM_THREADS" not in os.environ:
+            os.environ["OMP_NUM_THREADS"] = "2"
+            logger.info("Set OMP_NUM_THREADS to 2 for rank %d (local_rank %d)", self.rank, self.local_rank)
+        else:
+            logger.info("OMP_NUM_THREADS is already defined for rank %d (local_rank %d): %s", self.rank, self.local_rank, os.environ["OMP_NUM_THREADS"])
+
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.vllm_config, self.rank,
                                             self.distributed_init_method,
@@ -297,10 +304,8 @@ class RBLNWorker(WorkerBase):
             intermediate_tensors = IntermediateTensors(
                 get_pp_group().recv_tensor_dict())
 
-        start_time = time.time()
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
-        print(f"* start_time: {start_time * 1000}, total_num_scheduled_tokens: {scheduler_output.total_num_scheduled_tokens}, num_scheduled_tokens: {scheduler_output.num_scheduled_tokens}")
         if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
             return output
 
