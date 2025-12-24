@@ -12,9 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
-import torch
-
 from vllm.v1.outputs import ModelRunnerOutput
 
 from .utils import create_requests, create_scheduler
@@ -28,16 +25,16 @@ def test_basic():
     num_blocks_per_request = 4
 
     scheduler = create_scheduler(
-        block_size=block_size, 
+        block_size=block_size,
         num_blocks=num_blocks_per_request + num_requests,
-        max_num_batched_tokens=num_blocks_per_request*block_size*2,
+        max_num_batched_tokens=num_blocks_per_request * block_size * 2,
         enable_prefix_caching=True,
-        max_model_len=num_blocks_per_request*block_size*2,
+        max_model_len=num_blocks_per_request * block_size * 2,
     )
-    
+
     same_requests = create_requests(
-        num_requests, 
-        num_tokens=num_blocks_per_request*block_size,
+        num_requests,
+        num_tokens=num_blocks_per_request * block_size,
         max_tokens=1,
         same_prompt=True,
     )
@@ -50,32 +47,32 @@ def test_basic():
         scheduler_output = scheduler.schedule()
         req_ids = list(scheduler_output.num_scheduled_tokens.keys())
         scheduled_new_reqs = scheduler_output.scheduled_new_reqs
-        
+
         # prefill batch size fixed to 1
         assert len(req_ids) == 1
         assert req_ids[0] == str(req_index)
         assert len(scheduled_new_reqs) == 1
-        
+
         # assume single kv cache group
         assert len(scheduled_new_reqs[0].block_ids) == 1
 
         # check if prefix blocks are properly cached and allocated
         allocated_block_ids = scheduled_new_reqs[0].block_ids[0]
-        num_cached_tokens = len(cached_block_ids)*block_size
+        num_cached_tokens = len(cached_block_ids) * block_size
         num_computed_tokens = scheduled_new_reqs[0].num_computed_tokens
         assert allocated_block_ids[:-1] == cached_block_ids
         assert req_index == 0 or num_computed_tokens == num_cached_tokens
 
         # check if ref count of blocks are properly counted
-        assert all(
-            block.ref_cnt == 1 for block in 
-            scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0]
-        )
+        assert all(block.ref_cnt == 1 for block in
+                   scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0])
 
         model_runner_output = ModelRunnerOutput(
             req_ids=req_ids,
             req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
-            sampled_token_ids=[[0],]*len(req_ids),
+            sampled_token_ids=[
+                [0],
+            ] * len(req_ids),
             logprobs=None,
             prompt_logprobs_dict={},
             pooler_output=[],
@@ -95,34 +92,34 @@ def test_basic():
 
 
 def test_preallocation_in_prefill():
-    # test that block preallocation during the prefill phase 
+    # test that block preallocation during the prefill phase
     # does not break prefix caching functionality
 
     block_size = 16
     num_blocks_per_request = 2
 
     scheduler = create_scheduler(
-        block_size=block_size, 
+        block_size=block_size,
         max_num_batched_tokens=block_size,
         enable_prefix_caching=True,
-        max_model_len=block_size*num_blocks_per_request*2,
+        max_model_len=block_size * num_blocks_per_request * 2,
     )
     kv_cache_manager = scheduler.kv_cache_manager
-    
+
     req = create_requests(
-        1, 
-        num_tokens=num_blocks_per_request*block_size,
+        1,
+        num_tokens=num_blocks_per_request * block_size,
         max_tokens=1,
         same_prompt=True,
     )[0]
-    
+
     scheduler.add_request(req)
 
     scheduler_output = scheduler.schedule()
 
     assert len(scheduler_output.scheduled_new_reqs) == 1
     scheduled_new_req = scheduler_output.scheduled_new_reqs[0]
-    
+
     # assume single kv cache group
     assert len(scheduled_new_req.block_ids) == 1
 
@@ -147,25 +144,26 @@ def test_preallocation_in_prefill():
 
 
 def test_preallocation_in_decode():
-    # test that block preallocation during the decode phase 
+    # test that block preallocation during the decode phase
     # does not break prefix caching functionality
 
     block_size = 16
 
     scheduler = create_scheduler(
-        block_size=block_size, 
+        block_size=block_size,
         max_num_batched_tokens=block_size,
         enable_prefix_caching=True,
-        max_model_len=block_size*2,
+        max_model_len=block_size * 2,
     )
     kv_cache_manager = scheduler.kv_cache_manager
-    
-    req_a, req_b = tuple(create_requests(
-        2, 
-        num_tokens=block_size,
-        max_tokens=1,
-        same_prompt=True,
-    ))
+
+    req_a, req_b = tuple(
+        create_requests(
+            2,
+            num_tokens=block_size,
+            max_tokens=1,
+            same_prompt=True,
+        ))
     req_a.prompt_token_ids.pop()
     req_a._all_token_ids.pop()
     req_a.num_prompt_tokens = len(req_a.prompt_token_ids)
@@ -174,18 +172,17 @@ def test_preallocation_in_decode():
     scheduler.add_request(req_a)
     scheduler.add_request(req_b)
 
-
     # first iteration
     scheduler_output = scheduler.schedule()
 
     req_ids = list(scheduler_output.num_scheduled_tokens.keys())
     scheduled_new_reqs = scheduler_output.scheduled_new_reqs
-    
+
     # prefill batch size fixed to 1
     assert len(req_ids) == 1
     assert req_ids[0] == "0"
     assert len(scheduled_new_reqs) == 1
-    
+
     # assume single kv cache group
     assert len(scheduled_new_reqs[0].block_ids) == 1
 
@@ -199,7 +196,9 @@ def test_preallocation_in_decode():
     model_runner_output = ModelRunnerOutput(
         req_ids=req_ids,
         req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
-        sampled_token_ids=[[0],]*len(req_ids),
+        sampled_token_ids=[
+            [0],
+        ] * len(req_ids),
         logprobs=None,
         prompt_logprobs_dict={},
         pooler_output=[],
@@ -211,7 +210,7 @@ def test_preallocation_in_decode():
 
     req_ids = list(scheduler_output.num_scheduled_tokens.keys())
     scheduled_new_reqs = scheduler_output.scheduled_new_reqs
-    
+
     # prefill batch size fixed to 1
     assert len(req_ids) == 1
     assert req_ids[0] == "1"
@@ -226,7 +225,9 @@ def test_preallocation_in_decode():
     model_runner_output = ModelRunnerOutput(
         req_ids=req_ids,
         req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
-        sampled_token_ids=[[0],]*len(req_ids),
+        sampled_token_ids=[
+            [0],
+        ] * len(req_ids),
         logprobs=None,
         prompt_logprobs_dict={},
         pooler_output=[],

@@ -52,8 +52,8 @@ def undo_uncomputed_block_caching(
             kv_cache_manager.block_pool._maybe_evict_cached_block(block)
 
         for manager in kv_cache_manager.coordinator.single_type_managers:
-            # NOTE(RBLN): SingleTypeKVCacheManager instances track the number 
-            # of cached blocks of running requests in num_cached_block dictionary.
+            # NOTE(RBLN): SingleTypeKVCacheManager instances track the number of
+            # cached blocks of running requests in num_cached_block dictionary.
             if request.request_id in manager.num_cached_block:
                 manager.num_cached_block[request.request_id] = num_full_block
 
@@ -406,10 +406,8 @@ class RBLNScheduler(Scheduler):
                 # Therefore, if the block is not finalized in this iteration,
                 # we must clear the block hash and undo block caching.
                 undo_uncomputed_block_caching(
-                    request, 
-                    self.kv_cache_manager,
-                    num_computed_tokens + num_new_tokens
-                )
+                    request, self.kv_cache_manager,
+                    num_computed_tokens + num_new_tokens)
 
                 # KVTransfer: the connector uses this info to determine
                 # if a load is needed. NOTE that
