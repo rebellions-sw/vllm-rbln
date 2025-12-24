@@ -112,6 +112,7 @@ def make_request(
     prompt_token_ids: list[int],
     use_structured_output: bool = False,
     top_p: float = 1.0,
+    temperature: float = 1.0,
     logprobs: int = 0,
     block_size: int = IB_SIZE,
     hash_fn: Callable = sha256,
@@ -140,7 +141,8 @@ def make_request(
                                      prompt_logprobs=prompt_logprobs,
                                      guided_decoding=guided_decoding,
                                      top_p=top_p,
-                                     logprobs=logprobs)
+                                     logprobs=logprobs,
+                                     temperature=temperature)
 
     return Request(request_id=request_id,
                    prompt_token_ids=prompt_token_ids,
@@ -241,6 +243,57 @@ def _schedule_new_request(
     )
 
 
+def _schedule_new_request_from_request(
+    req: Request,
+    block_ids: list[int],
+    outer_block_ids: list[int],
+    new_computed_tokens: int = 0,
+    token_ids: Optional[list[int]] = None,
+    finished_req_ids: Optional[list[str]] = None,
+    new_computed_blocks: Optional[list[int]] = None,
+    preempted_req_ids: Optional[list[str]] = None,
+) -> RBLNSchedulerOutput:
+    new_reqs = []
+    num_scheduled_tokens = {}
+    total_num_scheduled_tokens = 0
+    if token_ids is None:
+        token_ids = [1, 2, 3]
+    outer_block_ids = torch.tensor([outer_block_ids])
+    new_reqs.append(
+        NewRequestData(
+            req_id=req.request_id,
+            prompt_token_ids=req.prompt_token_ids,
+            mm_kwargs=[],
+            mm_hashes=[],
+            mm_positions=[],
+            sampling_params=req.sampling_params,
+            pooling_params=None,
+            block_ids=block_ids,
+            num_computed_tokens=new_computed_tokens,
+            lora_request=None,
+        ))
+    num_scheduled_tokens[req.request_id] = len(req.prompt_token_ids)
+    total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
+
+    return RBLNSchedulerOutput(
+        scheduled_new_reqs=new_reqs,
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
+        num_scheduled_tokens=num_scheduled_tokens,
+        total_num_scheduled_tokens=total_num_scheduled_tokens,
+        scheduled_spec_decode_tokens={},
+        scheduled_encoder_inputs={},
+        num_common_prefix_blocks=0,
+        finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
+        free_encoder_mm_hashes=[],
+        structured_output_request_ids={},
+        grammar_bitmask=None,
+        block_table_dict={req.request_id: outer_block_ids},
+        cached_block_table=[],
+        cached_length=[],
+        dummy_block=None,
+    )
+
+
 def _schedule_cached_reqs(
     reqs: list[Request],
     new_block_ids: list[tuple[list[int], ...]],
@@ -282,8 +335,8 @@ def _schedule_cached_reqs(
         num_common_prefix_blocks=0,
         finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids={},
-        grammar_bitmask=None,
+        structured_output_request_ids={},  # FIXME
+        grammar_bitmask=None,  # FIXME
         block_table_dict=block_table_dict,
         cached_block_table=[],
         cached_length=[],
@@ -320,9 +373,8 @@ def forward_steps(reqs: list[Request]):
     # Prefill
     for i, req in enumerate(reqs):
         req_id = req.request_id
-        scheduler_output = _schedule_new_request(req_id,
-                                                 block_ids=([i], ),
-                                                 outer_block_ids=[i])
+        scheduler_output = _schedule_new_request_from_request(
+            req, block_ids=([i], ), outer_block_ids=[i])
         if req.use_structured_output:
             vocab_size = runner.model_config.get_vocab_size()
             scheduler_output.structured_output_request_ids = {req_id: i}

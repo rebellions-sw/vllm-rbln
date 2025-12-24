@@ -68,17 +68,22 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
 
 
 @pytest.mark.parametrize("use_structured_output", [True, False])
-@pytest.mark.parametrize("top_p", [1.0, 0.5])
+@pytest.mark.parametrize("top_p", [0.7, 1.0])
+@pytest.mark.parametrize("temperature", [0.0, 1.0])
 @pytest.mark.parametrize("logprobs", [0, 3])
-def test_forward_sampling_parameters(use_structured_output, top_p, logprobs):
+def test_forward_sampling_parameters(use_structured_output, top_p, temperature,
+                                     logprobs):
     reqs = []
     for i in range(3):
         reqs.append(
-            make_request(request_id=f"req_{i}",
-                         prompt_token_ids=[1, 2, 3],
-                         use_structured_output=use_structured_output,
-                         logprobs=logprobs,
-                         top_p=top_p))
+            make_request(
+                request_id=f"req_{i}",
+                prompt_token_ids=[1, 2, 3],
+                use_structured_output=use_structured_output,
+                top_p=top_p,
+                temperature=temperature,
+                logprobs=logprobs,
+            ))
     forward_steps(reqs)
 
 
