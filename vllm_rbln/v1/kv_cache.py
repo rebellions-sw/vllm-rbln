@@ -19,16 +19,18 @@ import vllm.v1.core.single_type_kv_cache_manager as single_type_kv_cache_manager
 from vllm.config import VllmConfig
 from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.core.single_type_kv_cache_manager import SingleTypeKVCacheManager
-from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.kv_cache_interface import SlidingWindowSpec
 from vllm.v1.request import Request
 
 
 @dataclass(frozen=True)
-class RBLNSlidingWindowSpec(AttentionSpec):
-    sliding_window: int
+class RBLNSlidingWindowSpec(SlidingWindowSpec):
 
     def __post_init__(self):
-        assert self.block_size == self.sliding_window
+        # NOTE: The block size here means to be the physical block size. The
+        # logical kernel_block_size that the kernel actually uses is equal to
+        # sliding_window. The physical block is split into logical blocks.
+        assert self.block_size % self.sliding_window == 0
 
     def max_memory_usage_bytes(self, vllm_config: VllmConfig) -> int:
         return self.page_size_bytes
