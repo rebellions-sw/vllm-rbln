@@ -78,7 +78,6 @@ jobs:
 
   check-code-quality:
     needs: check-skip-ci
-    if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
     uses: ./.github/workflows/pre-commit.yml
   
   trigger-internal-tests:
