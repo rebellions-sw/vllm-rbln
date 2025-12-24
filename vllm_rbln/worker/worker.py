@@ -426,6 +426,11 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         logger.info("compilation completed in %.6f seconds (%.3f ms)",
                     elapsed_time, elapsed_time * 1000)
 
+        # FIXME(RBLN): To reduce dynamo cache lookup overhead, make dyanmo
+        # evaluate a minimal set of guards required for dispatching compiled
+        # functions. This assumes that the model does not change.
+        torch.compiler.set_stance("default", skip_guard_eval_unsafe=True)
+
     def _prepare_dummy_input(
         self,
         max_num_batched_tokens: int = 1,

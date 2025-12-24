@@ -179,3 +179,7 @@ shellcheck*/
 
 # auto generated package versioning file
 _version.py
+
+profile/
+cache_dir/
+rsd_cache_dir/

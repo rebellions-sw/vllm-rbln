@@ -29,6 +29,18 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         RBLNOptimumModelBase,
         RBLNOptimumDecoderMixin,
 ):
+    """
+    Supports text-only generation models with:
+    - Sliding window attention
+      - `block_tables` is not used because there is no full attention layer.
+      - `local_block_tables` is only used for
+        the sliding window attention layer.
+    - Hybrid attention (full + sliding window layers)
+      - `block_tables` and `local_block_tables` are both used.
+
+    Note: Gemma3 uses hybrid attention but is multi-modal,
+            so it uses another exclusive class.
+    """
 
     def __init__(
         self,
@@ -50,6 +62,8 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                                                  InnerAttentionEntry, InnerR1,
                                                  InnerR2] = AttentionManager(
                                                      self.strategy)
+        self.is_hybrid = getattr(self.model.rbln_config, "cache_impl",
+                                 None) == "hybrid"
 
     def forward(self, model_input: ModelInputForRBLN,
                 **kwargs) -> torch.Tensor:
@@ -85,6 +99,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         # due to the padding space reserved for the sliding window.
         cache_position = kwargs.pop("cache_position")
         input_ids = kwargs.pop("input_ids")
+        block_tables = kwargs.pop("block_tables")
 
         if is_prompt:
             if self.model.prefill_decoder is None:
@@ -96,6 +111,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 input_ids=input_ids,
                 cache_position=cache_position,
                 local_block_tables=local_block_table_id,
+                block_tables=block_tables if self.is_hybrid else None,
             )
             logits = output.logits
             assert len(running_requests_ids) == 1
@@ -116,6 +132,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 input_ids=input_ids,
                 cache_position=cache_position,
                 local_block_tables=local_block_table_id,
+                block_tables=block_tables if self.is_hybrid else None,
             ).logits
 
         if not is_prompt:

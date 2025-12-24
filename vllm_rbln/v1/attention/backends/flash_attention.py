@@ -791,7 +791,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         logits_soft_cap: Optional[float] = None,
         attn_type: str = AttentionType.DECODER,
         kv_sharing_target_layer_name: Optional[str] = None,
-        use_irope: bool = False,
+        sinks: Optional[torch.Tensor] = None,
     ) -> None:
         self.enforce_eager = (
             get_current_vllm_config().model_config.enforce_eager)
@@ -807,11 +807,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 "RBLN Attention Backend does not support logits soft cap. "
                 "Outputs may be slightly off.")
             logits_soft_cap = None
-        if use_irope:
-            logger.warning_once(
-                "Using irope in RBLN Attention Backend is not supported yet, "
-                "it will fall back to global attention for long context.")
-            self.use_irope = False
 
         self.num_heads = num_heads
         self.head_size = head_size
@@ -844,6 +839,12 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 "Torch SDPA backend does not support FP8 KV cache. "
                 "Please use xFormers backend instead.")
         self.attn_type = attn_type
+
+        self.sinks = sinks
+        if self.sinks is not None:
+            assert self.sinks.shape[0] == num_heads, (
+                "Sinks must have the same number of heads as the number of "
+                "heads in the layer")
 
     def forward(
         self,
