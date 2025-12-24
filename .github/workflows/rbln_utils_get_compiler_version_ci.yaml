@@ -18,13 +18,6 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GIT_PAT }}
       run: |
-        echo "Listing recent runs..."
-        gh run list \
-          --repo rebellions-sw/vllm-rbln \
-          --workflow "rbln_utils_set_compiler_version_ci.yaml" \
-          --limit 5 \
-          --json databaseId,status,conclusion,createdAt
-
         RUN_ID=$(gh run list \
           --repo rebellions-sw/vllm-rbln \
           --workflow "rbln_utils_set_compiler_version_ci.yaml" \
