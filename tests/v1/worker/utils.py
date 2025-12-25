@@ -38,7 +38,7 @@ from vllm.v1.request import RequestStatus
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-
+import os
 if TYPE_CHECKING:
     import xgrammar as xgr
 else:
@@ -172,9 +172,11 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
         max_model_len=max_model_len,
         async_scheduling=async_scheduling,
     )
+    model_dir = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
+    model_name = model_dir + "/llama3_2-3b-128k_kv16k_batch4"
     model_config = ModelConfig(
         # model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        model="llava-hf/llava-v1.6-mistral-7b-hf",
+        model=model_name,
         # FIXME: opt-125m fails to compile rbln sampler
         dtype=torch.float,
         seed=42,
