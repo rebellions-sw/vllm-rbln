@@ -114,6 +114,9 @@ def make_request(
     top_p: float = 1.0,
     temperature: float = 1.0,
     logprobs: int = 0,
+    presence_penalty: float = 0.0,
+    frequency_penalty: float = 0.0,
+    repetition_penalty: float = 1.0,
     block_size: int = IB_SIZE,
     hash_fn: Callable = sha256,
     mm_positions: Optional[list[PlaceholderRange]] = None,
@@ -142,7 +145,10 @@ def make_request(
                                      guided_decoding=guided_decoding,
                                      top_p=top_p,
                                      logprobs=logprobs,
-                                     temperature=temperature)
+                                     temperature=temperature,
+                                     presence_penalty=presence_penalty,
+                                     frequency_penalty=frequency_penalty,
+                                     repetition_penalty=repetition_penalty)
 
     return Request(request_id=request_id,
                    prompt_token_ids=prompt_token_ids,
@@ -407,9 +413,8 @@ def forward_steps(reqs: list[Request]):
     assert runner_output.req_ids == ["req_2", "req_0", "req_1"]
     assert len(runner_output.sampled_token_ids) == 3
 
-    # FIXME check logprobs
-    # for i, req in enumerate(reqs):
-    #     if req.logprobs > 0:
-    #         assert runner_output.logprobs[i] is not None
-    #     else:
-    #         assert runner_output.logprobs[i] is None
+    for i, req in enumerate(reqs):
+        if req.sampling_params.logprobs > 0:
+            assert runner_output.logprobs[i] is not None
+        else:
+            assert runner_output.logprobs[i] is None
