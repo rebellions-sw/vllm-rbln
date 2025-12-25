@@ -64,7 +64,7 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
                                                     use_rbln_sampler,
                                                     use_structured_output):
     """Test sampler logic for both use_rbln_sampler=True and False."""
-    monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "0")
+    monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1" if use_rbln_sampler else "0")
     reqs = []
     for i in range(3):
@@ -87,7 +87,7 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
 def test_forward_sampling_parameters(monkeypatch, use_structured_output, top_p,
                                      temperature, logprobs, presence_penalty,
                                      frequency_penalty, repetition_penalty):
-    monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "0")
+    monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     reqs = []
     for i in range(3):
         reqs.append(

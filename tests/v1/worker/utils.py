@@ -17,7 +17,6 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import torch
-import torch._dynamo as dynamo
 import torch.nn as nn
 from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
                          set_current_vllm_config)
@@ -83,7 +82,6 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
                            dtype=torch.float32,
                            device=runner.device)
 
-    dynamo.reset()  # recompile limit reset
     runner.model = MockModelWrapper()
     runner.use_optimum_lora = False
     # Assign the fake forward function to the model
@@ -175,7 +173,8 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
         async_scheduling=async_scheduling,
     )
     model_config = ModelConfig(
-        model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        # model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        model="facebook/opt-125m",
         # FIXME: opt-125m fails to compile rbln sampler
         dtype=torch.float,
         seed=42,
