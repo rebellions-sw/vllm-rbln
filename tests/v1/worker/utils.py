@@ -397,7 +397,7 @@ def forward_steps(reqs: list[Request]):
         if req.use_structured_output:
             scheduler_output.structured_output_request_ids[
                 req.request_id] = req_order[i]
-                # need to be checked
+            # need to be checked
     scheduler_output.grammar_bitmask = create_grammar_bitmask(
         len(scheduler_output.structured_output_request_ids), vocab_size)
     runner_output = runner.execute_model(scheduler_output)
