@@ -113,7 +113,7 @@ def make_request(
     use_structured_output: bool = False,
     top_p: float = 1.0,
     temperature: float = 1.0,
-    logprobs: int = 0,
+    logprobs: Optional[int] = None,
     presence_penalty: float = 0.0,
     frequency_penalty: float = 0.0,
     repetition_penalty: float = 1.0,
@@ -391,6 +391,11 @@ def forward_steps(reqs: list[Request]):
         assert runner_output.req_ids == [req_id]
         assert len(runner_output.sampled_token_ids) == 1
 
+        if req.sampling_params.logprobs is not None:
+            assert runner_output.logprobs[0] is not None
+        else:
+            assert runner_output.logprobs is None
+
     # Update requests
     for i, req in enumerate(reqs):
         req.num_computed_tokens = 3
@@ -414,7 +419,8 @@ def forward_steps(reqs: list[Request]):
     assert len(runner_output.sampled_token_ids) == 3
 
     for i, req in enumerate(reqs):
-        if req.sampling_params.logprobs > 0:
-            assert runner_output.logprobs[i] is not None
+        req_index = req_order[i]
+        if req.sampling_params.logprobs is not None:
+            assert runner_output.logprobs[req_index] is not None
         else:
-            assert runner_output.logprobs[i] is None
+            assert runner_output.logprobs is None

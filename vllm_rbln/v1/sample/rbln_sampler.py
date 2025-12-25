@@ -203,6 +203,8 @@ class RBLNSampler(VLLMSampler):
                 and sampling_metadata.top_k is None):
             random_sampled, processed_logprobs = self.apply_topp_sampler(
                 logits, sampling_metadata.top_p)
+            print("@@ [sample] random_sampled", random_sampled)
+            print("@@ [sample] processed_logprobs", processed_logprobs)
 
         else:
             # Apply top_k and/or top_p.
