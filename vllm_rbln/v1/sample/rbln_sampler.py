@@ -114,8 +114,10 @@ class RBLNSampler(VLLMSampler):
 
         options = {
             "cache_dir": os.path.join(envs.VLLM_CACHE_ROOT, "rbln_sampler"),
-            "compile_context": rebel.CompileContext()
+            "compile_context": rebel.CompileContext(),
         }
+        if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
+            options["mode"] = "strict"
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
