@@ -22,6 +22,7 @@ from vllm.config import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
 import vllm_rbln.rbln_envs as envs
+import os
 
 logger = init_logger(__name__)
 
@@ -205,7 +206,8 @@ class RBLNSampler(VLLMSampler):
 
         else:
             # Apply top_k and/or top_p.
-            # FIXME: insert graph break to avoid Inductor memory tracking issues.
+            # FIXME: insert graph break
+            # to avoid Inductor memory tracking issues.
             torch._dynamo.graph_break()
             random_sampled, processed_logprobs = self.topk_topp_sampler(
                 logits,
