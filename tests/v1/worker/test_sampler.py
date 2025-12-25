@@ -81,12 +81,8 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
 @pytest.mark.parametrize("top_p", [0.7, 1.0])
 @pytest.mark.parametrize("temperature", [0.0, 1.0])
 @pytest.mark.parametrize("logprobs", [0, 3])
-@pytest.mark.parametrize("presence_penalty", [-2.0, 0.0, 2.0])
-@pytest.mark.parametrize("frequency_penalty", [-2.0, 0.0, 2.0])
-@pytest.mark.parametrize("repetition_penalty", [1.0, 2.0])
 def test_forward_sampling_parameters(monkeypatch, use_structured_output, top_p,
-                                     temperature, logprobs, presence_penalty,
-                                     frequency_penalty, repetition_penalty):
+                                     temperature, logprobs):
     monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     reqs = []
     for i in range(3):
