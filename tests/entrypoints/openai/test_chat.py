@@ -17,6 +17,7 @@ import os
 import openai  # use the official client for correctness check
 import pytest
 import pytest_asyncio
+import torch
 from utils import RemoteOpenAIServer
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
@@ -32,9 +33,14 @@ def monkeypatch_module():
     mpatch.undo()
 
 
+@pytest.fixture(autouse=True)
+def dynamo_reset():
+    yield
+    torch._dynamo.reset()
+
+
 @pytest.fixture(scope="module", params=[False, True])
 def server(request, monkeypatch_module):
-
     use_v1 = request.param
     monkeypatch_module.setenv('VLLM_USE_V1', '1' if use_v1 else '0')
     args = []

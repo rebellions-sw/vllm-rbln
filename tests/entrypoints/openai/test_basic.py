@@ -20,11 +20,18 @@ import openai
 import pytest
 import pytest_asyncio
 import requests
+import torch
 from utils import RemoteOpenAIServer
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
 MODEL_NAME = MODEL_DIR + "/opt_125m_batch2"
 MAX_TOKENS = 1
+
+
+@pytest.fixture(autouse=True)
+def dynamo_reset():
+    yield
+    torch._dynamo.reset()
 
 
 @pytest.fixture(scope='module')
