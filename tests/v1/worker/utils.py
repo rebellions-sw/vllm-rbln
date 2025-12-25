@@ -174,7 +174,7 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
     )
     model_config = ModelConfig(
         # model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        model="facebook/opt-125m",
+        model="llava-hf/llava-v1.6-mistral-7b-hf",
         # FIXME: opt-125m fails to compile rbln sampler
         dtype=torch.float,
         seed=42,
