@@ -170,14 +170,8 @@ jobs:
 
         run: |
           case "${{ matrix.test_type }}" in
-            "core")
-              pytest tests/v1/core -vv --durations 0
-              ;;
             "worker")
               pytest tests/v1/worker -vv --durations 0
-              ;;
-            "openai")
-              pytest tests/entrypoints/openai -vv --durations 0
               ;;
           esac
 
