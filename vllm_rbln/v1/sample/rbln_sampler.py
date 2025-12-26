@@ -194,7 +194,6 @@ class RBLNSampler(VLLMSampler):
         for processor in sampling_metadata.logitsprocs.argmax_invariant:
             logits = processor.apply(logits)
 
-        print(sampling_metadata.top_p)
         # Currently, RBLN only supports top_p sampling.
         # Covering other cases with RBLN is work in progress.
         if (sampling_metadata.top_p is not None
