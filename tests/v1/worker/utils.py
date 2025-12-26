@@ -6,7 +6,6 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-import os
 import tempfile
 from collections.abc import Callable
 # Unless required by applicable law or agreed to in writing, software
