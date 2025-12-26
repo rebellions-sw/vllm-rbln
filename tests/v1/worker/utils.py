@@ -26,7 +26,7 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.platforms import current_platform
-from vllm.sampling_params import SamplingParams
+from vllm.sampling_params import GuidedDecodingParams, SamplingParams
 from vllm.utils import LazyLoader, sha256
 from vllm.v1.core.kv_cache_manager import KVCacheManager, Request
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher
@@ -37,7 +37,6 @@ from vllm.v1.request import RequestStatus
 
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
-from vllm_rbln.v1.sample import WARM_UP_CONFIGS
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 if TYPE_CHECKING:
@@ -58,12 +57,15 @@ class MockModelWrapper(nn.Module):
     class MockModel:
 
         def __init__(self):
+            self.rbln_config = SimpleNamespace(use_multiple_decoder=False,
+                                               dtype=torch.float32)
             self.kv_block_adapter = SimpleNamespace(
                 get_available_num_blocks=lambda: NUM_BLOCKS)
 
     def __init__(self):
         super().__init__()
         self.model = self.MockModel()
+        self.dtype = self.model.rbln_config.dtype
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
@@ -85,19 +87,9 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
     # Assign the fake forward function to the model
     runner.model.forward = fake_forward
     if runner.use_rbln_sampler:
-        runner.bucket_sizes = tuple(
-            runner.get_bucket_sizes(runner.max_num_reqs))
-        with torch.inference_mode():
-            for bucket_size in runner.bucket_sizes:
-                runner.pooled_tensors[bucket_size] = torch.empty(
-                    (bucket_size, runner.model_config.get_vocab_size()),
-                    dtype=torch.float32,
-                )
-        torch._dynamo.config.recompile_limit = len(
-            runner.bucket_sizes) * len(WARM_UP_CONFIGS)
-        runner.sampler = torch.compile(runner.sampler,
-                                       dynamic=False,
-                                       fullgraph=False)
+        runner.prepare_rbln_sampler()
+    # warmup the sampler
+    runner.dummy_sampler_run()
 
 
 def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
@@ -116,6 +108,14 @@ def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
 def make_request(
     request_id: str,
     prompt_token_ids: list[int],
+    use_structured_output: bool = False,
+    top_p: float = 1.0,
+    top_k: int = 0,
+    temperature: float = 1.0,
+    logprobs: Optional[int] = None,
+    presence_penalty: float = 0.0,
+    frequency_penalty: float = 0.0,
+    repetition_penalty: float = 1.0,
     block_size: int = IB_SIZE,
     hash_fn: Callable = sha256,
     mm_positions: Optional[list[PlaceholderRange]] = None,
@@ -134,11 +134,26 @@ def make_request(
                 modality="image")
             mm_features.append(mm_feature)
 
+    if use_structured_output:
+        guided_decoding = GuidedDecodingParams(choice=["positive", "negative"])
+    else:
+        guided_decoding = None
+
+    sampling_params = SamplingParams(max_tokens=17,
+                                     prompt_logprobs=prompt_logprobs,
+                                     guided_decoding=guided_decoding,
+                                     top_p=top_p,
+                                     top_k=top_k,
+                                     logprobs=logprobs,
+                                     temperature=temperature,
+                                     presence_penalty=presence_penalty,
+                                     frequency_penalty=frequency_penalty,
+                                     repetition_penalty=repetition_penalty)
+
     return Request(request_id=request_id,
                    prompt_token_ids=prompt_token_ids,
                    mm_features=mm_features if mm_features else None,
-                   sampling_params=SamplingParams(
-                       max_tokens=17, prompt_logprobs=prompt_logprobs),
+                   sampling_params=sampling_params,
                    pooling_params=None,
                    eos_token_id=100,
                    lora_request=None,
@@ -160,7 +175,9 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
         async_scheduling=async_scheduling,
     )
     model_config = ModelConfig(
-        model="facebook/opt-125m",
+        model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        # model=model_name,
+        # FIXME: opt-125m fails to compile rbln sampler
         dtype=torch.float,
         seed=42,
     )
@@ -234,6 +251,56 @@ def _schedule_new_request(
     )
 
 
+def _schedule_new_request_from_request(
+    req: Request,
+    block_ids: list[int],
+    outer_block_ids: list[int],
+    new_computed_tokens: int = 0,
+    token_ids: Optional[list[int]] = None,
+    finished_req_ids: Optional[list[str]] = None,
+    new_computed_blocks: Optional[list[int]] = None,
+    preempted_req_ids: Optional[list[str]] = None,
+) -> RBLNSchedulerOutput:
+    new_reqs = []
+    num_scheduled_tokens = {}
+    total_num_scheduled_tokens = 0
+    if token_ids is None:
+        token_ids = [1, 2, 3]
+    outer_block_ids = torch.tensor([outer_block_ids])
+    new_reqs.append(
+        NewRequestData(
+            req_id=req.request_id,
+            prompt_token_ids=req.prompt_token_ids,
+            mm_kwargs=[],
+            mm_hashes=[],
+            mm_positions=[],
+            sampling_params=req.sampling_params,
+            pooling_params=None,
+            block_ids=block_ids,
+            num_computed_tokens=new_computed_tokens,
+            lora_request=None,
+        ))
+    num_scheduled_tokens[req.request_id] = len(req.prompt_token_ids)
+    total_num_scheduled_tokens += num_scheduled_tokens[req.request_id]
+    return RBLNSchedulerOutput(
+        scheduled_new_reqs=new_reqs,
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
+        num_scheduled_tokens=num_scheduled_tokens,
+        total_num_scheduled_tokens=total_num_scheduled_tokens,
+        scheduled_spec_decode_tokens={},
+        scheduled_encoder_inputs={},
+        num_common_prefix_blocks=0,
+        finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
+        free_encoder_mm_hashes=[],
+        structured_output_request_ids=None,  # FIXME
+        grammar_bitmask=None,  # FIXME
+        block_table_dict={req.request_id: outer_block_ids},
+        cached_block_table=[],
+        cached_length=[],
+        dummy_block=None,
+    )
+
+
 def _schedule_cached_reqs(
     reqs: list[Request],
     new_block_ids: list[tuple[list[int], ...]],
@@ -275,8 +342,8 @@ def _schedule_cached_reqs(
         num_common_prefix_blocks=0,
         finished_req_ids=set(finished_req_ids) if finished_req_ids else set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids={},
-        grammar_bitmask=None,
+        structured_output_request_ids={},  # FIXME
+        grammar_bitmask=None,  # FIXME
         block_table_dict=block_table_dict,
         cached_block_table=[],
         cached_length=[],
@@ -306,3 +373,55 @@ def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ):
 
 def create_grammar_bitmask(num_seqs: int, vocab_size: int):
     return xgr.allocate_token_bitmask(num_seqs, vocab_size).numpy()
+
+
+def forward_steps(reqs: list[Request]):
+    runner = create_model_runner(max_num_seqs=4)
+    # Prefill
+    for i, req in enumerate(reqs):
+        req_id = req.request_id
+        scheduler_output = _schedule_new_request_from_request(
+            req, block_ids=([i], ), outer_block_ids=[i])
+        if req.use_structured_output:
+            vocab_size = runner.model_config.get_vocab_size()
+            scheduler_output.structured_output_request_ids = {req_id: 0}
+            scheduler_output.grammar_bitmask = create_grammar_bitmask(
+                1, vocab_size)
+        runner_output = runner.execute_model(scheduler_output)
+        assert runner_output is not None
+        assert runner_output.req_ids == [req_id]
+        assert len(runner_output.sampled_token_ids) == 1
+
+        if req.sampling_params.logprobs is not None:
+            assert runner_output.logprobs[0] is not None
+        else:
+            assert runner_output.logprobs is None
+
+    # Update requests
+    for i, req in enumerate(reqs):
+        req.num_computed_tokens = 3
+
+    # Decode
+    scheduler_output = _schedule_cached_reqs(reqs,
+                                             new_block_ids=[None, None, None])
+    vocab_size = runner.model_config.get_vocab_size()
+    req_order = [1, 2, 0]
+    for i, req in enumerate(reqs):
+        if req.use_structured_output:
+            scheduler_output.structured_output_request_ids[
+                req.request_id] = req_order[i]
+            # need to be checked
+    scheduler_output.grammar_bitmask = create_grammar_bitmask(
+        len(scheduler_output.structured_output_request_ids), vocab_size)
+    runner_output = runner.execute_model(scheduler_output)
+    assert runner_output is not None
+    # req2 remains, and req0 and req1 are newly allocated in input_batch.req_ids
+    assert runner_output.req_ids == ["req_2", "req_0", "req_1"]
+    assert len(runner_output.sampled_token_ids) == 3
+
+    for i, req in enumerate(reqs):
+        req_index = req_order[i]
+        if req.sampling_params.logprobs is not None:
+            assert runner_output.logprobs[req_index] is not None
+        else:
+            assert runner_output.logprobs is None
