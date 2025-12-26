@@ -30,6 +30,10 @@ class RBLNInputBatch(InputBatch):
         use_rbln_sampler = kwargs.pop("use_rbln_sampler")
         super().__init__(*args, **kwargs)
         if use_rbln_sampler:
+            # NOTE(eunji.lee):
+            # Set top_p to 1.0 to avoid top_p=0.0 issue
+            self.top_p.fill_(1.0)
+            self.top_p_cpu_tensor.fill_(1.0)
             # Overwrite sampling_metadata with RBLN sampling metadata
             self.sampling_metadata = self._make_sampling_metadata_rbln(
                 self.num_reqs)
