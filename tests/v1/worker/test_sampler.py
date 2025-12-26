@@ -57,7 +57,6 @@ def dynamo_reset():
 #     assert bucket_sizes == expected_bucket_sizes
 #     assert len(runner.pooled_tensors) == len(expected_bucket_sizes)
 
-
 # @pytest.mark.parametrize("use_rbln_sampler", [True, False])
 # @pytest.mark.parametrize("use_structured_output", [True, False])
 # def test_forward_sampler_mode_and_structured_output(monkeypatch,
@@ -74,7 +73,6 @@ def dynamo_reset():
 #                          use_structured_output=use_structured_output,
 #                          top_p=0.7))
 #     forward_steps(reqs)
-
 
 # FIXME: temperature=1.0 triggers Inductor memory tracking issues.
 # @pytest.mark.parametrize("use_structured_output", [True, False])
@@ -103,6 +101,7 @@ def dynamo_reset():
 #                 repetition_penalty=repetition_penalty,
 #             ))
 #     forward_steps(reqs)
+
 
 # @pytest.mark.parametrize("use_structured_output", [False])
 @pytest.mark.parametrize("top_p", [1.0])
