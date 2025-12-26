@@ -1256,7 +1256,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
         torch._dynamo.config.recompile_limit = len(
             self.bucket_sizes) * len(WARM_UP_CONFIGS)
-        self.sampler = torch.compile(self.sampler,
-                                     options={"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe,},
-                                     dynamic=False,
-                                     fullgraph=False)
+        self.sampler = torch.compile(
+            self.sampler,
+            options={
+                "guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe,
+            },
+            dynamic=False,
+            fullgraph=False)
