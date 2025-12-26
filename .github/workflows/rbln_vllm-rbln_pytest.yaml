@@ -156,7 +156,7 @@ jobs:
 
       - name: Install local vllm-rbln package and dependencies
         run: |
-          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio pytest-xdist
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
           VERSION=${{ inputs.optimum_rbln_version }}
           pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
@@ -174,7 +174,8 @@ jobs:
               pytest tests/v1/core -vv --durations 0
               ;;
             "worker")
-              pytest tests/v1/worker -vv --durations 0
+              pytest tests/v1/worker/test_rebel_optimum_model_runner.py -vv --durations 0
+              pytest -n auto tests/v1/worker/test_sampler.py -vv --durations 0
               ;;
             "openai")
               pytest tests/entrypoints/openai -vv --durations 0

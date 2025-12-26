@@ -21,6 +21,7 @@ import rebel
 from vllm.config import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
+import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
 
@@ -111,6 +112,8 @@ class RBLNSampler(VLLMSampler):
         rebel.manual_seed(seed)
 
         options = {"compile_context": rebel.CompileContext()}
+        if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
+            options["mode"] = "strict"
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
@@ -199,6 +202,8 @@ class RBLNSampler(VLLMSampler):
 
         else:
             # Apply top_k and/or top_p.
+            # FIXME: insert graph break
+            # to avoid Inductor memory tracking issues.
             random_sampled, processed_logprobs = self.topk_topp_sampler(
                 logits,
                 sampling_metadata.generators,
