@@ -60,9 +60,10 @@ def dynamo_reset():
 
 @pytest.mark.parametrize("use_rbln_sampler", [True])
 @pytest.mark.parametrize("use_structured_output", [False])
+@pytest.mark.parametrize("vocab_size", [128, None])
 def test_forward_sampler_mode_and_structured_output(monkeypatch,
                                                     use_rbln_sampler,
-                                                    use_structured_output):
+                                                    use_structured_output, vocab_size):
     """Test sampler logic for both use_rbln_sampler=True and False."""
     monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1" if use_rbln_sampler else "0")
@@ -73,7 +74,7 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
                          prompt_token_ids=[1, 2, 3],
                          use_structured_output=use_structured_output,
                          top_p=0.7))
-    forward_steps(reqs)
+    forward_steps(reqs, manual_vocab_size=128)
 
 
 # # FIXME: temperature=1.0 triggers Inductor memory tracking issues.

@@ -164,7 +164,7 @@ def finish_request(manager: KVCacheManager, request: Request):
     manager.free(request)
 
 
-def get_vllm_config(async_scheduling=False, max_num_seqs=None):
+def get_vllm_config(async_scheduling=False, max_num_seqs=None, vocab_size: Optional[int] = None):
     max_model_len = max_num_seqs if max_num_seqs is not None else MAX_MODEL_LEN
     scheduler_config = SchedulerConfig(
         max_num_seqs=max_num_seqs if max_num_seqs is not None else MAX_NUM_SEQ,
@@ -181,6 +181,9 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
         dtype=torch.float,
         seed=42,
     )
+    if vocab_size is not None:
+        model_config.hf_text_config.vocab_size = vocab_size
+    # model_config.hf_text_config.vocab_size = 128
     cache_config = CacheConfig(
         block_size=IB_SIZE,
         swap_space=0,
@@ -351,8 +354,8 @@ def _schedule_cached_reqs(
     )
 
 
-def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ):
-    vllm_config = get_vllm_config(max_num_seqs=max_num_seqs)
+def create_model_runner(max_num_seqs: int = MAX_NUM_SEQ, vocab_size: Optional[int] = None):
+    vllm_config = get_vllm_config(max_num_seqs=max_num_seqs, vocab_size=vocab_size)
     with set_current_vllm_config(vllm_config, check_compile=False):
         temp_file = tempfile.mkstemp()[1]
         init_distributed_environment(
@@ -375,8 +378,8 @@ def create_grammar_bitmask(num_seqs: int, vocab_size: int):
     return xgr.allocate_token_bitmask(num_seqs, vocab_size).numpy()
 
 
-def forward_steps(reqs: list[Request]):
-    runner = create_model_runner(max_num_seqs=4)
+def forward_steps(reqs: list[Request], manual_vocab_size: Optional[int] = None):
+    runner = create_model_runner(max_num_seqs=4, vocab_size=manual_vocab_size)
     # Prefill
     for i, req in enumerate(reqs):
         req_id = req.request_id
