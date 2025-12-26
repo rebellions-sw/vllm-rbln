@@ -16,9 +16,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get optimum version from requirements.txt
+      - name: Get optimum version from requirements
         id: get_target_optimum_version
         run: |
-          OPTIMUM_RBLN_VERSION=$(grep '^optimum-rbln' requirements.txt | sed 's/optimum-rbln>=//')
-          echo "Found optimum-rbln version in requirements.txt: $OPTIMUM_RBLN_VERSION"
+          OPTIMUM_RBLN_VERSION=$(grep 'optimum-rbln' pyproject.toml | sed -n 's/.*optimum-rbln>=\([^"]*\).*/\1/p')
+          echo "Found optimum-rbln version in pyproject.toml: $OPTIMUM_RBLN_VERSION"
+
+          if [ -z "$OPTIMUM_RBLN_VERSION" ]; then
+            echo "Error: Could not find optimum-rbln version in pyproject.toml"
+            exit 1
+          fi
+
           echo "OPTIMUM_RBLN_VERSION=$OPTIMUM_RBLN_VERSION" >> $GITHUB_OUTPUT
