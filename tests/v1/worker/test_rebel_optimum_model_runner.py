@@ -34,6 +34,12 @@ NUM_BLOCKS = 8
 DEVICE = current_platform.device_type
 
 
+
+@pytest.fixture(autouse=True)
+def dynamo_reset():
+    yield
+    torch._dynamo.reset()
+
 # TODO add tests for both `enable_prefix_caching = True` and `False`
 def get_vllm_config(async_scheduling=False):
     scheduler_config = SchedulerConfig(
