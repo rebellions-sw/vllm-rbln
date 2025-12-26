@@ -17,7 +17,6 @@ import torch
 from vllm.platforms import current_platform
 
 from .utils import forward_steps, make_request
-
 DEVICE = current_platform.device_type
 
 
@@ -25,7 +24,6 @@ DEVICE = current_platform.device_type
 def dynamo_reset():
     yield
     torch._dynamo.reset()
-
 
 # @pytest.mark.parametrize("num_seqs, expected_bucket_sizes", [
 #     pytest.param(1, [1], id="1_seq"),

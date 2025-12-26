@@ -173,11 +173,9 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
         max_model_len=max_model_len,
         async_scheduling=async_scheduling,
     )
-    model_dir = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
-    model_name = model_dir + "/llama3_2-3b-128k_kv16k_batch4"
     model_config = ModelConfig(
-        # model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        model=model_name,
+        model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        # model=model_name,
         # FIXME: opt-125m fails to compile rbln sampler
         dtype=torch.float,
         seed=42,
