@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import os
 import tempfile
 from collections.abc import Callable
 # Unless required by applicable law or agreed to in writing, software
@@ -38,7 +39,7 @@ from vllm.v1.request import RequestStatus
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
-import os
+
 if TYPE_CHECKING:
     import xgrammar as xgr
 else:
