@@ -70,6 +70,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
         Returns:
             Tuple of (inputs_embeds, position_embed, rope_deltas)
         """
+
         # Prepare base arguments common to all models
         preprocess_args = {
             "input_ids":
@@ -221,7 +222,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
             position_ids = position_ids.add(delta)
             position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
             position_embed = self.model._get_position_embeddings(
-                torch.zeros(1, dtype=torch.float32), position_ids)
+                torch.zeros(1, dtype=self.dtype), position_ids)
             position_embeds.append(position_embed)
 
         for _ in range(padded_batch_size - len(running_requests_ids)):

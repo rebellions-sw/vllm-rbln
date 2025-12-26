@@ -52,7 +52,7 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
         is_prefill: bool,
         block_tables: torch.Tensor,
         input_ids: torch.LongTensor = None,
-        pixel_values: torch.FloatTensor = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
         image_sizes: Optional[torch.LongTensor] = None,
         cache_position: Union[List[torch.Tensor],
                               torch.Tensor] = None,  # vllm keyword argument

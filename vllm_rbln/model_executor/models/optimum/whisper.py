@@ -119,7 +119,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             # OR just generate pooled tensor in the model instance?
             decoder_attention_mask = torch.zeros(self.batch_size,
                                                  self.dec_max_seq_len,
-                                                 dtype=torch.float32)
+                                                 dtype=self.dtype)
             # Generate cache_position using dec_lengths
             for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]

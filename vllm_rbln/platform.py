@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -50,6 +51,7 @@ class RblnPlatform(Platform):
     # when torch.device(device_name) is called.
     # But we don't support the 'rbln'' device yet.
     # To support this, we must use PyTorch-RBLN
+    plugin_name: str = "rbln"
     device_name: str = "cpu"
     device_type: str = "cpu"
     dispatch_key: str = "CPU"
@@ -77,6 +79,10 @@ class RblnPlatform(Platform):
     def is_pin_memory_available(cls):
         logger.warning("Pin memory is not supported on RBLN.")
         return False
+
+    @classmethod
+    def get_device_communicator_cls(cls) -> str:
+        return "vllm_rbln.distributed.rbln_communicator.RblnCommunicator"  # noqa
 
     @classmethod
     def use_all_gather(cls) -> bool:
@@ -130,19 +136,37 @@ class RblnPlatform(Platform):
                     "T5 encoder-decoder model is not supported on V1. "
                     "Set `VLLM_USE_V1=0` to run T5 models in V0")
 
-        logger.info("original model_config.dtype = %s", model_config.dtype)
-        if model_config.dtype == torch.bfloat16:
-            logger.warning("bfloat16 is not supported on RBLN.")
-
-        # FIXME - force model dtype into fp32 for graph compilation
-        model_config.dtype = torch.float
-        assert model_config.dtype == torch.float
-        logger.info("RBLN model_config.dtype = %s", model_config.dtype)
-
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            if envs.VLLM_RBLN_ENFORCE_MODEL_FP32:
+                logger.info("original model_config.dtype = %s",
+                            model_config.dtype)
+                if model_config.dtype == torch.bfloat16:
+                    logger.warning("bfloat16 is not supported on RBLN.")
+
+                # FIXME - force model dtype into fp32 for graph compilation
+                model_config.dtype = torch.float
+                assert model_config.dtype == torch.float
+                logger.info("RBLN enforce model_config.dtype as torch.float")
+
+                if (lora_config := vllm_config.lora_config) is not None:
+                    lora_config.lora_dtype = torch.float
+                    logger.info(
+                        "RBLN enforce lora_config.lora_dtype as torch.float")
+            else:
+                dtype = model_config.dtype
+                logger.info("original model_config.dtype = %s", dtype)
+                if dtype != torch.bfloat16 and dtype != torch.float16 \
+                            and dtype != torch.float:
+                    logger.warning(
+                        "%s not supported on RBLN, "
+                        "only fp32,fp16,bf16 supported", dtype)
+                    model_config.dtype = torch.float
+                logger.info("RBLN use model_config.dtype = %s",
+                            model_config.dtype)
+
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = (
@@ -158,13 +182,27 @@ class RblnPlatform(Platform):
 
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
+                hf_config = vllm_config.model_config.hf_config
+                assert not hasattr(hf_config, "sliding_window") \
+                    or not getattr(hf_config, "use_sliding_window", True)
+
                 RblnPlatform.device_type = "rbln"
                 vllm_config.device_config.device_type = RblnPlatform.device_type
                 vllm_config.device_config.device = (torch.device(
                     RblnPlatform.device_type))
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
+
+                if (lora_config := vllm_config.lora_config) is not None:
+                    lora_config.lora_dtype = torch.float16
         else:
+            # NOTE(eunji.lee):
+            # It is for multimodal models
+            # to generate inputs as fp32, not bfloat16
+            # even though the model is compiled with bfloat16
+            model_config.dtype = torch.float
+            assert model_config.dtype == torch.float
+
             if envs.VLLM_USE_V1:
                 if parallel_config.worker_cls == "auto":
                     parallel_config.worker_cls = \
@@ -259,24 +297,66 @@ class RblnPlatform(Platform):
     @classmethod
     def disable_unsupported_prefix_caching(cls,
                                            vllm_config: VllmConfig) -> None:
-        """
-        Currently, prefix caching is supported only for decoder-only models.
-        """
-        if vllm_config.cache_config.enable_prefix_caching:
+        if not vllm_config.cache_config.enable_prefix_caching:
+            return
+
+        hf_config = vllm_config.model_config.hf_config
+
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            if getattr(hf_config, "sliding_window", None) is not None \
+                   and getattr(hf_config, "use_sliding_window", True):
+                cls._disable_prefix_caching(vllm_config,
+                                            "sliding window models")
+
+        else:
+            # Prefix caching is supported only for decoder-only models for now.
             if is_qwen3_pooling(vllm_config):
                 # Qwen3 pooling model does not support prefix caching for now.
                 cls._disable_prefix_caching(vllm_config,
                                             "Qwen3 pooling models")
-            elif is_enc_dec_arch(vllm_config.model_config.hf_config):
+            elif is_enc_dec_arch(hf_config):
                 cls._disable_prefix_caching(vllm_config,
                                             "encoder-decoder models")
-            elif is_multi_modal(vllm_config.model_config.hf_config):
+            elif is_multi_modal(hf_config):
                 cls._disable_prefix_caching(vllm_config, "multimodal models")
-            elif is_pooling_arch(vllm_config.model_config.hf_config):
+            elif is_pooling_arch(hf_config):
                 cls._disable_prefix_caching(vllm_config, "pooling models")
-            elif getattr(vllm_config.model_config.hf_config, "sliding_window",
-                         None) is not None and getattr(
-                             vllm_config.model_config.hf_config,
-                             "use_sliding_window", True):
+            elif getattr(hf_config, "sliding_window", None) is not None \
+                    and getattr(hf_config, "use_sliding_window", True):
                 cls._disable_prefix_caching(vllm_config,
                                             "sliding window models")
+
+    @classmethod
+    def support_hybrid_kv_cache(cls) -> bool:
+        return True
+
+    @classmethod
+    def get_punica_wrapper(cls) -> str:
+        return "vllm_rbln.lora.punica_wrapper.punica_rbln.PunicaWrapperRBLN"
+
+    @classmethod
+    def can_update_inplace(cls) -> bool:
+        return False
+
+    @classmethod
+    def device_id_to_physical_device_id(cls, device_id: int):
+        # overrides for RSD (rbln scalable devices)
+        # dp device ids for RBLN SHOULD consider rsd size
+        rsd_size = envs.VLLM_RBLN_TP_SIZE
+        assert rsd_size >= 1
+        if cls.device_control_env_var in os.environ and os.environ[
+                cls.device_control_env_var] != "":
+            device_ids = os.environ[cls.device_control_env_var].split(",")
+            physical_device_ids = ""
+            start_device_id = device_id * rsd_size
+            for rsd_id in range(rsd_size - 1):
+                physical_device_ids += str(device_ids[start_device_id +
+                                                      rsd_id])
+                physical_device_ids += ","
+            physical_device_ids += str(device_ids[start_device_id + rsd_size -
+                                                  1])
+            logger.info("RBLN DP physical_device_ids = %s",
+                        physical_device_ids)
+            return physical_device_ids
+        else:
+            return device_id

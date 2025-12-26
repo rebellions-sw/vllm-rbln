@@ -145,7 +145,8 @@ class RBLNOptimumModelBase(nn.Module):
         if isinstance(self.model_config.model,
                       (str, Path)) and os.path.exists(self.model_config.model):
             model_path = Path(self.model_config.model)
-            if model_path.is_dir() and any(model_path.glob('*.rbln')):
+            if model_path.is_dir() and any(
+                    model_path.glob('rbln_config.json')):
                 compiled_path = self.model_config.model
             else:
                 compiled_path = None
@@ -171,6 +172,11 @@ class RBLNOptimumModelBase(nn.Module):
         self.rbln_model_config = model.rbln_config
         self.attn_impl = model.get_attn_impl() if hasattr(
             model, "get_attn_impl") else None
+
+    @property
+    def dtype(self) -> torch.dtype:
+        assert self.model.rbln_config.dtype is not None
+        return self.model.rbln_config.dtype
 
 
 class RBLNOptimumDecoderMixin:
@@ -300,7 +306,6 @@ class RBLNOptimumDecoderMixin:
                 padded_batch_size=padded_batch_size,
                 dummy_block=dummy_block,
             )
-
         kwargs = {
             "block_tables": block_tables,
             "padded_batch_size": padded_batch_size,
