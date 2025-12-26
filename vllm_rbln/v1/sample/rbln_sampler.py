@@ -204,7 +204,6 @@ class RBLNSampler(VLLMSampler):
             # Apply top_k and/or top_p.
             # FIXME: insert graph break
             # to avoid Inductor memory tracking issues.
-            torch._dynamo.graph_break()
             random_sampled, processed_logprobs = self.topk_topp_sampler(
                 logits,
                 sampling_metadata.generators,
