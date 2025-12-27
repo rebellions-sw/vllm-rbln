@@ -137,6 +137,8 @@ class BlockMappingManager:
         # outer_block_id anymore.
         for ib_id in cached_inner_block_ids:
             self._cached_inner_to_outers[ib_id].remove(outer_block_id)
+            if len(self._cached_inner_to_outers[ib_id]) == 0:
+                self._cached_inner_to_outers.pop(ib_id)
 
         # 3. Reset the outer_block_id to inner mapping
         mapping = self._block_mappings.pop(outer_block_id, None)
@@ -234,6 +236,11 @@ class BlockMappingManager:
             for ib_id in cur_ib_segment:
                 if ib_id not in self._cached_inner_to_outers:
                     self._cached_inner_to_outers[ib_id] = []
+                assert cur_outer_block_id not in \
+                    self._cached_inner_to_outers[ib_id], \
+                    f"OB: {cur_outer_block_id} already in cached " \
+                    f"in IB: {ib_id}=" \
+                    f"{self._cached_inner_to_outers[ib_id]}"
                 self._cached_inner_to_outers[ib_id].append(cur_outer_block_id)
 
     def get_longest_matched_block(self, cached_ib_segment: list[int],
@@ -246,7 +253,8 @@ class BlockMappingManager:
         """
         # Find the outer block IDs
         # that match the first block of cached inner block segment
-        matched_obs = self._cached_inner_to_outers.get(cached_ib_segment[0])
+        matched_obs = self.get_outer_blocks_for_cached_inner(
+            cached_ib_segment[0])
         logger.debug(
             "[PFX] [MAPPING-SEARCH] QUERY_IB=%d | "
             "SEGMENT_SIZE=%d SEGMENT=%s | "
@@ -265,7 +273,7 @@ class BlockMappingManager:
 
             alive_obs = [ob for ob in alive_obs if ob not in skip_blocks]
             for outer_block_id in alive_obs:
-                cached_ibs = self._outer_to_cached_inner[outer_block_id]
+                cached_ibs = self.get_inner_blocks_for_outer(outer_block_id)
                 prefix_ibs = self._get_common_prefix(cached_ibs,
                                                      cached_ib_segment)
                 cache_hit_size = len(prefix_ibs)
