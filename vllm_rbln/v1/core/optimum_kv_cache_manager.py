@@ -228,9 +228,7 @@ class RBLNKVCacheManager(KVCacheManager):
         intersection = set(new_block_ids) & set(new_computed_block_ids)
         assert len(intersection) == 0, (
             "new_block_ids and new_computed_block_ids must not overlap. "
-            "intersection: %s"
-            % intersection
-        )
+            f"intersection: {intersection}")
         self._set_prefix_cached_blocks(request_id, num_new_computed_tokens,
                                        new_computed_block_ids)
         self._set_prefix_cached_blocks(request_id, num_new_computed_tokens,
