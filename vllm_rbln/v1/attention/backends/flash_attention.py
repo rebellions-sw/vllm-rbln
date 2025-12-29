@@ -859,6 +859,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             assert self.sinks.shape[0] == num_heads, (
                 "Sinks must have the same number of heads as the number of "
                 "heads in the layer")
+            if len(self.sinks.size()) == 1:
+                self.sinks = self.sinks[:, None]
 
     def forward(
         self,
