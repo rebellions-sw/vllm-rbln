@@ -49,6 +49,7 @@ def flash_attention_naive_prefill_impl(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if not envs.VLLM_RBLN_COMPILE_MODEL:
         # attn_weights = MM(q,kt) * scale
@@ -93,6 +94,7 @@ def _(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
 
@@ -109,6 +111,7 @@ def flash_attention_naive_decode_impl(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if not envs.VLLM_RBLN_COMPILE_MODEL:
         # NOTE: this reference impl works only for batch_size=1
@@ -151,6 +154,7 @@ def _(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
 
@@ -168,6 +172,7 @@ def flash_causal_attention_naive_prefill_impl(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if not envs.VLLM_RBLN_COMPILE_MODEL:
         # attn_weights = MM(q,kt) * scale
@@ -214,6 +219,7 @@ def _(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
 
@@ -230,6 +236,7 @@ def flash_causal_attention_naive_decode_impl(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if not envs.VLLM_RBLN_COMPILE_MODEL:
         # NOTE: this reference impl works only for batch_size=1
@@ -275,6 +282,7 @@ def _(
     seq_idx: torch.Tensor,
     block_tables: torch.Tensor,
     slot_mapping: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
 
@@ -292,6 +300,7 @@ def sliding_window_attention_naive_prefill_impl(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Expected tensor shapes:
@@ -383,6 +392,7 @@ def _(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
 
@@ -400,6 +410,7 @@ def sliding_window_attention_naive_decode_impl(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if envs.VLLM_RBLN_COMPILE_MODEL:
         return torch.empty_like(q)
@@ -482,6 +493,7 @@ def _(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
 
@@ -840,6 +852,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             assert self.sinks.shape[0] == num_heads, (
                 "Sinks must have the same number of heads as the number of "
                 "heads in the layer")
+            if len(self.sinks.size()) == 1:
+                self.sinks = self.sinks[:, None]
 
     def forward(
         self,
@@ -963,6 +977,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
+                    self.sinks,
                 )
             else:
                 attn_output = sliding_window_attention_naive_prefill(  # noqa: E501
@@ -975,6 +990,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
+                    self.sinks,
                 )
         # actually non-flash paged attention DOES NOT use slot_mapping
         elif envs.VLLM_RBLN_FLASH_CAUSAL_ATTN:
@@ -1012,6 +1028,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     attn_metadata.seq_lens.to(torch.int16),
                     attn_metadata.block_tables.to(torch.int16),
                     self.scale,  # dummy
+                    self.sinks,
                 )
             else:
                 attn_output = flash_causal_attention_naive_prefill(  # noqa: E501
@@ -1023,6 +1040,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     attn_metadata.seq_lens.to(torch.int16),
                     attn_metadata.block_tables.to(torch.int16),
                     self.scale,  # dummy
+                    self.sinks,
                 )
         else:
             if envs.VLLM_RBLN_COMPILE_MODEL:
@@ -1058,6 +1076,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     attn_metadata.seq_lens.to(torch.int16),
                     attn_metadata.block_tables.to(torch.int16),
                     self.scale,  # dummy
+                    self.sinks,
                 )
             else:
                 attn_output = flash_attention_naive_prefill(  # noqa: E501
@@ -1070,6 +1089,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     attn_metadata.seq_lens.to(torch.int16),
                     attn_metadata.block_tables.to(torch.int16),
                     self.scale,  # dummy
+                    self.sinks,
                 )
 
         # 2. attention output reshape for attention backend return
