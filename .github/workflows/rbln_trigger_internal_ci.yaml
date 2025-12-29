@@ -14,14 +14,10 @@ on:
         required: false
         type: string
         default: "3.12.9"
-      vllm_upstream_tag:
-        description: "vLLM upstream tag/version to use for tests (e.g., v0.9.1)"
-        required: false
-        type: string
 
 jobs:
   trigger-vllm-rbln-internal-ci:
-    if: github.repository_owner == 'rebellions-sw' && github.event_name == 'pull_request'
+    if: github.repository_owner == 'rebellions-sw'
     runs-on: vllm-rbln-runner-air
     steps:
       - name: Dispatch to fsw-integration
@@ -32,8 +28,9 @@ jobs:
           event-type: vllm-rbln-pr-event
           client-payload: |
             {
-              "ref": "${{ github.event.pull_request.head.ref }}",
-              "sha": "${{ github.event.pull_request.head.sha }}",
-              "pr_number": "${{ github.event.number }}",
-              "actor": "${{ github.actor }}"
+              "ref": "${{ inputs.ref || github.event.pull_request.head.ref || github.ref_name }}",
+              "sha": "${{ github.event.pull_request.head.sha || github.sha }}",
+              "pr_number": "${{ github.event.number || '' }}",
+              "actor": "${{ github.actor }}",
+              "python_version": "${{ inputs.python_version }}"
             }
