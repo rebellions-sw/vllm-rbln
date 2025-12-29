@@ -22,9 +22,11 @@ from typing import TYPE_CHECKING, Optional, Union
 import torch
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment,
-                              set_custom_all_reduce)
+from vllm.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+    set_custom_all_reduce,
+)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.lora.request import LoRARequest
@@ -35,8 +37,11 @@ from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
-from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
-                             ModelRunnerOutput)
+from vllm.v1.outputs import (
+    EMPTY_MODEL_RUNNER_OUTPUT,
+    AsyncModelRunnerOutput,
+    ModelRunnerOutput,
+)
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.worker_base import WorkerBase
 
@@ -162,7 +167,7 @@ class RBLNWorker(WorkerBase):
             selected_devices,
         )
 
-    def init_device(self) -> None:
+    def _set_cpu_affinity(self) -> None:
         # Setup thread affinity based on NUMA nodes
         if envs.VLLM_RBLN_NUMA and platform.system() == "Linux":
             cpu_arch = current_platform.get_cpu_architecture()
@@ -240,6 +245,9 @@ class RBLNWorker(WorkerBase):
                 self.local_rank,
                 os.environ["OMP_NUM_THREADS"],
             )
+
+    def init_device(self) -> None:
+        self._set_cpu_affinity()
 
         # Initialize the distributed environment.
         init_worker_distributed_environment(
