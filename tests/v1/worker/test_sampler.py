@@ -77,7 +77,6 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
     forward_steps(reqs)
 
 
-# FIXME: temperature=1.0 triggers Inductor memory tracking issues.
 @pytest.mark.parametrize("use_structured_output", [True, False])
 @pytest.mark.parametrize("top_p", [0.7, 1.0])
 @pytest.mark.parametrize("top_k", [0, 3])
