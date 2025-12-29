@@ -1,0 +1,7 @@
+setuptools>=61
+setuptools-scm>=8
+pyyaml
+datasets
+qwen_vl_utils
+vllm==0.10.2
+optimum-rbln>=0.9.4

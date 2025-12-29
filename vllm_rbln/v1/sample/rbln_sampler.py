@@ -21,8 +21,6 @@ import rebel
 from vllm.config import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
-import os
-import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
 
@@ -112,10 +110,7 @@ class RBLNSampler(VLLMSampler):
         super().__init__()
         rebel.manual_seed(seed)
 
-        options = {
-            "cache_dir": os.path.join(envs.VLLM_CACHE_ROOT, "rbln_sampler"),
-            "compile_context": rebel.CompileContext()
-        }
+        options = {"compile_context": rebel.CompileContext()}
         self._compiled_rbln_topp_sampler = torch.compile(
             self._rbln_topp_sampler_impl,
             dynamic=False,
