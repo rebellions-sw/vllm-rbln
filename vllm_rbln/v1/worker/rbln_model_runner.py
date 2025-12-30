@@ -488,7 +488,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         for src in src_dest_map:
             dst = src_dest_map[src]
             while src != dst:
-                print("[swap] src", src, "dst", dst)
                 self.input_batch.swap_states(src, dst)
                 # Mark dst as done by updating its destination to itself
                 next_dst = src_dest_map.get(dst, dst)
