@@ -36,7 +36,6 @@ class LJFRunningRequestQueue(RequestQueue):
     """
 
     def __init__(self) -> None:
-        logger.debug("LJFRunningRequestQueue init")
         self._heap: list[tuple[int, int, float, Request]] = []
 
     def add_request(self, request: Request) -> None:

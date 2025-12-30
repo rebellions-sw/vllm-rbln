@@ -104,14 +104,15 @@ class RBLNOptimumScheduler(Scheduler):
         # req_id -> Request
         self.requests: dict[str, Request] = {}
         # Scheduling policy
-        # if self.scheduler_config.policy == "priority":
-        #     self.policy = SchedulingPolicy.PRIORITY
-        # elif self.scheduler_config.policy == "fcfs":
-        #     self.policy = SchedulingPolicy.FCFS
-        # else:
-        #     raise ValueError(
-        #         f"Unknown scheduling policy: {self.scheduler_config.policy}")
-        self.policy = RBLNSchedulingPolicy.LJF
+        if self.scheduler_config.policy == "ljf":
+            self.policy = RBLNSchedulingPolicy.LJF
+        elif self.scheduler_config.policy == "priority":
+            self.policy = SchedulingPolicy.PRIORITY
+        elif self.scheduler_config.policy == "fcfs":
+            self.policy = SchedulingPolicy.FCFS
+        else:
+            raise ValueError(
+                f"Unknown scheduling policy: {self.scheduler_config.policy}")
         # Priority queues for requests.
         self.waiting = create_rbln_request_queue(self.policy)
         self.running: list[Request] = []
