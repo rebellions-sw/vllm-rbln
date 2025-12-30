@@ -23,8 +23,7 @@ from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.v1.core.encoder_cache_manager import EncoderCacheManager
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
-from vllm.v1.core.sched.request_queue import (SchedulingPolicy,
-                                              create_request_queue)
+from vllm.v1.core.sched.request_queue import SchedulingPolicy
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.v1.engine import EngineCoreEventType
 from vllm.v1.kv_cache_interface import KVCacheConfig
@@ -33,6 +32,8 @@ from vllm.v1.structured_output import StructuredOutputManager
 
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.core.optimum_kv_cache_manager import RBLNKVCacheManager
+from vllm_rbln.v1.core.request_queue import (RBLNSchedulingPolicy,
+                                             create_rbln_request_queue)
 
 logger = init_logger(__name__)
 
@@ -103,15 +104,16 @@ class RBLNOptimumScheduler(Scheduler):
         # req_id -> Request
         self.requests: dict[str, Request] = {}
         # Scheduling policy
-        if self.scheduler_config.policy == "priority":
-            self.policy = SchedulingPolicy.PRIORITY
-        elif self.scheduler_config.policy == "fcfs":
-            self.policy = SchedulingPolicy.FCFS
-        else:
-            raise ValueError(
-                f"Unknown scheduling policy: {self.scheduler_config.policy}")
+        # if self.scheduler_config.policy == "priority":
+        #     self.policy = SchedulingPolicy.PRIORITY
+        # elif self.scheduler_config.policy == "fcfs":
+        #     self.policy = SchedulingPolicy.FCFS
+        # else:
+        #     raise ValueError(
+        #         f"Unknown scheduling policy: {self.scheduler_config.policy}")
+        self.policy = RBLNSchedulingPolicy.LJF
         # Priority queues for requests.
-        self.waiting = create_request_queue(self.policy)
+        self.waiting = create_rbln_request_queue(self.policy)
         self.running: list[Request] = []
 
         # The request IDs that are finished in between the previous and the
@@ -198,7 +200,7 @@ class RBLNOptimumScheduler(Scheduler):
 
         # Use a temporary RequestQueue to collect requests that need to be
         # skipped and put back at the head of the waiting queue later
-        skipped_waiting_requests = create_request_queue(self.policy)
+        skipped_waiting_requests = create_rbln_request_queue(self.policy)
 
         # First, schedule the WAITING requests.
         if not preempted_reqs:
