@@ -51,8 +51,7 @@ from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader, check_use_alibi,
                         get_dtype_size, is_pin_memory_available, round_up)
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadataBuilder
 from vllm.v1.attention.backends.utils import (
-    CommonAttentionMetadata, create_fast_prefill_custom_backend,
-    reorder_batch_to_split_decodes_and_prefills)
+    CommonAttentionMetadata, create_fast_prefill_custom_backend)
 from vllm.v1.core.sched.output import (CachedRequestData, NewRequestData,
                                        SchedulerOutput)
 # yapf conflicts with isort for this block
@@ -464,17 +463,37 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if len(self.kv_cache_config.kv_cache_groups) == 0:
             return
 
-        if self.reorder_batch_threshold is not None:
-            # NOTE(lucas): currently no backend supports the custom masking
-            #  required for DCP with q_len > 1, so we assert here. Remove this
-            #  assert once the custom mask is support is added to FA3.
-            if self.dcp_world_size > 1:
-                assert self.reorder_batch_threshold == 1, \
-                    "DCP not support reorder_batch_threshold > 1 now."
-            reorder_batch_to_split_decodes_and_prefills(
-                self.input_batch,
-                scheduler_output,
-                decode_threshold=self.reorder_batch_threshold)
+        # if self.reorder_batch_threshold is not None:
+        #     # NOTE(lucas): currently no backend supports the custom masking
+        #     #  required for DCP with q_len > 1, so we assert here. Remove this
+        #     #  assert once the custom mask is support is added to FA3.
+        #     if self.dcp_world_size > 1:
+        #         assert self.reorder_batch_threshold == 1, \
+        #             "DCP not support reorder_batch_threshold > 1 now."
+        #     reorder_batch_to_split_decodes_and_prefills(
+        #         self.input_batch,
+        #         scheduler_output,
+        #         decode_threshold=self.reorder_batch_threshold)
+
+        orig_indices = np.arange(len(self.input_batch.req_ids))
+        sorted_order = np.argsort(self.input_batch.num_tokens[orig_indices] *
+                                  (-1),
+                                  kind="stable")
+        src_indices = orig_indices[sorted_order]
+        src_dest_map = {
+            int(src): int(dst)
+            for src, dst in zip(src_indices, orig_indices)
+        }
+
+        for src in src_dest_map:
+            dst = src_dest_map[src]
+            while src != dst:
+                print("[swap] src", src, "dst", dst)
+                self.input_batch.swap_states(src, dst)
+                # Mark dst as done by updating its destination to itself
+                next_dst = src_dest_map.get(dst, dst)
+                src_dest_map[dst] = dst
+                dst = next_dst
 
     # Note: used for model runner override.
     def _init_device_properties(self) -> None:
