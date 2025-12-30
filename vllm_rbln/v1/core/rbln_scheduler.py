@@ -65,6 +65,7 @@ class RBLNScheduler(Scheduler):
         # The only differences are:
         # - Disable mixed batching
         # - Limit prefill batch size to 1
+        # - Limit decode batch size to (max_num_seqs // pipeline_parallel_size)
         # - Create grammar bitmask for scheduled requests only
         # Search for NOTE(RBLN) for details
 
@@ -97,14 +98,16 @@ class RBLNScheduler(Scheduler):
         scheduled_timestamp = time.monotonic()
 
         # First, schedule the RUNNING requests.
-        # NOTE(RBLN): Prioritize prefill requests.
-        # Given our constraint that the prefill batch size fixed to 1
-        # if any prefill request is running,
-        # there must be exactly one at the end of the list.
-        req_index = (len(self.running) -
-                     1 if self.running and is_prefill(self.running[-1]) else 0)
-        while req_index < len(self.running) and token_budget > 0:
-            request = self.running[req_index]
+        # NOTE(RBLN): Prioritize running prefill requests.
+        running_to_schedule = [
+            request for request in self.running if is_prefill(request) and
+            (request.num_tokens_with_spec + request.num_output_placeholders -
+             request.num_computed_tokens)
+        ] or self.running
+
+        req_index = 0
+        while req_index < len(running_to_schedule) and token_budget > 0:
+            request = running_to_schedule[req_index]
 
             num_new_tokens = (request.num_tokens_with_spec +
                               request.num_output_placeholders -
@@ -153,6 +156,11 @@ class RBLNScheduler(Scheduler):
                     num_new_tokens,
                     num_lookahead_tokens=self.num_lookahead_tokens)
                 if new_blocks is None:
+                    # NOTE(RBLN): This should never happen for prefills as we
+                    # preallocated all the blocks when scheduling this request
+                    # from waiting requests.
+                    assert not is_prefill(request)
+
                     # The request cannot be scheduled.
                     # Preempt the lowest-priority request.
                     if self.policy == SchedulingPolicy.PRIORITY:
@@ -214,6 +222,18 @@ class RBLNScheduler(Scheduler):
                 for i in encoder_inputs_to_schedule:
                     self.encoder_cache_manager.allocate(request, i)
                 encoder_compute_budget = new_encoder_compute_budget
+
+            # NOTE(RBLN): We restrict the prefill batch size to 1 for now.
+            if is_prefill(request):
+                break
+
+            # NOTE(RBLN): We restrict the decode batch size to
+            # (max_num_seqs // pipeline_parallel_size) to prevent pipeline
+            # bubbles.
+            if len(scheduled_running_reqs) >= (
+                    self.max_num_running_reqs //
+                    self.vllm_config.parallel_config.pipeline_parallel_size):
+                break
 
         # Record the LoRAs in scheduled_running_reqs
         scheduled_loras: set[int] = set()
@@ -410,7 +430,7 @@ class RBLNScheduler(Scheduler):
                     num_computed_tokens + num_new_tokens)
 
                 # KVTransfer: the connector uses this info to determine
-                # if a load is needed. NOTE that
+                # if a load is needed. Note that
                 # This information is used to determine if a load is
                 # needed for this request.
                 if self.connector is not None:
@@ -490,7 +510,7 @@ class RBLNScheduler(Scheduler):
                 scheduled_running_reqs.clear()
                 token_budget = prefill_token_budget
 
-                # NOTE(RBLN): we restrict the prefill batch size to 1 for now.
+                # NOTE(RBLN): We restrict the prefill batch size to 1 for now.
                 break
 
         # Put back any skipped requests at the head of the waiting queue
