@@ -126,14 +126,13 @@ class CacheSearchManager:
 
     def find_cached_blocks(
             self, request_id: str, cached_blocks: list[int],
-            skip_blocks: set[int], num_new_computed_tokens: int,
+            num_new_computed_tokens: int,
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Find cached outer blocks that match the given inner blocks.
         """
 
-        best_match = self._try_match_request(cached_blocks, skip_blocks,
-                                             mapping_manager)
+        best_match = self._try_match_request(cached_blocks, mapping_manager)
         final_num_cached_tokens = sum(best_match.cached_lengths)
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -176,7 +175,7 @@ class CacheSearchManager:
         return cached_len_tokens // self._config.ib_size
 
     def _try_match_request(
-            self, cached_ib: list[int], skip_blocks: set[int],
+            self, cached_ib: list[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Try to find the best matching outer blocks for the given inner blocks.
@@ -190,7 +189,7 @@ class CacheSearchManager:
             cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
             cached_ob, num_cached_ibs = \
                 mapping_manager.get_longest_matched_block(
-                cur_ib_segment, skip_blocks)
+                cur_ib_segment)
             # FIXME simple stop condition
             # Upgrade the readability later
             if cached_ob == NO_MATCH_FOUND:
@@ -406,10 +405,12 @@ class RBLNPrefixKVCacheManager:
         """
         Get the matched outer blocks using inner blocks.
         """
-        skip_blocks = set(self.get_block_ids(request_id))
+        allocated_blocks = set(self.get_block_ids(request_id))
         result = self._cache_search_manager.find_cached_blocks(
-            request_id, cached_blocks, skip_blocks, num_new_computed_tokens,
+            request_id, cached_blocks, num_new_computed_tokens,
             self._mapping_manager)
+        assert len(set(result.cached_outer_blocks) & allocated_blocks) == 0, \
+            "Cached outer blocks and allocated outer blocks should be disjoint"
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):

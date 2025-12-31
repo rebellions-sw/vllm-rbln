@@ -157,8 +157,8 @@ class BlockMappingManager:
             if not mapping.is_active
         ]
 
-    def get_longest_matched_block(self, cached_ib_segment: list[int],
-                                  skip_blocks: set[int]) -> tuple[int, int]:
+    def get_longest_matched_block(
+            self, cached_ib_segment: list[int]) -> tuple[int, int]:
         """
         Given a segment of cached inner block IDs,
         return the outer block ID that has the longest matching prefix
