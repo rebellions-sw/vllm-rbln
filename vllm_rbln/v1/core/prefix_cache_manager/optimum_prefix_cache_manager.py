@@ -126,15 +126,13 @@ class CacheSearchManager:
 
     def find_cached_blocks(
             self, request_id: str, cached_blocks: list[int],
-            skip_blocks: set[int], num_new_computed_tokens: int,
+            num_new_computed_tokens: int,
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Find cached outer blocks that match the given inner blocks.
         """
 
-        best_match = self._try_match_request(cached_blocks, skip_blocks,
-                                             mapping_manager)
-        # self._cached_blocks_per_request[request_id] = best_match
+        best_match = self._try_match_request(cached_blocks, mapping_manager)
         final_num_cached_tokens = sum(best_match.cached_lengths)
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -154,27 +152,18 @@ class CacheSearchManager:
                     miss_rate)
 
             if best_match.has_cache_hit:
-                cached_blocks = []
-                ob_to_ib_mapping = {}
-
-                for i, (ob, cached_length) in \
-                    enumerate(zip(best_match.cached_outer_blocks,
-                        best_match.cached_lengths)):
-                    ibs = mapping_manager.get_cached_inner_blocks_for_outer(ob)
-                    cached_num_ib = cached_length // self._config.ib_size
-                    cached_inner_blocks = ibs[:cached_num_ib]
-                    cached_blocks.extend(cached_inner_blocks)
-                    ob_to_ib_mapping[ob] = len(cached_inner_blocks)
-
+                real_cached_ibs = [
+                    cached_blocks[:self._calculate_cached_inner_blocks(length)]
+                    for length in best_match.cached_lengths
+                ]
                 # TODO specify the hit ratio?
                 logger.debug(
                     "[PFX] [CACHE-HIT] REQUEST=%s | "
                     "OB_COUNT=%d OB=%s | "
-                    "IB_COUNT=%d IB=%s | "
-                    "OB_TO_IB_MAP=%s", request_id,
+                    "IB_COUNT=%d IB=%s", request_id,
                     len(best_match.cached_outer_blocks),
-                    best_match.cached_outer_blocks, len(cached_blocks),
-                    cached_blocks, ob_to_ib_mapping)
+                    best_match.cached_outer_blocks, len(real_cached_ibs),
+                    real_cached_ibs)
 
         return best_match
 
@@ -186,7 +175,7 @@ class CacheSearchManager:
         return cached_len_tokens // self._config.ib_size
 
     def _try_match_request(
-            self, cached_ib: list[int], skip_blocks: set[int],
+            self, cached_ib: list[int],
             mapping_manager: BlockMappingManager) -> CacheSearchResult:
         """
         Try to find the best matching outer blocks for the given inner blocks.
@@ -200,7 +189,7 @@ class CacheSearchManager:
             cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
             cached_ob, num_cached_ibs = \
                 mapping_manager.get_longest_matched_block(
-                cur_ib_segment, skip_blocks)
+                cur_ib_segment)
             # FIXME simple stop condition
             # Upgrade the readability later
             if cached_ob == NO_MATCH_FOUND:
@@ -416,10 +405,12 @@ class RBLNPrefixKVCacheManager:
         """
         Get the matched outer blocks using inner blocks.
         """
-        skip_blocks = set(self.get_block_ids(request_id))
+        allocated_blocks = set(self.get_block_ids(request_id))
         result = self._cache_search_manager.find_cached_blocks(
-            request_id, cached_blocks, skip_blocks, num_new_computed_tokens,
+            request_id, cached_blocks, num_new_computed_tokens,
             self._mapping_manager)
+        assert len(set(result.cached_outer_blocks) & allocated_blocks) == 0, \
+            "Cached outer blocks and allocated outer blocks should be disjoint"
 
         if result.has_cache_hit and isinstance(self._eviction_policy,
                                                LRUEvictionPolicy):
@@ -490,15 +481,6 @@ class RBLNPrefixKVCacheManager:
         else:
             self._handle_prefill_allocation(request_id, num_new_ob,
                                             inner_blocks)
-
-    def set_cached_blocks(self, cached_blocks: list[int],
-                          allocated_outer_blocks: list[int]) -> None:
-        """
-        Mark the blocks associated with the request as cached.
-        """
-        self._mapping_manager.set_cached_blocks(cached_blocks,
-                                                allocated_outer_blocks,
-                                                self._config.block_ratio)
 
     def get_dummy_block(self) -> int:
         if not self.is_full_block_available():
