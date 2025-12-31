@@ -91,7 +91,7 @@ jobs:
   pytest:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type }})
-    runs-on: runner-vllm-ci
+    runs-on: vllm-rbln-runner-c3m48a1
     needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
