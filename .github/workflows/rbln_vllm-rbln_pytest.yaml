@@ -54,7 +54,7 @@ env:
 jobs:
   build-vllm-rbln:
     name: Build vllm-rbln wheel
-    runs-on: runner-vllm-ci
+    runs-on: vllm-rbln-runner-c3m48a1
     outputs:
       wheel_filename: ${{ steps.get_wheel_filename.outputs.WHEEL_FILENAME }}
     steps:

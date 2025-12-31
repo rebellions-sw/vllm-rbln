@@ -39,7 +39,7 @@ env:
 jobs:
   test_vllm_rbln:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
-    runs-on: runner-vllm-ci
+    runs-on: vllm-rbln-runner-c24m384a8
     env:
       NUM_INPUT_PROMPT: 1
       RBLN_VERBOSE: 6
