@@ -264,13 +264,6 @@ class RBLNOptimumScheduler(Scheduler):
                     self.kv_cache_manager.get_computed_blocks(
                         request)
 
-                self.kv_cache_manager.set_prefix_cached_blocks(
-                    request,
-                    num_new_local_computed_tokens,
-                    new_blocks,
-                    new_computed_blocks,
-                )
-
                 # Get the cached blocks for prefix caching.
                 # using new_computed_blocks, num_new_local_computed_tokens
                 if self.cache_config.enable_prefix_caching:

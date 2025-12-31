@@ -134,7 +134,6 @@ class CacheSearchManager:
 
         best_match = self._try_match_request(cached_blocks, skip_blocks,
                                              mapping_manager)
-        # self._cached_blocks_per_request[request_id] = best_match
         final_num_cached_tokens = sum(best_match.cached_lengths)
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -154,27 +153,18 @@ class CacheSearchManager:
                     miss_rate)
 
             if best_match.has_cache_hit:
-                cached_blocks = []
-                ob_to_ib_mapping = {}
-
-                for i, (ob, cached_length) in \
-                    enumerate(zip(best_match.cached_outer_blocks,
-                        best_match.cached_lengths)):
-                    ibs = mapping_manager.get_cached_inner_blocks_for_outer(ob)
-                    cached_num_ib = cached_length // self._config.ib_size
-                    cached_inner_blocks = ibs[:cached_num_ib]
-                    cached_blocks.extend(cached_inner_blocks)
-                    ob_to_ib_mapping[ob] = len(cached_inner_blocks)
-
+                real_cached_ibs = [
+                    cached_blocks[:self._calculate_cached_inner_blocks(length)]
+                    for length in best_match.cached_lengths
+                ]
                 # TODO specify the hit ratio?
                 logger.debug(
                     "[PFX] [CACHE-HIT] REQUEST=%s | "
                     "OB_COUNT=%d OB=%s | "
-                    "IB_COUNT=%d IB=%s | "
-                    "OB_TO_IB_MAP=%s", request_id,
+                    "IB_COUNT=%d IB=%s", request_id,
                     len(best_match.cached_outer_blocks),
-                    best_match.cached_outer_blocks, len(cached_blocks),
-                    cached_blocks, ob_to_ib_mapping)
+                    best_match.cached_outer_blocks, len(real_cached_ibs),
+                    real_cached_ibs)
 
         return best_match
 
@@ -490,15 +480,6 @@ class RBLNPrefixKVCacheManager:
         else:
             self._handle_prefill_allocation(request_id, num_new_ob,
                                             inner_blocks)
-
-    def set_cached_blocks(self, cached_blocks: list[int],
-                          allocated_outer_blocks: list[int]) -> None:
-        """
-        Mark the blocks associated with the request as cached.
-        """
-        self._mapping_manager.set_cached_blocks(cached_blocks,
-                                                allocated_outer_blocks,
-                                                self._config.block_ratio)
 
     def get_dummy_block(self) -> int:
         if not self.is_full_block_available():
