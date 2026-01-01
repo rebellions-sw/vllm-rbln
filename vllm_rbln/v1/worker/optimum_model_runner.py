@@ -52,7 +52,8 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.utils.optimum.common import select_bucket_size
-from vllm_rbln.utils.optimum.registry import get_rbln_model_info
+from vllm_rbln.utils.optimum.registry import (get_rbln_model_info,
+                                              is_enc_dec_arch)
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
@@ -115,6 +116,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 cache_config.cache_dtype]
 
         self.is_pooling_model = (model_config.runner_type == 'pooling')
+        self.is_enc_dec_model = is_enc_dec_arch(model_config.hf_config)
         # When `is_multimodal_raw_input_only_model` is True, it means that
         # it extract multimodal raw inputs only and deliver as raw inputs to
         # the model.
@@ -329,7 +331,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
         with record_function_or_nullcontext("Sample"):
-            if self.use_rbln_sampler:
+            if self.use_rbln_sampler and not model_input.is_prompt:
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
@@ -339,7 +341,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
-            if self.use_rbln_sampler:
+            if self.use_rbln_sampler and not model_input.is_prompt:
                 sampler_output.sampled_token_ids = \
                     sampler_output.sampled_token_ids[:num_reqs]
                 if sampler_output.logprobs_tensors is not None:
