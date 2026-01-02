@@ -197,6 +197,11 @@ jobs:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
     runs-on: ${{ matrix.test_type.runner }}
+    container:
+      image: mcr.microsoft.com/devcontainers/python:3.12
+    defaults:
+      run:
+        shell: bash
     needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
