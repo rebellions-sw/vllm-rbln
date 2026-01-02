@@ -15,8 +15,6 @@
 
 import copy
 import os
-import platform
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional, Union
 
 import torch
@@ -31,8 +29,7 @@ from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
-from vllm.platforms import CpuArchEnum, current_platform
-from vllm.platforms.cpu import CpuPlatform, LogicalCPUInfo
+from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
@@ -48,6 +45,7 @@ from vllm.v1.worker.worker_base import WorkerBase
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
+from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
 from vllm_rbln.worker.utils import get_maximum_num_blocks
 
 logger = init_logger(__name__)
@@ -167,87 +165,16 @@ class RBLNWorker(WorkerBase):
             selected_devices,
         )
 
-    def _set_cpu_affinity(self) -> None:
-        # Setup thread affinity based on NUMA nodes
-        if envs.VLLM_RBLN_NUMA and platform.system() == "Linux":
-            cpu_arch = current_platform.get_cpu_architecture()
-            if cpu_arch in (CpuArchEnum.POWERPC, CpuArchEnum.S390X):
-                # For S390X/POWERPC SMT-8/4/2
-                self.local_omp_cpuid = self._get_autobind_cpu_ids(
-                    lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4])
-            elif cpu_arch == CpuArchEnum.X86:
-                # For x86 SMT-2, use 1 CPU per core
-                self.local_omp_cpuid = self._get_autobind_cpu_ids(
-                    lambda cpus: cpus[-1:])
-            else:
-                self.local_omp_cpuid = "nobind"
-        else:
-            self.local_omp_cpuid = "nobind"
-
-        if self.local_omp_cpuid not in ("all", "nobind"):
-            # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
-            cpu_ids = [
-                int(cpu_id.strip())
-                for cpu_id in self.local_omp_cpuid.split(",")
-            ]
-            # Set CPU affinity for current process
-            try:
-                os.sched_setaffinity(0, cpu_ids)
-                # Verify CPU affinity was set correctly
-                actual_cpu_ids = sorted(os.sched_getaffinity(0))
-                expected_cpu_ids = sorted(cpu_ids)
-                if actual_cpu_ids != expected_cpu_ids:
-                    logger.warning(
-                        "CPU affinity mismatch for rank %d (local_rank %d): "
-                        "expected %s, but got %s",
-                        self.rank,
-                        self.local_rank,
-                        expected_cpu_ids,
-                        actual_cpu_ids,
-                    )
-                else:
-                    logger.info(
-                        "Set CPU affinity for rank %d (local_rank %d): CPUs %s",
-                        self.rank,
-                        self.local_rank,
-                        self.local_omp_cpuid,
-                    )
-            except OSError as e:
-                logger.error(
-                    "Failed to set CPU affinity for rank %d (local_rank %d): "
-                    "%s",
-                    self.rank,
-                    self.local_rank,
-                    str(e),
-                )
-                raise
-        elif self.local_omp_cpuid == "nobind":
-            logger.info(
-                "Skipping CPU affinity binding for rank %d (local_rank %d): "
-                "nobind",
-                self.rank,
-                self.local_rank,
-            )
-
-        # If OMP_NUM_THREADS is not defined in the environment, set it to 2.
-        if "OMP_NUM_THREADS" not in os.environ:
-            os.environ["OMP_NUM_THREADS"] = "2"
-            logger.info(
-                "Set OMP_NUM_THREADS to 2 for rank %d (local_rank %d)",
-                self.rank,
-                self.local_rank,
-            )
-        else:
-            logger.info(
-                "OMP_NUM_THREADS is already defined for rank %d "
-                "(local_rank %d): %s",
-                self.rank,
-                self.local_rank,
-                os.environ["OMP_NUM_THREADS"],
-            )
-
     def init_device(self) -> None:
-        self._set_cpu_affinity()
+        set_cpu_affinity(
+            self.rank,
+            self.local_rank,
+            self.parallel_config,
+        )
+        set_omp_num_threads(
+            self.rank,
+            self.local_rank,
+        )
 
         # Initialize the distributed environment.
         init_worker_distributed_environment(
@@ -402,115 +329,6 @@ class RBLNWorker(WorkerBase):
         if envs.VLLM_RBLN_METRICS:
             # FIXME - performance tracker atexit is not called
             self.model_runner.performance_tracker.print_final_stats()
-
-    def _get_autobind_cpu_ids(
-        self,
-        cpu_selector: Callable[[list[LogicalCPUInfo]], list[LogicalCPUInfo]],
-    ) -> str:
-        allowed_numa_nodes, logical_cpu_list = (
-            CpuPlatform.get_allowed_cpu_core_node_list())
-
-        # Calculate rank_across_dp for CPU binding
-        # This ensures different DP groups get different CPU allocations
-        world_size = self.parallel_config.world_size
-        if self.parallel_config.data_parallel_size > 1:
-            world_size_across_dp = self.parallel_config.world_size_across_dp
-            dp_rank = self.parallel_config.data_parallel_rank
-            rank_across_dp = dp_rank * world_size + self.local_rank
-        else:
-            world_size_across_dp = world_size
-            rank_across_dp = self.rank
-
-        # Group CPUs by NUMA node
-        numa_node_to_cpus: dict[int, list[LogicalCPUInfo]] = {}
-        for cpu_info in logical_cpu_list:
-            numa_node = cpu_info.numa_node
-            if numa_node not in numa_node_to_cpus:
-                numa_node_to_cpus[numa_node] = []
-            numa_node_to_cpus[numa_node].append(cpu_info)
-
-        # Filter to only allowed NUMA nodes
-        available_numa_nodes = [
-            n for n in allowed_numa_nodes if n in numa_node_to_cpus
-        ]
-
-        if not available_numa_nodes:
-            logger.error(
-                "Auto thread-binding failed: no available NUMA nodes "
-                "with allowed CPUs. Please try to bind threads manually.")
-            return "all"
-
-        numa_node_idx = rank_across_dp % len(available_numa_nodes)
-        selected_numa_node = available_numa_nodes[numa_node_idx]
-        numa_node_cpu_list = numa_node_to_cpus[selected_numa_node]
-        ranks_in_same_numa = [
-            r for r in range(world_size_across_dp)
-            if r % len(available_numa_nodes) == numa_node_idx
-        ]
-
-        # Select CPUs from each physical core via cpu_selector
-        core_to_cpus: dict[int, list[LogicalCPUInfo]] = {}
-        for cpu_info in numa_node_cpu_list:
-            if cpu_info.physical_core not in core_to_cpus:
-                core_to_cpus[cpu_info.physical_core] = []
-            core_to_cpus[cpu_info.physical_core].append(cpu_info)
-        selected_cpu_list = []
-        for cpu_list in core_to_cpus.values():
-            cpu_list = sorted(cpu_list, key=lambda x: x.id)
-            selected_cpu_list.extend(cpu_selector(cpu_list))
-        selected_cpu_list = sorted(selected_cpu_list, key=lambda x: x.id)
-
-        # Always divide CPUs among ranks in the same NUMA node
-        # for exclusive allocation
-        if len(ranks_in_same_numa) > 1:
-            cpus_per_rank = len(selected_cpu_list) // len(ranks_in_same_numa)
-            remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
-
-            rank_position = ranks_in_same_numa.index(rank_across_dp)
-            start_idx = rank_position * cpus_per_rank + min(
-                rank_position, remainder)
-            end_idx = (start_idx + cpus_per_rank +
-                       (1 if rank_position < remainder else 0))
-            logical_cpu_list = selected_cpu_list[start_idx:end_idx]
-        else:
-            logical_cpu_list = selected_cpu_list
-
-        if not logical_cpu_list:
-            logger.warning(
-                "Auto thread-binding: no CPUs allocated for rank %d "
-                "(rank_across_dp %d). Falling back to default.",
-                self.rank,
-                rank_across_dp,
-            )
-            return "all"
-
-        # Log binding information
-        if len(ranks_in_same_numa) > 1:
-            logger.info(
-                "auto thread-binding: rank %d (rank_across_dp %d) "
-                "-> NUMA node %d, CPUs: %s (exclusive allocation, "
-                "shared NUMA node with ranks %s, id, physical core): %s",
-                self.rank,
-                rank_across_dp,
-                selected_numa_node,
-                ",".join(str(x.id) for x in logical_cpu_list),
-                [r for r in ranks_in_same_numa if r != rank_across_dp],
-                [(x.id, x.physical_core) for x in logical_cpu_list],
-            )
-        else:
-            logger.info(
-                "auto thread-binding: rank %d (rank_across_dp %d) "
-                "-> NUMA node %d, CPUs: %s (exclusive allocation, "
-                "id, physical core): %s",
-                self.rank,
-                rank_across_dp,
-                selected_numa_node,
-                ",".join(str(x.id) for x in logical_cpu_list),
-                [(x.id, x.physical_core) for x in logical_cpu_list],
-            )
-
-        return ",".join([str(x.id) for x in logical_cpu_list])
-
 
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
