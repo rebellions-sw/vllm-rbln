@@ -115,14 +115,15 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Get commit message if not provided
+      - name: Get commit message
         id: get_commit_message
         run: |
-          if [ -n "${{ inputs.pr_number }}" ]; then
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then
             COMMIT_MESSAGE=$(git log -1 --pretty=%B HEAD^2)
           else
             COMMIT_MESSAGE=$(git log -1 --pretty=%B)
           fi
+          echo "Commit message: $COMMIT_MESSAGE"
           echo "message<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -228,14 +229,15 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Get commit message if not provided
+      - name: Get commit message
         id: get_commit_message
         run: |
-          if [ -n "${{ inputs.pr_number }}" ]; then
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then
             COMMIT_MESSAGE=$(git log -1 --pretty=%B HEAD^2)
           else
             COMMIT_MESSAGE=$(git log -1 --pretty=%B)
           fi
+          echo "Commit message: $COMMIT_MESSAGE"
           echo "message<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
