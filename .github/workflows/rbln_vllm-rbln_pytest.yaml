@@ -150,11 +150,13 @@ jobs:
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
 
       - name: Set up Python 3.12
+        if: steps.should_skip.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install rebel-compiler
+        if: steps.should_skip.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
@@ -164,11 +166,13 @@ jobs:
           python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
 
       - name: Download wheel artifact
+        if: steps.should_skip.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
 
       - name: Install local vllm-rbln package and dependencies
+        if: steps.should_skip.outputs.skip != 'true'
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
           echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
@@ -259,10 +263,12 @@ jobs:
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
 
       - name: Install uv CLI
+        if: steps.should_skip.outputs.skip != 'true'
         run: |
           pip install uv
 
       - name: Install rebel-compiler
+        if: steps.should_skip.outputs.skip != 'true'
         run: |
           apt-get update
           apt-get install -y build-essential
@@ -272,11 +278,13 @@ jobs:
           uv pip install --system --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
 
       - name: Download wheel artifact
+        if: steps.should_skip.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
 
       - name: Install local vllm-rbln package and dependencies
+        if: steps.should_skip.outputs.skip != 'true'
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 15
