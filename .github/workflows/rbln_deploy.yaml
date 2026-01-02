@@ -25,10 +25,10 @@ jobs:
           python-version: "3.13"
       - name: Install build dependencies
         run: |
-          pip3 install packaging setuptools wheel setuptools_scm
+          pip3 install packaging setuptools wheel setuptools_scm build
       - name: Build package
         run: |
-          python3 setup.py bdist_wheel
+          python3 -m build --wheel
       - name: Publish package
         run: |
           pip3 install twine
