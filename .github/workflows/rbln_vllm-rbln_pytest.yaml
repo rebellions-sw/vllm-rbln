@@ -250,14 +250,18 @@ jobs:
           
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
 
+      - name: Install uv CLI
+        run: |
+          pip install uv
+
       - name: Install rebel-compiler
         run: |
           apt-get update
           apt-get install -y build-essential
-          python3 -m pip uninstall rebel-compiler -y
+          uv pip uninstall --system rebel-compiler -y
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
-          python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+          uv pip install --system --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -265,12 +269,19 @@ jobs:
           name: vllm-wheel
 
       - name: Install local vllm-rbln package and dependencies
-        run: |
-          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
-          echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
-          VERSION=${{ inputs.optimum_rbln_version }}
-          pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
-          echo "optimum-rbln $VERSION"
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          retry_on: any
+          shell: bash
+          command: |
+            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+            echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
+            VERSION=${{ inputs.optimum_rbln_version }}
+            uv pip install --system --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
+            echo "optimum-rbln $VERSION"
 
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
