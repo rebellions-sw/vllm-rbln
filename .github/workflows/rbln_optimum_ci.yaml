@@ -65,7 +65,7 @@ jobs:
           apt-get update
           apt-get install -y build-essential
           export CXX=$(which g++)
-          uv pip uninstall --system rebel-compiler -y
+          uv pip uninstall --system rebel-compiler
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
           uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
@@ -83,7 +83,7 @@ jobs:
 
       - name: Uninstall existing vllm-rbln
         run: |
-          uv pip uninstall --system -y vllm-rbln || true
+          uv pip uninstall --system vllm-rbln || true
 
       - name: Build vllm-rbln wheel
         run: |
