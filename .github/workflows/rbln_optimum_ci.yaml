@@ -50,11 +50,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
@@ -77,6 +72,10 @@ jobs:
           ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
+
+      - name: Fix git ownership
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Uninstall existing vllm-rbln
         run: |
