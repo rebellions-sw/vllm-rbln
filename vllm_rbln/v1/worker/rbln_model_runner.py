@@ -1683,7 +1683,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # make RBLN decode dummy intermediate tensors
             # FIXME - based on assumption, multiple batch decode
             batch_size = len(requests)
-            seq_len = 1
+            assert batch_size >= 1
+            num_computed_tokens = requests[0].num_computed_tokens
+            if num_computed_tokens == 0:
+                # FIXME(RBLN)
+                # prefill - single batch prefill
+                assert batch_size == 1
+                prompt_token_ids = requests[0].prompt_token_ids
+                seq_len = len(prompt_token_ids)
+            else:
+                # decode - single token prompt
+                seq_len = 1
             if self.intermediate_tensors is None:
                 self.intermediate_tensors = (
                     self.model.make_empty_intermediate_tensors(
