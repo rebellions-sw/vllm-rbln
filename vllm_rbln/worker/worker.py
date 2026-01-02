@@ -271,7 +271,10 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         distributed_backend = self.parallel_config.distributed_executor_backend
         if env_var not in os.environ or distributed_backend == "ray":
-            device_ids = [str(i) for i in range(total_device_count)]
+            dev_begin = total_device_count * \
+                self.parallel_config.data_parallel_rank
+            dev_end = dev_begin + total_device_count
+            device_ids = [str(i) for i in range(dev_begin, dev_end)]
         else:
             device_ids = os.environ[env_var].split(",")
 
@@ -634,13 +637,13 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
     def init_distributed_environment(self):
         # Set envs for RCCL
-        os.environ['LOCAL_RANK'] = str(self.local_rank)
+        os.environ['LOCAL_RANK'] = str(self.rank)
         os.environ['WORLD_SIZE'] = str(self.parallel_config.world_size)
 
         if self.parallel_config.data_parallel_size > 1:
             world_size = self.parallel_config.world_size
             rank = self.parallel_config.data_parallel_rank * world_size
-            rank += self.local_rank
+            rank += self.rank
             world_size = self.parallel_config.world_size_across_dp
             os.environ['LOCAL_RANK'] = str(rank)
             os.environ['WORLD_SIZE'] = str(world_size)
