@@ -117,9 +117,12 @@ jobs:
 
       - name: Get commit message if not provided
         id: get_commit_message
-        if: ${{ inputs.commit_message == '' }}
         run: |
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          if [ -n "${{ inputs.pr_number }}" ]; then
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B HEAD^2)
+          else
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          fi
           echo "message<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -227,9 +230,12 @@ jobs:
 
       - name: Get commit message if not provided
         id: get_commit_message
-        if: ${{ inputs.commit_message == '' }}
         run: |
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          if [ -n "${{ inputs.pr_number }}" ]; then
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B HEAD^2)
+          else
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          fi
           echo "message<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
