@@ -83,7 +83,7 @@ jobs:
 
       - name: Uninstall existing vllm-rbln
         run: |
-          uv pip uninstall --system vllm-rbln || true
+          uv pip uninstall --system vllm-rbln
 
       - name: Build vllm-rbln wheel
         run: |
@@ -100,9 +100,8 @@ jobs:
           shell: bash
           command: |
             uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
-            echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
             VERSION=${{ inputs.optimum_rbln_version }}
-            uv pip install --system --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
+            uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
             echo "optimum-rbln $VERSION"
 
       - name: Run decoder-only test (eager attn) (V1)
