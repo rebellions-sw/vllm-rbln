@@ -90,7 +90,7 @@ jobs:
 
   pytest:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
-    name: Pytest (${{ matrix.test_type }})
+    name: Pytest (${{ matrix.test_type.name }})
     runs-on: ${{ matrix.test_type.runner }}
     needs: [build-vllm-rbln]
     strategy:
@@ -162,11 +162,11 @@ jobs:
       - name: Install rebel-compiler
         run: |
           if [[ "${{ matrix.test_type.name }}" == "openai" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y build-essential
-          else
             apt-get update
             apt-get install -y build-essential
+          else
+            sudo apt-get update
+            sudo apt-get install -y build-essential
           fi
           
           python3 -m pip uninstall rebel-compiler -y
