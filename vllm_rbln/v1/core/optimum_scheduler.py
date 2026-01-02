@@ -365,7 +365,7 @@ class RBLNOptimumScheduler(Scheduler):
                             "Request %s is preempted. Freed block(s): %s "
                             "Already generated tokens: %d",
                             preempted_req.request_id, preempted_blocks,
-                            len(preempted_req.num_computed_tokens))
+                            len(preempted_req.output_token_ids))
                         preempted_req.status = RequestStatus.PREEMPTED
                         preempted_req.num_computed_tokens = 0
                         if self.log_stats:
