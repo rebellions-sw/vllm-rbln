@@ -76,7 +76,6 @@ from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.spec_decode.ngram_proposer import NgramProposer
 from vllm.v1.structured_output.utils import apply_grammar_bitmask
 from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
-from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.kv_connector_model_runner_mixin import (
     KVConnectorModelRunnerMixin)
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
@@ -92,6 +91,7 @@ from vllm_rbln.lora.mask import LoRAMask
 from vllm_rbln.v1.attention.backends.flash_attention import (
     RBLNFlashAttentionMetadataBuilder)
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
+from vllm_rbln.v1.worker.rbln_input_batch import CachedRequestState, InputBatch
 from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
@@ -1505,7 +1505,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # make RBLN decode dummy intermediate tensors
             # FIXME - based on assumption, multiple batch decode
             batch_size = len(requests)
-            seq_len = 1
+            assert batch_size >= 1
+            num_computed_tokens = requests[0].num_computed_tokens
+            if num_computed_tokens == 0:
+                # FIXME(RBLN)
+                # prefill - single batch prefill
+                assert batch_size == 1
+                prompt_token_ids = requests[0].prompt_token_ids
+                seq_len = len(prompt_token_ids)
+            else:
+                # decode - single token prompt
+                seq_len = 1
             if self.intermediate_tensors is None:
                 self.intermediate_tensors = (
                     self.model.make_empty_intermediate_tensors(
