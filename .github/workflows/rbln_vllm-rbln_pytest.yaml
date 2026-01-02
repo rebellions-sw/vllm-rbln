@@ -177,9 +177,6 @@ jobs:
             "worker")
               pytest tests/v1/worker -vv --durations 0
               ;;
-            "openai")
-              pytest tests/entrypoints/openai -vv --durations 0
-              ;;
           esac
 
       - name: Skip message
@@ -187,7 +184,7 @@ jobs:
         run: |
           echo "Found [skip-${{ matrix.test_type }}] in commit message, skipping CI"
 
-pytest-openai:
+  pytest-openai:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type }})
     runs-on: vllm-rbln-runner-c3m48a1
