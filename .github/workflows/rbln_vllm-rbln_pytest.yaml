@@ -54,7 +54,8 @@ env:
 jobs:
   build-vllm-rbln:
     name: Build vllm-rbln wheel
-    runs-on: vllm-rbln-runner-c3m48a1
+    # runs-on: vllm-rbln-runner-c3m48a1
+    runs-on: ubuntu-latest-rbln
     outputs:
       wheel_filename: ${{ steps.get_wheel_filename.outputs.WHEEL_FILENAME }}
     steps:
@@ -91,12 +92,12 @@ jobs:
   pytest:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type }})
-    runs-on: vllm-rbln-runner-c3m48a1
+    runs-on: ubuntu-latest-rbln
     needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
-        test_type: [core, worker, openai]
+        test_type: [core, worker]
     steps:
       - name: Checkout the vllm-rbln repository
         uses: actions/checkout@v4
@@ -180,6 +181,84 @@ jobs:
               pytest tests/entrypoints/openai -vv --durations 0
               ;;
           esac
+
+      - name: Skip message
+        if: steps.should_skip.outputs.skip == 'true'
+        run: |
+          echo "Found [skip-${{ matrix.test_type }}] in commit message, skipping CI"
+
+pytest-openai:
+    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
+    name: Pytest (${{ matrix.test_type }})
+    runs-on: vllm-rbln-runner-c3m48a1
+    needs: [build-vllm-rbln]
+    strategy:
+      fail-fast: ${{ inputs.fail_fast }}
+      matrix:
+        test_type: [openai]
+    steps:
+      - name: Checkout the vllm-rbln repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Get commit message if not provided
+        id: get_commit_message
+        if: ${{ inputs.commit_message == '' }}
+        run: |
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check if test should be skipped
+        id: should_skip
+        run: |
+          COMMIT_MESSAGE="${{ steps.get_commit_message.outputs.message }}"
+          SKIP=false
+          if [[ "$COMMIT_MESSAGE" == *"[skip openai]"* ]]; then
+            SKIP=true
+          fi
+
+          echo "skip=$SKIP" >> $GITHUB_OUTPUT
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install rebel-compiler
+        run: |
+          apt-get update
+          apt-get install -y build-essential
+          python3 -m pip uninstall rebel-compiler -y
+          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
+          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
+          python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vllm-wheel
+
+      - name: Install local vllm-rbln package and dependencies
+        run: |
+          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+          echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
+          VERSION=${{ inputs.optimum_rbln_version }}
+          pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
+          echo "optimum-rbln $VERSION"
+
+      - name: Run pytest
+        if: steps.should_skip.outputs.skip != 'true'
+        env:
+          VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
+          REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
+
+        run: |
+          pytest tests/entrypoints/openai -vv --durations 0
 
       - name: Skip message
         if: steps.should_skip.outputs.skip == 'true'

@@ -13,7 +13,7 @@ env:
 
 jobs:
   check-skip-ci:
-    runs-on: vllm-rbln-runner-c3m48a1
+    runs-on: ubuntu-latest-rbln
     outputs:
       should_skip: ${{ contains(github.event.pull_request.head.commit.message, '[skip ci]') }}
     steps:
@@ -27,7 +27,7 @@ jobs:
 
   check-team-member:
     needs: check-skip-ci
-    runs-on: vllm-rbln-runner-c3m48a1
+    runs-on: ubuntu-latest-rbln
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' }}
     outputs:
       is_team_member: ${{ steps.check_member.outputs.IS_TEAM_MEMBER }}
