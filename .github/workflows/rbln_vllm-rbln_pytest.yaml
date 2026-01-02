@@ -91,12 +91,7 @@ jobs:
   pytest:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
-    runs-on: ${{ matrix.test_type.runner }}
-    container:
-      image: mcr.microsoft.com/devcontainers/python:3.12
-    defaults:
-      run:
-        shell: bash
+    runs-on: ubuntu-latest-rbln
     needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
@@ -105,16 +100,10 @@ jobs:
           [
             {
               name : "core",
-              runner : "ubuntu-latest-rbln"
             },
             {
               name : "worker",
-              runner : "ubuntu-latest-rbln"
             },
-            {
-              name : "openai",
-              runner : "sw-k8s-ca22-8"
-            }
           ]
     steps:
       - name: Checkout the vllm-rbln repository
@@ -150,11 +139,6 @@ jobs:
                 SKIP=true
               fi
               ;;
-            "openai")
-              if [[ "$COMMIT_MESSAGE" == *"[skip openai]"* ]]; then
-                SKIP=true
-              fi
-              ;;
           esac
           
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
@@ -166,14 +150,8 @@ jobs:
 
       - name: Install rebel-compiler
         run: |
-          if [[ "${{ matrix.test_type.name }}" == "openai" ]]; then
-            apt-get update
-            apt-get install -y build-essential
-          else
-            sudo apt-get update
-            sudo apt-get install -y build-essential
-          fi
-          
+          sudo apt-get update
+          sudo apt-get install -y build-essential
           python3 -m pip uninstall rebel-compiler -y
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
@@ -206,6 +184,96 @@ jobs:
             "worker")
               pytest tests/v1/worker -vv --durations 0
               ;;
+          esac
+
+      - name: Skip message
+        if: steps.should_skip.outputs.skip == 'true'
+        run: |
+          echo "Found [skip-${{ matrix.test_type.name }}] in commit message, skipping CI"
+
+  pytest-arc:
+    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
+    name: Pytest (${{ matrix.test_type.name }})
+    runs-on: ${{ matrix.test_type.runner }}
+    needs: [build-vllm-rbln]
+    strategy:
+      fail-fast: ${{ inputs.fail_fast }}
+      matrix:
+        test_type: 
+          [
+            {
+              name : "openai",
+              runner : "sw-k8s-ca22-8"
+            }
+          ]
+    steps:
+      - name: Checkout the vllm-rbln repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Get commit message if not provided
+        id: get_commit_message
+        if: ${{ inputs.commit_message == '' }}
+        run: |
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check if test should be skipped
+        id: should_skip
+        run: |
+          COMMIT_MESSAGE="${{ steps.get_commit_message.outputs.message }}"
+          SKIP=false
+          
+          case "${{ matrix.test_type.name }}" in
+            "openai")
+              if [[ "$COMMIT_MESSAGE" == *"[skip openai]"* ]]; then
+                SKIP=true
+              fi
+              ;;
+          esac
+          
+          echo "skip=$SKIP" >> $GITHUB_OUTPUT
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install rebel-compiler
+        run: |
+          apt-get update
+          apt-get install -y build-essential
+          python3 -m pip uninstall rebel-compiler -y
+          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
+          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
+          python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vllm-wheel
+
+      - name: Install local vllm-rbln package and dependencies
+        run: |
+          pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+          echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
+          VERSION=${{ inputs.optimum_rbln_version }}
+          pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
+          echo "optimum-rbln $VERSION"
+
+      - name: Run pytest
+        if: steps.should_skip.outputs.skip != 'true'
+        env:
+          VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
+          REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
+
+        run: |
+          case "${{ matrix.test_type.name }}" in
             "openai")
               pytest tests/entrypoints/openai -vv --durations 0
               ;;
