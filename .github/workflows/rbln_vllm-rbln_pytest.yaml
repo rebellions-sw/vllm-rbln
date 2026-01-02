@@ -91,7 +91,7 @@ jobs:
   pytest:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
-    runs-on: ubuntu-latest-rbln
+    runs-on: ${{ matrix.test_type.runner }}
     needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
@@ -100,9 +100,11 @@ jobs:
           [
             {
               name : "core",
+              runner : "ubuntu-latest-rbln"
             },
             {
               name : "worker",
+              runner : "ubuntu-latest-rbln"
             },
           ]
     steps:
