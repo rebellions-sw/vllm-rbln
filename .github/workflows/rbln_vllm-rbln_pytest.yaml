@@ -108,7 +108,7 @@ jobs:
             },
             {
               name : "openai",
-              runner : "vllm-rbln-runner-c3m48a1"
+              runner : "sw-k8s-ca22-8"
             }
           ]
     steps:
