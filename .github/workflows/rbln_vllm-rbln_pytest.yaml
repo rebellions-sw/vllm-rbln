@@ -92,6 +92,11 @@ jobs:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
     runs-on: ${{ matrix.test_type.runner }}
+    container:
+      image: mcr.microsoft.com/devcontainers/python:3.12
+    defaults:
+      run:
+        shell: bash
     needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
@@ -194,7 +199,7 @@ jobs:
           REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
         run: |
-          case "${{ matrix.test_type }}" in
+          case "${{ matrix.test_type.name }}" in
             "core")
               pytest tests/v1/core -vv --durations 0
               ;;
@@ -209,4 +214,4 @@ jobs:
       - name: Skip message
         if: steps.should_skip.outputs.skip == 'true'
         run: |
-          echo "Found [skip-${{ matrix.test_type }}] in commit message, skipping CI"
+          echo "Found [skip-${{ matrix.test_type.name }}] in commit message, skipping CI"

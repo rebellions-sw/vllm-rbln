@@ -40,6 +40,11 @@ jobs:
   test_vllm_rbln:
     if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     runs-on: sw-k8s-ca22-8
+    container:
+      image: mcr.microsoft.com/devcontainers/python:3.12
+    defaults:
+      run:
+        shell: bash
     env:
       NUM_INPUT_PROMPT: 1
       RBLN_VERBOSE: 6
