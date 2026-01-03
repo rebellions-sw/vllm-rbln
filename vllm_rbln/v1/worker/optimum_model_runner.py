@@ -52,8 +52,7 @@ from vllm_rbln.model_executor.model_loader.rbln_model_loader import (
     get_optimum_model)
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.utils.optimum.common import select_bucket_size
-from vllm_rbln.utils.optimum.registry import (get_rbln_model_info,
-                                              is_enc_dec_arch)
+from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
@@ -116,7 +115,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 cache_config.cache_dtype]
 
         self.is_pooling_model = (model_config.runner_type == 'pooling')
-        self.is_enc_dec_model = is_enc_dec_arch(model_config.hf_config)
         # When `is_multimodal_raw_input_only_model` is True, it means that
         # it extract multimodal raw inputs only and deliver as raw inputs to
         # the model.
