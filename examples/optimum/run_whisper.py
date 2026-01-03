@@ -23,15 +23,18 @@ from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 def generate_prompts(batch_size: int, model_id: str):
     dataset = load_dataset("distil-whisper/librispeech_asr-noise",
                            "test-pub-noise",
+                           streaming=True,
                            split="40")
-
-    messages = [{
-        "prompt": "<|startoftranscript|>",
-        "multi_modal_data": {
-            "audio": (dataset[i]["audio"]["array"],
-                      dataset[i]["audio"]["sampling_rate"])
-        },
-    } for i in range(batch_size)]
+    dataset = dataset.take(batch_size)
+    messages = []
+    for item in dataset:
+        messages.append({
+            "prompt": "<|startoftranscript|>",
+            "multi_modal_data": {
+                "audio":
+                (item["audio"]["array"], item["audio"]["sampling_rate"])
+            },
+        })
 
     return messages
 
