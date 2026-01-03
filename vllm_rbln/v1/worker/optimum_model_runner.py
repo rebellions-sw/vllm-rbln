@@ -56,6 +56,7 @@ from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
+from vllm_rbln.v1.worker.utils import rbln_guard_filter_fn
 from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
@@ -265,14 +266,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     )
             torch._dynamo.config.recompile_limit = len(
                 self.bucket_sizes) * len(WARM_UP_CONFIGS)
-            self.sampler = torch.compile(
-                self.sampler,
-                dynamic=False,
-                options={
-                    "guard_filter_fn":
-                    torch.compiler.keep_tensor_guards_unsafe,
-                },
-                fullgraph=False)
+            self.sampler = torch.compile(self.sampler,
+                                         dynamic=False,
+                                         options={
+                                             "guard_filter_fn":
+                                             rbln_guard_filter_fn,
+                                         },
+                                         fullgraph=False)
 
     def get_model(self) -> nn.Module:
         return self.model
