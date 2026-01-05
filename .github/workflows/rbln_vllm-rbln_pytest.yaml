@@ -301,9 +301,12 @@ jobs:
           command: |
             uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
             echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
-            VERSION=${{ inputs.optimum_rbln_version }}
-            uv pip install --system --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
-            echo "optimum-rbln $VERSION"
+            if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+              uv pip install --system --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}")
+              echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+            else
+              uv pip install --system --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }}
+            fi
 
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
