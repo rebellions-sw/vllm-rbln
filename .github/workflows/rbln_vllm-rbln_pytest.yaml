@@ -223,7 +223,7 @@ jobs:
           [
             {
               name : "openai",
-              runner : "sw-k8s-ca22-8"
+              runner : "sw-k8s-ca22-1"
             }
           ]
     steps:
