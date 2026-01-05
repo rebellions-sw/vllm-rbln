@@ -90,7 +90,6 @@ jobs:
           retention-days: 7
 
   pytest:
-    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
     runs-on: ${{ matrix.test_type.runner }}
     needs: [build-vllm-rbln]
@@ -209,7 +208,6 @@ jobs:
           echo "Found [skip-${{ matrix.test_type.name }}] in commit message, skipping CI"
 
   pytest-arc:
-    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
     runs-on: ${{ matrix.test_type.runner }}
     container:
