@@ -217,6 +217,18 @@ class RBLNWorker(WorkerBase):
         self.model_runner.initialize_kv_cache(kv_cache_config)
 
     def compile_or_warm_up_model(self) -> None:
+        if self.parallel_config.data_parallel_size > 1:
+            if envs.VLLM_RBLN_DP_IMPL == "padded_decode":
+                max_num_batched_tokens = \
+                    self.scheduler_config.max_num_batched_tokens
+                max_num_seqs = self.scheduler_config.max_num_seqs
+                # TODO: consider relaxing this constraint
+                assert max_num_batched_tokens % max_num_seqs == 0, \
+                    "max_num_batched_tokens must be divisible by max_num_seqs"
+            elif envs.VLLM_RBLN_DP_IMPL == "dummy_prefill":
+                raise ValueError("dummy_prefill is not supported in v1 worker" \
+                                 "and will be deprecated in the future")
+
         if (self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL
                 or not envs.VLLM_RBLN_ENABLE_WARM_UP):
             logger.warning("skipping compile_or_warm_up_model")
