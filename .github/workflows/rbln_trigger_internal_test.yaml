@@ -32,7 +32,6 @@ jobs:
       optimum_rbln_version: ${{ inputs.optimum_rbln_version }}
 
   vllm-rbln-optimum-ci:
-    # needs: [get-compiler-version, vllm-rbln-pytest]
     needs: [get-compiler-version]
     uses: ./.github/workflows/rbln_optimum_ci.yaml
     secrets: inherit
