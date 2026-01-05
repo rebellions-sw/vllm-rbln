@@ -130,8 +130,9 @@ jobs:
 
       - name: Check if test should be skipped
         id: should_skip
+        env:
+          COMMIT_MESSAGE: ${{ steps.get_commit_message.outputs.message }}
         run: |
-          COMMIT_MESSAGE="${{ steps.get_commit_message.outputs.message }}"
           SKIP=false
           
           case "${{ matrix.test_type.name }}" in
