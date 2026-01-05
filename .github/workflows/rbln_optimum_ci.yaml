@@ -52,8 +52,8 @@ jobs:
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
-        run: |
-          echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
+        uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+        secrets: inherit
 
       - name: Install uv CLI
         run: |
@@ -66,7 +66,7 @@ jobs:
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
           uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
 
       - name: Checkout current repository
@@ -142,8 +142,8 @@ jobs:
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
-        run: |
-          echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
+        uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+        secrets: inherit
 
       - name: Install uv CLI
         run: |
@@ -156,7 +156,7 @@ jobs:
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
           uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
 
       - name: Checkout current repository
@@ -276,8 +276,8 @@ jobs:
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
-        run: |
-          echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
+        uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+        secrets: inherit
 
       - name: Install uv CLI
         run: |
@@ -290,7 +290,7 @@ jobs:
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
           uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
 
       - name: Checkout current repository
