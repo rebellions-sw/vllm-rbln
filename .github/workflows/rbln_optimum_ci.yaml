@@ -9,11 +9,11 @@ on:
         type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
-        required: false
+        required: true
         type: string
       optimum_rbln_version:
         description: "Version of optimum-rbln to use (optional)"
-        required: false
+        required: true
         type: string
   workflow_call:
     inputs:
@@ -52,7 +52,8 @@ jobs:
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
-        uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+        run: |
+          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
 
       - name: Install uv CLI
         run: |
@@ -141,7 +142,8 @@ jobs:
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
-        uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+        run: |
+          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
 
       - name: Install uv CLI
         run: |
@@ -274,7 +276,8 @@ jobs:
       - name: Get latest rebel_compiler version
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
-        uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+        run: |
+          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
 
       - name: Install uv CLI
         run: |
