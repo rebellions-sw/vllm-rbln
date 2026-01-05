@@ -71,7 +71,13 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
             False, None), (
                 "Prefix caching is not supported with encoder-decoder models. "
                 "Please set `enable_prefix_caching` to False.")
-        rbln_model = RBLNOptimumEncoderDecoder(vllm_config)
+        architectures = getattr(model_config.hf_config, "architectures", [])
+        if architectures[0] in ["WhisperForConditionalGeneration"]:
+            rbln_model = RBLNOptimumWhisperForConditionalGeneration(
+                vllm_config)
+        else:
+            # TODO: It will be deprecated in the future.
+            rbln_model = RBLNOptimumEncoderDecoder(vllm_config)
     elif is_pooling_arch(model_config.hf_config):
         assert vllm_config.cache_config.enable_prefix_caching in (
             False, None
