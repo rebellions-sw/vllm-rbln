@@ -45,6 +45,7 @@ on:
         type: string
 
 env:
+  RBLN_VERBOSE: 6
   REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
   REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
   REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
@@ -130,9 +131,9 @@ jobs:
 
       - name: Check if test should be skipped
         id: should_skip
+        env:
+          COMMIT_MESSAGE: ${{ steps.get_commit_message.outputs.message }}
         run: |
-          COMMIT_MESSAGE="${{ steps.get_commit_message.outputs.message }}"
-          echo "Checking commit message: $COMMIT_MESSAGE"
           SKIP=false
           
           case "${{ matrix.test_type.name }}" in
@@ -254,8 +255,9 @@ jobs:
 
       - name: Check if test should be skipped
         id: should_skip
+        env:
+          COMMIT_MESSAGE: ${{ steps.get_commit_message.outputs.message }}
         run: |
-          COMMIT_MESSAGE="${{ steps.get_commit_message.outputs.message }}"
           SKIP=false
           
           case "${{ matrix.test_type.name }}" in
