@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   sync-and-call:
-    runs-on: runner-vllm-ci
+    runs-on: ubuntu-latest-rbln
     permissions:
       contents: write
     outputs:
@@ -90,8 +90,8 @@ jobs:
     secrets: inherit
 
   cleanup:
-    runs-on: runner-vllm-ci
-    needs: [sync-and-call, check_code_quaility, check_internal_tests]
+    runs-on: ubuntu-latest-rbln
+    needs: [sync-and-call, check_code_quaility, check_device_run]
     if: always()
     permissions:
       contents: write
