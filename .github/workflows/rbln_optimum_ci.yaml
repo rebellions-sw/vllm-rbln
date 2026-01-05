@@ -37,7 +37,8 @@ env:
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
-  Optimum Test CI RSD 1:
+  test_vllm_rbln_rsd1:
+    name: Optimum Test CI RSD 1
     runs-on: sw-k8s-ca22-1
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -127,7 +128,8 @@ jobs:
           --p_prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/p_prompts.txt
           --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_bge_m3_result_qp_prompts.json
 
-  Optimum Test CI RSD 4:
+  test_vllm_rbln_rsd4:
+    name: Optimum Test CI RSD 4
     runs-on: sw-k8s-ca22-4
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -261,7 +263,8 @@ jobs:
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/paligemma-3b-8k-b4
 
-  Optimum Test CI RSD 8:
+  test_vllm_rbln_rsd8:
+    name: Optimum Test CI RSD 8
     runs-on: sw-k8s-ca22-8
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
