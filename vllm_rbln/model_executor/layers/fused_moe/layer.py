@@ -436,13 +436,8 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
         # 4. dp_group all reduce - {0+2}, {1+3}, {0+2}, {1+3}
         # 5. select each DP rank output
         # 6. to_group all reduce - {0+2+1+3}, {0+2+1+3}, {0+2+1+3}, {0+2+1+3}
-        cu_tokens_across_dp_cpu = get_forward_context(
-        ).dp_metadata.cu_tokens_across_dp_cpu
-
-        hidden_states = self.naive_multicast(hidden_states,
-                                             cu_tokens_across_dp_cpu)
-        router_logits = self.naive_multicast(router_logits,
-                                             cu_tokens_across_dp_cpu)
+        hidden_states = self.naive_multicast(hidden_states)
+        router_logits = self.naive_multicast(router_logits)
 
     # Matrix multiply.
     final_hidden_states = self.quant_method.apply(
@@ -480,8 +475,7 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
     return final_hidden_states
 
 
-def fused_moe_naive_multicast_rbln(self, x: torch.Tensor,
-                                   cu_tokens_across_dp_cpu: torch.Tensor):
+def fused_moe_naive_multicast_rbln(self, x: torch.Tensor):
     # as-is : [num_tokens, hidden_size]
     # to-be : buffer = [data_parallel_size*batch, seq, hidden_size], broadcast
     #         hidden = [batch, seq, hidden_size]

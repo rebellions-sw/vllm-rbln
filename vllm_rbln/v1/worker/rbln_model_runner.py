@@ -1212,9 +1212,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # Early exit.
             return 0, None
 
-        num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
-            num_tokens, dp_size, dp_rank)
-        max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp).item()
+        max_tokens_across_dp_cpu = num_tokens
         num_tokens_after_padding = torch.tensor([max_tokens_across_dp_cpu] *
                                                 dp_size,
                                                 device="cpu",
