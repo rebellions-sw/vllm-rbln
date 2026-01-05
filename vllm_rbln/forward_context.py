@@ -32,14 +32,13 @@ logger = init_logger(__name__)
 @dataclass
 class RBLNDPMetadata(DPMetadata):
     max_pads_across_dp: int = 0
-    num_tokens_across_dp_cpu: Optional[torch.Tensor] = None
 
     @staticmethod
     def make(
         vllm_config: VllmConfig,
         attn_metadata: Any,
         num_tokens: int,
-        num_tokens_across_dp: Optional[torch.Tensor] = None
+        num_tokens_across_dp_cpu: torch.Tensor
     ) -> "RBLNDPMetadata":
 
         parallel_config = vllm_config.parallel_config
@@ -60,17 +59,12 @@ class RBLNDPMetadata(DPMetadata):
 
         # If num_tokens_across_dp is None, it will be computed by all_reduce
         # Otherwise, num_tokens_across_dp[dp_rank] should be equal to batchsize
-        assert (num_tokens_across_dp is None
-                or num_tokens_across_dp[dp_rank] == batchsize)
-        if num_tokens_across_dp is None:
-            num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
-                batchsize, dp_size, dp_rank)
-        max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp)
-        cu_tokens_across_dp_cpu = torch.cumsum(num_tokens_across_dp, dim=0)
-        return RBLNDPMetadata(max_tokens_across_dp_cpu,
-                              cu_tokens_across_dp_cpu,
-                              max_pads_across_dp=max_pad,
-                              num_tokens_across_dp_cpu=num_tokens_across_dp)
+        assert num_tokens_across_dp_cpu is not None
+
+        max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp_cpu)
+        return RBLNDPMetadata(max_tokens_across_dp_cpu=max_tokens_across_dp_cpu,
+                              num_tokens_across_dp_cpu=num_tokens_across_dp_cpu,
+                              max_pads_across_dp=max_pad)
 
 
 @contextmanager
