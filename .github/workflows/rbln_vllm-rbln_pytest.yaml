@@ -136,6 +136,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
+          path: dist
 
       - name: Install local vllm-rbln package and dependencies
         if: steps.should_skip.outputs.skip != 'true'
@@ -249,6 +250,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
+          path: dist
 
       - name: Install local vllm-rbln package and dependencies
         if: steps.should_skip.outputs.skip != 'true'
