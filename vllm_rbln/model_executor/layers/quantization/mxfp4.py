@@ -2,7 +2,6 @@ from typing import Callable, Optional, Union
 
 import torch
 import vllm.model_executor.layers.quantization.mxfp4 as upstream
-from torch import Tensor
 from vllm.model_executor.layers.fused_moe import (FusedMoE, FusedMoEConfig,
                                                   FusedMoEMethodBase)
 from vllm.model_executor.layers.fused_moe import modular_kernel as mk
@@ -20,22 +19,23 @@ logger = init_logger(__name__)
     mutates_args=(),
 )
 def custom_moe_glu_mxfp4(
-    hidden_states: Tensor,
-    gate_proj_blocks: Tensor,
-    gate_proj_scales: Tensor,
-    gate_proj_bias: Tensor,
-    up_proj_blocks: Tensor,
-    up_proj_scales: Tensor,
-    up_proj_bias: Tensor,
-    down_proj_blocks: Tensor,
-    down_proj_scales: Tensor,
-    down_proj_bias: Tensor,
-    router_logits: Tensor,
-    alpha: Tensor,
-    limit: Tensor,
+    hidden_states: torch.Tensor,
+    gate_proj_blocks: torch.Tensor,
+    gate_proj_scales: torch.Tensor,
+    gate_proj_bias: torch.Tensor,
+    up_proj_blocks: torch.Tensor,
+    up_proj_scales: torch.Tensor,
+    up_proj_bias: torch.Tensor,
+    down_proj_blocks: torch.Tensor,
+    down_proj_scales: torch.Tensor,
+    down_proj_bias: torch.Tensor,
+    router_logits: torch.Tensor,
+    alpha: torch.Tensor,
+    limit: torch.Tensor,
+    expert_map: torch.Tensor,
     k: int,
     post_norm: bool = True,
-) -> Tensor:
+) -> torch.Tensor:
     """
     Customized MoE GLU operation.
 
@@ -50,12 +50,12 @@ def custom_moe_glu_mxfp4(
     - down_proj_blocks: [num_experts, hidden_size, intermediate_size // 2]
     - down_proj_scales: [num_experts, hidden_size, intermediate_size // 32]
     - masked_routing_weight: [batch * seq_len, num_experts]
-    - expert_select_count: [num_experts]
-    - alpha: []
-    - limit: []
+    - expert_map: [num_experts], valid expert mask
+    - alpha: [], constant
+    - limit: [], constant
 
     Returns:
-        Tensor: [batch * seq_len, hidden_size]
+        torch.Tensor: [batch * seq_len, hidden_size]
     """
 
     return torch.empty_like(hidden_states)
@@ -63,22 +63,23 @@ def custom_moe_glu_mxfp4(
 
 @custom_moe_glu_mxfp4.register_fake
 def custom_moe_glu_mxfp4_fake(
-    hidden_states: Tensor,
-    gate_proj_blocks: Tensor,
-    gate_proj_scales: Tensor,
-    gate_proj_bias: Tensor,
-    up_proj_blocks: Tensor,
-    up_proj_scales: Tensor,
-    up_proj_bias: Tensor,
-    down_proj_blocks: Tensor,
-    down_proj_scales: Tensor,
-    down_proj_bias: Tensor,
-    router_logits: Tensor,
-    alpha: Tensor,
-    limit: Tensor,
+    hidden_states: torch.Tensor,
+    gate_proj_blocks: torch.Tensor,
+    gate_proj_scales: torch.Tensor,
+    gate_proj_bias: torch.Tensor,
+    up_proj_blocks: torch.Tensor,
+    up_proj_scales: torch.Tensor,
+    up_proj_bias: torch.Tensor,
+    down_proj_blocks: torch.Tensor,
+    down_proj_scales: torch.Tensor,
+    down_proj_bias: torch.Tensor,
+    router_logits: torch.Tensor,
+    alpha: torch.Tensor,
+    limit: torch.Tensor,
+    expert_map: torch.Tensor,
     k: int,
     post_norm: bool = True,
-) -> Tensor:
+) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
 
@@ -89,6 +90,12 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         self.moe = moe
 
         self._cache_permute_indices: dict[torch.Size, torch.Tensor] = {}
+        # swigluoai constant value
+        # gemm1_alpha = 1.702, gemm1_beta = 1.0, gemm1_clamp_limit = 7.0
+        # gemm1_alpha = 1.702
+        self.swiglu_alpha = torch.tensor(1.702, dtype=torch.float32)
+        # gemm1_clamp_limit = 7.0
+        self.swiglu_limit = torch.tensor(7.0, dtype=torch.float32)
 
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
@@ -245,6 +252,13 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
         if activation == "swigluoai":
             # TODO: use expert_map
+            # FIXME(RBLN) - expert_map SHOULD be processed
+            expert_map_const = None
+            if expert_map is not None:
+                # Extract numpy array and create a fresh constant tensor
+                expert_map_list = expert_map.tolist()
+                expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
+
             output = torch.ops.rbln_custom_ops.custom_moe_glu_mxfp4(
                 x,
                 layer.gate_proj_blocks,
@@ -257,11 +271,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 layer.down_proj_scales,
                 layer.down_proj_bias,
                 router_logits,
-                # alpha (hardcoded in vllm as well?)
-                torch.tensor(1.702, dtype=x.dtype),
-                # swiglu_limit
-                torch.tensor(7.0, dtype=x.dtype),
+                self.swiglu_alpha,
+                self.swiglu_limit,
+                expert_map_const,
                 k=top_k,
+                post_norm=renormalize,
             )
         else:
             raise NotImplementedError(activation)
