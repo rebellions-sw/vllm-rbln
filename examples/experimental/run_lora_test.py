@@ -42,14 +42,22 @@ def create_test_prompts(
         ]
 
     if "sql" in lora_path.lower():
+        question = "What are the vehicle safety testing organizations that operate in the UK and France?"  # noqa
+
+        context = "CREATE TABLE SafetyOrgs (name VARCHAR(20), country VARCHAR(10));\nINSERT INTO SafetyOrgs (name, country) VALUES ('Euro NCAP', 'UK');\nINSERT INTO SafetyOrgs (name, country) VALUES ('ADAC', 'Germany');\nINSERT INTO SafetyOrgs (name, country) VALUES ('UTAC', 'France');\n"  # noqa
+
+        instruction = (
+            "You are a skilled SQL assistant."
+            "Using the given database context, generate the correct SQL query to answer the question.\n\n"  # noqa
+            f"Context: {context.strip()}")
+
+        prompt = (f"### Instruction:\n{instruction}\n\n"
+                  f"### Question:\n{question}\n\n"
+                  f"### Response:\n")
         return [
             (
-                "[user] Write a SQL query to answer the question based on the table schema.\n\n context: CREATE TABLE table_name_74 (icao VARCHAR, airport VARCHAR)\n\n question: Name the ICAO for lilongwe international airport [/user] [assistant]",  # noqa
-                SamplingParams(
-                    max_tokens=128,
-                    stop_token_ids=[32003],
-                    temperature=0.0,
-                ),
+                prompt,  # noqa
+                SamplingParams(max_tokens=256, ),
                 LoRARequest("sql-lora", lora_id, lora_path),
             ),
         ]
