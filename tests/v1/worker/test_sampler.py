@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import shutil
+from pathlib import Path
+
 import pytest
 import torch
 from vllm.platforms import current_platform
@@ -26,6 +30,9 @@ DEVICE = current_platform.device_type
 def dynamo_reset():
     yield
     torch._dynamo.reset()
+    cache_root = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_root and Path(cache_root).exists():
+        shutil.rmtree(cache_root, ignore_errors=True)
 
 
 @pytest.mark.parametrize("num_seqs, expected_bucket_sizes", [
