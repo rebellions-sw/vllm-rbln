@@ -162,7 +162,6 @@ jobs:
               ;;
             "worker")
               pytest tests/v1/worker/test_rebel_optimum_model_runner.py -vv --durations 0
-              pytest -n auto tests/v1/worker/test_sampler.py -vv --durations 0
               ;;
           esac
 
@@ -187,7 +186,11 @@ jobs:
             {
               name : "openai",
               runner : "sw-k8s-ca22-4"
-            }
+            },
+            {
+              name : "sampler",
+              runner : "sw-k8s-ca22-4"
+            },
           ]
     steps:
       - name: Checkout the vllm-rbln repository
@@ -281,6 +284,9 @@ jobs:
           case "${{ matrix.test_type.name }}" in
             "openai")
               pytest tests/entrypoints/openai -vv --durations 0
+              ;;
+            "sampler")
+              pytest -n auto tests/v1/worker/test_sampler.py -vv --durations 0
               ;;
           esac
 
