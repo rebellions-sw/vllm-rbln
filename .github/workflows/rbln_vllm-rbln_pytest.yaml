@@ -286,6 +286,7 @@ jobs:
               pytest tests/entrypoints/openai -vv --durations 0
               ;;
             "sampler")
+              export TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_${PYTEST_XDIST_WORKER:-gw0}
               pytest -n auto tests/v1/worker/test_sampler.py -vv --durations 0
               ;;
           esac
