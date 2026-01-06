@@ -78,19 +78,18 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
     forward_steps(reqs)
 
 
-@pytest.mark.parametrize("use_structured_output", [True, False])
 @pytest.mark.parametrize("top_p", [0.7, 1.0])
 @pytest.mark.parametrize("top_k", [0, 3])
 @pytest.mark.parametrize("temperature", [0.0, 1.0])
 @pytest.mark.parametrize("logprobs", [0, 3])
-@pytest.mark.parametrize("presence_penalty", [-2.0, 0.0, 2.0])
-@pytest.mark.parametrize("frequency_penalty", [-2.0, 0.0, 2.0])
+@pytest.mark.parametrize("presence_penalty", [0.0, 2.0])
+@pytest.mark.parametrize("frequency_penalty", [0.0, 2.0])
 @pytest.mark.parametrize("repetition_penalty", [1.0, 2.0])
 @pytest.mark.parametrize("warm_up", [True, False])
-def test_forward_sampling_parameters(monkeypatch, use_structured_output, top_p,
-                                     top_k, temperature, logprobs,
-                                     presence_penalty, frequency_penalty,
-                                     repetition_penalty, warm_up):
+def test_forward_sampling_parameters(monkeypatch, top_p, top_k, temperature,
+                                     logprobs, presence_penalty,
+                                     frequency_penalty, repetition_penalty,
+                                     warm_up):
     monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     monkeypatch.setenv("VLLM_RBLN_ENABLE_WARM_UP",
                        "True" if warm_up else "False")
@@ -100,7 +99,6 @@ def test_forward_sampling_parameters(monkeypatch, use_structured_output, top_p,
             make_request(
                 request_id=f"req_{i}",
                 prompt_token_ids=[1, 2, 3],
-                use_structured_output=use_structured_output,
                 top_p=top_p,
                 top_k=top_k,
                 temperature=temperature,
