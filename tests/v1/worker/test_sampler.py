@@ -26,7 +26,7 @@ from .utils import (create_model_runner, fake_load_model, forward_steps,
 DEVICE = current_platform.device_type
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def dynamo_reset():
     yield
     torch._dynamo.reset()
