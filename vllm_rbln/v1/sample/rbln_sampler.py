@@ -210,7 +210,6 @@ class RBLNSampler(VLLMSampler):
                 logits, sampling_metadata.top_p)
 
         else:
-            # torch._dynamo.graph_break()
             # Apply top_k and/or top_p.
             random_sampled, processed_logprobs = self.topk_topp_sampler(
                 logits,
