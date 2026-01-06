@@ -233,10 +233,6 @@ class RBLNOptimumScheduler(Scheduler):
                     continue
 
                 assert request.num_computed_tokens == 0
-                # Get locally-cached tokens.
-                new_computed_blocks, num_new_local_computed_tokens = \
-                    self.kv_cache_manager.get_computed_blocks(
-                        request)
 
                 # Number of tokens to be scheduled.
                 # We use `request.num_tokens` instead of
@@ -250,13 +246,23 @@ class RBLNOptimumScheduler(Scheduler):
                 new_blocks = self.kv_cache_manager.allocate_slots(
                     request,
                     num_new_tokens,
-                    num_new_local_computed_tokens,
-                    new_computed_blocks,
                 )
 
                 if new_blocks is None:
                     # The request cannot be scheduled.
                     break
+
+                # Get locally-cached tokens.
+                # NOTE(eunji.lee):
+                # Allocation -> Caching
+                # Allocate blocks before cache lookup to prevent
+                # prefix-cache hit blocks from being reused for new requests,
+                # which would otherwise reduce the cache hit rate.
+                # This is special logic
+                # because we do not touch cache-hit blocks.
+                new_computed_blocks, num_new_local_computed_tokens = \
+                    self.kv_cache_manager.get_computed_blocks(
+                        request)
 
                 # Get the cached blocks for prefix caching.
                 # using new_computed_blocks, num_new_local_computed_tokens
