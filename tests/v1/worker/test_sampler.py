@@ -13,14 +13,12 @@
 # limitations under the License.
 
 import pytest
-import torch
 from vllm.platforms import current_platform
 
 from .utils import (create_model_runner, fake_load_model, forward_steps,
                     make_request)
 
 DEVICE = current_platform.device_type
-
 
 
 @pytest.mark.parametrize("num_seqs, expected_bucket_sizes", [
