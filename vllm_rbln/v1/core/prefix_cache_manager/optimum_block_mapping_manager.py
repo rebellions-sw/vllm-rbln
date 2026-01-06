@@ -139,7 +139,7 @@ class BlockMappingManager:
         """
         Return the outer block ID that maps to a given inner block ID.
         """
-        return self._inner_to_outer.get(inner_block_id, None)
+        return self._inner_to_outer.get(inner_block_id)
 
     def get_inner_blocks_for_outer(self, outer_block_id: int) -> list[int]:
         """
