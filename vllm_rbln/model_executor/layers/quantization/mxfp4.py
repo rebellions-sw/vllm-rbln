@@ -32,9 +32,9 @@ def custom_moe_glu_mxfp4(
     router_logits: torch.Tensor,
     alpha: torch.Tensor,
     limit: torch.Tensor,
-    expert_map: torch.Tensor,
     k: int,
     post_norm: bool = True,
+    expert_map: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Customized MoE GLU operation.
@@ -50,9 +50,9 @@ def custom_moe_glu_mxfp4(
     - down_proj_blocks: [num_experts, hidden_size, intermediate_size // 2]
     - down_proj_scales: [num_experts, hidden_size, intermediate_size // 32]
     - masked_routing_weight: [batch * seq_len, num_experts]
-    - expert_map: [num_experts], valid expert mask
     - alpha: [], constant
     - limit: [], constant
+    - expert_map: [num_experts], valid expert mask
 
     Returns:
         torch.Tensor: [batch * seq_len, hidden_size]
@@ -76,9 +76,9 @@ def custom_moe_glu_mxfp4_fake(
     router_logits: torch.Tensor,
     alpha: torch.Tensor,
     limit: torch.Tensor,
-    expert_map: torch.Tensor,
     k: int,
     post_norm: bool = True,
+    expert_map: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
@@ -273,9 +273,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 router_logits,
                 self.swiglu_alpha,
                 self.swiglu_limit,
+                top_k,
+                renormalize,
                 expert_map_const,
-                k=top_k,
-                post_norm=renormalize,
             )
         else:
             raise NotImplementedError(activation)
