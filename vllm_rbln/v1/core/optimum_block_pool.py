@@ -55,8 +55,5 @@ class RBLNBlockPool(BlockPool):
             iterator = reversed(cached_blocks_one_group_values)
             _ = next(iterator)
             second_last_block = next(iterator)
-            # outer_block = []
-            # for block in cached_blocks_one_group_values:
-            #     outer_block.append(block.block_id)
             cached_blocks.append(second_last_block)
         return cached_blocks
