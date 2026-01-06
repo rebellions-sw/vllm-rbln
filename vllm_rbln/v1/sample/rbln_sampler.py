@@ -123,14 +123,15 @@ class RBLNSampler(VLLMSampler):
         )
         self.logprobs_mode = logprobs_mode
 
-    @torch.compiler.disable
     def apply_temperature(
         self,
         logits: torch.Tensor,
         temp: torch.Tensor,
     ) -> torch.Tensor:
-        # Use in-place division to avoid creating a new tensor.
-        return logits.div_(temp.unsqueeze(dim=1))
+        # NOTE:
+        # in-place division triggers buffer key error
+        # in torchinductor
+        return logits.div(temp.unsqueeze(dim=1))
 
     def apply_topp_sampler(
             self, logits: torch.Tensor, top_p: torch.Tensor
