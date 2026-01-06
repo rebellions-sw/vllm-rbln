@@ -112,6 +112,7 @@ class RBLNKVCacheManager(KVCacheManager):
         assert num_lookahead_tokens == 0
         assert not delay_cache_blocks
         assert num_encoder_tokens == 0
+        # NOTE: They are retrieved after the blocks are allocated
         assert num_new_computed_tokens == 0
         assert new_computed_blocks is None
         if num_new_tokens == 0:
