@@ -17,7 +17,9 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
+import numpy as np
 import torch
+from numpy import typing as npt
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionType)
 from vllm.config import VllmConfig, get_current_vllm_config
@@ -577,6 +579,7 @@ class RBLNFlashAttentionMetadata:
     seq_lens: torch.Tensor
     block_tables: torch.Tensor
     slot_mapping: torch.Tensor
+    is_prefills: npt.NDArray[np.bool_]
 
     # For cascade attention.
     use_cascade: Optional[bool]
@@ -765,6 +768,7 @@ class RBLNFlashAttentionMetadataBuilder(
             seq_lens=seq_lens_tensor.to(self.device),
             block_tables=block_tables_tensor.to(self.device),
             slot_mapping=slot_mapping,
+            is_prefills=is_prefills,
             use_cascade=False,
             common_prefix_len=common_prefix_len,
             scheduler_metadata=None,
