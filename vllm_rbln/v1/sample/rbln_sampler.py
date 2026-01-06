@@ -123,6 +123,15 @@ class RBLNSampler(VLLMSampler):
         )
         self.logprobs_mode = logprobs_mode
 
+    @torch.compiler.disable
+    def apply_temperature(
+        self,
+        logits: torch.Tensor,
+        temp: torch.Tensor,
+    ) -> torch.Tensor:
+        # Use in-place division to avoid creating a new tensor.
+        return logits.div_(temp.unsqueeze(dim=1))
+
     def apply_topp_sampler(
             self, logits: torch.Tensor, top_p: torch.Tensor
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -201,6 +210,7 @@ class RBLNSampler(VLLMSampler):
                 logits, sampling_metadata.top_p)
 
         else:
+            # torch._dynamo.graph_break()
             # Apply top_k and/or top_p.
             random_sampled, processed_logprobs = self.topk_topp_sampler(
                 logits,
