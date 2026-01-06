@@ -189,7 +189,7 @@ jobs:
             },
             {
               name : "sampler",
-              runner : "sw-k8s-ca22-4"
+              runner : "sw-k8s-ca22-1"
             },
           ]
     steps:
@@ -227,6 +227,11 @@ jobs:
           case "${{ matrix.test_type.name }}" in
             "openai")
               if [[ "$COMMIT_MESSAGE" == *"[skip openai]"* ]]; then
+                SKIP=true
+              fi
+              ;;
+            "sampler")
+              if [[ "$COMMIT_MESSAGE" == *"[skip sampler]"* ]]; then
                 SKIP=true
               fi
               ;;
