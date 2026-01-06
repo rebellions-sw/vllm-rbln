@@ -14,18 +14,18 @@
 import torch
 
 
-def rbln_guard_filter_fn(guard_entries):
-    """
-    Keep tensor guards (unsafe) + additionally keep the python guard
-    related to num_logprobs.
-    """
-    # 1) Start from PyTorch's built-in tensor-guard keep policy
-    base_keep = torch.compiler.keep_tensor_guards_unsafe(guard_entries)
+# def rbln_guard_filter_fn(guard_entries):
+#     """
+#     Keep tensor guards (unsafe) + additionally keep the python guard
+#     related to num_logprobs.
+#     """
+#     # 1) Start from PyTorch's built-in tensor-guard keep policy
+#     base_keep = torch.compiler.keep_tensor_guards_unsafe(guard_entries)
 
-    # 2) Add our extra keep condition
-    out = []
-    for keep, e in zip(base_keep, guard_entries):
-        name = getattr(e, "name", "") or ""
-        keep_max_num_logprobs = ("num_logprobs" in name)
-        out.append(bool(keep or keep_max_num_logprobs))
-    return out
+#     # 2) Add our extra keep condition
+#     out = []
+#     for keep, e in zip(base_keep, guard_entries):
+#         name = getattr(e, "name", "") or ""
+#         keep_max_num_logprobs = ("num_logprobs" in name)
+#         out.append(bool(keep or keep_max_num_logprobs))
+#     return out
