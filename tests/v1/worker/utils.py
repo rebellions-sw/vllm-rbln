@@ -6,6 +6,7 @@
 
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import os
 import tempfile
 from collections.abc import Callable
 # Unless required by applicable law or agreed to in writing, software
@@ -88,8 +89,10 @@ def fake_load_model(runner: RBLNOptimumModelRunner):
     runner.model.forward = fake_forward
     if runner.use_rbln_sampler:
         runner.prepare_rbln_sampler()
-    # warmup the sampler
-    runner.dummy_sampler_run()
+    warm_up = os.environ.get("VLLM_RBLN_ENABLE_WARM_UP",
+                             "False").lower() in ["true", "1"]
+    if warm_up:
+        runner.dummy_sampler_run()
 
 
 def make_kv_cache_config(block_size: int, num_blocks: int) -> KVCacheConfig:
