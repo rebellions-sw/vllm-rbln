@@ -34,7 +34,6 @@ from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                MergedColumnParallelLinear,
                                                RowParallelLinear)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
-from vllm.model_executor.layers.sampler import Sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 from vllm.model_executor.models.interfaces import SupportsLoRA
 
@@ -43,6 +42,7 @@ def get_vllm_config() -> VllmConfig:
     max_model_len = 4096
     scheduler_config = SchedulerConfig(
         max_num_seqs=256,
+        is_encoder_decoder=False,
         max_num_batched_tokens=max_model_len,
         max_model_len=max_model_len,
     )
@@ -136,7 +136,6 @@ def dummy_model() -> nn.Module:
             # Special handling for lm_head & sampler
             ("lm_head", ParallelLMHead(512, 10)),
             ("logits_processor", LogitsProcessor(512)),
-            ("sampler", Sampler())
         ]))
     model.config = MagicMock()
     model.embedding_modules = {"lm_head": "lm_head"}
@@ -164,7 +163,6 @@ def dummy_model_gate_up() -> nn.Module:
             # Special handling for lm_head & sampler
             ("lm_head", ParallelLMHead(512, 10)),
             ("logits_processor", LogitsProcessor(512)),
-            ("sampler", Sampler())
         ]))
     model.config = MagicMock()
     model.packed_modules_mapping = {
@@ -192,8 +190,8 @@ def sql_lora_huggingface_id():
 
 
 @pytest.fixture(scope="session")
-def sql_lora_files(sql_lora_huggingface_id):
-    return snapshot_download(repo_id=sql_lora_huggingface_id)
+def qwen3_lora_files():
+    return snapshot_download(repo_id="charent/self_cognition_Alice")
 
 
 @pytest.fixture(scope="session")
@@ -253,6 +251,17 @@ def qwen25vl_lora_files():
 @pytest.fixture(scope="session")
 def tinyllama_lora_files():
     return snapshot_download(repo_id="jashing/tinyllama-colorist-lora")
+
+
+@pytest.fixture(scope="session")
+def llama32_lora_huggingface_id():
+    # huggingface repo id is used to test lora runtime downloading.
+    return "jeeejeee/llama32-3b-text2sql-spider"
+
+
+@pytest.fixture(scope="session")
+def llama32_lora_files(llama32_lora_huggingface_id):
+    return snapshot_download(repo_id=llama32_lora_huggingface_id)
 
 
 @pytest.fixture

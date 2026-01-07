@@ -48,11 +48,11 @@ def get_random_id_to_index(num_loras: int,
 
 
 def test_lora_mask():
-    with pytest.raises(AttributeError):
-        _ = LoRAMask.get_lora_mask()
-
     LoRAMask.set_lora_mask(torch.randn(10, 10))
-    _ = LoRAMask.get_lora_mask()
+    mask = LoRAMask.get_lora_mask()
+
+    assert mask.shape[0] == 10
+    assert mask.shape[1] == 10
 
 
 @pytest.mark.parametrize("num_seqs", [1, 2, 4])
@@ -72,7 +72,8 @@ def test_create_lora_mask(num_seqs, seq_len, num_loras):
                                  id_to_index,
                                  max_loras,
                                  max_lora_rank,
-                                 lora_dtype=lora_dtype)
+                                 lora_dtype=lora_dtype,
+                                 device=input_ids.device)
 
     expected_shape = (num_seqs * seq_len, max_loras * max_lora_rank)
     assert lora_mask.shape == expected_shape

@@ -100,7 +100,6 @@ def populate_loras(
     id_to_index: list[int | None],
     layer: BaseLayerWithLoRA,
     layer_weights: torch.Tensor,
-    generate_embeddings_tensor: int = 0,
     repeats: int = 1,
 ) -> tuple[dict[int, LoRALayerWeights], dict[int, list[LoRALayerWeights]]]:
     """This method populates the lora layers with lora weights.
@@ -112,8 +111,6 @@ def populate_loras(
         layer: the LoRAlayer to populate.
         layer_weights: the PyTorch tensor containing the layer's
             weights.
-        generate_embeddings_tensor: whether to generate an
-            embeddings tensor for each LoRA.
         repeats: must only be set for column parallel packed
             layers. Indicates the number of loras to compose
             together to create a single lora layer.
@@ -136,10 +133,9 @@ def populate_loras(
                     layer_weights.device).init_random_lora(
                         module_name=f"fake_{i}",
                         weight=layer_weights,
-                        generate_embeddings_tensor=generate_embeddings_tensor,
                     )
-                sublora.lora_b = sublora.lora_b[:, (sublora_len *
-                                                    i):(sublora_len * (i + 1))]
+                sublora.lora_b = sublora.lora_b[(sublora_len *
+                                                 i):(sublora_len * (i + 1)), :]
                 sublora.optimize()
                 subloras.append(sublora)
 
@@ -150,7 +146,6 @@ def populate_loras(
                 slot_idx,
                 lora_a=lora.lora_a,
                 lora_b=lora.lora_b,
-                embeddings_tensor=lora.embeddings_tensor,
             )
 
             lora_dict[lora_id] = lora
@@ -226,9 +221,10 @@ def set_lora_mask(inputs: list[torch.Tensor], prompt_mapping: list[int],
 def set_sampler_indices_padded(prompt_mapping: list[int],
                                lora_index_to_id: list[int | None],
                                max_num_seqs: int, is_prefill: bool,
-                               max_loras: int) -> None:
+                               max_loras: int, device: str) -> None:
     sampler_indices_padded = create_sampler_indices_padded(
-        prompt_mapping, lora_index_to_id, max_num_seqs, is_prefill, max_loras)
+        prompt_mapping, lora_index_to_id, max_num_seqs, is_prefill, max_loras,
+        torch.device(device))
     LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
 
 
@@ -260,8 +256,8 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
 
     def lora_embedding_ref(x, embedding, lora_a, lora_b):
         output = embedding(x)
-        after_a = F.embedding(x, lora_a)
-        output += (after_a @ lora_b)
+        after_a = F.embedding(x, lora_a.T)
+        output += (after_a @ lora_b.T)
         return output
 
     for i in range(NUM_RANDOM_SEEDS):
@@ -285,8 +281,7 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
                                    prompt_mapping,
                                    is_prefill=stage)
         punica_wrapper.update_metadata(lora_mapping, id_to_index, max_loras,
-                                       vocab_size,
-                                       lora_config.lora_extra_vocab_size)
+                                       vocab_size)
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
                       lora_config.max_lora_rank, lora_config.lora_dtype)
@@ -320,155 +315,12 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
                                    prompt_mapping,
                                    is_prefill=stage)
         punica_wrapper.update_metadata(lora_mapping, id_to_index, max_loras,
-                                       vocab_size,
-                                       lora_config.lora_extra_vocab_size)
+                                       vocab_size)
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
                       lora_config.max_lora_rank, lora_config.lora_dtype)
         lora_result = rbln_compile(lora_embedding)(torch.cat(inputs))
         expected_result = rbln_compile(embedding)(torch.cat(inputs))
-
-        rtol, atol = TOLERANCES[lora_result.dtype]
-        torch.testing.assert_close(lora_result,
-                                   expected_result,
-                                   rtol=rtol,
-                                   atol=atol)
-
-
-@torch.inference_mode()
-@pytest.mark.parametrize("num_loras", [1, 2, 4])
-@pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("vocab_size", [512, 32000, 64000, 128000])
-@pytest.mark.parametrize("stage", STAGES)
-def test_embeddings_with_new_embeddings(dist_init, num_loras, device,
-                                        vocab_size, stage) -> None:
-    torch.set_default_device(device)
-    max_loras = 8
-    punica_wrapper = get_punica_wrapper(8192, 256, device, max_loras=max_loras)
-    lora_config = LoRAConfig(max_loras=max_loras,
-                             max_lora_rank=8,
-                             lora_dtype=torch.bfloat16)
-
-    def create_random_embedding_layer():
-        embedding = VocabParallelEmbedding(vocab_size, 256)
-        embedding_data = torch.rand_like(embedding.weight.data)
-        embedding.weight.data = embedding_data
-        embedding.weight.data[vocab_size:, :] = 0
-        expanded_embedding = VocabParallelEmbedding(
-            vocab_size + lora_config.lora_extra_vocab_size * max_loras,
-            256,
-            org_num_embeddings=vocab_size)
-        expanded_embedding.weight.data[:vocab_size, :] = embedding_data
-        lora_embedding = VocabParallelEmbeddingWithLoRA(
-            deepcopy(expanded_embedding))
-        lora_embedding.create_lora_weights(max_loras, lora_config)
-
-        return expanded_embedding, lora_embedding
-
-    def expanded_lora_embedding_ref(x, orig_x, embedding, lora_a, lora_b):
-        output = embedding(x)
-        after_a = F.embedding(orig_x, lora_a)
-        output += (after_a @ lora_b)
-        return output
-
-    for i in range(NUM_RANDOM_SEEDS):
-        set_random_seed(i)
-
-        id_to_index = get_random_id_to_index(num_loras, max_loras)
-        expanded_embedding, lora_embedding = create_random_embedding_layer()
-        lora_dict, _ = populate_loras(
-            id_to_index,
-            layer=lora_embedding,
-            layer_weights=torch.zeros(
-                (256, vocab_size + lora_config.lora_extra_vocab_size)),
-            generate_embeddings_tensor=256,
-        )
-
-        lora_embedding.set_mapping(punica_wrapper)
-        # All embeddings tensors have the same shape.
-        embeddings_tensors = [
-            lora_dict[id].embeddings_tensor for id in sorted(lora_dict.keys())
-        ]
-        embeddings_tensor_len = embeddings_tensors[0].shape[0]
-
-        # Add empty embeddings_tensors for unoccupied lora slots.
-        for _ in range(max_loras - len(embeddings_tensors)):
-            embeddings_tensors.append(torch.zeros(embeddings_tensors[0].shape))
-
-        input_shape = (1, 200) if stage else (1, 1)
-        inputs, token_mapping, prompt_mapping = create_random_inputs(
-            active_lora_ids=list(lora_dict.keys()),
-            num_inputs=1 if stage else num_loras * 3,
-            input_size=input_shape,
-            input_range=(1, vocab_size),
-            device=device)
-        lora_mapping = LoRAMapping(token_mapping,
-                                   prompt_mapping,
-                                   is_prefill=stage)
-        punica_wrapper.update_metadata(lora_mapping, id_to_index, max_loras,
-                                       vocab_size,
-                                       lora_config.lora_extra_vocab_size)
-        original_inputs = deepcopy(inputs)
-
-        # Force some of the inputs to be in the extended embeddings range
-        # to guarantee that their behavior is tested.
-        for input_, original_input_, lora_id in zip(inputs, original_inputs,
-                                                    prompt_mapping):
-            embedding_id = lora_id - 1
-            input_[0, -1] = vocab_size + (
-                (embedding_id + 1) * embeddings_tensor_len - 1)
-            original_input_[0, -1] = vocab_size + embeddings_tensor_len - 1
-            if stage:
-                input_[0, -2] = vocab_size + (embedding_id *
-                                              embeddings_tensor_len)
-                original_input_[0, -2] = vocab_size
-
-        expanded_embedding.weight[vocab_size:vocab_size +
-                                  (embeddings_tensor_len *
-                                   max_loras)] = torch.cat(embeddings_tensors)
-
-        set_lora_mask(original_inputs, prompt_mapping, id_to_index, max_loras,
-                      lora_config.max_lora_rank, lora_config.lora_dtype)
-        lora_result = rbln_compile(lora_embedding)(torch.cat(original_inputs))
-
-        expected_results: list[torch.Tensor] = []
-        for input_, original_input_, lora_id in zip(inputs, original_inputs,
-                                                    prompt_mapping):
-            lora = lora_dict[lora_id]
-            result = rbln_compile(expanded_lora_embedding_ref)(
-                input_, original_input_, expanded_embedding, lora.lora_a,
-                lora.lora_b)
-            expected_results.append(result)
-        expected_result = torch.cat(expected_results)
-
-        rtol, atol = TOLERANCES[lora_result.dtype]
-        torch.testing.assert_close(lora_result,
-                                   expected_result,
-                                   rtol=rtol,
-                                   atol=atol)
-
-        # Check that resetting the lora weights succeeds
-        for slot_idx in range(max_loras):
-            lora_embedding.reset_lora(slot_idx)
-
-        inputs, token_mapping, prompt_mapping = create_random_inputs(
-            active_lora_ids=[0],
-            num_inputs=1 if stage else num_loras * 3,
-            input_size=input_shape,
-            input_range=(1, vocab_size),
-            device=device)
-        original_inputs = deepcopy(inputs)
-        lora_mapping = LoRAMapping(token_mapping,
-                                   prompt_mapping,
-                                   is_prefill=stage)
-        punica_wrapper.update_metadata(lora_mapping, id_to_index, max_loras,
-                                       vocab_size,
-                                       lora_config.lora_extra_vocab_size)
-
-        set_lora_mask(original_inputs, prompt_mapping, id_to_index, max_loras,
-                      lora_config.max_lora_rank, lora_config.lora_dtype)
-        lora_result = rbln_compile(lora_embedding)(torch.cat(original_inputs))
-        expected_result = rbln_compile(expanded_embedding)(torch.cat(inputs))
 
         rtol, atol = TOLERANCES[lora_result.dtype]
         torch.testing.assert_close(lora_result,
@@ -492,20 +344,26 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
                              lora_dtype=torch.bfloat16)
 
     def _pretest():
-        linear = ParallelLMHead(vocab_size + lora_config.lora_extra_vocab_size,
+        linear = ParallelLMHead(vocab_size,
                                 1024,
                                 vocab_size,
                                 params_dtype=torch.bfloat16)
         linear.weight.data = torch.rand_like(linear.weight.data)
         linear.weight.data[:, vocab_size:] = 0
-        logits_processor = LogitsProcessor(
-            vocab_size + lora_config.lora_extra_vocab_size, vocab_size)
+        logits_processor = LogitsProcessor(vocab_size)
         lora_logits_processor = LogitsProcessorWithLoRA(
             logits_processor, 1024, linear.weight.dtype, linear.weight.device,
             None)
         lora_logits_processor.create_lora_weights(max_loras, lora_config)
 
         return linear, logits_processor, lora_logits_processor
+
+    def lm_head_logits_processor_ref(logits_processor, input_, linear, lora):
+        result = logits_processor._get_logits(hidden_states=input_,
+                                              lm_head=linear,
+                                              embedding_bias=None)
+        result += input_ @ lora.lora_a.T @ lora.lora_b.T * lora.scaling
+        return result
 
     for i in range(NUM_RANDOM_SEEDS):
         set_random_seed(i)
@@ -518,7 +376,6 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
             id_to_index,
             layer=lora_logits_processor,
             layer_weights=linear.weight,
-            generate_embeddings_tensor=1024,
         )
 
         inputs, token_mapping, prompt_mapping = create_random_inputs(
@@ -537,14 +394,13 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
             id_to_index,
             max_loras,
             vocab_size,
-            lora_config.lora_extra_vocab_size,
         )
         input_ = torch.rand(20, 1024)
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
                       lora_config.max_lora_rank, lora_config.lora_dtype)
         set_sampler_indices_padded(prompt_mapping, id_to_index, len(inputs),
-                                   stage, max_loras)
+                                   stage, max_loras, device)
         lora_result = rbln_compile(lora_logits_processor._get_logits)(
             hidden_states=torch.cat(inputs),
             lm_head=linear,
@@ -555,21 +411,10 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
         expected_results: list[torch.Tensor] = []
         for input_, lora_id in zip(inputs, prompt_mapping):
             lora = lora_dict[lora_id]
-            embeddings_tensor = lora.embeddings_tensor
-            embeddings_tensor_len = embeddings_tensor.shape[0]
-
-            linear.weight[vocab_size:vocab_size +
-                          embeddings_tensor_len] = embeddings_tensor
-            logits_processor.org_vocab_size = (
-                vocab_size + lora_config.lora_extra_vocab_size)
-
-            result = rbln_compile(logits_processor._get_logits)(
-                hidden_states=input_, lm_head=linear, embedding_bias=None)
-            result[:, vocab_size + embeddings_tensor_len:] = float("-inf")
-            result += input_ @ lora.lora_a @ lora.lora_b * lora.scaling
+            result = rbln_compile(lm_head_logits_processor_ref)(
+                logits_processor, input_, linear, lora)
             expected_results.append(result)
         expected_result = torch.cat(expected_results)
-        logits_processor.org_vocab_size = vocab_size
 
         rtol, atol = TOLERANCES[lora_result.dtype]
         torch.testing.assert_close(lora_result,
@@ -592,18 +437,13 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
         lora_mapping = LoRAMapping(token_mapping,
                                    prompt_mapping,
                                    is_prefill=stage)
-        punica_wrapper.update_metadata(
-            lora_mapping,
-            id_to_index,
-            max_loras,
-            vocab_size,
-            lora_config.lora_extra_vocab_size,
-        )
+        punica_wrapper.update_metadata(lora_mapping, id_to_index, max_loras,
+                                       vocab_size)
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
                       lora_config.max_lora_rank, lora_config.lora_dtype)
         set_sampler_indices_padded(prompt_mapping, id_to_index, len(inputs),
-                                   False, max_loras)
+                                   False, max_loras, device)
         lora_result = rbln_compile(lora_logits_processor._get_logits)(
             hidden_states=torch.cat(inputs),
             lm_head=original_lm_head,
@@ -680,7 +520,6 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
             id_to_index,
             max_loras,
             512,
-            lora_config.lora_extra_vocab_size,
         )
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
@@ -691,8 +530,8 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
         for input_, lora_id in zip(inputs, prompt_mapping):
             lora = lora_dict[lora_id]
             result = rbln_compile(lora_linear_replicated_ref)(input_, linear,
-                                                              lora.lora_a,
-                                                              lora.lora_b,
+                                                              lora.lora_a.T,
+                                                              lora.lora_b.T,
                                                               lora.scaling)
             expected_results.append(result)
         expected_result = torch.cat(expected_results)
@@ -719,8 +558,12 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
                                    prompt_mapping,
                                    is_prefill=stage)
 
-        punica_wrapper.update_metadata(lora_mapping, id_to_index, max_loras,
-                                       512, lora_config.lora_extra_vocab_size)
+        punica_wrapper.update_metadata(
+            lora_mapping,
+            id_to_index,
+            max_loras,
+            512,
+        )
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
                       lora_config.max_lora_rank, lora_config.lora_dtype)
@@ -811,7 +654,6 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
             id_to_index,
             max_loras,
             512,
-            lora_config.lora_extra_vocab_size,
         )
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
@@ -822,8 +664,8 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
         for input_, lora_id in zip(inputs, prompt_mapping):
             lora = lora_dict[lora_id]
             result = rbln_compile(lora_linear_parallel_ref)(input_, linear,
-                                                            lora.lora_a,
-                                                            lora.lora_b,
+                                                            lora.lora_a.T,
+                                                            lora.lora_b.T,
                                                             lora.scaling)
             expected_results.append(result)
         expected_result = torch.cat(expected_results)
@@ -850,8 +692,12 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
                                    prompt_mapping,
                                    is_prefill=stage)
 
-        punica_wrapper.update_metadata(lora_mapping, id_to_index, max_loras,
-                                       512, lora_config.lora_extra_vocab_size)
+        punica_wrapper.update_metadata(
+            lora_mapping,
+            id_to_index,
+            max_loras,
+            512,
+        )
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
                       lora_config.max_lora_rank, lora_config.lora_dtype)
@@ -932,8 +778,8 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
     def lora_column_parallel_packed_ref(x, linear, subloras):
         output = linear(x)[0]
         for i, sublora in enumerate(subloras):
-            output[:, sublora.lora_b.shape[1] * i:sublora.lora_b.shape[1] *
-                   (i + 1)] += (input_ @ sublora.lora_a @ sublora.lora_b *
+            output[:, sublora.lora_b.shape[0] * i:sublora.lora_b.shape[0] *
+                   (i + 1)] += (input_ @ sublora.lora_a.T @ sublora.lora_b.T *
                                 sublora.scaling)
         return output
 
@@ -969,7 +815,6 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
             id_to_index,
             max_loras,
             512,
-            lora_config.lora_extra_vocab_size,
         )
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,
@@ -1012,7 +857,6 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
             id_to_index,
             max_loras,
             512,
-            lora_config.lora_extra_vocab_size,
         )
 
         set_lora_mask(inputs, prompt_mapping, id_to_index, max_loras,

@@ -20,11 +20,11 @@
 import json
 import os
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Union
 
 import torch
 from safetensors.torch import save_file
-from vllm.lora.lora import LoRALayerWeights, PackedLoRALayerWeights
+from vllm.lora.lora_weights import LoRALayerWeights, PackedLoRALayerWeights
 
 
 class DummyLoRAManager:
@@ -45,26 +45,18 @@ class DummyLoRAManager:
         module_name: str,
         weight: torch.Tensor,
         rank: int = 8,
-        generate_embeddings_tensor: int = 0,
     ):
         lora = LoRALayerWeights(
             module_name,
             rank=rank,
             lora_alpha=1,
-            lora_a=torch.rand([weight.shape[1], rank],
+            lora_a=torch.rand([rank, weight.shape[1]],
                               dtype=weight.dtype,
                               device=self._device),
-            lora_b=torch.rand([rank, weight.shape[0]],
+            lora_b=torch.rand([weight.shape[0], rank],
                               dtype=weight.dtype,
                               device=self._device),
         )
-        if generate_embeddings_tensor:
-            lora.embeddings_tensor = torch.rand(
-                5,
-                generate_embeddings_tensor,
-                dtype=weight.dtype,
-                device=self._device,
-            )
         self.set_module_lora(module_name, lora)
 
         return lora
@@ -82,8 +74,8 @@ class DummyLoRAManager:
             module_name,
             rank=rank,
             lora_alpha=1,
-            lora_a=torch.rand([input_dim, rank], device="cuda"),
-            lora_b=torch.rand([rank, output_dim], device="cuda"),
+            lora_a=torch.rand([rank, input_dim], device="cuda"),
+            lora_b=torch.rand([output_dim, input_dim], device="cuda"),
             embeddings_tensor=embeddings_tensor,
         )
         self.set_module_lora(module_name, lora)
@@ -97,7 +89,7 @@ class DummyLoRAManager:
         module_name: str,
         input_dim: int,
         output_dims: list[int],
-        noop_lora_index: Optional[list[int]] = None,
+        noop_lora_index: list[int] | None = None,
         rank: int = 8,
     ):
         base_loras: list[LoRALayerWeights] = []
