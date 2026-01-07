@@ -50,11 +50,11 @@ def get_random_id_to_index(num_loras: int,
 
 
 def test_lora_inputs():
-    with pytest.raises(AttributeError):
-        _ = LoRAInputs.get_sampler_indices_padded()
-
     LoRAInputs.set_sampler_indices_padded(torch.randn(10, 10))
-    _ = LoRAInputs.get_sampler_indices_padded()
+    sampler_indices_padded = LoRAInputs.get_sampler_indices_padded()
+
+    assert sampler_indices_padded.shape[0] == 10
+    assert sampler_indices_padded.shape[1] == 10
 
 
 @pytest.mark.parametrize("num_loras", [1, 2, 4])
@@ -72,10 +72,10 @@ def test_create_sampler_indices_padded(num_loras, stage):
         # and current stage is prefill.
         with pytest.raises(AssertionError):
             sampler_indices_padded = create_sampler_indices_padded(
-                lora_ids, id_to_index, max_num_seqs, stage, max_loras)
+                lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu")
     else:
         sampler_indices_padded = create_sampler_indices_padded(
-            lora_ids, id_to_index, max_num_seqs, stage, max_loras)
+            lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu")
 
         assert sampler_indices_padded.dtype == torch.long
         assert len(sampler_indices_padded) == (1 if stage else max_num_seqs)
