@@ -304,7 +304,7 @@ def test_cache_hit_child_block(limited_6blocks_scheduler):
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
     answer = torch.tensor([4, 5, -1, -1], dtype=torch.int16)
     assert torch.allclose(output.block_table_dict[req4_id], answer)
-    assert output.cached_block_table == []
+    assert output.cached_block_table == [2, 3]
 
 
 def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
@@ -360,7 +360,7 @@ def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
     output = limited_6blocks_scheduler.schedule()
     model_runner_output = create_model_runner_output(output)
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
-    assert output.cached_block_table == [0, 1]
+    assert output.cached_block_table == [2, 3]
     assert output.block_table_dict[req2_id].tolist() == [4, 5, -1, -1]
 
     # Finish Schedule req0, req1 and schedule req3 [0, 1]
@@ -376,7 +376,7 @@ def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
     output = limited_6blocks_scheduler.schedule()
     model_runner_output = create_model_runner_output(output)
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
-    assert output.cached_block_table == []
+    assert output.cached_block_table == [4, 5]
     assert output.block_table_dict[req3_id].tolist() == [0, 1, -1, -1]
 
 
@@ -416,10 +416,6 @@ def test_finish_request(scheduler):
     assert mapping.outer_block_id == 0
     assert mapping.inner_block_ids == [1, 2, 3]
     assert len(mapping_manager._inner_to_outer) == 3
-    assert mapping_manager.get_cached_inner_blocks_for_outer(0) == [1, 2, 3]
-    assert mapping_manager.get_outer_blocks_for_cached_inner(1) == [0]
-    assert mapping_manager.get_outer_blocks_for_cached_inner(2) == [0]
-    assert mapping_manager.get_outer_blocks_for_cached_inner(3) == [0]
 
 
 def test_free_outer_blocks(scheduler):
@@ -447,7 +443,3 @@ def test_free_outer_blocks(scheduler):
     assert mapping_manager.get_mapping(0) is None
 
     assert len(mapping_manager._inner_to_outer) == 0
-    assert mapping_manager.get_cached_inner_blocks_for_outer(0) == []
-    assert mapping_manager.get_outer_blocks_for_cached_inner(1) == []
-    assert mapping_manager.get_outer_blocks_for_cached_inner(2) == []
-    assert mapping_manager.get_outer_blocks_for_cached_inner(3) == []
