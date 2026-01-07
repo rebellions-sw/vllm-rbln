@@ -33,6 +33,10 @@ class RBLNInputBatch(InputBatch):
             # Overwrite sampling_metadata with RBLN sampling metadata
             self.sampling_metadata = self._make_sampling_metadata_rbln(
                 self.num_reqs)
+            # NOTE(eunji.lee):
+            # Set top_p to 1.0 to avoid top_p=0.0 issue
+            self.top_p.fill_(1.0)
+            self.top_p_cpu_tensor.fill_(1.0)
 
     def refresh_metadata_rbln(self, bucket_size: int):
         """Apply any batch updates to sampling metadata."""
