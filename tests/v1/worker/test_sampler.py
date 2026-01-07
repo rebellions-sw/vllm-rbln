@@ -78,7 +78,8 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
 @pytest.mark.parametrize("presence_penalty", [0.0, 2.0])
 @pytest.mark.parametrize("frequency_penalty", [0.0, 2.0])
 @pytest.mark.parametrize("repetition_penalty", [1.0, 2.0])
-@pytest.mark.parametrize("warm_up", [True, False])
+@pytest.mark.parametrize("warm_up", [True, False],
+                         ids=["warm_upTrue", "warm_upFalse"])
 def test_forward_sampling_parameters(monkeypatch, top_p, top_k, temperature,
                                      logprobs, presence_penalty,
                                      frequency_penalty, repetition_penalty,
