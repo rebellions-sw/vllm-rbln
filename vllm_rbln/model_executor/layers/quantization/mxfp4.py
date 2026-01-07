@@ -246,9 +246,14 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         logical_replica_count: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
 
-        orig_shape = x.shape
-        x = x.view(-1, self.hidden_size)
-        router_logits = router_logits.view(-1, self.num_experts)
+        # refer to custom_moe_glu
+        orig_shape = x.shape  # noqa: F841
+        num_tokens = orig_shape[:-1].numel()  # noqa: F841
+        hidden_states = x.reshape(num_tokens, -1)
+        router_logits = router_logits.reshape(num_tokens, -1)
+        # x = x.view(-1, self.hidden_size)
+        # router_logits = router_logits.view(-1, self.num_experts)
+        # router_logits = router_logits.view(-1, self.moe.num_experts)
 
         if activation == "swigluoai":
             # TODO: use expert_map
@@ -259,8 +264,8 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 expert_map_list = expert_map.tolist()
                 expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
 
-            output = torch.ops.rbln_custom_ops.custom_moe_glu_mxfp4(
-                x,
+            final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu_mxfp4(
+                hidden_states,
                 layer.gate_proj_blocks,
                 layer.gate_proj_scales,
                 layer.gate_proj_bias,
@@ -280,7 +285,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         else:
             raise NotImplementedError(activation)
 
-        return output.view(orig_shape)
+        return final_hidden_states.reshape(orig_shape)
 
 
 # We do this because upstream uses Mxfp4MoEMethod for all non-xpu platforms
