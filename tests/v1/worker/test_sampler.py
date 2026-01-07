@@ -87,7 +87,6 @@ def test_forward_sampling_parameters(monkeypatch, top_p, top_k, temperature,
     monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     monkeypatch.setenv("VLLM_RBLN_ENABLE_WARM_UP",
                        "True" if warm_up else "False")
-    # tmp
     reqs = []
     for i in range(3):
         reqs.append(
