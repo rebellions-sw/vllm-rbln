@@ -231,7 +231,7 @@ jobs:
               fi
               ;;
             "sampler")
-              if [[ "$COMMIT_MESSAGE" == *"[skip sampler]"* ]]; then
+              if [[ "$COMMIT_MESSAGE" == *"[skip worker]"* ]]; then
                 SKIP=true
               fi
               ;;
