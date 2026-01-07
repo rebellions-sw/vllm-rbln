@@ -1810,6 +1810,23 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             batch_descriptor = BatchDescriptor(num_tokens=num_input_tokens,
                                                uniform_decode=uniform_decode)
 
+        # Padding for speculative decoding
+        # in case of that all requests are not scheduled equally.
+        num_scheduled_tokens_per_req = torch.tensor([
+            scheduler_output.num_scheduled_tokens[i]
+            for i in self.input_batch.req_ids
+        ],
+                                                    device=input_ids.device,
+                                                    dtype=torch.int32)
+        max_num_scheduled_tokens = torch.max(num_scheduled_tokens_per_req)
+
+        if self.speculative_config is not None and not torch.all(
+                num_scheduled_tokens_per_req == max_num_scheduled_tokens):
+            input_ids = rbln_utils.pad_speculative_draft_tokens(
+                input_ids, num_scheduled_tokens_per_req)
+            positions = rbln_utils.pad_speculative_draft_tokens(
+                positions, num_scheduled_tokens_per_req)
+
         # Run the model.
         # Use persistent buffers for CUDA graphs.
         with (set_forward_context(
