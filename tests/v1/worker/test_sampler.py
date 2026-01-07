@@ -60,7 +60,6 @@ def test_forward_sampler_mode_and_structured_output(monkeypatch,
     """Test sampler logic for both use_rbln_sampler=True and False."""
     monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1" if use_rbln_sampler else "0")
-    monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
     reqs = []
     for i in range(3):
         reqs.append(
