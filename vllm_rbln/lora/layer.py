@@ -35,8 +35,8 @@ def base_linear_patched_apply(
     )  # [bs, seq_len, hidden_size] -> [bs * seq_len, hidden_size]
 
     lora_output: torch.Tensor = self.punica_wrapper.add_lora_linear(
-        output, x, self.lora_a_stacked, self.lora_b_stacked,
-        self.lora_bias_stacked, 1.0, self.output_slices)
+        output, x, self.lora_a_stacked, self.lora_b_stacked, 1.0,
+        self.output_slices)
 
     return lora_output.view(output_org_shape)
 
