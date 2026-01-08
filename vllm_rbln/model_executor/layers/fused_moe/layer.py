@@ -238,7 +238,7 @@ def unquantized_fused_moe_method_rbln(
     return final_hidden_states.reshape(orig_shape)
 
 
-def _get_tokens_mask(left=1.0, right=float('-inf')):
+def get_tokens_mask(left=1.0, right=float('-inf')):
     num_tokens = \
         get_forward_context().dp_metadata.num_tokens_across_dp_cpu
     num_tokens = num_tokens.unsqueeze(1)
@@ -269,7 +269,7 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
 
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if use_moe_tokens_mask:
-        tokens_mask = _get_tokens_mask(1.0, 0.0)
+        tokens_mask = get_tokens_mask(1.0, 0.0)
         selected_weights = selected_weights * tokens_mask
 
     n_expert = router_logits.shape[1]
@@ -396,7 +396,7 @@ def unquantized_fused_optimize_moe_method_custom(
 
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if use_moe_tokens_mask:
-        tokens_mask = _get_tokens_mask()
+        tokens_mask = get_tokens_mask()
         router_logits = router_logits * tokens_mask
 
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/
