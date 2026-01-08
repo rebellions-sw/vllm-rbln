@@ -41,8 +41,12 @@ Result2T = TypeVar("Result2T")
 
 class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
 
-    def __init__(self):
+    def __init__(self, decoder_batch_size: int):
         self.table: Dict[str, EntryT] = {}
+        self.decoder_batch_size = decoder_batch_size
+        self.local_block_table_ids: torch.Tensor = torch.zeros(self.decoder_batch_size, 1, dtype=torch.int16)
+        self.cache_positions: torch.Tensor = torch.zeros(self.decoder_batch_size, 1, dtype=torch.int32)
+        self.mask = torch.zeros(self.decoder_batch_size, 1, dtype=torch.bool)
 
     @abstractmethod
     def add(self, running_requests_id: str, local_table_id: int,
@@ -80,11 +84,13 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         is_prompt: bool,
         finished_requests_ids: list[str],
         running_requests_ids: list[str],
-        get_entry_fn: Optional[Callable[[Any], Any]] = None,
+        get_entry_fn: Callable[[Any], Any],
         get_extra_values_fn: Optional[Callable[[Any],
                                                Union[Any, tuple[Any,
                                                                 ...]]]] = None,
-    ) -> Union[list[int], tuple[list[int], ...]]:
+        extra_tensors: Optional[tuple[torch.Tensor, ...]] = None,
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+        request_nums = len(running_requests_ids)
         if is_prompt:
             if finished_requests_ids:
                 first_id = finished_requests_ids[0]
@@ -102,44 +108,27 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
                 available_ids = set(range(decoder_batch_size)) - used_ids
                 assert available_ids, "No available table IDs"
                 table_id = min(available_ids)
-            return [table_id]
+            self.local_block_table_ids[0, 0] = table_id
+            return self.local_block_table_ids
 
-        table_ids = []
-        extra_values = []
+        valid_table_ids = set(list(range(decoder_batch_size)))
 
-        for request_id in running_requests_ids:
+        for i, request_id in enumerate(running_requests_ids):
             entry = self.table[request_id]
-            table_id = get_entry_fn(entry) if get_entry_fn else entry
-            table_ids.append(table_id)
+            table_id = get_entry_fn(entry)
+            self.local_block_table_ids[i, 0] = table_id
+            valid_table_ids.remove(table_id)
+            results = []
+            if get_extra_values_fn and extra_tensors:
+                for value, tensor in zip(get_extra_values_fn(entry), extra_tensors):
+                    tensor = value
+                    results.append(tensor)
 
-            if get_extra_values_fn:
-                result = get_extra_values_fn(entry)
-                if not isinstance(result, tuple):
-                    result = (result, )
-                extra_values.append(result)
-
-        if get_extra_values_fn:
-            extra_values_lists: list[list[Any]] = [
-                list(col) for col in zip(*extra_values)
-            ]
-            return (table_ids, *extra_values_lists)
-        return table_ids
-
-    def pad_list22dtensor(
-        self,
-        original_list: list[int],
-        rows: int,
-        cols: int,
-        pad_value: int = 0,
-        dtype: torch.dtype = None,
-    ) -> torch.Tensor:
-        if dtype is None:
-            dtype = torch.int16
-        valid_nums = len(original_list)
-        padded = torch.full((rows, cols), pad_value, dtype=dtype)
-        original_tensor = torch.tensor(original_list, dtype=dtype).unsqueeze(1)
-        padded[:valid_nums] = original_tensor
-        return padded
+        self.mask.fill_(True)
+        mask[:request_nums] = False
+        fill_value = next(iter(valid_table_ids))
+        self.local_block_table_ids[mask] = fill_value
+        return (self.local_block_table_ids, *results)
 
     def pad_to_2d(
         self,
@@ -211,12 +200,12 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, InnerR1,
             get_entry_fn=lambda entry: entry.local_table_id,
         )
 
-        table_ids = cast(list[int], result)
+        table_ids = cast(torch.Tensor, result)
         return table_ids
 
     def preprocess(
         self,
-        local_block_table_ids: List[int],
+        local_block_table_ids: list[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
@@ -227,11 +216,12 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, InnerR1,
         pad_value = next(
             (i for i in range(decoder_batch_size) if i not in used_ids), 0)
 
-        padded_local_block_table_ids = self.pad_to_2d(local_block_table_ids,
-                                                      decoder_batch_size, 1,
-                                                      pad_value, torch.int16)
-        padded_cache_positions = self.pad_to_2d(cache_positions,
-                                                decoder_batch_size, 1, 0)
+        # padded_local_block_table_ids = self.pad_to_2d(local_block_table_ids,
+        #                                               decoder_batch_size, 1,
+        #                                               pad_value, torch.int16)
+        # padded_cache_positions = self.pad_to_2d(cache_positions,
+        #                                         decoder_batch_size, 1, 0)
+
 
         return (
             padded_local_block_table_ids,
@@ -246,9 +236,11 @@ HybridR2 = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
                                                      HybridR1, HybridR2]):
 
-    def __init__(self, pad_token_id):
-        super().__init__()
+    def __init__(self, decoder_batch_size: int, pad_token_id: int):
+        super().__init__(decoder_batch_size=decoder_batch_size)
         self.pad_token_id = pad_token_id
+        self.pad_lens: torch.Tensor = torch.zeros(self.decoder_batch_size, 1, dtype=torch.int16)
+        self.attention_masks: torch.Tensor = torch.zeros(self.decoder_batch_size, max_length, dtype=torch.int64)
 
     def add(self, running_requests_id: str, local_table_id: int,
             **kwargs) -> None:
@@ -280,9 +272,14 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
             attention_mask = ((input_ids != self.pad_token_id).to(
                 torch.int64).squeeze(0))
         else:
+            request_nums = len(running_requests_ids)
             get_extra_values_fn = lambda entry: (
                 entry.pad_len,
                 entry.attention_mask,
+            )
+            extra_tensors = (
+                self.pad_lens[:request_nums, 0],
+                self.attention_masks[:request_nums, :]
             )
 
         result = self.get_table_mapping_values(
@@ -292,13 +289,14 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
             running_requests_ids,
             get_entry_fn=lambda entry: entry.local_table_id,
             get_extra_values_fn=get_extra_values_fn,
+            extra_tensors=extra_tensors,
         )
 
         if is_prompt:
-            table_ids = cast(list[int], result)
+            table_ids = cast(torch.Tensor, result)
             return table_ids, [], [attention_mask]
         else:
-            result = cast(tuple[list[int], list[int], list[torch.Tensor]],
+            result = cast(tuple[torch.Tensor, torch.Tensor, torch.Tensor],
                           result)
             table_ids, pad_lens, attention_masks = result
             return table_ids, pad_lens, attention_masks
@@ -322,10 +320,10 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
         pad_value = next(
             (i for i in range(decoder_batch_size) if i not in used_ids), 0)
 
-        padded_local_block_table_ids = self.pad_to_2d(local_block_table_ids,
-                                                      decoder_batch_size, 1,
-                                                      pad_value, torch.int16)
-        padded_pad_len = self.pad_to_2d(pad_lens, decoder_batch_size, 1, 0)
+        # padded_local_block_table_ids = self.pad_to_2d(local_block_table_ids,
+        #                                               decoder_batch_size, 1,
+        #                                               pad_value, torch.int16)
+        # padded_pad_len = self.pad_to_2d(pad_lens, decoder_batch_size, 1, 0)
         padded_cache_positions = self.pad_to_2d(cache_positions,
                                                 decoder_batch_size, 1, 0)
         padded_attention_mask = self.pad_to_2d(attention_masks,

@@ -56,7 +56,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
-        self.strategy = InnerAttentionStrategy()
+        self.strategy = InnerAttentionStrategy(decoder_batch_size=self.decoder_batch_size)
         self.attention_manager: AttentionManager[InnerAttentionStrategy,
                                                  InnerAttentionEntry, InnerR1,
                                                  InnerR2] = AttentionManager(

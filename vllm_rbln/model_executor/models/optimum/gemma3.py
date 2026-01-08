@@ -108,7 +108,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
 
-        self.strategy = HybridAttentionImageStrategy(tokenizer.pad_token_id)
+        self.strategy = HybridAttentionImageStrategy(tokenizer.pad_token_id, decoder_batch_size=self.batch_size)
         self.attention_manager: HybridAttentionImageManager \
             = HybridAttentionImageManager(self.strategy)
 

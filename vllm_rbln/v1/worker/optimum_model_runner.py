@@ -244,6 +244,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
             self.model = get_optimum_model(vllm_config=self.vllm_config)
+        self.use_block_table = getattr(self.model.model.rbln_config, "cache_impl",
+                                 None) != "sliding_window"
         self.use_optimum_lora = getattr(self.model.model.rbln_config,
                                         "use_lora", None)
         if self.lora_config and not self.use_optimum_lora:
@@ -599,8 +601,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
 
-        self.decode_block_tables.fill_(scheduler_output.dummy_block)
-
         req_ids = self.input_batch.req_ids
         for i, req_id in enumerate(req_ids):
             req_index = self.input_batch.req_id_to_index[req_id]
@@ -610,16 +610,18 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.input_batch.token_ids_cpu[req_index][input_position])
             self.decode_input_ids[i, 0] = input_id
             self.decode_positions[i, 0] = input_position
-            if self.enable_prefix_caching:
-                num_blocks = len(scheduler_output.block_table_dict[req_id])
-                block_table = scheduler_output.block_table_dict[req_id]
-            else:
-                num_blocks = num_blocks_per_req[req_index]
-                block_table = block_tables_cpu[req_index, :num_blocks]
+            if self.use_block_table:
+                if self.enable_prefix_caching and self.model.is_hybrid:
+                    num_blocks = len(scheduler_output.block_table_dict[req_id])
+                    block_table = scheduler_output.block_table_dict[req_id]
+                else:
+                    num_blocks = num_blocks_per_req[req_index]
+                    block_table = block_tables_cpu[req_index, :num_blocks]
             print("@@@ block_tables_cpu: ", block_tables_cpu.shape)
             print("@@@ block_table: ", block_table.shape)
             print("@@@ num_blocks: ", num_blocks)
             print("@@@ decode_block_tables: ", self.decode_block_tables.shape)
+            self.decode_block_tables.fill_(scheduler_output.dummy_block)
             self.decode_block_tables[i, :num_blocks] = block_table
             running_request_ids.append(req_id)
 
