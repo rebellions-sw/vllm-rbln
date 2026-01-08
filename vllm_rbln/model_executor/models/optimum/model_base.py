@@ -184,20 +184,33 @@ class RBLNOptimumDecoderMixin:
     def setup_decoder_mixin(
         self,
         attn_impl: str,
-        vocab_size: int,
+        vllm_config: VllmConfig,
         use_multiple_decoder: bool,
-        default_batch_size: int,
         decoder_batch_sizes: list[int],
         num_blocks: int,
     ):
         self.attn_impl = attn_impl
         self.use_multiple_decoder = use_multiple_decoder
-        # FIXME: self.batch_size != self.decoder_batch_size ?
-        self.decoder_batch_size = default_batch_size
+        self.decoder_batch_size = vllm_config.scheduler_config.max_num_seqs
         if self.use_multiple_decoder:
             self.decoder_batch_sizes = tuple(reversed(decoder_batch_sizes))
 
-        self.logits_processor = LogitsProcessor(vocab_size,
+        self.vocab_size = vllm_config.model_config.get_vocab_size
+        self.max_model_len = vllm_config.model_config.max_model_len
+
+        if vllm_config.cache_config.enable_prefix_caching:
+            self.block_size = vllm_config.additional_config["attn_block_size"]
+        else:
+            self.block_size = vllm_config.cache_config.block_size
+
+        self.num_blocks_per_seq = math.ceil(self.max_model_len /
+                                            self.block_size)
+
+        self.input_ids_dtype = torch.int64
+        self.position_ids_dtype = torch.int32
+        self.block_tables_dtype = torch.int16
+
+        self.logits_processor = LogitsProcessor(self.vocab_size,
                                                 logits_as_input=True)
         self.sampler = Sampler()
         self.available_blocks = torch.arange(
@@ -205,6 +218,20 @@ class RBLNOptimumDecoderMixin:
             num_blocks,
             dtype=torch.int16,
         )
+
+        self.padded_input_ids: dict[int, torch.Tensor] = {}
+        self.padded_position_ids: dict[int, torch.Tensor] = {}
+        self.padded_block_tables: dict[int, torch.Tensor] = {}
+
+        for batch_size in decoder_batch_sizes:
+            self.padded_input_ids[batch_size] = torch.zeros(
+                batch_size, 1, dtype=self.input_ids_dtype)
+            self.padded_position_ids[batch_size] = torch.zeros(
+                batch_size, 1, dtype=self.position_ids_dtype)
+            self.padded_block_tables[batch_size] = torch.zeros(
+                batch_size,
+                self.num_blocks_per_seq,
+                dtype=self.block_tables_dtype)
 
     def pad_decoder_items(
         self,
@@ -229,15 +256,10 @@ class RBLNOptimumDecoderMixin:
 
         original_batch_size = input_ids.shape[0]
 
-        padded_input_ids = torch.zeros(padded_batch_size,
-                                       1,
-                                       dtype=input_ids.dtype)
-        padded_position_ids = torch.zeros(padded_batch_size,
-                                          1,
-                                          dtype=positions.dtype)
-        padded_block_tables = torch.zeros(padded_batch_size,
-                                          block_tables.shape[1],
-                                          dtype=block_tables.dtype).fill_(-1)
+        padded_input_ids = self.padded_input_ids[padded_batch_size]
+        padded_position_ids = self.padded_position_ids[padded_batch_size]
+        padded_block_tables = self.padded_block_tables[
+            padded_batch_size].fill_(-1)
 
         mask = torch.ones_like(
             padded_block_tables,
@@ -258,12 +280,11 @@ class RBLNOptimumDecoderMixin:
 
         if torch.any(mask):
             if dummy_block is not None:
-                padding_blocks = torch.tensor([dummy_block],
-                                              dtype=block_tables.dtype)
+                dummy_block = int(dummy_block)
             else:
-                padding_blocks = self.available_blocks[
-                    ~torch.isin(self.available_blocks, block_tables.flatten())]
-            padded_block_tables[mask] = padding_blocks[0]
+                dummy_block = self.available_blocks[~torch.isin(
+                    self.available_blocks, block_tables.flatten())][0].item()
+            padded_block_tables[mask] = dummy_block
         return padded_input_ids, padded_position_ids, padded_block_tables
 
     def preprocess_for_decoder(

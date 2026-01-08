@@ -37,9 +37,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vllm_config=self.vllm_config,
             use_multiple_decoder=False,
-            default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
