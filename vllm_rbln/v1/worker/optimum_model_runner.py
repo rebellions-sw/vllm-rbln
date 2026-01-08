@@ -530,8 +530,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduler_output: "RBLNSchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], list[int],
                Optional[MultiModalKwargs], list[str]]:
-        input_tokens: list[list[int]] = []
-        input_positions: list[list[int]] = []
         running_request_ids = []
         batched_mm_inputs: Optional[BatchedTensorInputs] = None
         is_new_request = (len(scheduler_output.scheduled_new_reqs) == 1)
@@ -544,31 +542,22 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         cached_length = []
 
         if is_new_request:
+            # New request started
             req_id = scheduler_output.scheduled_new_reqs[0].req_id
         else:
+            # Preempted request resumed
             req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
+            logger.warning("Request %s is resumed.", req_id)
 
         req_index = self.input_batch.req_id_to_index[req_id]
         num_tokens = int(self.input_batch.num_tokens[req_index])
+
+        # prompt_tokens, input_positions: [1, num_tokens]
         prompt_tokens = self.input_batch.token_ids_cpu_tensor[
             req_index:req_index + 1, :num_tokens]
-        if is_new_request:
-            # New request started
-            scheduled = scheduler_output.scheduled_new_reqs[0]
-            block_ids = scheduled.block_ids[0]
-        else:
-            # Preempted request resumed
-            logger.warning("Request %s is resumed.", req_id)
-            block_ids = scheduler_output.scheduled_cached_reqs.new_block_ids[0]
-
         input_positions = self.prefill_positions[:, :num_tokens]
-        num_blocks = num_blocks_per_req[req_index]
+
         if self.enable_prefix_caching:
-            logger.debug(
-                "Request %s is now scheduled. Prompt tokens: %s, "
-                "Already generated tokens: %s, Allocated block(s): %s", req_id,
-                len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids), block_ids)
             block_table = scheduler_output.block_table_dict[req_id]
             cached_block_table = scheduler_output.cached_block_table
             cached_length = scheduler_output.cached_length
@@ -581,25 +570,25 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     "cached tokens.")
         else:
             block_table = block_tables_cpu[req_index]
+            num_blocks = num_blocks_per_req[req_index]
             block_table = self.mask_block_table(block_table, num_blocks)
-            logger.debug(
-                "Request %s is now scheduled. Prompt tokens: %s, "
-                "Already generated tokens: %s, Allocated block(s): %s", req_id,
-                len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids),
-                block_table.tolist())
+        logger.debug(
+            "Request %s is now scheduled. Prompt tokens: %s, "
+            "Already generated tokens: %s, Allocated block(s): %s", req_id,
+            len(self.requests[req_id].prompt_token_ids),
+            len(self.requests[req_id].output_token_ids), block_table.tolist())
 
         running_request_ids.append(req_id)
 
         if self.supports_mm_inputs:
             batched_mm_inputs = self._extract_mm_kwargs(scheduler_output)
 
-        input_tokens = prompt_tokens  # [1, num_tokens]
         block_table = block_table.unsqueeze(0)
         # NOTE The cached_block_table is not unsqueezed for convenience.
         # It is used only for prefill
-        return input_tokens, input_positions, block_table, cached_block_table, \
-        cached_length, batched_mm_inputs, running_request_ids
+        return prompt_tokens, input_positions, block_table, \
+        cached_block_table, cached_length, batched_mm_inputs, \
+        running_request_ids
 
     def _prepare_decode(
         self,
