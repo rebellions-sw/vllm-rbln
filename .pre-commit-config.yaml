@@ -1,29 +1,23 @@
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
 default_stages:
   - pre-commit # Run locally
   - manual # Run in CI
 exclude: 'third_party/.*'
 repos:
-- repo: https://github.com/google/yapf
-  rev: v0.43.0
-  hooks:
-  - id: yapf
-    args: [--in-place, --verbose]
-    additional_dependencies: [toml] # TODO: Remove when yapf is upgraded
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.9.3
+  rev: v0.14.0
   hooks:
-  - id: ruff
+  - id: ruff-check
     args: [--output-format, github, --fix]
+  - id: ruff-format
 - repo: https://github.com/codespell-project/codespell
   rev: v2.4.0
   hooks:
   - id: codespell
     additional_dependencies: ['tomli']
     args: ['--toml', 'pyproject.toml']
-- repo: https://github.com/PyCQA/isort
-  rev: 0a0b7a830386ba6a31c2ec8316849ae4d1b8240d # 6.0.0
-  hooks:
-  - id: isort
 - repo: https://github.com/pre-commit/mirrors-clang-format
   rev: v19.1.7
   hooks:
@@ -37,10 +31,10 @@ repos:
   - id: pymarkdown
     args: [fix]
 - repo: https://github.com/astral-sh/uv-pre-commit
-  rev: 0.6.2
+  rev: 0.9.1
   hooks:
     - id: pip-compile
-      args: [requirements/test.in, -o, requirements/test.txt]
+      args: [requirements/test.in, -o, requirements/test.txt, --index-strategy, unsafe-best-match, --torch-backend, cpu, --python-platform, x86_64-manylinux_2_28, --python-version, "3.12"]
       files: ^requirements/test\.(in|txt)$
 - repo: local
   hooks:
