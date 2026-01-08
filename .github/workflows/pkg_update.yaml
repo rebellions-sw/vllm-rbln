@@ -41,6 +41,8 @@ jobs:
           else
             VERSION=${{ inputs.optimum-version }}
           fi
+          # Remove 'v' prefix if present
+          VERSION="${VERSION#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check Skip PR (vllm-rbln)
