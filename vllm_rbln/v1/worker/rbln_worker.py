@@ -171,10 +171,14 @@ class RBLNWorker(WorkerBase):
             self.local_rank,
             self.parallel_config,
         )
-        set_omp_num_threads(
-            self.rank,
-            self.local_rank,
-        )
+
+        # Only set OMP_NUM_THREADS when TP > 1 or DP > 1
+        if (self.parallel_config.tensor_parallel_size > 1 or
+                self.parallel_config.data_parallel_size > 1):
+            set_omp_num_threads(
+                self.rank,
+                self.local_rank,
+            )
 
         # Initialize the distributed environment.
         init_worker_distributed_environment(
