@@ -260,37 +260,16 @@ class RBLNOptimumDecoderMixin:
         if padded_batch_size is None:
             padded_batch_size = self.decoder_batch_size
 
-        original_batch_size = input_ids.shape[0]
+        padded_input_ids = input_ids[:padded_batch_size]
+        padded_position_ids = positions[:padded_batch_size]
+        padded_block_tables = block_tables[:padded_batch_size]
 
-        padded_input_ids = self.padded_input_ids[padded_batch_size]
-        padded_position_ids = self.padded_position_ids[padded_batch_size]
-        padded_block_tables = self.padded_block_tables[
-            padded_batch_size].fill_(-1)
-        mask = self.masks[padded_batch_size].fill_(True)
-
-        if input_block_ids is None:
-            padded_input_ids[:original_batch_size] = input_ids
-            padded_position_ids[:original_batch_size] = positions
-            padded_block_tables[:original_batch_size] = block_tables
-            mask[:original_batch_size, :] = False
-        else:
-            padded_input_ids[input_block_ids] = input_ids
-            padded_position_ids[input_block_ids] = positions
-            padded_block_tables[input_block_ids] = block_tables
-            mask[input_block_ids, :] = False
-
-        if torch.any(mask):
-            if dummy_block is not None:
-                dummy_block = int(dummy_block)
-            else:
-                dummy_block = self.available_blocks[~torch.isin(
-                    self.available_blocks, block_tables.flatten())][0].item()
-            padded_block_tables[mask] = dummy_block
         return padded_input_ids, padded_position_ids, padded_block_tables
 
     def preprocess_for_decoder(
         self,
         is_prompt: bool,
+        request_nums: int,
         block_tables: torch.Tensor,
         input_ids: Optional[torch.Tensor] = None,
         cache_position: Optional[torch.Tensor] = None,
@@ -313,8 +292,6 @@ class RBLNOptimumDecoderMixin:
         else:
             if input_block_ids is None:
                 padded_batch_size = self.decoder_batch_size
-                if input_ids is not None:
-                    request_nums = input_ids.shape[0]
                 # Select lower-bounded batch size in case of multiple decoders
                 if self.use_multiple_decoder:
                     padded_batch_size = select_bucket_size(

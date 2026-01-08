@@ -46,13 +46,14 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         block_tables = model_input.block_tables
         dummy_block = model_input.dummy_block
 
-        request_nums = input_ids.shape[0]
+        request_nums = len(model_input.running_requests_ids)
         if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         kwargs = self.preprocess_for_decoder(is_prompt,
+                                             request_nums,
                                              block_tables,
                                              input_ids,
                                              cache_position,
@@ -68,12 +69,11 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
                                             model_input.cached_block_tables,
                                             model_input.cached_lengths,
                                             block_tables)
+            print("[prefill] kwargs: ", kwargs)
             return self.model.prefill_decoder(**kwargs).logits
         else:
+            print("[decode] kwargs: ", kwargs)
             self.model.decoder = self.model.decoders[padded_batch_size]
 
             logits = self.model.decoder(**kwargs).logits
-            if self.attn_impl != "flash_attn":
-                return logits[:request_nums]
-
-            return logits[:model_input.block_tables.shape[0]]
+            return logits[:request_nums]

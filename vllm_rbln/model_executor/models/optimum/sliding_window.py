@@ -72,7 +72,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
 
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-        request_nums = input_ids.shape[0]
+        request_nums = len(running_requests_ids)
         if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
@@ -86,8 +86,9 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             finished_requests_ids,
         )
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, cache_position)
+        kwargs = self.preprocess_for_decoder(is_prompt, request_nums,
+                                             block_tables, input_ids,
+                                             cache_position)
 
         padded_batch_size = kwargs.pop("padded_batch_size",
                                        self.decoder_batch_size)

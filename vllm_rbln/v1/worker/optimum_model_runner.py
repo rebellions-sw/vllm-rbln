@@ -125,8 +125,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.dcp_world_size = 1
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
         self.max_num_reqs = scheduler_config.max_num_seqs
-        self.num_blocks_per_seq = math.ceil(self.max_model_len /
-                                            self.cache_config.block_size)
+        if self.cache_config.enable_prefix_caching:
+            block_size = self.vllm_config.additional_config["attn_block_size"]
+        else:
+            block_size = self.cache_config.block_size
+        self.num_blocks_per_seq = math.ceil(self.max_model_len / block_size)
 
         # Model-related.
         self.num_query_heads = model_config.get_num_attention_heads(
@@ -596,7 +599,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
 
-        self.decode_block_tables.fill_(-1)
+        self.decode_block_tables.fill_(scheduler_output.dummy_block)
 
         req_ids = self.input_batch.req_ids
         for i, req_id in enumerate(req_ids):
@@ -607,11 +610,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 self.input_batch.token_ids_cpu[req_index][input_position])
             self.decode_input_ids[i, 0] = input_id
             self.decode_positions[i, 0] = input_position
-            num_blocks = num_blocks_per_req[req_index]
             if self.enable_prefix_caching:
+                num_blocks = len(scheduler_output.block_table_dict[req_id])
                 block_table = scheduler_output.block_table_dict[req_id]
             else:
+                num_blocks = num_blocks_per_req[req_index]
                 block_table = block_tables_cpu[req_index, :num_blocks]
+            print("@@@ block_tables_cpu: ", block_tables_cpu.shape)
+            print("@@@ block_table: ", block_table.shape)
+            print("@@@ num_blocks: ", num_blocks)
+            print("@@@ decode_block_tables: ", self.decode_block_tables.shape)
             self.decode_block_tables[i, :num_blocks] = block_table
             running_request_ids.append(req_id)
 

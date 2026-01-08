@@ -96,7 +96,7 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
-        request_nums = input_ids.shape[0]
+        request_nums = len(model_input.running_requests_ids)
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
                 **model_input.multi_modal_kwargs)
@@ -112,8 +112,9 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             pixel_values = None
             image_sizes = None
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, cache_position)
+        kwargs = self.preprocess_for_decoder(is_prompt, request_nums,
+                                             block_tables, input_ids,
+                                             cache_position)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")

@@ -61,7 +61,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
 
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-        request_nums = input_ids.shape[0]
+        request_nums = len(running_requests_ids)
 
         if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
@@ -74,6 +74,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             running_requests_ids,
             finished_requests_ids,
         )
+        # FIXME non-valid block ids are in table_ids
         valid_block_ids = torch.tensor(table_ids)
 
         if is_prompt:
@@ -87,6 +88,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         cache_position = torch.zeros(request_nums, 1, dtype=torch.int32)
 
         kwargs = self.preprocess_for_decoder(is_prompt,
+                                             request_nums,
                                              block_tables,
                                              input_ids,
                                              cache_position,
