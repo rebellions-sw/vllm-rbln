@@ -222,6 +222,7 @@ class RBLNOptimumDecoderMixin:
         self.padded_input_ids: dict[int, torch.Tensor] = {}
         self.padded_position_ids: dict[int, torch.Tensor] = {}
         self.padded_block_tables: dict[int, torch.Tensor] = {}
+        self.masks: dict[int, torch.Tensor] = {}
 
         for batch_size in decoder_batch_sizes:
             self.padded_input_ids[batch_size] = torch.zeros(
@@ -232,6 +233,10 @@ class RBLNOptimumDecoderMixin:
                 batch_size,
                 self.num_blocks_per_seq,
                 dtype=self.block_tables_dtype)
+            self.masks[batch_size] = torch.zeros(
+                batch_size,
+                self.num_blocks_per_seq,
+                dtype=torch.bool)
 
     def pad_decoder_items(
         self,
@@ -260,12 +265,7 @@ class RBLNOptimumDecoderMixin:
         padded_position_ids = self.padded_position_ids[padded_batch_size]
         padded_block_tables = self.padded_block_tables[
             padded_batch_size].fill_(-1)
-
-        mask = torch.ones_like(
-            padded_block_tables,
-            dtype=torch.bool,
-            device=block_tables.device,
-        )
+        mask = self.masks[padded_batch_size].fill_(True)
 
         if input_block_ids is None:
             padded_input_ids[:original_batch_size] = input_ids
