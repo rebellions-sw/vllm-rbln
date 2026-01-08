@@ -219,6 +219,8 @@ class RBLNOptimumDecoderMixin:
             dtype=torch.int16,
         )
 
+        # To reduce the overhead to generate tensors for each forward pass,
+        # we pre-allocate tensors for each batch size.
         self.padded_input_ids: dict[int, torch.Tensor] = {}
         self.padded_position_ids: dict[int, torch.Tensor] = {}
         self.padded_block_tables: dict[int, torch.Tensor] = {}
@@ -233,10 +235,9 @@ class RBLNOptimumDecoderMixin:
                 batch_size,
                 self.num_blocks_per_seq,
                 dtype=self.block_tables_dtype)
-            self.masks[batch_size] = torch.zeros(
-                batch_size,
-                self.num_blocks_per_seq,
-                dtype=torch.bool)
+            self.masks[batch_size] = torch.zeros(batch_size,
+                                                 self.num_blocks_per_seq,
+                                                 dtype=torch.bool)
 
     def pad_decoder_items(
         self,
