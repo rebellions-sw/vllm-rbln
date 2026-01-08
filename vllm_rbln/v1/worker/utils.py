@@ -72,9 +72,8 @@ def get_autobind_cpu_ids(
     ]
 
     if not available_numa_nodes:
-        logger.error(
-            "Auto thread-binding failed: no available NUMA nodes "
-            "with allowed CPUs. Please try to bind threads manually.")
+        logger.error("Auto thread-binding failed: no available NUMA nodes "
+                     "with allowed CPUs. Please try to bind threads manually.")
         return "all"
 
     numa_node_idx = rank_across_dp % len(available_numa_nodes)
@@ -167,17 +166,13 @@ def set_cpu_affinity(
         if cpu_arch in (CpuArchEnum.POWERPC, CpuArchEnum.S390X):
             # For S390X/POWERPC SMT-8/4/2
             local_omp_cpuid = get_autobind_cpu_ids(
-                rank,
-                local_rank,
-                parallel_config,
+                rank, local_rank, parallel_config,
                 lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4])
         elif cpu_arch == CpuArchEnum.X86:
             # For x86 SMT-2, use 1 CPU per core
-            local_omp_cpuid = get_autobind_cpu_ids(
-                rank,
-                local_rank,
-                parallel_config,
-                lambda cpus: cpus[-1:])
+            local_omp_cpuid = get_autobind_cpu_ids(rank, local_rank,
+                                                   parallel_config,
+                                                   lambda cpus: cpus[-1:])
         else:
             local_omp_cpuid = "nobind"
     else:
@@ -186,8 +181,7 @@ def set_cpu_affinity(
     if local_omp_cpuid not in ("all", "nobind"):
         # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
         cpu_ids = [
-            int(cpu_id.strip())
-            for cpu_id in local_omp_cpuid.split(",")
+            int(cpu_id.strip()) for cpu_id in local_omp_cpuid.split(",")
         ]
         # Set CPU affinity for current process
         try:
@@ -259,4 +253,3 @@ def set_omp_num_threads(
             local_rank,
             os.environ["OMP_NUM_THREADS"],
         )
-
