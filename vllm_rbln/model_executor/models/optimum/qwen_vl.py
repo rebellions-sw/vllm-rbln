@@ -137,10 +137,9 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
 
-        request_nums = input_ids.shape[0]
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-
+        request_nums = len(running_requests_ids)
         if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
@@ -170,8 +169,9 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
                     self.rope_deltas.pop(request_id)
             self.rope_deltas[cur_request_id] = rope_deltas.item()
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, cache_position)
+        kwargs = self.preprocess_for_decoder(is_prompt, request_nums,
+                                             block_tables, input_ids,
+                                             cache_position)
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
 

@@ -123,13 +123,14 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
-
+        # FIXME non-valid block ids are in block_tables
         valid_block_ids = [
             block_table[0].item() for block_table in block_tables
         ]
         batch_idx = block_tables[0][0] if is_prompt else None
-
+        request_nums = len(model_input.running_requests_ids)
         kwargs = self.preprocess_for_decoder(is_prompt,
+                                             request_nums,
                                              block_tables,
                                              input_ids,
                                              cache_position,
