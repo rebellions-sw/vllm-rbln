@@ -57,7 +57,34 @@ class RBLNOptimumWorker(WorkerBase):
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
             init_cached_hf_modules()
-        self.profiler = None
+
+        # Torch profiler. Enabled and configured through env vars:
+        # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
+        if envs.VLLM_TORCH_PROFILER_DIR:
+            torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
+            logger.info("Profiling enabled. Traces will be saved to: %s",
+                        torch_profiler_trace_dir)
+            logger.debug(
+                "Profiler config: record_shapes=%s,"
+                "profile_memory=%s,with_stack=%s,with_flops=%s",
+                envs.VLLM_TORCH_PROFILER_RECORD_SHAPES,
+                envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
+                envs.VLLM_TORCH_PROFILER_WITH_STACK,
+                envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
+            )
+            self.profiler = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                ],
+                record_shapes=envs.VLLM_TORCH_PROFILER_RECORD_SHAPES,
+                profile_memory=envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
+                with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
+                with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                    torch_profiler_trace_dir, use_gzip=True))
+        else:
+            self.profiler = None
+
 
     def init_device(self) -> None:
         # Initialize the distributed environment.
@@ -96,7 +123,17 @@ class RBLNOptimumWorker(WorkerBase):
         return output if self.is_driver_worker else None
 
     def profile(self, is_start: bool = True):
-        raise RuntimeError("Profiler is not enabled.")
+        if self.profiler is None:
+            raise RuntimeError("Profiler is not enabled.")
+        if is_start:
+            self.profiler.start()
+        else:
+            self.profiler.stop()
+            # only print profiler results on rank 0
+            if self.local_rank == 0:
+                print(self.profiler.key_averages().table(
+                    sort_by="self_cuda_time_total"))
+        
 
     def load_model(self):
         self.model_runner.load_model()
