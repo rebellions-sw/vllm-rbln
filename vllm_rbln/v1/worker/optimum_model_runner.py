@@ -324,7 +324,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
         with record_function_or_nullcontext("Sample"):
-            if self.use_rbln_sampler:
+            use_padding = self.use_rbln_sampler and not model_input.is_prompt
+            if use_padding:
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
@@ -334,7 +335,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
-            if self.use_rbln_sampler:
+            if use_padding:
                 sampler_output.sampled_token_ids = \
                     sampler_output.sampled_token_ids[:num_reqs]
                 if sampler_output.logprobs_tensors is not None:

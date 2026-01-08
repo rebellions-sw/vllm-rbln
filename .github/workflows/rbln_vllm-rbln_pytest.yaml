@@ -45,6 +45,7 @@ on:
         type: string
 
 env:
+  RBLN_VERBOSE: 6
   REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
   REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
   REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
@@ -52,51 +53,23 @@ env:
   HF_AUTH_TOKEN: ${{ secrets.HF_AUTH_TOKEN }}
 
 jobs:
-  build-vllm-rbln:
-    name: Build vllm-rbln wheel
-    runs-on: runner-vllm-ci
-    outputs:
-      wheel_filename: ${{ steps.get_wheel_filename.outputs.WHEEL_FILENAME }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
-          fetch-depth: 0
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install build dependencies and build vllm-rbln wheel
-        run: |
-          python -m pip install build setuptools_scm
-          python -m build --wheel
-
-      - name: Get wheel filename
-        id: get_wheel_filename
-        run: |
-          WHEEL_FILENAME=$(ls dist/vllm_rbln-*.whl | xargs basename)
-          echo "Found wheel file: ${WHEEL_FILENAME}"
-          echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_OUTPUT
-      
-      - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vllm-wheel
-          path: dist/
-          retention-days: 7
-
   pytest:
-    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
-    name: Pytest (${{ matrix.test_type }})
-    runs-on: runner-vllm-ci
-    needs: [build-vllm-rbln]
+    name: Pytest (${{ matrix.test_type.name }})
+    runs-on: ${{ matrix.test_type.runner }}
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
-        test_type: [core, worker, openai]
+        test_type: 
+          [
+            {
+              name : "core",
+              runner : "ubuntu-latest-rbln"
+            },
+            {
+              name : "worker",
+              runner : "ubuntu-latest-rbln"
+            },
+          ]
     steps:
       - name: Checkout the vllm-rbln repository
         uses: actions/checkout@v4
@@ -105,42 +78,50 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Get commit message if not provided
+      - name: Get commit message
         id: get_commit_message
-        if: ${{ inputs.commit_message == '' }}
         run: |
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B HEAD^2)
+          else
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          fi
+          echo "Commit message: $COMMIT_MESSAGE"
           echo "message<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Check if test should be skipped
         id: should_skip
+        env:
+          COMMIT_MESSAGE: ${{ steps.get_commit_message.outputs.message }}
         run: |
-          COMMIT_MESSAGE="${{ steps.get_commit_message.outputs.message }}"
           SKIP=false
           
-          case "${{ matrix.test_type }}" in
+          case "${{ matrix.test_type.name }}" in
             "core")
-              if [[ "$COMMIT_MESSAGE" == *"[skip-core]"* ]]; then
+              if [[ "$COMMIT_MESSAGE" == *"[skip core]"* ]]; then
                 SKIP=true
               fi
               ;;
             "worker")
-              if [[ "$COMMIT_MESSAGE" == *"[skip-worker]"* ]]; then
+              if [[ "$COMMIT_MESSAGE" == *"[skip worker]"* ]]; then
                 SKIP=true
               fi
               ;;
           esac
           
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
+          echo "Skip decision: $SKIP"
 
       - name: Set up Python 3.12
+        if: steps.should_skip.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install rebel-compiler
+        if: steps.should_skip.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
@@ -148,19 +129,25 @@ jobs:
           PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
           python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+          echo "rebel-compiler ${VERSION}"
 
       - name: Download wheel artifact
+        if: steps.should_skip.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
+          path: dist
 
       - name: Install local vllm-rbln package and dependencies
+        if: steps.should_skip.outputs.skip != 'true'
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
-          echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
-          VERSION=${{ inputs.optimum_rbln_version }}
-          pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
-          echo "optimum-rbln $VERSION"
+          if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+            pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+            echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+          else
+            pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+          fi
 
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
@@ -169,13 +156,128 @@ jobs:
           REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
         run: |
-          case "${{ matrix.test_type }}" in
+          case "${{ matrix.test_type.name }}" in
             "core")
               pytest tests/v1/core -vv --durations 0
               ;;
             "worker")
               pytest tests/v1/worker -vv --durations 0
               ;;
+          esac
+
+      - name: Skip message
+        if: steps.should_skip.outputs.skip == 'true'
+        run: |
+          echo "Found [skip-${{ matrix.test_type.name }}] in commit message, skipping CI"
+
+  pytest-arc:
+    name: Pytest (${{ matrix.test_type.name }})
+    runs-on: ${{ matrix.test_type.runner }}
+    container:
+      image: mcr.microsoft.com/devcontainers/python:3.12
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: ${{ inputs.fail_fast }}
+      matrix:
+        test_type: 
+          [
+            {
+              name : "openai",
+              runner : "sw-k8s-ca22-4"
+            }
+          ]
+    steps:
+      - name: Checkout the vllm-rbln repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fix git ownership
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Get commit message
+        id: get_commit_message
+        run: |
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B HEAD^2)
+          else
+            COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          fi
+          echo "Commit message: $COMMIT_MESSAGE"
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check if test should be skipped
+        id: should_skip
+        env:
+          COMMIT_MESSAGE: ${{ steps.get_commit_message.outputs.message }}
+        run: |
+          SKIP=false
+          
+          case "${{ matrix.test_type.name }}" in
+            "openai")
+              if [[ "$COMMIT_MESSAGE" == *"[skip openai]"* ]]; then
+                SKIP=true
+              fi
+              ;;
+          esac
+          
+          echo "skip=$SKIP" >> $GITHUB_OUTPUT
+
+      - name: Install uv CLI
+        if: steps.should_skip.outputs.skip != 'true'
+        run: |
+          pip install uv
+
+      - name: Install rebel-compiler
+        if: steps.should_skip.outputs.skip != 'true'
+        run: |
+          apt-get update
+          apt-get install -y build-essential
+          uv pip uninstall --system rebel-compiler
+          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
+          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
+          uv pip install --system --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+
+      - name: Download wheel artifact
+        if: steps.should_skip.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: vllm-wheel
+          path: dist
+
+      - name: Install local vllm-rbln package and dependencies
+        if: steps.should_skip.outputs.skip != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          retry_on: any
+          shell: bash
+          command: |
+            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+            if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+              echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+            else
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+            fi
+
+      - name: Run pytest
+        if: steps.should_skip.outputs.skip != 'true'
+        env:
+          VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
+          REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
+
+        run: |
+          case "${{ matrix.test_type.name }}" in
             "openai")
               pytest tests/entrypoints/openai -vv --durations 0
               ;;
@@ -184,4 +286,4 @@ jobs:
       - name: Skip message
         if: steps.should_skip.outputs.skip == 'true'
         run: |
-          echo "Found [skip-${{ matrix.test_type }}] in commit message, skipping CI"
+          echo "Found [skip-${{ matrix.test_type.name }}] in commit message, skipping CI"
