@@ -20,11 +20,9 @@ from typing import TYPE_CHECKING, Optional, Union
 import torch
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.distributed import (
-    ensure_model_parallel_initialized,
-    init_distributed_environment,
-    set_custom_all_reduce,
-)
+from vllm.distributed import (ensure_model_parallel_initialized,
+                              init_distributed_environment,
+                              set_custom_all_reduce)
 from vllm.distributed.kv_transfer import ensure_kv_transfer_initialized
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.lora.request import LoRARequest
@@ -34,11 +32,8 @@ from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
-from vllm.v1.outputs import (
-    EMPTY_MODEL_RUNNER_OUTPUT,
-    AsyncModelRunnerOutput,
-    ModelRunnerOutput,
-)
+from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
+                             ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
 from vllm.v1.worker.worker_base import WorkerBase
 
@@ -173,8 +168,8 @@ class RBLNWorker(WorkerBase):
         )
 
         # Only set OMP_NUM_THREADS when TP > 1 or DP > 1
-        if (self.parallel_config.tensor_parallel_size > 1 or
-                self.parallel_config.data_parallel_size > 1):
+        if (self.parallel_config.tensor_parallel_size > 1
+                or self.parallel_config.data_parallel_size > 1):
             set_omp_num_threads(
                 self.rank,
                 self.local_rank,
@@ -333,6 +328,7 @@ class RBLNWorker(WorkerBase):
         if envs.VLLM_RBLN_METRICS:
             # FIXME - performance tracker atexit is not called
             self.model_runner.performance_tracker.print_final_stats()
+
 
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
