@@ -248,31 +248,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # if use_multiple_decoder is True, use decoder_batch_sizes
         # otherwise, use max_num_seqs
         if self.use_rbln_sampler:
-            use_multiple_decoder = getattr(self.model.model.rbln_config,
-                                           "use_multiple_decoder", False)
-            if use_multiple_decoder:
-                self.bucket_sizes = self.model.decoder_batch_sizes
-            else:
-                batch_size = self.vllm_config.scheduler_config.max_num_seqs
-                self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
-            logger.debug("Bucket sizes for RBLN sampler: %s",
-                         self.bucket_sizes)
-            with torch.inference_mode():
-                for bucket_size in self.bucket_sizes:
-                    self.pooled_tensors[bucket_size] = torch.empty(
-                        (bucket_size, self.model_config.get_vocab_size()),
-                        dtype=self.model.dtype,
-                    )
-            torch._dynamo.config.recompile_limit = len(
-                self.bucket_sizes) * len(WARM_UP_CONFIGS)
-            self.sampler = torch.compile(
-                self.sampler,
-                dynamic=False,
-                options={
-                    "guard_filter_fn":
-                    torch.compiler.keep_tensor_guards_unsafe,
-                },
-                fullgraph=False)
+            self.prepare_rbln_sampler()
 
     def get_model(self) -> nn.Module:
         return self.model
@@ -329,7 +305,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
         with record_function_or_nullcontext("Sample"):
-            if self.use_rbln_sampler:
+            use_padding = self.use_rbln_sampler and not model_input.is_prompt
+            if use_padding:
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
@@ -339,7 +316,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
-            if self.use_rbln_sampler:
+            if use_padding:
                 sampler_output.sampled_token_ids = \
                     sampler_output.sampled_token_ids[:num_reqs]
                 if sampler_output.logprobs_tensors is not None:
@@ -1263,3 +1240,27 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             tensor = getattr(logprobs_tensors, field_name)
             dict[field_name] = tensor[:num_reqs]
         return LogprobsTensors(**dict)
+
+    def prepare_rbln_sampler(self):
+        # Set bucket sizes and pooled tensors for RBLN sampler
+        # if use_multiple_decoder is True, use decoder_batch_sizes
+        # otherwise, use max_num_seqs
+        use_multiple_decoder = getattr(self.model.model.rbln_config,
+                                       "use_multiple_decoder", False)
+        if use_multiple_decoder:
+            self.bucket_sizes = self.model.decoder_batch_sizes
+        else:
+            batch_size = self.vllm_config.scheduler_config.max_num_seqs
+            self.bucket_sizes = tuple(self.get_bucket_sizes(batch_size))
+        logger.debug("Bucket sizes for RBLN sampler: %s", self.bucket_sizes)
+        with torch.inference_mode():
+            for bucket_size in self.bucket_sizes:
+                self.pooled_tensors[bucket_size] = torch.empty(
+                    (bucket_size, self.model_config.get_vocab_size()),
+                    dtype=self.model.dtype,
+                )
+        torch._dynamo.config.recompile_limit = len(
+            self.bucket_sizes) * len(WARM_UP_CONFIGS)
+        self.sampler = torch.compile(self.sampler,
+                                     dynamic=False,
+                                     fullgraph=False)
