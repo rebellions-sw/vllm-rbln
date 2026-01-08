@@ -161,7 +161,7 @@ jobs:
               pytest tests/v1/core -vv --durations 0
               ;;
             "worker")
-              pytest tests/v1/worker -vv --durations 0
+              pytest tests/v1/worker/test_rebel_optimum_model_runner.py -vv --durations 0
               ;;
           esac
 
@@ -186,7 +186,11 @@ jobs:
             {
               name : "openai",
               runner : "sw-k8s-ca22-4"
-            }
+            },
+            {
+              name : "sampler",
+              runner : "sw-k8s-ca22-1"
+            },
           ]
     steps:
       - name: Checkout the vllm-rbln repository
@@ -226,6 +230,11 @@ jobs:
                 SKIP=true
               fi
               ;;
+            "sampler")
+              if [[ "$COMMIT_MESSAGE" == *"[skip worker]"* ]]; then
+                SKIP=true
+              fi
+              ;;
           esac
           
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
@@ -262,7 +271,7 @@ jobs:
           retry_on: any
           shell: bash
           command: |
-            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio pytest-xdist
             if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
               uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
               echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
@@ -280,6 +289,10 @@ jobs:
           case "${{ matrix.test_type.name }}" in
             "openai")
               pytest tests/entrypoints/openai -vv --durations 0
+              ;;
+            "sampler")
+              pytest -n auto -k "warm_upTrue" tests/v1/worker/test_sampler.py -vv --durations 0
+              pytest -n auto -k "warm_upFalse" tests/v1/worker/test_sampler.py -vv --durations 0
               ;;
           esac
 
