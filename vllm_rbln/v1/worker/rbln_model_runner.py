@@ -483,6 +483,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # keeping its internal state. This is why we check the number
         # of kv_cache groups instead of solely checking
         # for self.model_config.is_attention_free.
+        if not envs.VLLM_RBLN_SORT_BATCH:
+            return
         if len(self.kv_cache_config.kv_cache_groups) == 0:
             return
 
