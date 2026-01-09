@@ -179,7 +179,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             self.mask_local_block_table(request_nums, valid_table_ids)
 
         if has_extra_values:
-            return (self.local_block_table_ids, *extra_tensors)
+            return (self.local_block_table_ids[:decoder_batch_size], *extra_tensors)
         return self.local_block_table_ids[:decoder_batch_size]
 
     def get_table_mapping_values(
@@ -305,7 +305,8 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
                 entry.pad_len,
                 entry.attention_mask,
             )
-            extra_tensors = (self.pad_lens, self.attention_masks)
+            extra_tensors = (self.pad_lens[:decoder_batch_size],
+                             self.attention_masks[:decoder_batch_size])
 
         result = self.get_table_mapping_values(
             decoder_batch_size,

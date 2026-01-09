@@ -622,12 +622,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     self.decode_block_tables.fill_(
                         scheduler_output.dummy_block)
                 self.decode_block_tables[i, :num_blocks] = block_table
-            # print("@@@ block_tables_cpu: ", block_tables_cpu.shape)
-            # print("@@@ block_table: ", block_table.shape)
-            # print("@@@ num_blocks: ", num_blocks)
-            # print("@@@ decode_block_tables: ", self.decode_block_tables.shape)
-            print("@@@ scheduler_output.dummy_block: ",
-                  scheduler_output.dummy_block)
             running_request_ids.append(req_id)
 
         return self.decode_input_ids, self.decode_positions, \
