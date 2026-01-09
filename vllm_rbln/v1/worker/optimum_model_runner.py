@@ -244,8 +244,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
             self.model = get_optimum_model(vllm_config=self.vllm_config)
-        self.use_block_table = getattr(self.model.model.rbln_config, "cache_impl",
-                                 None) != "sliding_window"
+        self.use_block_table = getattr(self.model.model.rbln_config,
+                                       "cache_impl", None) != "sliding_window"
         self.use_optimum_lora = getattr(self.model.model.rbln_config,
                                         "use_lora", None)
         if self.lora_config and not self.use_optimum_lora:
@@ -557,6 +557,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_index:req_index + 1, :num_tokens]
         input_positions = self.prefill_positions[:, :num_tokens]
 
+        # FIXME skip block_table if not use_block_table
         if self.enable_prefix_caching:
             block_table = scheduler_output.block_table_dict[req_id]
             cached_block_table = scheduler_output.cached_block_table
@@ -617,12 +618,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 else:
                     num_blocks = num_blocks_per_req[req_index]
                     block_table = block_tables_cpu[req_index, :num_blocks]
-            print("@@@ block_tables_cpu: ", block_tables_cpu.shape)
-            print("@@@ block_table: ", block_table.shape)
-            print("@@@ num_blocks: ", num_blocks)
-            print("@@@ decode_block_tables: ", self.decode_block_tables.shape)
-            self.decode_block_tables.fill_(scheduler_output.dummy_block)
-            self.decode_block_tables[i, :num_blocks] = block_table
+                if scheduler_output.dummy_block is not None:
+                    self.decode_block_tables.fill_(
+                        scheduler_output.dummy_block)
+                self.decode_block_tables[i, :num_blocks] = block_table
+            # print("@@@ block_tables_cpu: ", block_tables_cpu.shape)
+            # print("@@@ block_table: ", block_table.shape)
+            # print("@@@ num_blocks: ", num_blocks)
+            # print("@@@ decode_block_tables: ", self.decode_block_tables.shape)
+            print("@@@ scheduler_output.dummy_block: ",
+                  scheduler_output.dummy_block)
             running_request_ids.append(req_id)
 
         return self.decode_input_ids, self.decode_positions, \

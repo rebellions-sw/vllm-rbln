@@ -48,7 +48,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         # Result1T = list[int]
         # Result2T = tuple[torch.Tensor, torch.Tensor]
 
-        self.strategy = InnerAttentionStrategy(decoder_batch_size=self.batch_size)
+        self.strategy = InnerAttentionStrategy(
+            decoder_batch_size=self.batch_size)
         self.attention_manager: AttentionManager[InnerAttentionStrategy,
                                                  InnerAttentionEntry, InnerR1,
                                                  InnerR2] = AttentionManager(
