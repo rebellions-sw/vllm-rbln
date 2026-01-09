@@ -82,43 +82,68 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
     def clear(self):
         self.table.clear()
 
-    def get_table_mapping_values(
+    def find_available_table_id(
         self,
         decoder_batch_size: int,
-        is_prompt: bool,
         finished_requests_ids: list[str],
-        running_requests_ids: list[str],
         get_entry_fn: Callable[[Any], Any],
-        get_extra_values_fn: Optional[Callable[[Any],
-                                               Union[Any, tuple[Any,
-                                                                ...]]]] = None,
-        extra_tensors: Optional[tuple[torch.Tensor, ...]] = None,
+    ) -> int:
+        """
+        Find an available table ID by reusing from
+        finished requests or finding a new one.
+        """
+        if finished_requests_ids:
+            # Reuse table_id from the first finished request
+            first_id = finished_requests_ids[0]
+            first_entry = self.table[first_id]
+            table_id = get_entry_fn(
+                first_entry) if get_entry_fn else first_entry
+
+            # Clean up finished requests from table
+            for request_id in finished_requests_ids:
+                self.table.pop(request_id)
+            return table_id
+        else:
+            # Find the minimum available table_id
+            used_ids = {
+                get_entry_fn(v) if get_entry_fn else v
+                for v in self.table.values()
+            }
+            available_ids = set(range(decoder_batch_size)) - used_ids
+            assert available_ids, "No available table IDs"
+            return min(available_ids)
+
+    def _handle_prompt_case(
+        self,
+        running_requests_ids: list[str],
+        finished_requests_ids: list[str],
+        decoder_batch_size: int,
+        get_entry_fn: Callable[[Any], Any],
+    ) -> torch.Tensor:
+        """Handle the prompt case: single request with table_id assignment."""
+        current_request_id = running_requests_ids[0]
+        table_id = self.find_available_table_id(decoder_batch_size,
+                                                finished_requests_ids,
+                                                get_entry_fn)
+
+        self.local_block_table_ids[0, 0].copy_(table_id)
+        self.add(current_request_id, table_id)
+        return self.local_block_table_ids[0, :]  # [1, 1] -> [1]
+
+    def _handle_decoding_case(
+        self,
+        running_requests_ids: list[str],
+        decoder_batch_size: int,
+        get_entry_fn: Callable[[Any], Any],
+        get_extra_values_fn: Optional[Callable[[Any], Union[Any, tuple[Any,
+                                                                       ...]]]],
+        extra_tensors: Optional[tuple[torch.Tensor, ...]],
     ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
         request_nums = len(running_requests_ids)
-        if is_prompt:
-            current_request_id = running_requests_ids[0]
-            if finished_requests_ids:
-                first_id = finished_requests_ids[0]
-                first_entry = self.table[first_id]
-                table_id = get_entry_fn(
-                    first_entry) if get_entry_fn else first_entry
+        valid_table_ids = set(range(decoder_batch_size))
+        results = []
 
-                for request_id in finished_requests_ids:
-                    self.table.pop(request_id)
-            else:
-                used_ids = {
-                    get_entry_fn(v) if get_entry_fn else v
-                    for v in self.table.values()
-                }
-                available_ids = set(range(decoder_batch_size)) - used_ids
-                assert available_ids, "No available table IDs"
-                table_id = min(available_ids)
-            self.local_block_table_ids[0, 0].copy_(table_id)
-            self.add(current_request_id, table_id)
-            return self.local_block_table_ids[0, :]  # [1, 1] -> [1]
-
-        valid_table_ids = set(list(range(decoder_batch_size)))
-
+        # Copy table_ids and extra values for each running request
         for i, request_id in enumerate(running_requests_ids):
             entry = self.table[request_id]
             table_id = get_entry_fn(entry)
@@ -140,40 +165,33 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             return (self.local_block_table_ids, *results)
         return self.local_block_table_ids[:decoder_batch_size]
 
-    def pad_to_2d(
+    def get_table_mapping_values(
         self,
-        original_values: Union[list[int], list[torch.Tensor], torch.Tensor],
-        rows: int,
-        cols: int,
-        pad_value: int = 0,
-        dtype: torch.dtype = None,
-    ) -> torch.Tensor:
-        if isinstance(original_values, list) and original_values:
-            original_value = original_values[0]
-            if isinstance(original_value, int):
-                dtype = torch.int16 if dtype is None else dtype
-                valid_nums = len(original_values)
-                padded = torch.full((rows, cols), pad_value, dtype=dtype)
-                original_tensor = torch.tensor(original_values,
-                                               dtype=dtype).unsqueeze(1)
-            elif isinstance(original_value, torch.Tensor):
-                dtype = original_value.dtype if dtype is None else dtype
-                valid_nums = len(original_values)
-                padded = torch.full((rows, cols), pad_value, dtype=dtype)
-                original_tensor = torch.cat(original_values)
-            else:
-                raise RuntimeError("Invalid type of input.")
-
-        elif isinstance(original_values, torch.Tensor):
-            original_tensor = original_values
-            dtype = original_tensor.dtype
-            valid_nums = original_tensor.shape[0]
-            padded = torch.full((rows, cols), pad_value, dtype=dtype)
+        decoder_batch_size: int,
+        is_prompt: bool,
+        finished_requests_ids: list[str],
+        running_requests_ids: list[str],
+        get_entry_fn: Callable[[Any], Any],
+        get_extra_values_fn: Optional[Callable[[Any],
+                                               Union[Any, tuple[Any,
+                                                                ...]]]] = None,
+        extra_tensors: Optional[tuple[torch.Tensor, ...]] = None,
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+        if is_prompt:
+            return self._handle_prompt_case(
+                running_requests_ids,
+                finished_requests_ids,
+                decoder_batch_size,
+                get_entry_fn,
+            )
         else:
-            raise RuntimeError("Invalid type of input.")
-
-        padded[:valid_nums] = original_tensor
-        return padded
+            return self._handle_decoding_case(
+                running_requests_ids,
+                decoder_batch_size,
+                get_entry_fn,
+                get_extra_values_fn,
+                extra_tensors,
+            )
 
 
 InnerR1 = list[int]
@@ -235,7 +253,6 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
         self.pad_token_id = pad_token_id
         self.max_seq_len = max_seq_len
         self.pad_lens: torch.Tensor = torch.zeros(self.decoder_batch_size,
-                                                  1,
                                                   dtype=torch.int16)
         self.attention_masks: torch.Tensor = torch.zeros(
             self.decoder_batch_size, self.max_seq_len, dtype=torch.float32)
@@ -271,7 +288,7 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
                 entry.pad_len,
                 entry.attention_mask,
             )
-            extra_tensors = (self.pad_lens[:, 0], self.attention_masks)
+            extra_tensors = (self.pad_lens, self.attention_masks)
 
         result = self.get_table_mapping_values(
             decoder_batch_size,
@@ -306,13 +323,12 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
         assert pad_lens is not None
         assert attention_masks is not None
         # FIXME: if multi batch?
-        # cache_positions:
+        # cache_positions (decoder_batch_size, 1):
         #  the index including padding between text and image
-        # pad_lens:
+        # pad_lens (decoder_batch_size):
         #   the size of padding
-        # position_ids:
+        # position_ids (decoder_batch_size, 1):
         #   the index of the token to be decoded in the sequence.
-        # shape: (decoder_batch_size, 1)
         position_ids = cache_positions - pad_lens.unsqueeze(1)
         return (
             local_block_table_ids,
