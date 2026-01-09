@@ -463,7 +463,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if len(self.kv_cache_config.kv_cache_groups) == 0:
             return
 
-
         orig_indices = np.arange(len(self.input_batch.req_ids))
         sorted_order = np.argsort(self.input_batch.num_tokens[orig_indices] *
                                   (-1),
