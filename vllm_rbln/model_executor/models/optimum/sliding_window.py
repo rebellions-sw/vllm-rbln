@@ -128,7 +128,6 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
                 request_nums,
                 padded_batch_size,
             )
-            print("@@@ local_block_table_id: ", local_block_table_id)
             logits = self.model.decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,

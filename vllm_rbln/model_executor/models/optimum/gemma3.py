@@ -130,20 +130,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         running_requests_ids = model_input.running_requests_ids
         request_nums = len(running_requests_ids)
 
-        # In prefill phase, the length of list must be 1
-        sliding_window_table_ids, padded_cache_lengths, attention_masks = \
-        self.attention_manager.get(
-                is_prompt,
-                self.decoder_batch_size,
-                running_requests_ids,
-                finished_requests_ids,
-                input_ids=input_ids,
-            )
-
         kwargs = self.preprocess_for_decoder(is_prompt, request_nums,
                                              block_tables, input_ids,
                                              position_ids)
-
+        padded_batch_size = kwargs.pop("padded_batch_size",
+                                       self.decoder_batch_size)
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.
         # [decode] `cache_position` and `position_ids` are distinguished
@@ -151,6 +142,23 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         cache_position = kwargs.pop("cache_position")
         input_ids = kwargs.pop("input_ids")
         block_tables = kwargs.pop("block_tables")
+
+        if is_prompt:
+            # Used for available table IDs
+            max_num_seqs = self.decoder_batch_size
+        else:
+            # Used for padding
+            max_num_seqs = padded_batch_size
+
+        # In prefill phase, the length of list must be 1
+        sliding_window_table_ids, padded_cache_lengths, attention_masks = \
+        self.attention_manager.get(
+                is_prompt,
+                max_num_seqs,
+                running_requests_ids,
+                finished_requests_ids,
+                input_ids=input_ids,
+            )
 
         if is_prompt:
             inputs_embeds = None
@@ -183,17 +191,14 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             updated_padded_cache_length = output.padded_cache_lengths
 
             assert len(running_requests_ids) == 1
-            self.attention_manager.add(
+            self.attention_manager.add_extra_values(
                 running_requests_id=running_requests_ids[0],
-                local_table_id=sliding_window_table_ids[0],
                 pad_len=updated_padded_cache_length,
                 attention_mask=updated_attention_mask,
             )
         else:
             if self.model.language_model.decoders is None:
                 raise ValueError("Decoders is None")
-            padded_batch_size = kwargs.pop("padded_batch_size",
-                                           self.decoder_batch_size)
             self.model.language_model.decoder = (
                 self.model.language_model.decoders[padded_batch_size])
             (

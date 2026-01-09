@@ -75,6 +75,13 @@ class HybridAttentionImageManager(
         AttentionManager[HybridAttentionImageStrategy,
                          HybridAttentionImageEntry, HybridR1, HybridR2]):
 
+    def add_extra_values(self, running_requests_id: str, pad_len: int,
+                         attention_mask: torch.Tensor) -> None:
+        # attention_mask is [1, max_seq_len] -> [max_seq_len]
+        self._s.add_extra_values(running_requests_id,
+                                 pad_len=pad_len,
+                                 attention_mask=attention_mask.squeeze(0))
+
     def update(
         self,
         running_requests_ids: list[str],
