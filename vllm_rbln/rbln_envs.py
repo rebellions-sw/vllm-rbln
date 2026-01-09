@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_LOGITS_ALL_GATHER: bool = True
     VLLM_RBLN_NUM_RAY_NODES: int = 1
     VLLM_RBLN_METRICS: bool = False
+    VLLM_RBLN_SORT_BATCH: bool = False
 
 
 def get_dp_impl():
@@ -128,6 +129,9 @@ environment_variables = {
     lambda: int(os.environ.get("VLLM_RBLN_NUM_RAY_NODES", 1)),
     "VLLM_RBLN_METRICS":
     (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
+     ("true", "1")),
+    "VLLM_RBLN_SORT_BATCH":
+    (lambda: os.environ.get("VLLM_RBLN_SORT_BATCH", "False").lower() in
      ("true", "1")),
 }
 
