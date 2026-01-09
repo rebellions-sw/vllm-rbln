@@ -113,24 +113,44 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             assert available_ids, "No available table IDs"
             return min(available_ids)
 
-    def _handle_prompt_case(
+    def mask_local_block_table(self, request_nums: int,
+                               valid_table_ids: set[int]) -> None:
+        """Fill padding positions with a valid table_id."""
+        self.mask.fill_(True)
+        self.mask[:request_nums] = False
+        fill_value = next(iter(valid_table_ids))
+        self.local_block_table_ids[self.mask] = fill_value
+
+    def handle_prefill(
         self,
         running_requests_ids: list[str],
         finished_requests_ids: list[str],
         decoder_batch_size: int,
         get_entry_fn: Callable[[Any], Any],
     ) -> torch.Tensor:
-        """Handle the prompt case: single request with table_id assignment."""
         current_request_id = running_requests_ids[0]
         table_id = self.find_available_table_id(decoder_batch_size,
                                                 finished_requests_ids,
                                                 get_entry_fn)
 
-        self.local_block_table_ids[0, 0].copy_(table_id)
+        self.local_block_table_ids[0, 0] = table_id
         self.add(current_request_id, table_id)
         return self.local_block_table_ids[0, :]  # [1, 1] -> [1]
 
-    def _handle_decoding_case(
+    def copy_extra_values_to_tensors(
+        self,
+        entry: Any,
+        index: int,
+        get_extra_values_fn: Callable[[Any], Union[Any, tuple[Any, ...]]],
+        extra_tensors: tuple[torch.Tensor, ...],
+    ) -> None:
+        for value, tensor in zip(get_extra_values_fn(entry), extra_tensors):
+            if isinstance(value, torch.Tensor):
+                tensor[index].copy_(value)
+            else:
+                tensor[index] = value
+
+    def handle_decode(
         self,
         running_requests_ids: list[str],
         decoder_batch_size: int,
@@ -141,28 +161,25 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
     ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
         request_nums = len(running_requests_ids)
         valid_table_ids = set(range(decoder_batch_size))
-        results = []
+        has_extra_values = get_extra_values_fn is not None
 
         # Copy table_ids and extra values for each running request
         for i, request_id in enumerate(running_requests_ids):
             entry = self.table[request_id]
             table_id = get_entry_fn(entry)
-            self.local_block_table_ids[i, 0].copy_(table_id)
+            self.local_block_table_ids[i, 0] = table_id
             valid_table_ids.remove(table_id)
-            results = []
-            if get_extra_values_fn and extra_tensors:
-                for value, tensor in zip(get_extra_values_fn(entry),
-                                         extra_tensors):
-                    tensor[i].copy_(value)
-                    results.append(tensor)
-        if request_nums < decoder_batch_size:
-            self.mask.fill_(True)
-            self.mask[:request_nums] = False
-            fill_value = next(iter(valid_table_ids))
-            self.local_block_table_ids[self.mask] = fill_value
+            if has_extra_values:
+                self.copy_extra_values_to_tensors(entry, i,
+                                                  get_extra_values_fn,
+                                                  extra_tensors)
 
-        if get_extra_values_fn and extra_tensors:
-            return (self.local_block_table_ids, *results)
+        # Fill padding positions if needed
+        if request_nums < decoder_batch_size:
+            self.mask_local_block_table(request_nums, valid_table_ids)
+
+        if has_extra_values:
+            return (self.local_block_table_ids, *extra_tensors)
         return self.local_block_table_ids[:decoder_batch_size]
 
     def get_table_mapping_values(
@@ -178,14 +195,14 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         extra_tensors: Optional[tuple[torch.Tensor, ...]] = None,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
         if is_prompt:
-            return self._handle_prompt_case(
+            return self.handle_prefill(
                 running_requests_ids,
                 finished_requests_ids,
                 decoder_batch_size,
                 get_entry_fn,
             )
         else:
-            return self._handle_decoding_case(
+            return self.handle_decode(
                 running_requests_ids,
                 decoder_batch_size,
                 get_entry_fn,
