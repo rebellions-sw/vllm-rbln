@@ -17,6 +17,7 @@ import math
 from typing import Optional
 
 from vllm.config import ModelConfig, ParallelConfig
+from vllm.platforms import current_platform
 
 import vllm_rbln.rbln_envs as envs
 
@@ -76,10 +77,24 @@ def get_maximum_num_blocks(
                            envs.VLLM_RBLN_TP_SIZE
 
     # TODO(jongho): Update if target npu is REBEL.
-    ATOM_DRAM_NBYTES = 16 * 2**30
-    ATOM_SYS_DRAM_NBYTES = 288 * 2**20
-    available_dram = tensor_parallel_size * (ATOM_DRAM_NBYTES -
+
+    device_name = current_platform.get_device_name().lower()
+    assert "rbln" in device_name
+    if "ca" in device_name:
+        # ATOM - RBLN-CA[xxx]
+        # ATOM DRAM - 16GB (single chip)
+        ATOM_DRAM_NBYTES = 16 * 2**30
+        ATOM_SYS_DRAM_NBYTES = 288 * 2**20
+        available_dram = tensor_parallel_size * (ATOM_DRAM_NBYTES -
                                              ATOM_SYS_DRAM_NBYTES)
+    elif "cr" in device_name:
+        # REBEL - RBLN-CR[xxx]
+        # REBEL DRAM - 140GB (quad chips, chiplet) - system ~= 132GB (expected)
+        # FIXME(RBLN) - based on initial assumption
+        REBEL_DRAM_NBYTES = 132 * 2**30
+        available_dram = tensor_parallel_size * REBEL_DRAM_NBYTES
+    else:
+        assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
     def check_oom(available_dram: int) -> None:
         if available_dram <= 0:
