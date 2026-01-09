@@ -28,7 +28,7 @@ import torch.nn as nn
 from vllm.attention import Attention, AttentionType
 from vllm.attention.backends.abstract import AttentionBackend
 from vllm.attention.layers.chunked_local_attention import ChunkedLocalAttention
-from vllm.config import VllmConfig, get_layers_from_vllm_config
+from vllm.config import VllmConfig, get_layers_from_vllm_config, update_config
 from vllm.distributed.eplb.eplb_state import EplbState
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
@@ -1978,6 +1978,16 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             async_output_copy_stream=self.async_output_copy_stream,
         )
 
+    def update_config(self, overrides: dict[str, Any]) -> None:
+        allowed_config_names = {"load_config", "model_config"}
+        for config_name, config_overrides in overrides.items():
+            assert config_name in allowed_config_names, \
+                f"Config `{config_name}` not supported. " \
+                f"Allowed configs: {allowed_config_names}"
+            config = getattr(self, config_name)
+            new_config = update_config(config, config_overrides)
+            setattr(self, config_name, new_config)
+
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
         model_loader = get_model_loader(self.load_config)
@@ -2088,6 +2098,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             compiled_graph = self._compile_model(model_wrapper)
             self.model_executable = compiled_graph
 
+    def reload_weights(self) -> None:
+        assert getattr(self, "model", None) is not None, \
+            "Cannot reload weights before model is loaded."
+        model_loader = get_model_loader(self.load_config)
+        logger.info("Reloading weights inplace...")
+        model = self.get_model()
+        model_loader.load_weights(model, model_config=self.model_config)
+
     def save_tensorized_model(
         self,
         tensorizer_config: "TensorizerConfig",
@@ -2191,6 +2209,26 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self._sync_device()
 
         return prompt_logprobs_dict
+
+    def _get_nans_in_logits(
+        self,
+        logits: Optional[torch.Tensor],
+    ) -> dict[str, int]:
+        try:
+            if logits is None:
+                return {req_id: 0 for req_id in self.input_batch.req_ids}
+
+            num_nans_in_logits = {}
+            num_nans_for_index = logits.isnan().sum(dim=-1).cpu().numpy()
+            for req_id in self.input_batch.req_ids:
+                req_index = self.input_batch.req_id_to_index[req_id]
+                num_nans_in_logits[req_id] = (
+                    int(num_nans_for_index[req_index])
+                    if num_nans_for_index is not None
+                    and req_index < logits.shape[0] else 0)
+            return num_nans_in_logits
+        except IndexError:
+            return {}
 
     @contextmanager
     def maybe_randomize_inputs(self, input_ids: torch.Tensor):
