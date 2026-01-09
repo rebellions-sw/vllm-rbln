@@ -358,6 +358,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                                self.inputs_embeds_size,
                                                dtype=self.dtype,
                                                numpy=False)
+        self.discard_request_mask = self._make_buffer(self.max_num_reqs,
+                                                      dtype=torch.bool)
         self.num_decode_draft_tokens = self._make_buffer(self.max_num_reqs,
                                                          dtype=torch.int32)
         self.num_accepted_tokens = self._make_buffer(self.max_num_reqs,
@@ -426,6 +428,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pin_memory=self.pin_memory,
         )
 
+        self.valid_sampled_token_count_event: torch.Event | None = None
+
         # Ephemeral state transferred between
         # execute_model() and sample_tokens().
         self.execute_model_state: ExecuteModelState | None = None
@@ -454,6 +458,20 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
+
+    def _get_positions(self, num_tokens: Any):
+        if isinstance(num_tokens, int):
+            if self.uses_mrope:
+                return self.mrope_positions.gpu[:, :num_tokens]
+            # if self.uses_xdrope_dim > 0:
+            #     return self.xdrope_positions.gpu[:, :num_tokens]
+            return self.positions.gpu[:num_tokens]
+        else:
+            if self.uses_mrope:
+                return self.mrope_positions.gpu[:, num_tokens]
+            # if self.uses_xdrope_dim > 0:
+            #     return self.xdrope_positions.gpu[:, num_tokens]
+            return self.positions.gpu[num_tokens]
 
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],
@@ -1911,8 +1929,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # we must resolve the batch dimension.
             input_ids = input_ids.view(num_reqs, -1).to(torch.long)
             positions = positions.view(num_reqs, -1)
-            is_prefills = (self.input_batch.num_computed_tokens_cpu
-                           < self.input_batch.num_tokens_no_spec - 1)
+            is_prefills = self.is_prefills()
 
             token_indices = None
             if is_prefills[0]:
@@ -1967,7 +1984,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
 
             start_time = time.perf_counter()
-            if self.lora_config is not None:
+            if not self.use_wrapped_compute_logits():
                 model_output = self.model_executable(
                     input_ids=input_ids,
                     positions=positions,
@@ -2027,8 +2044,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                       num_scheduled_tokens_np,
                                       kv_connector_output)
                 sample_hidden_states = hidden_states
-                if self.lora_config is not None:
-                    # DO NOT include compute logits if lora_config is enabled
+                if not self.use_wrapped_compute_logits():
+                    # DO NOT include compute logits
 
                     # FIXME(jiwoo.park) This is a temporary workaround;
                     # SHOULD resolve the batch dimension.
@@ -2146,6 +2163,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     spec_decode_common_attn_metadata,
                 )
 
+        spec_config = self.speculative_config
+        use_padded_batch_for_eagle = (
+            spec_config is not None and spec_config.use_eagle()
+            and not spec_config.disable_padded_drafter_batch)
         effective_drafter_max_model_len = self.max_model_len
         if effective_drafter_max_model_len is None:
             effective_drafter_max_model_len = self.model_config.max_model_len
@@ -2157,6 +2178,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         input_fits_in_drafter = spec_decode_common_attn_metadata and (
             spec_decode_common_attn_metadata.max_seq_len + self.num_spec_tokens
             <= effective_drafter_max_model_len)
+        if use_padded_batch_for_eagle:
+            assert self.speculative_config is not None
+            assert isinstance(self.drafter, EagleProposer)
+            sampled_token_ids = sampler_output.sampled_token_ids
+            if input_fits_in_drafter:
+                # EAGLE speculative decoding can use the GPU sampled tokens as
+                # inputs, and does not need to wait for bookkeeping to finish.
+                propose_draft_token_ids(sampled_token_ids)
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -2175,7 +2204,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 scheduler_output.total_num_scheduled_tokens,
             )
 
-        if self.speculative_config and input_fits_in_drafter:
+        if (self.speculative_config and not use_padded_batch_for_eagle
+                and input_fits_in_drafter):
             # ngram and other speculative decoding methods use the sampled
             # tokens on the CPU, so they are run after bookkeeping.
             propose_draft_token_ids(valid_sampled_token_ids)
@@ -2215,6 +2245,25 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             draft_token_ids = self._draft_token_ids
         self._draft_token_ids = None
         return DraftTokenIds(req_ids, draft_token_ids)
+
+    def _copy_valid_sampled_token_count(
+            self, next_token_ids: torch.Tensor,
+            valid_sampled_tokens_count: torch.Tensor) -> None:
+        if self.valid_sampled_token_count_event is None:
+            return
+
+        default_stream = torch.cuda.current_stream()
+        # Initialize a new stream to overlap the copy operation with
+        # prepare_input of draft model.
+        with torch.cuda.stream(self.valid_sampled_token_count_copy_stream):
+            self.valid_sampled_token_count_copy_stream.wait_stream(
+                default_stream)  # type: ignore
+            counts = valid_sampled_tokens_count
+            counts_cpu = self.valid_sampled_token_count_cpu
+            counts_cpu[:counts.shape[0]].copy_(counts, non_blocking=True)
+            self.valid_sampled_token_count_event.record()
+
+        self.input_batch.prev_sampled_token_ids = next_token_ids.unsqueeze(1)
 
     def propose_draft_token_ids(
         self,
@@ -2273,40 +2322,24 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
         elif spec_config.use_eagle():
             assert isinstance(self.drafter, EagleProposer)
+            assert spec_config.disable_padded_drafter_batch is not True, (
+                "This option is not supported in vllm-rbln.")
+            assert isinstance(
+                sampled_token_ids,
+                torch.Tensor), ("sampled_token_ids should be a torch.Tensor.")
 
-            if spec_config.disable_padded_drafter_batch:
-                # When padded-batch is disabled, the sampled_token_ids should be
-                # the cpu-side list[list[int]] of valid sampled tokens for each
-                # request, with invalid requests having empty lists.
-                assert isinstance(
-                    sampled_token_ids,
-                    list), ("sampled_token_ids should be a python list when"
-                            "padded-batch is disabled.")
-                next_token_ids = self.drafter.prepare_next_token_ids_cpu(
+            next_token_ids, valid_sampled_tokens_count = (
+                self.drafter.prepare_next_token_ids_padded(
+                    common_attn_metadata,
                     sampled_token_ids,
                     self.requests,
                     self.input_batch,
-                    scheduler_output.num_scheduled_tokens,
-                )
-            else:
-                # When using padded-batch, the sampled_token_ids should be
-                # the gpu tensor of sampled tokens for each request, of shape
-                # (num_reqs, num_spec_tokens + 1) with rejected tokens having
-                # value -1.
-                assert isinstance(sampled_token_ids, torch.Tensor), (
-                    "sampled_token_ids should be a torch.Tensor when"
-                    "padded-batch is enabled.")
-                next_token_ids, valid_sampled_tokens_count = (
-                    self.drafter.prepare_next_token_ids_padded(
-                        common_attn_metadata,
-                        sampled_token_ids,
-                        self.requests,
-                        self.input_batch,
-                        self.discard_request_mask.gpu,
-                    ))
-                self._copy_valid_sampled_token_count(
-                    next_token_ids, valid_sampled_tokens_count)
+                    self.discard_request_mask.gpu,
+                ))
+            self._copy_valid_sampled_token_count(next_token_ids,
+                                                 valid_sampled_tokens_count)
 
+            target_hidden_states = hidden_states
             if spec_decode_metadata is None:
                 token_indices_to_sample = None
                 # input_ids can be None for multimodal models.
@@ -2317,44 +2350,22 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     target_hidden_states = torch.cat(
                         [h[:num_scheduled_tokens] for h in aux_hidden_states],
                         dim=-1)
-                else:
-                    target_hidden_states = hidden_states[:num_scheduled_tokens]
             else:
-                if spec_config.disable_padded_drafter_batch:
-                    token_indices_to_sample = None
-                    common_attn_metadata, token_indices = \
-                        self.drafter.prepare_inputs(
-                            common_attn_metadata,
-                            sampled_token_ids,
-                            spec_decode_metadata.num_draft_tokens,
-                        )
-                    target_token_ids = self.input_ids.gpu[token_indices]
-                    target_positions = self._get_positions(token_indices)
-                    if self.use_aux_hidden_state_outputs:
-                        assert aux_hidden_states is not None
-                        target_hidden_states = torch.cat(
-                            [h[token_indices] for h in aux_hidden_states],
-                            dim=-1)
-                    else:
-                        target_hidden_states = hidden_states[token_indices]
-                else:
-                    common_attn_metadata, token_indices_to_sample = (
-                        self.drafter.prepare_inputs_padded(
-                            common_attn_metadata,
-                            spec_decode_metadata,
-                            valid_sampled_tokens_count,
-                        ))
-                    total_num_tokens = common_attn_metadata.num_actual_tokens
-                    # When padding the batch, token_indices is just a range
-                    target_token_ids = self.input_ids.gpu[:total_num_tokens]
-                    target_positions = self._get_positions(total_num_tokens)
-                    if self.use_aux_hidden_state_outputs:
-                        assert aux_hidden_states is not None
-                        target_hidden_states = torch.cat(
-                            [h[:total_num_tokens] for h in aux_hidden_states],
-                            dim=-1)
-                    else:
-                        target_hidden_states = hidden_states[:total_num_tokens]
+                common_attn_metadata, token_indices_to_sample = (
+                    self.drafter.prepare_inputs_padded(
+                        common_attn_metadata,
+                        spec_decode_metadata,
+                        valid_sampled_tokens_count,
+                    ))
+                total_num_tokens = common_attn_metadata.num_actual_tokens
+                # When padding the batch, token_indices is just a range
+                target_token_ids = self.input_ids.gpu[:total_num_tokens]
+                target_positions = self._get_positions(total_num_tokens)
+                if self.use_aux_hidden_state_outputs:
+                    assert aux_hidden_states is not None
+                    target_hidden_states = torch.cat(
+                        [h[:total_num_tokens] for h in aux_hidden_states],
+                        dim=-1)
 
             if self.supports_mm_inputs:
                 mm_embed_inputs = self._gather_mm_embeddings(
@@ -2373,6 +2384,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 sampling_metadata=sampling_metadata,
                 common_attn_metadata=common_attn_metadata,
                 mm_embed_inputs=mm_embed_inputs,
+                kv_caches=self.kv_caches,
             )
 
         return draft_token_ids
@@ -2431,6 +2443,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
             if get_pp_group().is_last_rank \
                 and self.lora_config is None \
+                and (self.speculative_config is None \
+                     or self.speculative_config.method != "eagle") \
                 and not self.is_pooling_model \
                 and self.logits_processor is not None:
 
@@ -3253,6 +3267,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # self.transfer_event.record()
         # self.transfer_event.synchronize()
         return pinned.tolist()
+
+    def is_prefills(self) -> np.ndarray:
+        return (self.input_batch.num_computed_tokens_cpu
+                < self.input_batch.num_tokens_no_spec - 1)
+
+    def use_wrapped_compute_logits(self) -> bool:
+        return not (self.lora_config is not None or
+                    ((spec_config := self.speculative_config) is not None
+                     and spec_config.method == "eagle"))
 
 
 def create_lora_mask(

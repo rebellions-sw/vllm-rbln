@@ -37,6 +37,7 @@ def pad(x: torch.Tensor,
 def pad_speculative_draft_tokens(
     input_ids: torch.Tensor,
     num_scheduled_tokens: torch.Tensor,
+    max_len: int | None = None,
 ) -> torch.Tensor:
     """
     Pad per-request draft tokens to a uniform length (max across requests)
@@ -44,11 +45,18 @@ def pad_speculative_draft_tokens(
 
     Assumes `input_ids` is a 1D concatenation of per-request draft tokens
     in request order.
-    Example:
+    Example 1:
       input_ids = [3925, 3823, 1694, 477] or [13, 18, 19, 20]
       num_scheduled_tokens = [1, 3]
     returns:
       [3925, 0, 0, 3823, 1694, 477] or [13, 0, 0, 18, 19, 20]
+    
+    Example 2:
+      input_ids = [3363, 315, 11]
+      num_scheduled_tokens = [2, 1]
+      max_len = 3
+    returns:
+      [3363, 315, 0, 11, 0, 0]
     """
     if input_ids.ndim != 1:
         raise ValueError(
@@ -60,6 +68,13 @@ def pad_speculative_draft_tokens(
 
     num_reqs = num_scheduled_tokens.numel()
     max_sched = num_scheduled_tokens.max().item()
+
+    if max_len is not None:
+        if max_len < max_sched:
+            raise ValueError(
+                f"max_len({max_len}) must be >= max(num_scheduled_tokens)"
+                f"({max_sched})")
+        max_sched = max_len
 
     # Create flattened destination indices
     req_indices = torch.repeat_interleave(

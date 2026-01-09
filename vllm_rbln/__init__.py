@@ -60,3 +60,4 @@ def register_ops():
         import vllm_rbln.models.qwen3  # noqa
         import vllm_rbln.models.qwen3_moe  # noqa
         import vllm_rbln.models.utils  # noqa
+        import vllm_rbln.v1.spec_decoding.eagle  # noqa
