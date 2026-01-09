@@ -19,7 +19,7 @@ import time
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from copy import copy, deepcopy
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Union, cast
 
 import numpy as np
@@ -1190,7 +1190,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         process_group_dict[DP.cpu_group.group_name] = DP.ranks
 
         options = {
-            "compile_context": self.compile_context,
+            # "compile_context": self.compile_context,
             "tensor_parallel_size": envs.VLLM_RBLN_TP_SIZE,
             "process_group_dict": process_group_dict,
             "guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe,
@@ -1203,19 +1203,20 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             options["mode"] = "strict"
 
         # compile compute_logits
-        self.compute_logits = torch.compile(
-            self.compute_logits,
-            backend="rbln",
-            options=copy(options),
-            dynamic=False,
-        )
+        # self.compute_logits = torch.compile(
+        #     self.compute_logits,
+        #     backend="rbln",
+        #     options=copy(options),
+        #     dynamic=False,
+        # )
 
-        compiled_model = torch.compile(
-            model,
-            backend="rbln",
-            options=copy(options),
-            dynamic=False,
-        )
+        compiled_model = model
+        # compiled_model = torch.compile(
+        #     model,
+        #     backend="rbln",
+        #     options=copy(options),
+        #     dynamic=False,
+        # )
 
         return compiled_model
 
@@ -2498,9 +2499,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # RBLN compile context to mark static address for kv cache tensor
             # if tensor is set to have static address,
             # similar to RBLN kv cache binding
-            from rebel.compile_context import CompileContext
+            # from rebel.compile_context import CompileContext
 
-            self.compile_context = CompileContext(use_weight_sharing=True)
+            # self.compile_context = CompileContext(use_weight_sharing=True)
             compiled_graph = self._compile_model(model_wrapper)
             self.model_executable = compiled_graph
 
@@ -2882,7 +2883,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
             tensor = torch.zeros(kv_cache_tensor.size,
                                  dtype=torch.int8,
-                                 device="cpu")
+                                 device=self.device)
             for layer_name in kv_cache_tensor.shared_by:
                 kv_cache_raw_tensors[layer_name] = tensor
 
@@ -3110,9 +3111,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_attn_module,
         )
 
-        if not self.model_config.enforce_eager and envs.VLLM_RBLN_COMPILE_MODEL:
-            for kv_cache in self.kv_caches:
-                self.compile_context.mark_static_address(kv_cache)
+        # if not self.model_config.enforce_eager
+        # and envs.VLLM_RBLN_COMPILE_MODEL:
+        #     for kv_cache in self.kv_caches:
+        #         self.compile_context.mark_static_address(kv_cache)
 
         return kv_caches
 
