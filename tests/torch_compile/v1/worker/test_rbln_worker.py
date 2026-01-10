@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Tests for RBLNWorker."""
 
 import os
@@ -19,14 +18,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-
 from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig, VllmConfig, set_current_vllm_config)
 from vllm.platforms import current_platform
 from vllm.v1.core.sched.output import CachedRequestData, SchedulerOutput
 
-from vllm_rbln.v1.worker.rbln_worker import RBLNWorker, init_worker_distributed_environment
-
+from vllm_rbln.v1.worker.rbln_worker import (
+    RBLNWorker, init_worker_distributed_environment)
 
 BLOCK_SIZE = 1024
 DEVICE = current_platform.device_type
@@ -62,68 +60,69 @@ def get_vllm_config():
 @pytest.fixture
 def worker():
     vllm_config = get_vllm_config()
-    with set_current_vllm_config(vllm_config):
-        with patch.object(RBLNWorker, '_init_device_env'):
-            w = RBLNWorker(
-                vllm_config=vllm_config,
-                local_rank=0,
-                rank=0,
-                distributed_init_method="tcp://localhost:18080",
-            )
-            # Mock model_runner
-            w.model_runner = MagicMock()
-            return w
+    with set_current_vllm_config(vllm_config), patch.object(
+            RBLNWorker, '_init_device_env'):
+        w = RBLNWorker(
+            vllm_config=vllm_config,
+            local_rank=0,
+            rank=0,
+            distributed_init_method="tcp://localhost:18080",
+        )
+        # Mock model_runner
+        w.model_runner = MagicMock()
+        return w
 
 
 @pytest.fixture
 def worker_with_profiler():
     vllm_config = get_vllm_config()
-    with set_current_vllm_config(vllm_config):
-        with patch.object(RBLNWorker, '_init_device_env'):
-            with patch('vllm_rbln.rbln_envs.VLLM_TORCH_PROFILER_DIR', '/tmp/profiler'):
-                w = RBLNWorker(
-                    vllm_config=vllm_config,
-                    local_rank=0,
-                    rank=0,
-                    distributed_init_method="tcp://localhost:18080",
-                )
-                return w
+    with set_current_vllm_config(vllm_config), patch.object(
+            RBLNWorker, '_init_device_env'), patch(
+                'vllm_rbln.rbln_envs.VLLM_TORCH_PROFILER_DIR',
+                '/tmp/profiler'):
+        w = RBLNWorker(
+            vllm_config=vllm_config,
+            local_rank=0,
+            rank=0,
+            distributed_init_method="tcp://localhost:18080",
+        )
+        return w
 
 
 def test_init_creates_worker_with_correct_attributes():
     vllm_config = get_vllm_config()
-    with set_current_vllm_config(vllm_config):
-        with patch.object(RBLNWorker, '_init_device_env'):
-            worker = RBLNWorker(
-                vllm_config=vllm_config,
-                local_rank=0,
-                rank=0,
-                distributed_init_method="tcp://localhost:12345",
-                is_driver_worker=True,
-            )
+    with set_current_vllm_config(vllm_config), patch.object(
+            RBLNWorker, '_init_device_env'):
+        worker = RBLNWorker(
+            vllm_config=vllm_config,
+            local_rank=0,
+            rank=0,
+            distributed_init_method="tcp://localhost:12345",
+            is_driver_worker=True,
+        )
 
-            assert worker.local_rank == 0
-            assert worker.rank == 0
-            assert worker.is_driver_worker is True
-            assert worker.device == torch.device(current_platform.device_type)
-            assert worker.parallel_config.disable_custom_all_reduce is True
-            assert worker.profiler is None
+        assert worker.local_rank == 0
+        assert worker.rank == 0
+        assert worker.is_driver_worker is True
+        assert worker.device == torch.device(current_platform.device_type)
+        assert worker.parallel_config.disable_custom_all_reduce is True
+        assert worker.profiler is None
 
 
 def test_init_with_ray_backend_skips_device_env_setup():
     vllm_config = get_vllm_config()
     vllm_config.parallel_config.distributed_executor_backend = "ray"
 
-    with set_current_vllm_config(vllm_config):
-        with patch.object(RBLNWorker, '_init_device_env') as mock_init_device:
-            worker = RBLNWorker(
-                vllm_config=vllm_config,
-                local_rank=0,
-                rank=0,
-                distributed_init_method="tcp://localhost:12345",
-            )
-            # _init_device_env should not be called for Ray backend
-            mock_init_device.assert_not_called()
+    with set_current_vllm_config(vllm_config), patch.object(
+            RBLNWorker, '_init_device_env') as mock_init_device:
+        worker = RBLNWorker(  # noqa: F841
+            vllm_config=vllm_config,
+            local_rank=0,
+            rank=0,
+            distributed_init_method="tcp://localhost:12345",
+        )
+        # _init_device_env should not be called for Ray backend
+        mock_init_device.assert_not_called()
 
 
 def test_initialize_cache_sets_block_counts(worker):
@@ -152,7 +151,7 @@ def test_get_model_returns_model_runner_model(worker):
 
 
 def test_get_supported_tasks_delegates_to_model_runner(worker):
-    expected_tasks = ("generate",)
+    expected_tasks = ("generate", )
     worker.model_runner.get_supported_tasks.return_value = expected_tasks
 
     result = worker.get_supported_tasks()
@@ -240,12 +239,13 @@ def test_compile_or_warm_up_skips_when_enforce_eager(worker):
     worker.model_runner.warm_up_model.assert_not_called()
 
 
-def test_compile_or_warm_up_calls_warm_up_when_enabled( worker):
+def test_compile_or_warm_up_calls_warm_up_when_enabled(worker):
     worker.model_config.enforce_eager = False
 
-    with patch('vllm_rbln.rbln_envs.VLLM_RBLN_COMPILE_MODEL', True):
-        with patch('vllm_rbln.rbln_envs.VLLM_RBLN_ENABLE_WARM_UP', True):
-            worker.compile_or_warm_up_model()
+    with patch('vllm_rbln.rbln_envs.VLLM_RBLN_COMPILE_MODEL',
+               True), patch('vllm_rbln.rbln_envs.VLLM_RBLN_ENABLE_WARM_UP',
+                            True):
+        worker.compile_or_warm_up_model()
 
     worker.model_runner.warm_up_model.assert_called_once()
 
@@ -270,7 +270,8 @@ def test_execute_model_with_model_runner_output(worker):
     mock_output = MagicMock(spec=ModelRunnerOutput)
     worker.model_runner.execute_model.return_value = mock_output
 
-    with patch('vllm.distributed.parallel_state.get_pp_group') as mock_pp_group:
+    with patch(
+            'vllm.distributed.parallel_state.get_pp_group') as mock_pp_group:
         mock_pp_group.return_value.is_first_rank = True
         result = worker.execute_model(scheduler_output)
 
@@ -280,37 +281,39 @@ def test_execute_model_with_model_runner_output(worker):
 def test_sets_environment_variables():
     vllm_config = get_vllm_config()
 
-    with patch('vllm_rbln.v1.worker.rbln_worker.init_distributed_environment'):
-        with patch('vllm_rbln.v1.worker.rbln_worker.set_custom_all_reduce'):
-            with patch('vllm_rbln.v1.worker.rbln_worker.ensure_model_parallel_initialized'):
-                with patch('vllm_rbln.v1.worker.rbln_worker.ensure_kv_transfer_initialized'):
-                    init_worker_distributed_environment(
-                        vllm_config=vllm_config,
-                        rank=0,
-                        distributed_init_method="tcp://localhost:18080",
-                        local_rank=0,
-                        backend="gloo",
-                    )
+    with patch(
+            'vllm_rbln.v1.worker.rbln_worker.init_distributed_environment'
+    ), patch('vllm_rbln.v1.worker.rbln_worker.set_custom_all_reduce'), patch(
+            'vllm_rbln.v1.worker.rbln_worker.ensure_model_parallel_initialized'
+    ), patch('vllm_rbln.v1.worker.rbln_worker.ensure_kv_transfer_initialized'):
+        init_worker_distributed_environment(
+            vllm_config=vllm_config,
+            rank=0,
+            distributed_init_method="tcp://localhost:18080",
+            local_rank=0,
+            backend="gloo",
+        )
 
-                    assert os.environ.get('LOCAL_RANK') == '0'
-                    assert os.environ.get('WORLD_SIZE') == '1'
+        assert os.environ.get('LOCAL_RANK') == '0'
+        assert os.environ.get('WORLD_SIZE') == '1'
 
 
 def test_data_parallel_sets_correct_env_vars():
     vllm_config = get_vllm_config()
     vllm_config.parallel_config.data_parallel_size = 2
 
-    with patch('vllm_rbln.v1.worker.rbln_worker.init_distributed_environment'):
-        with patch('vllm_rbln.v1.worker.rbln_worker.set_custom_all_reduce'):
-            with patch('vllm_rbln.v1.worker.rbln_worker.ensure_model_parallel_initialized'):
-                with patch('vllm_rbln.v1.worker.rbln_worker.ensure_kv_transfer_initialized'):
-                    init_worker_distributed_environment(
-                        vllm_config=vllm_config,
-                        rank=0,
-                        distributed_init_method="tcp://localhost:12345",
-                        local_rank=0,
-                        backend="gloo",
-                    )
+    with patch(
+            'vllm_rbln.v1.worker.rbln_worker.init_distributed_environment'
+    ), patch('vllm_rbln.v1.worker.rbln_worker.set_custom_all_reduce'), patch(
+            'vllm_rbln.v1.worker.rbln_worker.ensure_model_parallel_initialized'
+    ), patch('vllm_rbln.v1.worker.rbln_worker.ensure_kv_transfer_initialized'):
+        init_worker_distributed_environment(
+            vllm_config=vllm_config,
+            rank=0,
+            distributed_init_method="tcp://localhost:12345",
+            local_rank=0,
+            backend="gloo",
+        )
 
-                    assert 'LOCAL_RANK' in os.environ
-                    assert 'WORLD_SIZE' in os.environ
+        assert 'LOCAL_RANK' in os.environ
+        assert 'WORLD_SIZE' in os.environ

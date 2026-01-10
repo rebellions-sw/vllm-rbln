@@ -20,7 +20,6 @@ import random
 import numpy as np
 import pytest
 import torch
-
 from vllm.attention import Attention
 from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig, VllmConfig, set_current_vllm_config)
@@ -38,6 +37,7 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheTensor)
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.worker.gpu_input_batch import InputBatch
+
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
 
 BLOCK_SIZE = 1024
@@ -417,8 +417,8 @@ def test_update_states_request_unscheduled(model_runner):
 
 @pytest.mark.skip(reason="TODO: kv cache stride order is not supported yet")
 def test_kv_cache_stride_order(monkeypatch, model_runner):
-    # This test checks if RBLNModelRunner initializes correctly when an attention
-    # backend enforces a non-default KV cache stride order.
+    # This test checks if RBLNModelRunner initializes correctly when
+    # an attention backend enforces a non-default KV cache stride order.
     n_heads = model_runner.model_config.get_num_kv_heads(
         model_runner.parallel_config)
     expected_kv_cache_shape = [
@@ -440,7 +440,6 @@ def test_kv_cache_stride_order(monkeypatch, model_runner):
                             rnd_stride_order)
 
     model_runner.attn_groups = []
-    vllm_config = get_vllm_config()
     model_runner.initialize_kv_cache(model_runner.kv_cache_config)
 
     # Shape is unchanged, but layout may differ
@@ -491,7 +490,8 @@ def test_init_kv_cache_with_kv_sharing_invalid_target_layer_order():
     layer_1 = "model.layers.1.self_attn.attn"
     error_msg = f"{layer_1} must come before the current layer"
     vllm_config = get_vllm_config()
-    with pytest.raises(ValueError, match=error_msg), set_current_vllm_config(vllm_config):
+    with pytest.raises(ValueError,
+                       match=error_msg), set_current_vllm_config(vllm_config):
         fwd_context = {
             # initialization below will fail because target layer is invalid;
             # the target layer needs to come before layer 1
@@ -522,7 +522,8 @@ def test_init_kv_cache_with_kv_sharing_target_layer_not_exist():
     invalid_layer = "model.layers.0.cross_attn.attn"
     error_msg = f"{invalid_layer} is not a valid Attention layer in the model"
     vllm_config = get_vllm_config()
-    with pytest.raises(ValueError, match=error_msg), set_current_vllm_config(vllm_config):
+    with pytest.raises(ValueError,
+                       match=error_msg), set_current_vllm_config(vllm_config):
         fwd_context = {
             layer_0:
             Attention(
@@ -551,7 +552,8 @@ def test_init_kv_cache_with_kv_sharing_target_same_as_current():
     layer_1 = "model.layers.1.self_attn.attn"
     error_msg = f"{layer_1} cannot be the same as the current layer"
     vllm_config = get_vllm_config()
-    with pytest.raises(ValueError, match=error_msg), set_current_vllm_config(vllm_config):
+    with pytest.raises(ValueError,
+                       match=error_msg), set_current_vllm_config(vllm_config):
         fwd_context = {
             # initialization below will fail because target layer is invalid;
             # the target layer needs to come before layer 1
@@ -611,11 +613,13 @@ def test_init_kv_cache_without_kv_sharing(monkeypatch):
         # page size for layer 0's kv_cache_spec is 32KB
         num_expected_blocks = 5120
         kv_cache_config = get_kv_cache_config(vllm_config, kv_cache_spec,
-                                            available_memory)
+                                              available_memory)
         assert kv_cache_config.num_blocks == num_expected_blocks
         assert len(kv_cache_config.kv_cache_tensors) == 2
-        assert kv_cache_config.kv_cache_tensors[0].size == available_memory // 2
-        assert kv_cache_config.kv_cache_tensors[1].size == available_memory // 2
+        assert kv_cache_config.kv_cache_tensors[
+            0].size == available_memory // 2
+        assert kv_cache_config.kv_cache_tensors[
+            1].size == available_memory // 2
 
         max_context_len =\
             estimate_max_model_len(vllm_config, kv_cache_spec, 5 * GiB_bytes)
@@ -685,7 +689,7 @@ def test_init_kv_cache_with_kv_sharing_valid():
         # which is twice as many as without KV sharing
         num_expected_blocks = 8192
         kv_cache_config = get_kv_cache_config(vllm_config, kv_cache_spec,
-                                            available_memory)
+                                              available_memory)
         assert kv_cache_config.num_blocks == num_expected_blocks
         assert len(kv_cache_config.kv_cache_tensors) == 1
         # Each layer now has twice the available memory for KV cache
@@ -715,7 +719,8 @@ def test_init_kv_cache_with_kv_sharing_valid():
 
         # check layer 1 added to kv cache group's layer names
         assert len(kv_cache_config_after_init.kv_cache_groups) == 1
-        assert len(kv_cache_config_after_init.kv_cache_groups[0].layer_names) == 2
+        assert len(
+            kv_cache_config_after_init.kv_cache_groups[0].layer_names) == 2
         assert kv_cache_config_after_init.kv_cache_groups[0].layer_names[
             0] == layer_0
         assert kv_cache_config_after_init.kv_cache_groups[0].layer_names[
