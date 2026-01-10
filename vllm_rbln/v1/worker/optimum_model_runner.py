@@ -603,6 +603,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             0].num_blocks_per_row
 
         req_ids = self.input_batch.req_ids
+        if self.use_block_table and scheduler_output.dummy_block is not None:
+            self.decode_block_tables.fill_(scheduler_output.dummy_block)
         for i, req_id in enumerate(req_ids):
             req_index = self.input_batch.req_id_to_index[req_id]
             input_position = int(
@@ -612,18 +614,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             self.decode_input_ids[i, 0] = input_id
             self.decode_positions[i, 0] = input_position
             if self.use_block_table:
-                if self.enable_prefix_caching and self.model.is_hybrid:
+                if self.enable_prefix_caching:
                     num_blocks = len(scheduler_output.block_table_dict[req_id])
                     block_table = scheduler_output.block_table_dict[req_id]
                 else:
                     num_blocks = num_blocks_per_req[req_index]
                     block_table = block_tables_cpu[req_index, :num_blocks]
-                if scheduler_output.dummy_block is not None:
-                    self.decode_block_tables.fill_(
-                        scheduler_output.dummy_block)
                 self.decode_block_tables[i, :num_blocks] = block_table
             running_request_ids.append(req_id)
-
+        print("decode_block_tables: ", self.decode_block_tables.shape,
+              self.decode_block_tables)
         return self.decode_input_ids, self.decode_positions, \
             self.decode_block_tables, running_request_ids
 

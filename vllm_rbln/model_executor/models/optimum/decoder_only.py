@@ -69,10 +69,8 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
                                             model_input.cached_block_tables,
                                             model_input.cached_lengths,
                                             block_tables)
-            print("[prefill] kwargs: ", kwargs)
             return self.model.prefill_decoder(**kwargs).logits
         else:
-            print("[decode] kwargs: ", kwargs)
             self.model.decoder = self.model.decoders[padded_batch_size]
 
             logits = self.model.decoder(**kwargs).logits

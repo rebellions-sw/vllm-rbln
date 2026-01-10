@@ -179,7 +179,8 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             self.mask_local_block_table(request_nums, valid_table_ids)
 
         if has_extra_values:
-            return (self.local_block_table_ids[:decoder_batch_size], *extra_tensors)
+            return (self.local_block_table_ids[:decoder_batch_size],
+                    *extra_tensors)
         return self.local_block_table_ids[:decoder_batch_size]
 
     def get_table_mapping_values(

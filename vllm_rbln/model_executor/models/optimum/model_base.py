@@ -206,9 +206,6 @@ class RBLNOptimumDecoderMixin:
         self.num_blocks_per_seq = math.ceil(self.max_model_len /
                                             self.block_size)
 
-        self.input_ids_dtype = torch.int64
-        self.position_ids_dtype = torch.int32
-        self.block_tables_dtype = torch.int16
 
         self.logits_processor = LogitsProcessor(self.vocab_size,
                                                 logits_as_input=True)
@@ -218,26 +215,6 @@ class RBLNOptimumDecoderMixin:
             num_blocks,
             dtype=torch.int16,
         )
-
-        # To reduce the overhead to generate tensors for each forward pass,
-        # we pre-allocate tensors for each batch size.
-        self.padded_input_ids: dict[int, torch.Tensor] = {}
-        self.padded_position_ids: dict[int, torch.Tensor] = {}
-        self.padded_block_tables: dict[int, torch.Tensor] = {}
-        self.masks: dict[int, torch.Tensor] = {}
-
-        for batch_size in decoder_batch_sizes:
-            self.padded_input_ids[batch_size] = torch.zeros(
-                batch_size, 1, dtype=self.input_ids_dtype)
-            self.padded_position_ids[batch_size] = torch.zeros(
-                batch_size, 1, dtype=self.position_ids_dtype)
-            self.padded_block_tables[batch_size] = torch.zeros(
-                batch_size,
-                self.num_blocks_per_seq,
-                dtype=self.block_tables_dtype)
-            self.masks[batch_size] = torch.zeros(batch_size,
-                                                 self.num_blocks_per_seq,
-                                                 dtype=torch.bool)
 
     def pad_decoder_items(
         self,
@@ -296,7 +273,21 @@ class RBLNOptimumDecoderMixin:
                 if self.use_multiple_decoder:
                     padded_batch_size = select_bucket_size(
                         request_nums, self.decoder_batch_sizes)
-
+            else:
+                # Convert input_block_ids to 1D tensor for indexing
+                # input_block_ids is [3, 1] -> [3] (squeeze last dimension)
+                if isinstance(input_block_ids, torch.Tensor):
+                    # Flatten or squeeze to get 1D indices
+                    if input_block_ids.dim() > 1:
+                        indices = input_block_ids.squeeze(-1).to(torch.int64)
+                    else:
+                        indices = input_block_ids.to(torch.int64)
+                else:
+                    indices = torch.tensor(input_block_ids, dtype=torch.int64)
+                # Use clone() to avoid memory overlap error
+                input_ids[indices] = input_ids[:request_nums].clone()
+                cache_position[indices] = cache_position[:request_nums].clone()
+                block_tables[indices] = block_tables[:request_nums].clone()
             input_ids, cache_position, block_tables = self.pad_decoder_items(
                 input_ids,
                 cache_position,

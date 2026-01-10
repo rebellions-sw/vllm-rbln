@@ -162,9 +162,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(
 
         if is_prompt:
             inputs_embeds = None
-            prefill_batch_idx = sliding_window_table_ids[0]
-            local_block_table_id = torch.tensor([prefill_batch_idx],
-                                                dtype=torch.int16)
             # token_type_ids model_input != token_type_ids of gemma3
             # https://github.com/huggingface/transformers/blob/d0c9c66d1c09df3cd70bf036e813d88337b20d4c/src/transformers/models/gemma3/processing_gemma3.py#L143
             token_type_ids = torch.zeros_like(input_ids)
@@ -182,7 +179,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 inputs_embeds=inputs_embeds,
                 cache_position=cache_position,
                 attention_mask=attention_mask,
-                local_block_tables=local_block_table_id,
+                local_block_tables=sliding_window_table_ids,
                 block_tables=block_tables,
                 token_type_ids=token_type_ids,
             )
