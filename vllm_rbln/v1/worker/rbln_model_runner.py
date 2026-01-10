@@ -1449,7 +1449,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if self.is_pooling_model else None,
         )
         self._execute_dummy_requests(dummy_prefill_requests,
-                                     dummy_prefill_num_scheduled_tokens)
+                                     dummy_prefill_num_scheduled_tokens,
+                                     num_kv_cache_groups)
 
         # compile decode graph
         decode_max_batch_size = self.scheduler_config.max_num_seqs
@@ -1474,6 +1475,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self._execute_dummy_requests(
             requests=dummy_decode_requests,
             num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
+            num_kv_cache_groups=num_kv_cache_groups,
         )
 
     def _add_dummy_requests(
@@ -1482,7 +1484,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         num_scheduled_tokens: dict[str, int],
         total_tokens: int,
         num_computed_tokens: int,
-        num_kv_cache_groups: int = 1,
+        num_kv_cache_groups: int,
         sampling_params: Optional[SamplingParams] = None,
         pooling_params: Optional[PoolingParams] = None,
     ) -> None:
@@ -1509,10 +1511,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if total_tokens - num_computed_tokens == 0 \
                 else total_tokens - num_computed_tokens
 
-    def _execute_dummy_requests(self,
-                                requests: list[NewRequestData],
+    def _execute_dummy_requests(self, requests: list[NewRequestData],
                                 num_scheduled_tokens: dict[str, int],
-                                num_kv_cache_groups: int = 1) -> None:
+                                num_kv_cache_groups: int) -> None:
         sched_output = SchedulerOutput(
             scheduled_new_reqs=requests,
             scheduled_cached_reqs=CachedRequestData.make_empty(),
