@@ -622,8 +622,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     block_table = block_tables_cpu[req_index, :num_blocks]
                 self.decode_block_tables[i, :num_blocks] = block_table
             running_request_ids.append(req_id)
-        print("decode_block_tables: ", self.decode_block_tables.shape,
-              self.decode_block_tables)
+
         return self.decode_input_ids, self.decode_positions, \
             self.decode_block_tables, running_request_ids
 
