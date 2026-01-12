@@ -17,6 +17,8 @@ import torch
 import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
+from vllm.model_executor.models.interfaces import (SupportsMultiModal,
+                                                   SupportsTranscription)
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -31,9 +33,10 @@ from .optimum_attention import (
 logger = init_logger(__name__)
 
 
-class RBLNOptimumWhisperForConditionalGeneration(
-    RBLNOptimumModelBase, RBLNOptimumDecoderMixin
-):
+class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
+                                                 RBLNOptimumDecoderMixin,
+                                                 SupportsTranscription,
+                                                 SupportsMultiModal):
     INVALID_TOKEN = 100
 
     def __init__(

@@ -22,8 +22,7 @@ import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
-from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
-from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.v1.sample.metadata import SamplingMetadata
 
 import optimum.rbln
 from optimum.rbln.transformers.models.decoderonly import (
@@ -202,13 +201,8 @@ class RBLNOptimumDecoderMixin:
         if self.use_multiple_decoder:
             self.decoder_batch_sizes = tuple(reversed(decoder_batch_sizes))
 
-        self.logits_processor = LogitsProcessor(vocab_size, logits_as_input=True)
-        self.sampler = Sampler()
-        self.available_blocks = torch.arange(
-            0,
-            num_blocks,
-            dtype=torch.int16,
-        )
+        self.logits_processor = LogitsProcessor(vocab_size,
+                                                logits_as_input=True)
 
     def pad_decoder_items(
         self,
@@ -345,8 +339,7 @@ class RBLNOptimumDecoderMixin:
         dst_blocks = block_tables[0].tolist()
 
         for block_idx, (src_block, dst_block) in enumerate(
-            zip(cached_block_tables, dst_blocks)
-        ):
+                zip(cached_block_tables, dst_blocks)):
             try:
                 prefill_decoder.runtime._copy_kv_cache(
                     src_block, dst_block, cached_lengths[block_idx]
@@ -366,15 +359,6 @@ class RBLNOptimumDecoderMixin:
                 )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg) from e
-
-    def sample(
-        self,
-        logits: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput | None:
-        # Only for V0
-        next_tokens = self.sampler(logits, sampling_metadata)
-        return next_tokens
 
     # It is required for decoder models in openai api server
     def compute_logits(

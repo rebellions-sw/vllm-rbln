@@ -30,9 +30,10 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumIdefics3ForConditionalGeneration(
-    RBLNOptimumModelBase, RBLNOptimumDecoderMixin
-):
+class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
+                                                  RBLNOptimumDecoderMixin,
+                                                  SupportsMultiModal):
+
     def __init__(
         self,
         vllm_config: VllmConfig,

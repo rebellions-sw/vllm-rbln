@@ -29,9 +29,10 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumLlavaNextForConditionalGeneration(
-    RBLNOptimumModelBase, RBLNOptimumDecoderMixin
-):
+class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
+                                                   RBLNOptimumDecoderMixin,
+                                                   SupportsMultiModal):
+
     def __init__(
         self,
         vllm_config: VllmConfig,

@@ -19,8 +19,8 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import DispatchPooler, Pooler
 from vllm.model_executor.models import VllmModelForPooling
-from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
 from vllm.tasks import PoolingTask
+from vllm.v1.outputs import PoolerOutput
 from vllm.v1.pool.metadata import PoolingMetadata
 
 from .base import ModelInputForRBLN
@@ -41,14 +41,6 @@ class RBLNClassifierPooler(Pooler):
     def get_supported_tasks(self) -> set[PoolingTask]:
         return {"classify", "score"}
 
-    @staticmethod
-    def _build_output(
-        all_data: torch.Tensor | list[torch.Tensor],
-    ) -> PoolerOutput:
-        """Wrap tensor data into vLLM's PoolerOutput format."""
-        all_outputs = [PoolingSequenceGroupOutput(data) for data in all_data]
-        return PoolerOutput(outputs=all_outputs)
-
     def forward(
         self,
         hidden_states: torch.Tensor | list[torch.Tensor],
@@ -56,7 +48,7 @@ class RBLNClassifierPooler(Pooler):
     ) -> PoolerOutput:
         # RBLN models return already pooled/processed states for classification
         # No additional pooling needed - just format for vllm compatibility
-        return self._build_output(hidden_states)
+        return hidden_states
 
 
 class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):

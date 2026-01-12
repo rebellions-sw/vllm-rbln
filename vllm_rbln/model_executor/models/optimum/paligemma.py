@@ -29,9 +29,10 @@ from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 
 
-class RBLNOptimumPaliGemmaForConditionalGeneration(
-    RBLNOptimumModelBase, RBLNOptimumDecoderMixin
-):
+class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
+                                                   RBLNOptimumDecoderMixin,
+                                                   SupportsMultiModal):
+
     def __init__(
         self,
         vllm_config: VllmConfig,

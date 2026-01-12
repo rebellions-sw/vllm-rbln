@@ -17,10 +17,9 @@ from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
-from vllm.config import LogprobsMode
-from vllm_rbln.v1.sample.ops.penalties import (
-    apply_all_penalties as rbln_apply_all_penalties,
-)
+from vllm.config.model import LogprobsMode
+from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
+                                               rbln_apply_all_penalties)
 import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
