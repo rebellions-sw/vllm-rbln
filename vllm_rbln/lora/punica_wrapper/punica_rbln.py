@@ -94,7 +94,6 @@ class PunicaWrapperRBLN(PunicaWrapperBase):
                         x: torch.Tensor,
                         lora_a_stacked: tuple[torch.Tensor, ...],
                         lora_b_stacked: tuple[torch.Tensor, ...],
-                        lora_bias_stacked: Optional[tuple[torch.Tensor, ...]],
                         scale: float,
                         output_slices: tuple[int, ...],
                         *,
@@ -110,7 +109,7 @@ class PunicaWrapperRBLN(PunicaWrapperBase):
                 @ lora_a_stacked[indicies[i], layer_idx, :, :]
                 @ lora_b_stacked[indicies[i], layer_idx, :, :]
                 * scale
-            ).squeeze(0) + lora_bias_stacked[i]
+            ).squeeze(0)
         """
         slice_offset = 0
 
