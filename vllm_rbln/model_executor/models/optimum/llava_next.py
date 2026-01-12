@@ -28,7 +28,8 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
-                                                   RBLNOptimumDecoderMixin):
+                                                   RBLNOptimumDecoderMixin,
+                                                   SupportsMultiModal):
 
     def __init__(
         self,

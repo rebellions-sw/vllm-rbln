@@ -29,7 +29,8 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
-                                                  RBLNOptimumDecoderMixin):
+                                                  RBLNOptimumDecoderMixin,
+                                                  SupportsMultiModal):
 
     def __init__(
         self,

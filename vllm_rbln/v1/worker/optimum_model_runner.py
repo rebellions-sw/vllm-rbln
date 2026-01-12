@@ -24,15 +24,15 @@ from vllm.distributed.parallel_state import get_pp_group
 from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
-from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import (BatchedTensorInputs, MultiModalKwargs,
                                     MultiModalKwargsItem)
 from vllm.multimodal.utils import group_mm_kwargs_by_modality
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
-from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LazyLoader,
-                        is_pin_memory_available)
+from vllm.utils.import_utils import LazyLoader
+# from vllm.utils import LazyLoader, is_pin_memory_available)
+from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
@@ -44,7 +44,6 @@ from vllm.v1.sample.sampler import Sampler
 from vllm.v1.utils import record_function_or_nullcontext
 from vllm.v1.worker.gpu_input_batch import CachedRequestState
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
-from vllm.v1.worker.utils import AttentionGroup
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -106,38 +105,52 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduler_config = self.scheduler_config
         parallel_config = self.parallel_config
         self.device = device
-        self.pin_memory = is_pin_memory_available()
+        self.pin_memory = False
         self.dtype = self.model_config.dtype
         if cache_config.cache_dtype == "auto":
             self.kv_cache_dtype = self.dtype
         else:
             self.kv_cache_dtype = STR_DTYPE_TO_TORCH_DTYPE[
-                cache_config.cache_dtype]
-
+                self.cache_config.cache_dtype]
         self.is_pooling_model = (model_config.runner_type == 'pooling')
         # When `is_multimodal_raw_input_only_model` is True, it means that
         # it extract multimodal raw inputs only and deliver as raw inputs to
         # the model.
         self.is_multimodal_raw_input_only_model = True
 
-        self.max_model_len = model_config.max_model_len
-        self.dcp_world_size = 1
-        self.max_num_tokens = scheduler_config.max_num_batched_tokens
-        self.max_num_reqs = scheduler_config.max_num_seqs
+        self.vocab_size = self.model_config.get_vocab_size()
+        self.max_model_len = self.model_config.max_model_len
+        self.max_num_tokens = self.scheduler_config.max_num_batched_tokens
+        self.max_num_reqs = self.scheduler_config.max_num_seqs
+        self.inputs_embeds_size = self.model_config.get_inputs_embeds_size()
 
-        # Model-related.
-        self.num_query_heads = model_config.get_num_attention_heads(
-            parallel_config)
-        self.hidden_size = model_config.get_hidden_size()
-
-        # Multi-modal data support
-        # NOTE There is a bug in vLLM MM registry internally in v0.10.X.
-        # As a workaround, VLLM_WORKER_MULTIPROC_METHOD should be set "spawn"
-        # in case of multi-modal encoder-decoder models.
-        self.mm_registry = MULTIMODAL_REGISTRY
-        self.uses_mrope = model_config.uses_mrope
+        # # Multi-modal data support
+        # # NOTE There is a bug in vLLM MM registry internally in v0.10.X.
+        # # As a workaround, VLLM_WORKER_MULTIPROC_METHOD should be set "spawn"
+        # # in case of multi-modal encoder-decoder models.
+        # self.mm_registry = MULTIMODAL_REGISTRY
+        # self.uses_mrope = model_config.uses_mrope
         self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
             model_config)
+
+        self.req_states = RequestState(
+            max_num_reqs=self.max_num_reqs,
+            max_model_len=self.max_model_len,
+            max_num_batched_tokens=self.max_num_tokens,
+            num_speculative_steps=0,
+            vocab_size=self.vocab_size,
+            device=self.device,
+            pin_memory=self.pin_memory,
+        )
+        self.input_buffers = InputBuffers(
+            max_num_reqs=self.max_num_reqs,
+            max_num_tokens=self.max_num_tokens,
+            inputs_embeds_size=self.inputs_embeds_size,
+            vocab_size=self.vocab_size,
+            dtype=self.dtype,
+            device=self.device,
+            pin_memory=self.pin_memory,
+        )
 
         # Sampler
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
@@ -153,18 +166,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
         self.sampler = sampler
 
-        # Lazy initializations
-        # self.model: nn.Module  # Set after load_model
-        # Initialize in initialize_kv_cache
-        self.kv_caches: list[torch.Tensor] = []
-        # indexes: [kv_cache_group_id][attn_group]
-        self.attn_groups: list[list[AttentionGroup]] = []
-        # self.kv_cache_config: KVCacheConfig
+        # Attention groups are not supported.
+        self.attn_groups = []  # type: ignore
 
-        self.use_aux_hidden_state_outputs = False
-
-        # Request states.
-        self.requests: dict[str, CachedRequestState] = {}
+        # # Request states.
+        # self.requests: dict[str, CachedRequestState] = {}
 
         # Input Batch
         # NOTE(Chen): Ideally, we should initialize the input batch inside
@@ -759,7 +765,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 if new_block_ids is not None:
                     # Append the new blocks to the existing block IDs.
                     for block_ids, new_ids in zip(req_state.block_ids,
-                                                  new_block_ids):
+                                                  new_block_ids,
+                                                  strict=False):
                         block_ids.extend(new_ids)
             else:
                 assert new_block_ids is not None
@@ -958,7 +965,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         pooler_output: list[Optional[torch.Tensor]] = []
         for raw_output, seq_len, prompt_len in zip(
-                raw_pooler_output, seq_lens, pooling_metadata.prompt_lens):
+                raw_pooler_output,
+                seq_lens,
+                pooling_metadata.prompt_lens,
+                strict=False):
 
             output = raw_output.data if seq_len == prompt_len else None
             pooler_output.append(output)

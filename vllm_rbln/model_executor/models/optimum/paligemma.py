@@ -28,7 +28,8 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 
 
 class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
-                                                   RBLNOptimumDecoderMixin):
+                                                   RBLNOptimumDecoderMixin,
+                                                   SupportsMultiModal):
 
     def __init__(
         self,
