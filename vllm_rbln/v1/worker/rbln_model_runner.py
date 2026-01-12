@@ -35,7 +35,7 @@ from vllm.distributed.kv_transfer import (get_kv_transfer_group,
 from vllm.distributed.kv_transfer.kv_connector.utils import copy_kv_blocks
 from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
                                              get_tp_group)
-from vllm.forward_context import DPMetadata, set_forward_context
+from vllm.forward_context import set_forward_context
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.model_loader import TensorizerLoader, get_model_loader
 from vllm.model_executor.models.interfaces import supports_transcription
@@ -926,6 +926,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             logits_indices = query_start_loc[1:] - 1
             num_draft_tokens = None
             spec_decode_metadata = None
+            num_sampled_tokens = np.ones(num_reqs, dtype=np.int32)
         else:
             # Get the number of draft tokens for each request.
             # Iterate over the dictionary rather than all requests since not all
@@ -939,6 +940,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             spec_decode_metadata = self._calc_spec_decode_metadata(
                 num_draft_tokens, cu_num_tokens)
             logits_indices = spec_decode_metadata.logits_indices
+            num_sampled_tokens = num_draft_tokens + 1
             self.num_draft_tokens.np[:num_reqs] = num_draft_tokens
             self.num_draft_tokens.np[num_reqs:].fill(0)
             self.num_draft_tokens.copy_to_gpu()
@@ -1053,7 +1055,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Hot-Swap lora model
         if self.lora_config:
-            self.set_active_loras(self.input_batch, num_scheduled_tokens)
+            assert (
+                np.sum(num_sampled_tokens)
+                <= self.vllm_config.scheduler_config.max_num_batched_tokens)
+            self.set_active_loras(self.input_batch, num_scheduled_tokens,
+                                  num_sampled_tokens)
 
         return (attn_metadata, logits_indices, spec_decode_metadata,
                 num_scheduled_tokens, spec_decode_common_attn_metadata,
@@ -1199,7 +1205,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def get_dp_padding(self,
                        num_tokens: int) -> tuple[int, Optional[torch.Tensor]]:
         dp_size = self.vllm_config.parallel_config.data_parallel_size
-        dp_rank = self.vllm_config.parallel_config.data_parallel_rank
+        # dp_rank = self.vllm_config.parallel_config.data_parallel_rank
 
         # For DP: Don't pad when setting enforce_eager.
         # This lets us set enforce_eager on the prefiller in a P/D setup and
@@ -1751,6 +1757,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.lora_config.max_loras,
                     self.lora_config.max_lora_rank,
                     self.lora_config.lora_dtype,
+                    self.device,
                 )
                 sampler_indices_padded = create_sampler_indices_padded(
                     lora_ids,
@@ -1758,6 +1765,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.max_num_seqs,
                     is_prefills[0],
                     self.lora_config.max_loras,
+                    self.device,
                 )
                 LoRAMask.set_lora_mask(lora_mask)
                 LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
@@ -1837,7 +1845,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     else:  # decode
                         logits = self.compute_logits(hidden_states)
                         logits = logits[logits_indices]
-                    logits = self.logits_processor._gather_logits(logits)
+                    if envs.VLLM_RBLN_LOGITS_ALL_GATHER:
+                        logits = self.logits_processor._gather_logits(logits)
                     logits = logits.view(-1, logits.size(-1))
                 else:
                     selected_token_indices = logits_indices
@@ -2049,9 +2058,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if self.lora_config:
             self.model = self.load_lora_model(
                 self.model,
-                self.model_config,
-                self.scheduler_config,
-                self.lora_config,
+                self.vllm_config,
                 self.device,
             )
         if hasattr(self, "drafter"):
@@ -2854,14 +2861,23 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         return pinned.tolist()
 
 
-def create_lora_mask(input_ids: torch.Tensor, lora_ids: list[int],
-                     lora_index_to_id: list[int], max_loras: int,
-                     max_lora_rank: int,
-                     lora_dtype: torch.dtype) -> torch.Tensor:
+def create_lora_mask(
+    input_ids: torch.Tensor,
+    lora_ids: list[int],
+    lora_index_to_id: list[int],
+    max_loras: int,
+    max_lora_rank: int,
+    lora_dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
     lora_mask = torch.zeros(input_ids.shape[0] * input_ids.shape[1],
                             max_loras * max_lora_rank,
-                            dtype=lora_dtype)
-    ones = torch.ones(input_ids.shape[1], max_lora_rank, dtype=lora_dtype)
+                            dtype=lora_dtype,
+                            device=device)
+    ones = torch.ones(input_ids.shape[1],
+                      max_lora_rank,
+                      dtype=lora_dtype,
+                      device=device)
 
     for i in range(len(lora_ids)):
         if lora_ids[i] == 0:
@@ -2876,10 +2892,14 @@ def create_lora_mask(input_ids: torch.Tensor, lora_ids: list[int],
     return lora_mask
 
 
-def create_sampler_indices_padded(lora_ids: list[int],
-                                  lora_index_to_id: list[int],
-                                  max_num_seqs: int, is_prefill: bool,
-                                  max_loras: int) -> torch.Tensor:
+def create_sampler_indices_padded(
+    lora_ids: list[int],
+    lora_index_to_id: list[int],
+    max_num_seqs: int,
+    is_prefill: bool,
+    max_loras: int,
+    device: torch.device,
+) -> torch.Tensor:
     if is_prefill:
         assert len(lora_ids
                    ) == 1, "Only single LoRA is supported during prefill phase"
@@ -2889,11 +2909,13 @@ def create_sampler_indices_padded(lora_ids: list[int],
         if i < len(lora_ids) and lora_ids[i] > 0 else -1
         for i in range(len(lora_ids) if is_prefill else max_num_seqs)
     ]
-    sampler_indices_padded = torch.tensor(prompt_mapping, dtype=torch.long)
+    sampler_indices_padded = torch.tensor(prompt_mapping,
+                                          dtype=torch.long,
+                                          device=device)
     sampler_indices_padded = torch.where(sampler_indices_padded == -1,
                                          max_loras, sampler_indices_padded)
     sampler_indices_padded = torch.arange(
-        0, len(sampler_indices_padded), dtype=torch.long) + (
-            sampler_indices_padded * len(sampler_indices_padded))
+        0, len(sampler_indices_padded), dtype=torch.long,
+        device=device) + (sampler_indices_padded * len(sampler_indices_padded))
 
     return sampler_indices_padded
