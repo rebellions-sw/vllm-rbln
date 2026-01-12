@@ -1921,9 +1921,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.execute_model_state = None
 
         # Apply structured output bitmasks if present.
-        if grammar_output is not None:
+        if grammar_output is not None and logits.shape[0] > 0:
+            # NOTE(RBLN): `xgr.apply_token_bitmask_inplace` requires logits
+            # to be float32 dtype for CPU tensors
+            original_dtype = logits.dtype
+            logits = logits.to(torch.float32)
             apply_grammar_bitmask(scheduler_output, grammar_output,
                                   self.input_batch, logits)
+            logits = logits.to(original_dtype)
 
         with record_function_or_nullcontext("Sample"):
             sampler_output = self._sample(logits, spec_decode_metadata)
