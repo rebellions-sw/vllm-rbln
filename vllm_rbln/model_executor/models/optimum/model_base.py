@@ -25,8 +25,7 @@ from optimum.rbln.transformers.models.decoderonly import (
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
-from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
-from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.v1.sample.metadata import SamplingMetadata
 
 from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
@@ -199,12 +198,6 @@ class RBLNOptimumDecoderMixin:
 
         self.logits_processor = LogitsProcessor(vocab_size,
                                                 logits_as_input=True)
-        self.sampler = Sampler()
-        self.available_blocks = torch.arange(
-            0,
-            num_blocks,
-            dtype=torch.int16,
-        )
 
     def pad_decoder_items(
         self,
@@ -352,15 +345,6 @@ class RBLNOptimumDecoderMixin:
                     "at index %d: %s", src_block, dst_block, block_idx, e)
                 logger.error(error_msg)
                 raise RuntimeError(error_msg) from e
-
-    def sample(
-        self,
-        logits: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
-    ) -> Optional[SamplerOutput]:
-        # Only for V0
-        next_tokens = self.sampler(logits, sampling_metadata)
-        return next_tokens
 
     # It is required for decoder models in openai api server
     def compute_logits(self, hidden_states: torch.Tensor,
