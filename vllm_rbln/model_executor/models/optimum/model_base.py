@@ -206,7 +206,6 @@ class RBLNOptimumDecoderMixin:
         self.num_blocks_per_seq = math.ceil(self.max_model_len /
                                             self.block_size)
 
-
         self.logits_processor = LogitsProcessor(self.vocab_size,
                                                 logits_as_input=True)
         self.sampler = Sampler()
