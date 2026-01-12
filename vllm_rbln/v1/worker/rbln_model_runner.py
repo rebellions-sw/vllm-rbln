@@ -35,7 +35,7 @@ from vllm.distributed.kv_transfer import (get_kv_transfer_group,
 from vllm.distributed.kv_transfer.kv_connector.utils import copy_kv_blocks
 from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
                                              get_tp_group)
-from vllm.forward_context import DPMetadata, set_forward_context
+from vllm.forward_context import set_forward_context
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.model_loader import TensorizerLoader, get_model_loader
 from vllm.model_executor.models.interfaces import supports_transcription
@@ -1199,7 +1199,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def get_dp_padding(self,
                        num_tokens: int) -> tuple[int, Optional[torch.Tensor]]:
         dp_size = self.vllm_config.parallel_config.data_parallel_size
-        dp_rank = self.vllm_config.parallel_config.data_parallel_rank
+        # dp_rank = self.vllm_config.parallel_config.data_parallel_rank
 
         # For DP: Don't pad when setting enforce_eager.
         # This lets us set enforce_eager on the prefiller in a P/D setup and
@@ -1920,9 +1920,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.execute_model_state = None
 
         # Apply structured output bitmasks if present.
-        if grammar_output is not None:
+        if grammar_output is not None and logits.shape[0] > 0:
+            # NOTE(RBLN): `xgr.apply_token_bitmask_inplace` requires logits
+            # to be float32 dtype for CPU tensors
+            original_dtype = logits.dtype
+            logits = logits.to(torch.float32)
             apply_grammar_bitmask(scheduler_output, grammar_output,
                                   self.input_batch, logits)
+            logits = logits.to(original_dtype)
 
         with record_function_or_nullcontext("Sample"):
             sampler_output = self._sample(logits, spec_decode_metadata)
