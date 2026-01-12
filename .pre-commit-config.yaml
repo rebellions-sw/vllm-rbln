@@ -1,7 +1,7 @@
 default_stages:
   - pre-commit # Run locally
   - manual # Run in CI
-exclude: 'third_party/.*'
+exclude: 'third_party/.*|benchmarks/backend_request_func\.py|benchmarks/benchmark_serving_structured_output\.py'
 repos:
 - repo: https://github.com/google/yapf
   rev: v0.43.0
