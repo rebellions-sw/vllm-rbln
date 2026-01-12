@@ -67,11 +67,10 @@ class RBLNWorker(WorkerBase):
         )
         self.device = torch.device(current_platform.device_type)
 
-        if self.parallel_config.distributed_executor_backend == "ray":
-            logger.info(
-                "Running on Ray backend. Skipping device env var setup.")
-        else:
-            self._init_device_env()
+        self.local_world_size = (self.parallel_config.world_size //
+                                 envs.VLLM_RBLN_NUM_RAY_NODES)
+
+        self._init_device_env()
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -125,28 +124,34 @@ class RBLNWorker(WorkerBase):
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
     def _init_device_env(self) -> None:
-        world_size = self.parallel_config.world_size
+        world_size = self.local_world_size
         env_var = current_platform.device_control_env_var
 
         total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
-        if env_var not in os.environ:
-            device_ids = [str(i) for i in range(total_device_count)]
+        distributed_backend = self.parallel_config.distributed_executor_backend
+        if env_var not in os.environ or distributed_backend == "ray":
+            dev_begin = total_device_count * \
+                self.parallel_config.data_parallel_rank
+            dev_end = dev_begin + total_device_count
+            device_ids = [str(i) for i in range(dev_begin, dev_end)]
+            start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
+            end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
+            selected_devices = ",".join(device_ids[start_idx:end_idx])
         else:
             device_ids = os.environ[env_var].split(",")
-
-        # This check is only valid for single node mp backends, invalid for ray
-        # ex) node#0 : RBLN_DEVICES=0,1
-        #     node#1 : RBLN_DEVICES=2,3
-        distributed_backend = self.parallel_config.distributed_executor_backend
-        if distributed_backend == "mp" and len(
-                device_ids) < total_device_count:
-            raise RuntimeError(f"{env_var} has devices {device_ids}"
-                               f" but required {total_device_count}")
-
-        start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
-        end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
-        selected_devices = ",".join(device_ids[start_idx:end_idx])
+            assert len(
+                device_ids
+            ) == world_size, f"device_ids: {device_ids} should have device count: {world_size}"
+            try:
+                device_id = int(device_ids[self.local_rank])
+                start_idx = device_id * envs.VLLM_RBLN_TP_SIZE
+                end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
+                device_ids = [str(i) for i in range(start_idx, end_idx)]
+                selected_devices = ",".join(device_ids)
+            except ValueError:
+                raise ValueError(
+                    f"device_ids: {device_ids} should be a list of integers")
 
         os.environ[env_var] = selected_devices
         logger.info(
@@ -231,6 +236,7 @@ class RBLNWorker(WorkerBase):
             elif envs.VLLM_RBLN_DP_IMPL == "dummy_prefill":
                 raise ValueError("dummy_prefill is not supported in v1 worker" \
                                  "and will be deprecated in the future")
+            self.model_runner.prepare_dummy_run()
 
         if (self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL
                 or not envs.VLLM_RBLN_ENABLE_WARM_UP):
@@ -302,6 +308,7 @@ class RBLNWorker(WorkerBase):
                     sort_by="self_cuda_time_total"))
 
     def execute_dummy_batch(self) -> None:
+        self.model_runner.dummy_run()
         return
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
@@ -339,7 +346,7 @@ def init_worker_distributed_environment(
     world_size = parallel_config.world_size
 
     # Set envs for RCCL
-    os.environ['LOCAL_RANK'] = str(local_rank)
+    os.environ['LOCAL_RANK'] = str(rank)
     os.environ['WORLD_SIZE'] = str(world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
@@ -348,7 +355,7 @@ def init_worker_distributed_environment(
         world_size_across_dp = parallel_config.world_size_across_dp
         dp_rank = parallel_config.data_parallel_rank
         rank_across_dp = dp_rank * world_size
-        rank_across_dp += local_rank
+        rank_across_dp += rank
         logger.info("world_size_across_dp = %s, rank_across_dp = %s",
                     world_size_across_dp, rank_across_dp)
         # consider across_dp

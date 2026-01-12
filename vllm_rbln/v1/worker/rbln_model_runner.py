@@ -366,7 +366,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 (3, self.max_num_tokens + 1), dtype=torch.int64)
 
         # None in the first PP rank. The rest are set after load_model.
-        self.intermediate_tensors: Optional[IntermediateTensors] = None
+        self.prefill_intermediate_tensors: Optional[IntermediateTensors] = None
+        self.decode_intermediate_tensors: Optional[IntermediateTensors] = None
 
         # OPTIMIZATION: Cache the tensors rather than creating them every step.
         # Keep in int64 to avoid overflow with long context
@@ -427,6 +428,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
+
+        self.dummy_run_scheduler_outputs: \
+            Optional[tuple[SchedulerOutput, SchedulerOutput]] = None
 
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],
@@ -1155,47 +1159,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         return tuple(tasks)
 
-    def sync_and_slice_intermediate_tensors(
-        self,
-        batch_size: int,
-        seq_len: int,
-        intermediate_tensors: Optional[IntermediateTensors],
-        sync_self: bool,
-    ) -> IntermediateTensors:
-        # FIXME - RBLN does not support intermediate tensor slicing
-        tp = self.vllm_config.parallel_config.tensor_parallel_size
-        enabled_sp = self.compilation_config.pass_config. \
-            enable_sequence_parallelism
-
-        if intermediate_tensors is None:
-            # for warm_up, from empty dummy intermediate tensors
-            assert self.intermediate_tensors is not None
-            assert batch_size > 0
-            assert seq_len > 0
-            num_tokens = batch_size * seq_len
-            if enabled_sp:
-                # When sequence parallelism is enabled, we always pad num_tokens
-                # to be a multiple of tensor_parallel_size (tp) earlier
-                assert num_tokens % tp == 0
-            residual_scatter = tp > 1 and enabled_sp \
-                and num_tokens % tp == 0
-            assert not enabled_sp, "RBLN warm_up = !sp(sequence_parallel)"
-            assert not residual_scatter, "RBLN warm_up = !residual_scatter"
-            assert not sync_self, "RBLN warm_up = !sync self(from dummy)"
-            return IntermediateTensors({
-                k: v.reshape((batch_size, seq_len, -1))
-                for k, v in self.intermediate_tensors.items()
-            })
-        else:
-            # for execution, from input intermediate tensors
-            assert batch_size == -1
-            assert seq_len == -1
-            assert sync_self, "RBLN execute = sync self(from input)"
-            return IntermediateTensors({
-                k: v
-                for k, v in intermediate_tensors.items()
-            })
-
     def _pool(
         self,
         hidden_states: torch.Tensor,
@@ -1238,7 +1201,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def _preprocess(
         self,
         scheduler_output: "SchedulerOutput",
-        intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> tuple[int, Optional[torch.Tensor], Optional[torch.Tensor],
                Optional[torch.Tensor], torch.Tensor,
                Optional[IntermediateTensors], dict[str, Any]]:
@@ -1297,12 +1259,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         else:
             positions = self.positions.gpu[:num_input_tokens]
 
-        if get_pp_group().is_first_rank:
-            intermediate_tensors = None
-        else:
-            intermediate_tensors = self.sync_and_slice_intermediate_tensors(
-                -1, -1, intermediate_tensors, True)
-
         if (self.model_config.is_encoder_decoder
                 and scheduler_output.scheduled_encoder_inputs):
             encoder_inputs = self._extract_encoder_inputs(scheduler_output)
@@ -1314,7 +1270,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             input_ids,
             inputs_embeds,
             positions,
-            intermediate_tensors,
             model_kwargs,
         )
 
@@ -1385,9 +1340,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 task=self.get_supported_pooling_tasks()[0])
             if self.is_pooling_model else None,
         )
-        self._execute_dummy_requests(dummy_prefill_requests,
-                                     dummy_prefill_num_scheduled_tokens,
-                                     num_kv_cache_groups)
+        so, cso = self._make_dummy_scheduler_outputs(
+            dummy_prefill_requests, dummy_prefill_num_scheduled_tokens,
+            num_kv_cache_groups)
+        self._execute_dummy_requests(so, cso,
+                                     self.prefill_intermediate_tensors)
 
         # compile decode graph
         decode_max_batch_size = self.scheduler_config.max_num_seqs
@@ -1408,12 +1365,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     task=self.get_supported_pooling_tasks()[0])
                 if self.is_pooling_model else None,
             )
-
-        self._execute_dummy_requests(
-            requests=dummy_decode_requests,
-            num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
-            num_kv_cache_groups=num_kv_cache_groups,
-        )
+        so, cso = self._make_dummy_scheduler_outputs(
+            dummy_decode_requests, dummy_decode_num_scheduled_tokens,
+            num_kv_cache_groups)
+        self._execute_dummy_requests(so, cso, self.decode_intermediate_tensors)
 
     def _add_dummy_requests(
         self,
@@ -1424,6 +1379,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         num_kv_cache_groups: int,
         sampling_params: Optional[SamplingParams] = None,
         pooling_params: Optional[PoolingParams] = None,
+        block_id: int = 0,
     ) -> None:
 
         num_blocks = round_up(
@@ -1437,7 +1393,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             mm_features=[],
             sampling_params=sampling_params,
             pooling_params=pooling_params,
-            block_ids=([0] * num_blocks, ) * num_kv_cache_groups,
+            block_ids=([block_id] * num_blocks, ) * num_kv_cache_groups,
             num_computed_tokens=num_computed_tokens,
             lora_request=None,
         )
@@ -1446,9 +1402,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if total_tokens - num_computed_tokens == 0 \
                 else total_tokens - num_computed_tokens
 
-    def _execute_dummy_requests(self, requests: list[NewRequestData],
-                                num_scheduled_tokens: dict[str, int],
-                                num_kv_cache_groups: int) -> None:
+    def _make_dummy_scheduler_outputs(
+            self, requests: list[NewRequestData],
+            num_scheduled_tokens: dict[str, int], num_kv_cache_groups: int
+    ) -> tuple[SchedulerOutput, SchedulerOutput]:
         sched_output = SchedulerOutput(
             scheduled_new_reqs=requests,
             scheduled_cached_reqs=CachedRequestData.make_empty(),
@@ -1474,32 +1431,16 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             free_encoder_mm_hashes=[],
             kv_connector_metadata=None,
         )
+        return sched_output, cleanup_sched_output
+
+    def _execute_dummy_requests(
+        self,
+        sched_output: SchedulerOutput,
+        cleanup_sched_output: SchedulerOutput,
+        intermediate_tensors: IntermediateTensors,
+    ) -> None:
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
-        else:
-            # make RBLN decode dummy intermediate tensors
-            # FIXME - based on assumption, multiple batch decode
-            batch_size = len(requests)
-            assert batch_size >= 1
-            num_computed_tokens = requests[0].num_computed_tokens
-            if num_computed_tokens == 0:
-                # FIXME(RBLN)
-                # prefill - single batch prefill
-                assert batch_size == 1
-                prompt_token_ids = requests[0].prompt_token_ids
-                seq_len = len(prompt_token_ids)
-            else:
-                # decode - single token prompt
-                seq_len = 1
-            if self.intermediate_tensors is None:
-                self.intermediate_tensors = (
-                    self.model.make_empty_intermediate_tensors(
-                        batch_size=batch_size * seq_len,
-                        dtype=self.model_config.dtype,
-                        device=self.device))
-
-            intermediate_tensors = self.sync_and_slice_intermediate_tensors(
-                batch_size, seq_len, None, False)
 
         output = self.execute_model(sched_output, intermediate_tensors)
         if output is None:
@@ -1507,7 +1448,34 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         output = self.execute_model(cleanup_sched_output, intermediate_tensors)
         if output is None:
             self.sample_tokens(None)
-        self.intermediate_tensors = None
+
+    @torch.inference_mode()
+    def prepare_dummy_run(self) -> None:
+        num_kv_cache_groups = len(self.kv_cache_config.kv_cache_groups)
+        dummy_run_requests = []
+        dummy_run_num_scheduled_tokens = {}
+        self._add_dummy_requests(
+            requests=dummy_run_requests,
+            num_scheduled_tokens=dummy_run_num_scheduled_tokens,
+            total_tokens=1,
+            num_computed_tokens=1,
+            num_kv_cache_groups=num_kv_cache_groups,
+            sampling_params=None if self.is_pooling_model else SamplingParams(
+                temperature=0.0),
+            pooling_params=PoolingParams(
+                task=self.get_supported_pooling_tasks()[0])
+            if self.is_pooling_model else None,
+            block_id=self.cache_config.num_gpu_blocks - 1,
+        )
+        self.dummy_run_scheduler_outputs = self._make_dummy_scheduler_outputs(
+            dummy_run_requests, dummy_run_num_scheduled_tokens,
+            num_kv_cache_groups)
+
+    @torch.inference_mode()
+    def dummy_run(self) -> None:
+        so, cso = self.dummy_run_scheduler_outputs
+
+        self._execute_dummy_requests(so, cso, self.decode_intermediate_tensors)
 
     def _bookkeeping_sync(
         self, scheduler_output: "SchedulerOutput",
@@ -1676,9 +1644,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 input_ids,
                 inputs_embeds,
                 positions,
-                intermediate_tensors,
                 model_kwargs,
-            ) = self._preprocess(scheduler_output, intermediate_tensors)
+            ) = self._preprocess(scheduler_output)
 
         # Run the model.
         # Use persistent buffers for CUDA graphs.
@@ -2069,6 +2036,45 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.compile_context = CompileContext(use_weight_sharing=True)
             compiled_graph = self._compile_model(model_wrapper)
             self.model_executable = compiled_graph
+
+        distributed_executor_backend = \
+            self.vllm_config.parallel_config.distributed_executor_backend
+        if distributed_executor_backend == "ray":
+            self._prepare_intermediate_tensors()
+        else:
+            with torch.inference_mode():
+                self._prepare_intermediate_tensors()
+
+    def _prepare_intermediate_tensors(self) -> None:
+
+        def _reshape(
+                batch_size: int, seq_len: int,
+                intermediate_tensors: IntermediateTensors
+        ) -> IntermediateTensors:
+            return IntermediateTensors({
+                k: v.view(batch_size, seq_len, -1)
+                for k, v in intermediate_tensors.items()
+            })
+
+        batch_size = self.max_prefill_batch_size
+        seq_len = (self.scheduler_config.max_num_batched_tokens
+                   if self.scheduler_config.enable_chunked_prefill else
+                   self.model_config.max_model_len)
+        self.prefill_intermediate_tensors = _reshape(
+            batch_size, seq_len,
+            self.model.make_empty_intermediate_tensors(
+                batch_size=batch_size * seq_len,
+                dtype=self.model_config.dtype,
+                device=self.device))
+
+        batch_size = self.max_num_seqs
+        seq_len = 1
+        self.decode_intermediate_tensors = _reshape(
+            batch_size, seq_len,
+            self.model.make_empty_intermediate_tensors(
+                batch_size=batch_size * seq_len,
+                dtype=self.model_config.dtype,
+                device=self.device))
 
     def save_tensorized_model(
         self,
