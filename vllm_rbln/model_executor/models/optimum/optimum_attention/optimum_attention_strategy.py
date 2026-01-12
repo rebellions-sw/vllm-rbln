@@ -54,7 +54,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         self.table[running_requests_id] = self.entry_factory(local_table_id)
 
     @abstractmethod
-    def entry_factory(self) -> EntryT:
+    def entry_factory(self, local_table_id: int) -> EntryT:
         ...
 
     @abstractmethod
@@ -86,7 +86,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         self,
         decoder_batch_size: int,
         finished_requests_ids: list[str],
-        get_entry_fn: Callable[[Any], Any],
+        get_entry_fn: Callable[[EntryT], int],
     ) -> int:
         """
         Find an available table ID by reusing from
@@ -96,8 +96,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             # Reuse table_id from the first finished request
             first_id = finished_requests_ids[0]
             first_entry = self.table[first_id]
-            table_id = get_entry_fn(
-                first_entry) if get_entry_fn else first_entry
+            table_id = get_entry_fn(first_entry)
 
             # Clean up finished requests from table
             for request_id in finished_requests_ids:
@@ -105,10 +104,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             return table_id
         else:
             # Find the minimum available table_id
-            used_ids = {
-                get_entry_fn(v) if get_entry_fn else v
-                for v in self.table.values()
-            }
+            used_ids = {get_entry_fn(v) for v in self.table.values()}
             available_ids = set(range(decoder_batch_size)) - used_ids
             assert available_ids, "No available table IDs"
             return min(available_ids)
@@ -161,7 +157,6 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
     ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
         request_nums = len(running_requests_ids)
         valid_table_ids = set(range(decoder_batch_size))
-        has_extra_values = get_extra_values_fn is not None
 
         # Copy table_ids and extra values for each running request
         for i, request_id in enumerate(running_requests_ids):
@@ -169,7 +164,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             table_id = get_entry_fn(entry)
             self.local_block_table_ids[i, 0] = table_id
             valid_table_ids.remove(table_id)
-            if has_extra_values:
+            if get_extra_values_fn is not None and extra_tensors is not None:
                 self.copy_extra_values_to_tensors(entry, i,
                                                   get_extra_values_fn,
                                                   extra_tensors)
@@ -178,7 +173,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         if request_nums < decoder_batch_size:
             self.mask_local_block_table(request_nums, valid_table_ids)
 
-        if has_extra_values:
+        if get_extra_values_fn is not None and extra_tensors is not None:
             return (self.local_block_table_ids[:decoder_batch_size],
                     *extra_tensors)
         return self.local_block_table_ids[:decoder_batch_size]

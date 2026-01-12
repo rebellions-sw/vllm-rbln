@@ -284,9 +284,14 @@ class RBLNOptimumDecoderMixin:
                 else:
                     indices = torch.tensor(input_block_ids, dtype=torch.int64)
                 # Use clone() to avoid memory overlap error
-                input_ids[indices] = input_ids[:request_nums].clone()
-                cache_position[indices] = cache_position[:request_nums].clone()
-                block_tables[indices] = block_tables[:request_nums].clone()
+                if input_ids is not None:
+                    input_ids[indices] = input_ids[:request_nums].clone()
+                if cache_position is not None:
+                    cache_position[
+                        indices] = cache_position[:request_nums].clone()
+                if block_tables is not None:
+                    block_tables[indices] = block_tables[:request_nums].clone()
+
             input_ids, cache_position, block_tables = self.pad_decoder_items(
                 input_ids,
                 cache_position,
