@@ -15,8 +15,10 @@
 import pytest
 import torch
 
-from vllm_rbln.lora.mask import LoRAMask
-from vllm_rbln.v1.worker.rbln_model_runner import create_lora_mask
+from vllm_rbln.lora.inputs import LoRAInputs
+from vllm_rbln.v1.worker.rbln_model_runner import create_sampler_indices_padded
+
+STAGES = [True, False]  # prefill(True) stage and decode(False) stage
 
 
 def get_random_id_to_index(num_loras: int,
@@ -47,45 +49,42 @@ def get_random_id_to_index(num_loras: int,
     return slots
 
 
-def test_lora_mask():
-    with pytest.raises(AttributeError):
-        _ = LoRAMask.get_lora_mask()
+def test_lora_inputs():
+    LoRAInputs.set_sampler_indices_padded(torch.randn(10, 10))
+    sampler_indices_padded = LoRAInputs.get_sampler_indices_padded()
 
-    LoRAMask.set_lora_mask(torch.randn(10, 10))
-    _ = LoRAMask.get_lora_mask()
+    assert sampler_indices_padded.shape[0] == 10
+    assert sampler_indices_padded.shape[1] == 10
 
 
-@pytest.mark.parametrize("num_seqs", [1, 2, 4])
-@pytest.mark.parametrize("seq_len", [1, 256])
 @pytest.mark.parametrize("num_loras", [1, 2, 4])
-def test_create_lora_mask(num_seqs, seq_len, num_loras):
+@pytest.mark.parametrize("stage", STAGES)
+def test_create_sampler_indices_padded(num_loras, stage):
+    max_num_seqs = 8
     max_loras = 8
-    max_lora_rank = 8
-    lora_dtype = torch.bfloat16
 
-    input_ids = torch.randint(0, 6000, (num_seqs, seq_len), dtype=torch.int64)
     id_to_index = get_random_id_to_index(num_loras, max_loras)
-    lora_ids = torch.randint(0, num_loras + 1, (num_seqs, )).tolist()
+    lora_ids = torch.randint(0, num_loras + 1,
+                             (1 if stage else max_num_seqs, )).tolist()
 
-    lora_mask = create_lora_mask(input_ids,
-                                 lora_ids,
-                                 id_to_index,
-                                 max_loras,
-                                 max_lora_rank,
-                                 lora_dtype=lora_dtype)
+    if stage and len(lora_ids) > 1:
+        # the case that the number of sequences is greater than 1
+        # and current stage is prefill.
+        with pytest.raises(AssertionError):
+            sampler_indices_padded = create_sampler_indices_padded(
+                lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu")
+    else:
+        sampler_indices_padded = create_sampler_indices_padded(
+            lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu")
 
-    expected_shape = (num_seqs * seq_len, max_loras * max_lora_rank)
-    assert lora_mask.shape == expected_shape
-    assert lora_mask.dtype == lora_dtype
+        assert sampler_indices_padded.dtype == torch.long
+        assert len(sampler_indices_padded) == (1 if stage else max_num_seqs)
 
-    for i, lora_id in enumerate(lora_ids):
-        if lora_id == 0:
-            continue
+        for i in range(len(lora_ids)):
+            if lora_ids[i] > 0:
+                index = id_to_index.index(lora_ids[i])
+            else:
+                index = max_loras if stage else max_num_seqs
 
-        lora_index = id_to_index.index(lora_id)
-        start_row = i * seq_len
-        start_col = lora_index * max_lora_rank
-
-        mask_section = lora_mask[start_row:start_row + seq_len,
-                                 start_col:start_col + max_lora_rank]
-        assert torch.all(mask_section == 1.0)
+            expected_value = i + (index * len(lora_ids))
+            assert sampler_indices_padded[i] == expected_value
