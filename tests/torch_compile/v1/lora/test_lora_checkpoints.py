@@ -41,8 +41,7 @@ def test_load_checkpoints(
     chatglm3_lora_files,
 ):
     packed_modules_mapping = BaiChuanBaseForCausalLM.packed_modules_mapping
-    embedding_modules = BaiChuanBaseForCausalLM.embedding_modules
-    embed_padding_modules = BaiChuanBaseForCausalLM.embedding_padding_modules
+
     expected_lora_modules: list[str] = []
     for module in BAICHUAN_LORA_MODULES:
         if module in packed_modules_mapping:
@@ -54,41 +53,35 @@ def test_load_checkpoints(
                                                 max_position_embeddings=4096)
         # For the baichuan7B model, load it's LoRA,
         # and the test should pass.
-        LoRAModel.from_local_checkpoint(
-            baichuan_lora_files,
-            expected_lora_modules,
-            peft_helper=peft_helper,
-            lora_model_id=1,
-            device="cpu",
-            embedding_modules=embedding_modules,
-            embedding_padding_modules=embed_padding_modules)
+        LoRAModel.from_local_checkpoint(baichuan_lora_files,
+                                        expected_lora_modules,
+                                        peft_helper=peft_helper,
+                                        lora_model_id=1,
+                                        device="cpu",
+                                        model_vocab_size=64000)
     elif lora_name == "baichuan7B-zero":
         # Test that the target_modules contain prefix
         # such as "model.layers.0.self_atten.W_pack", and
         # the test should pass.
         peft_helper = PEFTHelper.from_local_dir(baichuan_zero_lora_files,
                                                 max_position_embeddings=4096)
-        LoRAModel.from_local_checkpoint(
-            baichuan_zero_lora_files,
-            expected_lora_modules,
-            peft_helper=peft_helper,
-            lora_model_id=1,
-            device="cpu",
-            embedding_modules=embedding_modules,
-            embedding_padding_modules=embed_padding_modules)
+        LoRAModel.from_local_checkpoint(baichuan_zero_lora_files,
+                                        expected_lora_modules,
+                                        peft_helper=peft_helper,
+                                        lora_model_id=1,
+                                        device="cpu",
+                                        model_vocab_size=64000)
     elif lora_name == "baichuan7B-zero-regex":
         # Test that the `target_modules` in the form of regular expressions,
         # such as `model\\..*(W_pack|o_proj)`, and the test should pass.
         peft_helper = PEFTHelper.from_local_dir(baichuan_regex_lora_files,
                                                 max_position_embeddings=4096)
-        LoRAModel.from_local_checkpoint(
-            baichuan_regex_lora_files,
-            expected_lora_modules,
-            peft_helper=peft_helper,
-            lora_model_id=1,
-            device="cpu",
-            embedding_modules=embedding_modules,
-            embedding_padding_modules=embed_padding_modules)
+        LoRAModel.from_local_checkpoint(baichuan_regex_lora_files,
+                                        expected_lora_modules,
+                                        peft_helper=peft_helper,
+                                        lora_model_id=1,
+                                        device="cpu",
+                                        model_vocab_size=64000)
     else:
         # For the baichuan7B model, load chatglm3-6b's LoRA,
         # and the test should raise the following error.
@@ -96,21 +89,18 @@ def test_load_checkpoints(
         peft_helper = PEFTHelper.from_local_dir(chatglm3_lora_files,
                                                 max_position_embeddings=4096)
         with pytest.raises(ValueError, match=expected_error):
-            LoRAModel.from_local_checkpoint(
-                chatglm3_lora_files,
-                expected_lora_modules,
-                peft_helper=peft_helper,
-                lora_model_id=1,
-                device="cpu",
-                embedding_modules=embedding_modules,
-                embedding_padding_modules=embed_padding_modules)
+            LoRAModel.from_local_checkpoint(chatglm3_lora_files,
+                                            expected_lora_modules,
+                                            peft_helper=peft_helper,
+                                            lora_model_id=1,
+                                            device="cpu",
+                                            model_vocab_size=64000)
 
 
 def test_lora_weights_mapping(baichuan_lora_files):
 
     packed_modules_mapping = BaiChuanBaseForCausalLM.packed_modules_mapping
-    embedding_modules = BaiChuanBaseForCausalLM.embedding_modules
-    embed_padding_modules = BaiChuanBaseForCausalLM.embedding_padding_modules
+
     expected_lora_modules: list[str] = []
     for module in BAICHUAN_LORA_MODULES:
         if module in packed_modules_mapping:
@@ -134,8 +124,7 @@ def test_lora_weights_mapping(baichuan_lora_files):
         peft_helper=peft_helper,
         lora_model_id=1,
         device="cpu",
-        embedding_modules=embedding_modules,
-        embedding_padding_modules=embed_padding_modules,
+        model_vocab_size=64000,
         weights_mapper=hf_to_vllm_mapper,
     )
     for name in lora_model.loras:

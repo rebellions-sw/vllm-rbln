@@ -32,9 +32,12 @@ from vllm_rbln.v1.worker.rbln_worker import RBLNWorker as Worker
 
 NUM_LORAS = 16
 
+MODEL_PATH = "Qwen/Qwen3-0.6B"
+NUM_LORAS = 16
+
 
 @patch.dict(os.environ, {"RANK": "0"})
-def test_worker_apply_lora(sql_lora_files):
+def test_worker_apply_lora(qwen3_lora_files):
 
     def set_active_loras(worker: Worker, lora_requests: list[LoRARequest]):
         lora_mapping = LoRAMapping([], [])
@@ -42,14 +45,15 @@ def test_worker_apply_lora(sql_lora_files):
         worker.model_runner.lora_manager.set_active_adapters(
             lora_requests, lora_mapping)
 
+    model_config = ModelConfig(
+        MODEL_PATH,
+        seed=0,
+        dtype="float16",
+        max_model_len=127,
+    )
+
     vllm_config = VllmConfig(
-        model_config=ModelConfig(
-            "meta-llama/Llama-2-7b-hf",
-            seed=0,
-            dtype="bfloat16",
-            task="generate",
-            disable_cascade_attn=True,
-        ),
+        model_config=model_config,
         load_config=LoadConfig(
             download_dir=None,
             load_format="dummy",
@@ -59,7 +63,14 @@ def test_worker_apply_lora(sql_lora_files):
             tensor_parallel_size=1,
             data_parallel_size=1,
         ),
-        scheduler_config=SchedulerConfig("generate", 32, 32, 32),
+        scheduler_config=SchedulerConfig(
+            max_model_len=model_config.max_model_len,
+            is_encoder_decoder=model_config.is_encoder_decoder,
+            runner_type="generate",
+            max_num_batched_tokens=32,
+            max_num_seqs=32,
+            max_num_partial_prefills=32,
+        ),
         device_config=DeviceConfig("cpu"),
         cache_config=CacheConfig(
             block_size=16,
@@ -85,7 +96,7 @@ def test_worker_apply_lora(sql_lora_files):
     assert worker.list_loras() == set()
 
     lora_requests = [
-        LoRARequest(str(i + 1), i + 1, sql_lora_files)
+        LoRARequest(str(i + 1), i + 1, qwen3_lora_files)
         for i in range(NUM_LORAS)
     ]
 
