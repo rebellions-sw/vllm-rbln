@@ -626,7 +626,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 if new_block_ids is not None:
                     # Append the new blocks to the existing block IDs.
                     for block_ids, new_ids in zip(req_state.block_ids,
-                                                  new_block_ids):
+                                                  new_block_ids,
+                                                  strict=False):
                         block_ids.extend(new_ids)
             else:
                 assert new_block_ids is not None
@@ -1249,7 +1250,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         pooler_output: list[Optional[torch.Tensor]] = []
         for raw_output, seq_len, prompt_len in zip(
-                raw_pooler_output, seq_lens_cpu, pooling_metadata.prompt_lens):
+                raw_pooler_output,
+                seq_lens_cpu,
+                pooling_metadata.prompt_lens,
+                strict=False):
 
             output = raw_output.data if seq_len == prompt_len else None
             pooler_output.append(output)
@@ -1853,7 +1857,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     else:  # decode
                         logits = self.compute_logits(hidden_states)
                         logits = logits[logits_indices]
-                    if envs.VLLM_RBLN_LOGITS_ALL_GATHER:
+                    if not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
                         logits = self.logits_processor._gather_logits(logits)
                     logits = logits.view(-1, logits.size(-1))
                 else:
@@ -2629,7 +2633,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     state_tensors = []
                     storage_offset_bytes = 0
                     for (shape, dtype) in zip(kv_cache_spec.shapes,
-                                              kv_cache_spec.dtypes):
+                                              kv_cache_spec.dtypes,
+                                              strict=False):
                         dtype_size = get_dtype_size(dtype)
                         num_element_per_page = (
                             kv_cache_spec.page_size_bytes // dtype_size)
