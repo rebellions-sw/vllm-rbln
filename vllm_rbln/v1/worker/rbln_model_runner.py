@@ -417,7 +417,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # execute_model() and sample_tokens().
         self.execute_model_state: ExecuteModelState | None = None
 
-        self.max_batch_size = self.scheduler_config.max_num_seqs
+        self.max_batch_size = (self.scheduler_config.max_num_seqs //
+                               self.parallel_config.pipeline_parallel_size)
         self.max_num_seqs = self.scheduler_config.max_num_seqs
         self.max_prefill_batch_size = 1
         self.max_num_batched_tokens = (
@@ -626,7 +627,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 if new_block_ids is not None:
                     # Append the new blocks to the existing block IDs.
                     for block_ids, new_ids in zip(req_state.block_ids,
-                                                  new_block_ids):
+                                                  new_block_ids,
+                                                  strict=False):
                         block_ids.extend(new_ids)
             else:
                 assert new_block_ids is not None
@@ -1249,7 +1251,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         pooler_output: list[Optional[torch.Tensor]] = []
         for raw_output, seq_len, prompt_len in zip(
-                raw_pooler_output, seq_lens_cpu, pooling_metadata.prompt_lens):
+                raw_pooler_output,
+                seq_lens_cpu,
+                pooling_metadata.prompt_lens,
+                strict=False):
 
             output = raw_output.data if seq_len == prompt_len else None
             pooler_output.append(output)
@@ -1419,13 +1424,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                      num_kv_cache_groups)
 
         # compile decode graph
-        decode_max_batch_size = (self.scheduler_config.max_num_seqs 
-            // self.parallel_config.pipeline_parallel_size)
         decode_max_seq_len = self.model_config.max_model_len
 
         dummy_decode_requests = []
         dummy_decode_num_scheduled_tokens = {}
-        for _ in range(decode_max_batch_size):
+        for _ in range(self.max_batch_size):
             self._add_dummy_requests(
                 requests=dummy_decode_requests,
                 num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
@@ -1751,12 +1754,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 positions = rbln_utils.pad(positions, -1, prefill_size)
             else:
                 # decode batch padding
-                input_ids = rbln_utils.pad(
-                    input_ids, 0, self.max_num_seqs //
-                    self.parallel_config.pipeline_parallel_size)
-                positions = rbln_utils.pad(
-                    positions, -2, self.max_num_seqs //
-                    self.parallel_config.pipeline_parallel_size)
+                input_ids = rbln_utils.pad(input_ids, 0, self.max_batch_size)
+                positions = rbln_utils.pad(positions, -2, self.max_batch_size)
 
             if self.lora_config is not None:
                 lora_ids = [
@@ -2634,7 +2633,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     state_tensors = []
                     storage_offset_bytes = 0
                     for (shape, dtype) in zip(kv_cache_spec.shapes,
-                                              kv_cache_spec.dtypes):
+                                              kv_cache_spec.dtypes,
+                                              strict=False):
                         dtype_size = get_dtype_size(dtype)
                         num_element_per_page = (
                             kv_cache_spec.page_size_bytes // dtype_size)
