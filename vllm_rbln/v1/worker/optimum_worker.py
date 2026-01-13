@@ -85,7 +85,6 @@ class RBLNOptimumWorker(WorkerBase):
         else:
             self.profiler = None
 
-
     def init_device(self) -> None:
         # Initialize the distributed environment.
         init_worker_distributed_environment(self.vllm_config, self.rank,
@@ -133,7 +132,6 @@ class RBLNOptimumWorker(WorkerBase):
             if self.local_rank == 0:
                 print(self.profiler.key_averages().table(
                     sort_by="self_cuda_time_total"))
-        
 
     def load_model(self):
         self.model_runner.load_model()
