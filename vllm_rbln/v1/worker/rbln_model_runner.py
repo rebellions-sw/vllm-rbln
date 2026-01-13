@@ -1838,7 +1838,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 end_time = time.perf_counter()
                 execution_time = end_time - start_time
 
-                if len(reports) > 0:
+                if reports is not None and len(reports) > 0:
                     host_time = reports[0].get('total_host', None)
                     device_time = reports[0].get('total_device', None)
                     ccl_time = reports[0].get('total_ccl', None)
