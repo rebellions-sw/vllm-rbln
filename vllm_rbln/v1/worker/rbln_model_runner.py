@@ -110,8 +110,16 @@ class AsyncRBLNModelRunnerOutput(AsyncModelRunnerOutput):
         model_runner_output: ModelRunnerOutput,
         sampled_token_ids: torch.Tensor,
         invalid_req_indices: list[int],
-        async_output_copy_stream: torch.cuda.Stream,
+        # async_output_copy_stream: torch.cuda.Stream,
     ):
+        # TODO(RBLN): We need asynchronous non blocking DtoH memcpy and a way
+        # to synchronize it. In original gpu vllm code, a copy operation is
+        # launched asynchronously, and an event is recorded on the same stream.
+        # Synchronizing on that event guarantees that the copy has completed
+        # at that point.
+        # We keep the original GPU code commented out for reference in future
+        # implementations.
+
         self._model_runner_output = model_runner_output
         self._invalid_req_indices = invalid_req_indices
 
@@ -129,13 +137,17 @@ class AsyncRBLNModelRunnerOutput(AsyncModelRunnerOutput):
         #     self._sampled_token_ids_cpu = self._sampled_token_ids.to(
         #         'cpu', non_blocking=True)
         #     self._async_copy_ready_event.record()
+        # TODO(RBLN): Replace this with proper async DtoH memcpy.
+        self._sampled_token_ids_cpu = self._sampled_token_ids.to(
+            'cpu', non_blocking=True)
 
     def get_output(self) -> ModelRunnerOutput:
         """Copy the device tensors to the host and return a ModelRunnerOutput.
 
         This function blocks until the copy is finished.
         """
-        self._async_copy_ready_event.synchronize()
+        # TODO(RBLN): We need to synchronize DtoH memcpy here.
+        # self._async_copy_ready_event.synchronize()
 
         # Release the device tensor once the copy has completed
         del self._sampled_token_ids
@@ -325,6 +337,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         )
 
         self.use_async_scheduling = self.scheduler_config.async_scheduling
+        # TODO(RBLN): We might need stream to control DtoH memcpy.
         # self.async_output_copy_stream = torch.cuda.Stream() if \
         #     self.use_async_scheduling else None
 
@@ -2016,7 +2029,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             model_runner_output=output,
             sampled_token_ids=sampler_output.sampled_token_ids,
             invalid_req_indices=invalid_req_indices,
-            async_output_copy_stream=self.async_output_copy_stream,
+            # async_output_copy_stream=self.async_output_copy_stream,
         )
 
     def load_model(self) -> None:
