@@ -163,31 +163,6 @@ def __custom_init__(self: EagleProposer,
                                                    max_batch_size, 1)
 
 
-def custom_prepare_inputs(
-    self: EagleProposer,
-    common_attn_metadata: CommonAttentionMetadata,
-    sampled_token_ids: list[list[int]],
-    num_draft_tokens: list[int],
-) -> tuple[CommonAttentionMetadata, torch.Tensor]:
-
-    # E.g.
-    #  common_attn_metadata.query_start_loc{_cpu}:
-    #       [0, q1, q1 + q2, q1 + q2 + q3]
-    #  common_attn_metadata.seq_lens{_cpu}: [s1, s2, s3]
-    #  num_rejected_tokens: [n1, n2, n3]
-    # This function computes the intermediate values:
-    #  num_tokens_per_req: [q1 - n1, q2 - n2, q3 - n3]
-    # And returns:
-    #  common_attn_metadata.query_start_loc{_cpu}:
-    #       [0, q1 - n1, q1 + q2 - n1 - n2, q1 + q2 + q3 - n1 - n2 - n3]
-    #  common_attn_metadata.seq_lens{_cpu}:
-    #       [s1 - n1 + 1, s2 - n2 + 1, s3 - n3 + 1]
-    #  token_indices: [0, 1, ..., q1 - n1 - 1,
-    #                 q1, q1 + 1, ..., q1 + q2 - n2 - 1,
-    #                 q1 + q2, q1 + q2 + 1, ..., q1 + q2 + q3 - n3 - 1]
-    pass
-
-
 def custom_propose(
     self: EagleProposer,
     target_token_ids: torch.Tensor,
@@ -491,5 +466,4 @@ def custom_propose(
 
 
 EagleProposer.__init__ = __custom_init__
-# EagleProposer.prepare_inputs = custom_prepare_inputs
 EagleProposer.propose = custom_propose
