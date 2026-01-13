@@ -19,7 +19,7 @@ jobs:
         GH_TOKEN: ${{ secrets.GIT_PAT }}
       run: |
         RUN_ID=$(gh run list \
-          --repo rebellions-sw/vllm-rbln \
+          --repo rbln-sw/vllm-rbln \
           --workflow "rbln_utils_set_compiler_version_ci.yaml" \
           --status success \
           --limit 1 \
@@ -36,7 +36,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: compiler-version-for-vllm-rbln
-        repository: rebellions-sw/vllm-rbln
+        repository: rbln-sw/vllm-rbln
         github-token: ${{ secrets.GIT_PAT }}
         run-id: ${{ steps.get-run-id.outputs.RUN_ID }}
 
