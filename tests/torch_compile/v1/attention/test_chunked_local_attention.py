@@ -14,6 +14,7 @@
 
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# yapf: disable
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,6 +25,8 @@ from vllm.v1.attention.backends.utils import (
 
 from tests.torch_compile.v1.attention.utils import (
     BatchSpec, create_common_attn_metadata)
+
+# yapf: enable
 
 
 @dataclass
