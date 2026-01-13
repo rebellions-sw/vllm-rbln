@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
 import itertools
 import math
 import os
@@ -1808,7 +1809,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
 
             start_time = time.perf_counter()
-            with rebel.capture_reports() as reports:
+            if hasattr(rebel, "capture_reports"):
+                capture_ctx = rebel.capture_reports()
+            else:
+                # use a dummy context manager that does nothing
+                capture_ctx = contextlib.nullcontext()
+            with capture_ctx as reports:
                 if self.lora_config is not None:
                     model_output = self.model_executable(
                         input_ids=input_ids,
