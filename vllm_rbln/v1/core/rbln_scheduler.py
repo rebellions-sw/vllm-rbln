@@ -67,6 +67,7 @@ class RBLNScheduler(Scheduler):
         # The only differences are:
         # - Disable mixed batching
         # - Limit prefill batch size to 1
+        # - Limit decode batch size to (max_num_seqs // pipeline_parallel_size)
         # Search for NOTE(RBLN) for details
 
         # NOTE(woosuk) on the scheduling algorithm:
@@ -264,6 +265,14 @@ class RBLNScheduler(Scheduler):
                     self.encoder_cache_manager.allocate(request, i)
                     if self.ec_connector is not None:
                         self.ec_connector.update_state_after_alloc(request, i)
+
+            # NOTE(RBLN): We restrict the decode batch size to
+            # (max_num_seqs // pipeline_parallel_size) to prevent pipeline
+            # bubbles.
+            if len(scheduled_running_reqs) >= (
+                    self.max_num_running_reqs //
+                    self.vllm_config.parallel_config.pipeline_parallel_size):
+                break
 
         # Record the LoRAs in scheduled_running_reqs
         scheduled_loras: set[int] = set()
