@@ -15,7 +15,7 @@ import ast
 
 import numpy as np
 import torch
-from vllm.config import CompilationMode, CUDAGraphMode, VllmConfig
+from vllm.config import VllmConfig
 from vllm.forward_context import set_forward_context
 from vllm.model_executor.models.llama_eagle3 import Eagle3LlamaForCausalLM
 from vllm.multimodal import MULTIMODAL_REGISTRY
@@ -71,21 +71,8 @@ def __custom_init__(self: EagleProposer,
     self.eagle3_use_aux_hidden_state: bool = (
         self._get_eagle3_use_aux_hidden_state_from_config())
 
+    # NOTE(RBLN): vllm-rbln does not use cudagraphs.
     self.use_cuda_graph = False
-    self.cudagraph_batch_sizes = []  # Note: vllm-rbln does not use cudagraphs.
-
-    self.compilation_config = self.vllm_config.compilation_config
-    if self.compilation_config.mode == CompilationMode.VLLM_COMPILE:
-        cudagraph_mode = self.compilation_config.cudagraph_mode
-        if cudagraph_mode != CUDAGraphMode.NONE and not cudagraph_mode.has_mode(
-                CUDAGraphMode.PIECEWISE):
-            logger.warning(
-                "Currently the eagle proposer only supports cudagraph_mode "
-                "PIECEWISE, if you want the drafter to use cuda graphs, "
-                "please set compilation_config.cudagraph_mode to PIECEWISE "
-                "or FULL_AND_PIECEWISE")
-        self.use_cuda_graph = (cudagraph_mode.has_mode(CUDAGraphMode.PIECEWISE)
-                               and not self.speculative_config.enforce_eager)
 
     # persistent buffers for cuda graph
     self.input_ids = torch.zeros(self.max_num_tokens,
@@ -137,6 +124,7 @@ def __custom_init__(self: EagleProposer,
     )
 
     # Determine allowed attention backends once during initialization.
+    # NOTE(RBLN): vllm-rbln uses only RBLNFlashAttentionMetadata
     self.allowed_attn_types = (RBLNFlashAttentionMetadata, )
 
     # Parse the speculative token tree.
@@ -175,12 +163,11 @@ def custom_propose(
     mm_embed_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
     num_rejected_tokens_gpu: torch.Tensor | None = None,
     *,
-    # num_tokens: np.ndarray,
-    # num_input_tokens: np.ndarray,
     kv_caches: list[torch.Tensor],
 ) -> torch.Tensor:
     max_len_per_req = (self.num_speculative_tokens + 1)
 
+    # NOTE(RBLN): Logits tensor is a 2D tensor.
     if last_token_indices is None:
         last_token_indices = common_attn_metadata.query_start_loc[1:] - 1
         last_token_indices_2d = last_token_indices
@@ -265,6 +252,8 @@ def custom_propose(
         input_ids = self.input_ids[:num_tokens]
         inputs_embeds = None
 
+    # NOTE(RBLN): A temporary workaround;
+    # reshapes input tensors in the same way as the RBLN model runner.
     is_prefills = self.runner.is_prefills()
     num_reqs = self.runner.input_batch.num_reqs
     input_ids = input_ids.view(num_reqs, -1)
@@ -301,6 +290,8 @@ def custom_propose(
         else:
             last_hidden_states, hidden_states = ret_hidden_states
 
+    # NOTE(RBLN): A temporary workaround;
+    # reshapes input tensors in the same way as the RBLN model runner.
     hidden_states = hidden_states.flatten(0, -2)
     last_hidden_states = last_hidden_states.flatten(0, -2)
     sample_hidden_states = last_hidden_states[last_token_indices]
@@ -360,10 +351,30 @@ def custom_propose(
         # cast to int32 is crucial when eagle model is compiled.
         # tensor.argmax() returns int64 by default.
         input_ids = draft_token_ids_list[-1].int()
-        positions = positions[:input_ids.size(0)]
-        positions += 1
-        exceeds_max_model_len = positions >= self.max_model_len
-        clamped_positions = torch.where(exceeds_max_model_len, 0, positions)
+        if self.uses_mrope:
+            positions += 1
+            # NOTE(woosuk): We should handle the case where the draft model
+            # generates tokens beyond the max model length.
+            # Since it is complex to remove such requests from the batch,
+            # we keep them in the batch but adjust the position ids
+            # and slot mappings to avoid the
+            # out-of-range access during the model execution.
+            # The draft tokens generated with this adjustment
+            # should be ignored.
+            exceeds_max_model_len = positions[0] >= self.max_model_len
+            # Mask out the position ids that exceed the max model length.
+            # Otherwise, we may get out-of-range error in RoPE.
+            clamped_positions = torch.where(
+                exceeds_max_model_len.unsqueeze(0),
+                torch.zeros_like(positions),
+                positions,
+            )
+        else:
+            positions = positions[:input_ids.size(0)]
+            positions += 1
+            exceeds_max_model_len = positions >= self.max_model_len
+            clamped_positions = torch.where(exceeds_max_model_len, 0,
+                                            positions)
         # For data integrity when async scheduling, we shouldn't use in place
         # operations in case they are modified in next step's `prepare_input`
         # of main model.
@@ -381,12 +392,22 @@ def custom_propose(
             common_attn_metadata.seq_lens_cpu - 1)
 
         # Compute the slot mapping.
-        block_numbers = clamped_positions // self.block_size
+        if self.uses_mrope:
+            # all dimensions of positions are the same
+            block_numbers = clamped_positions[0] // self.block_size
+        else:
+            block_numbers = clamped_positions // self.block_size
         block_ids = common_attn_metadata.block_table_tensor.gather(
             dim=1, index=block_numbers.view(-1, 1))
         block_ids = block_ids.view(-1)
-        common_attn_metadata.slot_mapping = (
-            block_ids * self.block_size + clamped_positions % self.block_size)
+        if self.uses_mrope:
+            common_attn_metadata.slot_mapping = (
+                block_ids * self.block_size +
+                clamped_positions[0] % self.block_size)
+        else:
+            common_attn_metadata.slot_mapping = (
+                block_ids * self.block_size +
+                clamped_positions % self.block_size)
         # Mask out the slot mappings that exceed the max model length.
         # Otherwise, the KV cache will be inadvertently updated with the
         # padding tokens.
@@ -408,24 +429,18 @@ def custom_propose(
         for layer_name in self.attn_layer_names:
             per_layer_attn_metadata[layer_name] = attn_metadata
 
-        # copy inputs to buffer for cudagraph
-        self.input_ids[:batch_size] = input_ids
-        self._set_positions(batch_size, clamped_positions.view(-1))
-
         if self.supports_mm_inputs:
             self.inputs_embeds[:batch_size] = self.model.embed_input_ids(
                 input_ids)
-
             input_ids = None
-            inputs_embeds = self.inputs_embeds[:input_batch_size]
         else:
-            input_ids = self.input_ids[:input_batch_size]
             inputs_embeds = None
 
+        # NOTE(RBLN): A temporary workaround;
+        # reshapes input tensors in the same way as the RBLN model runner.
         num_reqs = self.runner.input_batch.num_reqs
         input_ids = input_ids.view(num_reqs, -1)
         positions = positions.view(num_reqs, -1)
-
         if not is_prefills[0]:
             input_ids = rbln_utils.pad(input_ids, 0, self.runner.max_num_seqs)
             positions = rbln_utils.pad(positions, -2, self.runner.max_num_seqs)
@@ -454,6 +469,8 @@ def custom_propose(
             else:
                 last_hidden_states, hidden_states = ret_hidden_states
 
+        # NOTE(RBLN): A temporary workaround;
+        # reshapes input tensors in the same way as the RBLN model runner.
         hidden_states = hidden_states.flatten(0, -2)
         last_hidden_states = last_hidden_states.flatten(0, -2)
         logits = self.model.compute_logits(last_hidden_states[:batch_size])
