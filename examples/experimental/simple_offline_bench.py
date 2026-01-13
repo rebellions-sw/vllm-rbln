@@ -90,15 +90,15 @@ def main():
             ignore_eos=True,
             max_tokens=args.output_len,
         ))
-    lat = time.perf_counter() - st
+    total_run_time = time.perf_counter() - st
 
-    print(f"latency: {lat} (sec)")
+    print(f"total run time: {total_run_time} (sec)")
     assert all(output.prompt_token_ids and (
         len(output.prompt_token_ids) == args.input_len) for output in outputs)
     assert all(
         len(output.outputs[0].token_ids) == args.output_len
         for output in outputs)
-    print(f"throughput: {(args.num_requests*args.output_len)/lat} (token/sec)")
+    print(f"output throughput: {(args.num_requests*args.output_len)/total_run_time} (token/sec)")
 
 
 if __name__ == "__main__":
