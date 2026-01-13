@@ -23,6 +23,7 @@ from copy import copy, deepcopy
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 import numpy as np
+import rebel
 import torch
 import torch.nn as nn
 from vllm.attention import Attention, AttentionType
@@ -1807,33 +1808,49 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
 
             start_time = time.perf_counter()
-            if self.lora_config is not None:
-                model_output = self.model_executable(
-                    input_ids=input_ids,
-                    positions=positions,
-                    intermediate_tensors=intermediate_tensors,
-                    inputs_embeds=inputs_embeds,
-                    **model_kwargs,
-                )
-            else:
-                model_output = self.model_executable(
-                    input_ids=input_ids,
-                    positions=positions,
-                    intermediate_tensors=intermediate_tensors,
-                    selected_token_indices=token_indices,
-                    inputs_embeds=inputs_embeds,
-                    **model_kwargs,
-                )
+            with rebel.capture_reports() as reports:
+                if self.lora_config is not None:
+                    model_output = self.model_executable(
+                        input_ids=input_ids,
+                        positions=positions,
+                        intermediate_tensors=intermediate_tensors,
+                        inputs_embeds=inputs_embeds,
+                        **model_kwargs,
+                    )
+                else:
+                    model_output = self.model_executable(
+                        input_ids=input_ids,
+                        positions=positions,
+                        intermediate_tensors=intermediate_tensors,
+                        selected_token_indices=token_indices,
+                        inputs_embeds=inputs_embeds,
+                        **model_kwargs,
+                    )
+
             if self.performance_tracker is not None:
                 # Record performance metrics
                 end_time = time.perf_counter()
                 execution_time = end_time - start_time
+
+                if len(reports) > 0:
+                    host_time = reports[0].get('total_host', None)
+                    device_time = reports[0].get('total_device', None)
+                    ccl_time = reports[0].get('total_ccl', None)
+
                 if is_prefills[0]:
                     self.performance_tracker.record_prefill(
-                        execution_time, num_scheduled_tokens)
+                        execution_time,
+                        num_scheduled_tokens,
+                        host_time=host_time,
+                        device_time=device_time,
+                        ccl_time=ccl_time)
                 else:
                     self.performance_tracker.record_decode(
-                        execution_time, num_scheduled_tokens)
+                        execution_time,
+                        num_scheduled_tokens,
+                        host_time=host_time,
+                        device_time=device_time,
+                        ccl_time=ccl_time)
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
