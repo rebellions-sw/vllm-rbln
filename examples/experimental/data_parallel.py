@@ -54,13 +54,9 @@ from vllm.utils import get_open_port
 
 os.environ['VLLM_TORCH_PROFILER_DIR'] = './profile'
 
-hf_overrides_kw = {
-    "num_hidden_layers": 2,
-}
-
-
 def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
-         dp_master_port, tp_size, enable_ep):
+         dp_master_port, tp_size, enable_ep,
+         max_model_len, block_size, decode_batch, num_hidden_layers):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     # paralle_config.data_parallel_size = envs.sVLLM_DP_SIZE
@@ -74,12 +70,12 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
         "The vLLM is",
         "The president of the United States is",
         "The future of AI is",
-    ]
+    ] * dp_size
 
     # with DP, each rank should process different prompts.
     # usually all the DP ranks process a full dataset,
     # and each rank processes a different part of the dataset.
-    prompts_per_rank = (len(prompts) // dp_size) + 1
+    prompts_per_rank = (len(prompts) // dp_size)
     start = global_dp_rank * prompts_per_rank
     end = start + prompts_per_rank
     prompts = prompts[start:end]
@@ -96,15 +92,22 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     # sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
     sampling_params = SamplingParams(temperature=0.0)
 
+    if num_hidden_layers == 0:
+        hf_overrides_kw = None
+    else:
+        hf_overrides_kw = {
+            "num_hidden_layers": num_hidden_layers,
+        }
+
     # Create an LLM.
     llm = LLM(
         model=model,
-        #hf_overrides=hf_overrides_kw,
-        max_model_len=8 * 1024,
-        block_size=1024,
+        hf_overrides=hf_overrides_kw,
+        max_model_len=max_model_len,
+        block_size=block_size,
         enable_chunked_prefill=True,
         max_num_batched_tokens=128,
-        max_num_seqs=1,
+        max_num_seqs=decode_batch,
         trust_remote_code=True,
         tensor_parallel_size=tp_size,
         enable_expert_parallel=enable_ep,
@@ -143,6 +146,22 @@ if __name__ == "__main__":
     parser.add_argument('--ep',
                         action='store_true',
                         help="vLLM enable_expert_parallel")
+    parser.add_argument("--max-model-len",
+                        type=int,
+                        default=8192,
+                        help="Max sequence length")
+    parser.add_argument("--block-size",
+                        type=int,
+                        default=4096,
+                        help="KV cache block size")
+    parser.add_argument("--decode-batch",
+                        type=int,
+                        default=1,
+                        help="decode batch size")
+    parser.add_argument("--num-hidden-layers",
+                        type=int,
+                        default=0,
+                        help="num hidden layers")
     parser.add_argument("--node-size",
                         type=int,
                         default=1,
@@ -166,6 +185,10 @@ if __name__ == "__main__":
     node_size = args.node_size
     node_rank = args.node_rank
     enable_ep = args.ep
+    max_model_len = args.max_model_len
+    block_size = args.block_size
+    decode_batch = args.decode_batch
+    num_hidden_layers = args.num_hidden_layers
 
     if node_size == 1:
         dp_master_ip = "127.0.0.1"
@@ -184,7 +207,8 @@ if __name__ == "__main__":
         proc = Process(target=main,
                        args=(args.model, dp_size, local_dp_rank,
                              global_dp_rank, dp_master_ip, dp_master_port,
-                             tp_size, enable_ep))
+                             tp_size, enable_ep,
+                             max_model_len, block_size, decode_batch, num_hidden_layers))
         proc.start()
         procs.append(proc)
     exit_code = 0
