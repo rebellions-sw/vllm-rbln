@@ -32,15 +32,8 @@ jobs:
       - name: Target Optimum Version
         id: optimum-version
         run: |
-          if [ "${{ inputs.optimum-version }}" == "latest" ]; then
-            # Get the latest version from PyPI
-            # Can be mismatched Version when it's not released to PyPI yet.
-            VERSION=$(curl -s https://pypi.org/pypi/optimum-rbln/json | \
-                      jq -r '.releases | keys | .[]' | \
-                      python .github/scripts/parsing_latest_version.py)
-          else
-            VERSION=${{ inputs.optimum-version }}
-          fi
+
+          VERSION="v0.9.3a1"
           # Remove 'v' prefix if present
           VERSION="${VERSION#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -69,7 +62,7 @@ jobs:
     needs: check-skip
     if: ${{ needs.check-skip.outputs.skip-pr == 'false' }}
     with:
-      python-version: ${{ inputs.python-version }}
+      python-version: "3.12"
       optimum-version: ${{ needs.check-skip.outputs.target-version }}
     secrets: inherit
 
