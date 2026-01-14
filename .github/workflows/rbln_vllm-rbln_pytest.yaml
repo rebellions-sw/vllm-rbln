@@ -46,11 +46,6 @@ on:
 
 env:
   RBLN_VERBOSE: 6
-  REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
-  REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-  REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
-  HF_USER_ID: ${{ secrets.HF_USER_ID }}
-  HF_AUTH_TOKEN: ${{ secrets.HF_AUTH_TOKEN }}
 
 jobs:
   pytest:
@@ -126,9 +121,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential
           python3 -m pip uninstall rebel-compiler -y
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
-          python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+          python3 -m pip install --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler=="${VERSION}"
           echo "rebel-compiler ${VERSION}"
 
       - name: Download wheel artifact
@@ -250,9 +244,8 @@ jobs:
           apt-get update
           apt-get install -y build-essential
           uv pip uninstall --system rebel-compiler
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
-          uv pip install --system --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler=="${VERSION}"
 
       - name: Download wheel artifact
         if: steps.should_skip.outputs.skip != 'true'

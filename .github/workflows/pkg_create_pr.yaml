@@ -41,9 +41,6 @@ jobs:
           done
           echo "All retries with --cache-dir failed."
           exit 1
-        env:
-          UV_INDEX_REBELLIONS_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-          UV_INDEX_REBELLIONS_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
 
       - name: Create PR for updated files
         id: create-pr-step
