@@ -158,12 +158,10 @@ def flash_attention_naive_prefill(
                 v = tl.broadcast_to(v_insert, (1, H, G, P, D))
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i)
-                    )
+                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i))
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask)
-                    )
+                        rblib.flash_attn_tile(qk_scaled, attn_mask))
 
                 attn_out_cur = tl.dot(row_exp_normalize, v)
                 if partition_id > 0:
@@ -323,12 +321,10 @@ def flash_attention_naive_decode(
                 v = tl.broadcast_to(v_insert, (1, H, G, P, D))
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i)
-                    )
+                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i))
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask)
-                    )
+                        rblib.flash_attn_tile(qk_scaled, attn_mask))
 
                 attn_out_cur = tl.dot(row_exp_normalize, v)
                 if partition_id > 0:
