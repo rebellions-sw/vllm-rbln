@@ -10,6 +10,7 @@ on:
         description: "Optimum version to update"
         required: true
         type: string
+
 jobs:
   create-pr:
     runs-on: rbln-sw-k8s-general
