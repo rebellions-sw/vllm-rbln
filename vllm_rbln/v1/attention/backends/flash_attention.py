@@ -32,7 +32,9 @@ if TYPE_CHECKING:
 import vllm_rbln.rbln_envs as envs
 import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
-from vllm_rbln.triton_kernels import attention  # noqa: F401
+from vllm_rbln.triton_kernels import (attention,  # noqa: F401
+                                      causal_attention,
+                                      sliding_window_attention)
 
 logger = init_logger(__name__)
 

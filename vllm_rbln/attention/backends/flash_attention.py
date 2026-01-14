@@ -28,7 +28,8 @@ from vllm.config import get_current_vllm_config
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
-from vllm_rbln.triton_kernels import attention, causal_attention  # noqa: F401
+from vllm_rbln.triton_kernels import (attention,  # noqa: F401
+                                      causal_attention)
 from vllm_rbln.worker.model_runner import ModelInputForRebelBuilder
 
 logger = init_logger(__name__)
