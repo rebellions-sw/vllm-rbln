@@ -23,7 +23,7 @@ on:
         required: true
 jobs:
   create-pr:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     steps:
       - name: Checkout
         uses: actions/checkout@v4

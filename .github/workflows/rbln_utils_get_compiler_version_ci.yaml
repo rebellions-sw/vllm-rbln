@@ -9,7 +9,7 @@ on:
 
 jobs:
   get-rebel-version:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     outputs:
       compiler_version: ${{ steps.get-compiler-version.outputs.COMPILER_VERSION }}
     steps:

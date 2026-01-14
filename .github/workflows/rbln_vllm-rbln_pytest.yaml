@@ -63,11 +63,11 @@ jobs:
           [
             {
               name : "core",
-              runner : "ubuntu-latest-rbln"
+              runner : "rbln-sw-k8s-general"
             },
             {
               name : "worker",
-              runner : "ubuntu-latest-rbln"
+              runner : "rbln-sw-k8s-general"
             },
           ]
     steps:
@@ -185,11 +185,11 @@ jobs:
           [
             {
               name : "openai",
-              runner : "sw-k8s-ca22-4"
+              runner : "rbln-sw-k8s-ca22-4"
             },
             {
               name : "sampler",
-              runner : "sw-k8s-ca22-1"
+              runner : "rbln-sw-k8s-ca22-1"
             },
           ]
     steps:
