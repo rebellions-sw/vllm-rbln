@@ -1,8 +1,26 @@
 name: Pkg Create PR for vllm-rbln
 on:
-  pull_request:
-    branches:
-      - dev
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version to use"
+        required: true
+        type: string
+      optimum-version:
+        description: "Optimum version to update"
+        required: true
+        type: string
+    secrets:
+      REBEL_PYPI_USERNAME:
+        required: true
+      REBEL_PYPI_PASSWORD:
+        required: true
+      REBEL_SW_DEVELOP_USERNAME:
+        required: true
+      REBEL_SW_DEVELOP_PASSWORD:
+        required: true
+      GIT_PAT:
+        required: true
 
 jobs:
   create-pr:
