@@ -9,7 +9,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-20.04-rbln
+    runs-on: rbln-sw-k8s-general
     continue-on-error: true
     steps:
       - name: Checkout the repository
