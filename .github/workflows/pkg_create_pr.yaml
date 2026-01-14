@@ -1,15 +1,8 @@
 name: Pkg Create PR for vllm-rbln
 on:
-  workflow_call:
-    inputs:
-      python-version:
-        description: "Python version to use"
-        required: true
-        type: string
-      optimum-version:
-        description: "Optimum version to update"
-        required: true
-        type: string
+  pull_request:
+    branches:
+      - dev
 
 jobs:
   create-pr:
@@ -59,8 +52,6 @@ jobs:
           branch: auto-update-optimum-rbln-${{ inputs.optimum-version }}
           base: dev
           reviewers: |
-            rebel-jonghewk
-            rebel-eunji
             rebel-seinpark
             rebel-sunwook
     outputs:
