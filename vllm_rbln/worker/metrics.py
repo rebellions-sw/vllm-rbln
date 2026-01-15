@@ -14,6 +14,7 @@
 
 import atexit
 from dataclasses import dataclass, field
+from typing import Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -88,12 +89,27 @@ class PerformanceTracker:
             atexit.register(self.print_final_stats)
             self._registered_cleanup = True
 
-    def record_prefill(self, latency: float, token_count: int):
+    def check_dummy_request(self, request_ids: Optional[list[str]]) -> bool:
+        if request_ids is not None:
+            request_id = request_ids[0]
+            if request_id.startswith("dummy_request_"):
+                return True
+        return False
+
+    def record_prefill(self,
+                       latency: float,
+                       token_count: int,
+                       request_ids: Optional[list[str]] = None):
         """Record prefill step metrics."""
+        self.check_dummy_request(request_ids)
         self.prefill_metrics.add_measurement(latency, token_count)
 
-    def record_decode(self, latency: float, token_count: int):
+    def record_decode(self,
+                      latency: float,
+                      token_count: int,
+                      request_ids: Optional[list[str]] = None):
         """Record decode step metrics."""
+        self.check_dummy_request(request_ids)
         self.decode_metrics.add_measurement(latency, token_count)
 
     def print_final_stats(self):
