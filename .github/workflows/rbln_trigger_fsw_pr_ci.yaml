@@ -1,4 +1,4 @@
-name: Trigger Internal CI for vLLM-RBLN
+name: Trigger FSW PR CI for vLLM-RBLN
 
 on:
   pull_request:
@@ -20,9 +20,9 @@ on:
         type: string
 
 jobs:
-  trigger-vllm-rbln-internal-ci:
+  trigger-vllm-rbln-fsw-pr-ci:
     if: github.repository_owner == 'rebellions-sw' && github.event_name == 'pull_request'
-    runs-on: vllm-rbln-runner-air
+    runs-on: fsw-r18s-atom-ext-rbln-sw-general-c1m12
     steps:
       - name: Dispatch to fsw-integration
         uses: peter-evans/repository-dispatch@v4
