@@ -104,7 +104,7 @@ jobs:
           echo "Build skipped: ${{ steps.check_image.outputs.exists }}" >&2
 
   test:
-    if: github.repository_owner == 'rebellions-sw'
+    if: github.repository_owner == 'RBLN-SW'
     name: Run Tests
     runs-on: fsw-r18s-atom-ext-rbln-sw-general-c3m48a1
     needs: build

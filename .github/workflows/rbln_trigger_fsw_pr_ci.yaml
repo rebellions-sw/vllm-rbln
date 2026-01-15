@@ -21,7 +21,7 @@ on:
 
 jobs:
   trigger-vllm-rbln-fsw-pr-ci:
-    if: github.repository_owner == 'rebellions-sw' && github.event_name == 'pull_request'
+    if: github.repository_owner == 'RBLN-SW' && github.event_name == 'pull_request'
     runs-on: fsw-r18s-atom-ext-rbln-sw-general-c1m12
     steps:
       - name: Dispatch to fsw-integration
