@@ -70,9 +70,9 @@ jobs:
             echo "❌ IS_COLLABORATOR set to: $result"
           fi
 
-  # check-code-quality:
-  #   needs: check-skip-ci
-  #   uses: ./.github/workflows/pre-commit.yml
+  check-code-quality:
+    needs: check-skip-ci
+    uses: ./.github/workflows/pre-commit.yml
   
   trigger-internal-tests:
     # needs: [check-skip-ci, check-team-member, check-code-quality]
