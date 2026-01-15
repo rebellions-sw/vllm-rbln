@@ -33,7 +33,7 @@ worker (e.g. in your launcher script or shell).
 
 ### Exponential
 
-- Starts at `max_num_seqs`.
+- Starts at `max_batch_size = max_num_seqs // pipeline_parallel_size`.
 - Each additional bucket divides the previous bucket by `step`.
 - Stops when `limit` buckets are generated or dropping below `min_batch_size`.
 - Use this when you expect wide variance in batch sizes and want denser coverage
@@ -46,7 +46,7 @@ export VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY=exp
 export VLLM_RBLN_DECODE_BATCH_BUCKET_MIN=2
 export VLLM_RBLN_DECODE_BATCH_BUCKET_STEP=2
 export VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT=4
-# vllm server launched with max_num_seqs=32
+# vllm server launched with max_num_seqs=32, pipeline_parallel_size=1
 ```
 
 For the configuration above the decode batch buckets are `[32, 16, 8, 4]`.
@@ -56,7 +56,7 @@ For the configuration above the decode batch buckets are `[32, 16, 8, 4]`.
 
 ### Linear
 
-- Starts at `max_batch_size`.
+- Starts at `max_batch_size = max_num_seqs // pipeline_parallel_size`.
 - Each additional bucket subtracts `step` from the previous bucket.
 - Stops when `limit` buckets are generated or the size dips below `min_batch_size`.
 - Use this when you want evenly spaced buckets (e.g. 4096, 3840, 3584, ...).
@@ -68,7 +68,7 @@ export VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY=linear
 export VLLM_RBLN_DECODE_BATCH_BUCKET_MIN=2
 export VLLM_RBLN_DECODE_BATCH_BUCKET_STEP=4
 export VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT=32
-# vllm server launched with max_num_seqs=16
+# vllm server launched with max_num_seqs=16, pipeline_parallel_size=1
 ```
 
 For the configuration above the decode batch buckets are `[16, 12, 8, 4]`.
