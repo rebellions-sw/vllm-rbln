@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   sync-and-call:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     permissions:
       contents: write
     outputs:
@@ -90,7 +90,7 @@ jobs:
     secrets: inherit
 
   cleanup:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     needs: [sync-and-call, check_code_quaility, check_internal_tests]
     if: always()
     permissions:
