@@ -285,8 +285,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 # Record performance metrics
                 execution_time = end_time - start_time
                 if model_input.is_prompt:
+                    request_id = model_input.running_requests_ids[0]
                     self.performance_tracker.record_prefill(
-                        execution_time, num_scheduled_tokens)
+                        execution_time, num_scheduled_tokens, request_id)
                 else:
                     self.performance_tracker.record_decode(
                         execution_time, num_scheduled_tokens)

@@ -13,7 +13,9 @@
 # limitations under the License.
 
 import atexit
+from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -74,12 +76,36 @@ class StepMetrics:
         return len(self.latencies)
 
 
+class PrefillMetricsByRequestID:
+    """Metrics for prefill step by request id."""
+
+    def __init__(self):
+        self.metrics = defaultdict(StepMetrics)
+
+    def add_measurement(self, request_id: str, latency: float,
+                        token_count: int):
+        """Add a latency and token count measurement."""
+        self.metrics[request_id].add_measurement(latency, token_count)
+
+    def get_avg_latency_per_request(self) -> dict[str, float]:
+        """Get average latency per request."""
+        return {
+            request_id: metric.get_avg_latency()
+            for request_id, metric in self.metrics.items()
+        }
+
+    def get_num_request_ids(self) -> int:
+        """Get total number of request ids processed."""
+        return len(self.metrics)
+
+
 class PerformanceTracker:
     """Tracks performance metrics for prefill and decode steps."""
 
     def __init__(self):
         self.prefill_metrics = StepMetrics()
         self.decode_metrics = StepMetrics()
+        self.prefill_metrics_by_request_id = PrefillMetricsByRequestID()
         self._registered_cleanup = False
 
     def register_cleanup(self):
@@ -88,9 +114,15 @@ class PerformanceTracker:
             atexit.register(self.print_final_stats)
             self._registered_cleanup = True
 
-    def record_prefill(self, latency: float, token_count: int):
+    def record_prefill(self,
+                       latency: float,
+                       token_count: int,
+                       request_id: Optional[str] = None):
         """Record prefill step metrics."""
         self.prefill_metrics.add_measurement(latency, token_count)
+        if request_id:
+            self.prefill_metrics_by_request_id.add_measurement(
+                request_id, latency, token_count)
 
     def record_decode(self, latency: float, token_count: int):
         """Record decode step metrics."""
@@ -112,6 +144,13 @@ class PerformanceTracker:
                         self.prefill_metrics.get_avg_latency())
             logger.info("  Average throughput: %.2f tokens/sec",
                         self.prefill_metrics.get_avg_throughput())
+            if self.prefill_metrics_by_request_id.get_num_request_ids() > 0:
+                avg_latency_by_request_id = \
+                    self.prefill_metrics_by_request_id.get_avg_latency_per_request()
+                logger.info("  Average latency per request:")
+                for request_id, latency in \
+                    avg_latency_by_request_id.items():
+                    logger.info("    %s: %.2f ms", request_id, latency)
         else:
             logger.info("PREFILL METRICS: No data recorded")
 
