@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from vllm.v1.outputs import ModelRunnerOutput
-
-from .utils import create_requests, create_scheduler
+from .utils import create_requests, create_runner_output, create_scheduler
 
 
 def test_basic():
@@ -67,16 +65,7 @@ def test_basic():
         assert all(block.ref_cnt == 1 for block in
                    scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0])
 
-        model_runner_output = ModelRunnerOutput(
-            req_ids=req_ids,
-            req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
-            sampled_token_ids=[
-                [0],
-            ] * len(req_ids),
-            logprobs=None,
-            prompt_logprobs_dict={},
-            pooler_output=[],
-        )
+        model_runner_output = create_runner_output(scheduler_output)
         scheduler.update_from_output(scheduler_output, model_runner_output)
 
     # check if every request drained
@@ -197,16 +186,7 @@ def test_preallocation_in_decode():
     assert req_a_block.block_hash is None
     assert len(kv_cache_manager.block_pool.cached_block_hash_to_block) == 0
 
-    model_runner_output = ModelRunnerOutput(
-        req_ids=req_ids,
-        req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
-        sampled_token_ids=[
-            [0],
-        ] * len(req_ids),
-        logprobs=None,
-        prompt_logprobs_dict={},
-        pooler_output=[],
-    )
+    model_runner_output = create_runner_output(scheduler_output)
     scheduler.update_from_output(scheduler_output, model_runner_output)
 
     # second iteration
@@ -226,16 +206,7 @@ def test_preallocation_in_decode():
     # check if block allocated to request a is not cached yet
     assert req_a_block.block_hash is None
 
-    model_runner_output = ModelRunnerOutput(
-        req_ids=req_ids,
-        req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
-        sampled_token_ids=[
-            [0],
-        ] * len(req_ids),
-        logprobs=None,
-        prompt_logprobs_dict={},
-        pooler_output=[],
-    )
+    model_runner_output = create_runner_output(scheduler_output)
     scheduler.update_from_output(scheduler_output, model_runner_output)
 
     # third iteration

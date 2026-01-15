@@ -27,8 +27,10 @@ from vllm.sampling_params import SamplingParams
 from vllm.utils.hashing import sha256
 from vllm.v1.core.kv_cache_utils import (get_request_block_hasher,
                                          init_none_hash)
+from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
+from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request
 from vllm.v1.structured_output import StructuredOutputManager
 
@@ -258,3 +260,18 @@ def create_requests(
         )
         requests.append(request)
     return requests
+
+
+def create_runner_output(scheduler_output: SchedulerOutput):
+    req_ids = list(scheduler_output.num_scheduled_tokens.keys())
+    return ModelRunnerOutput(
+        req_ids=req_ids,
+        req_id_to_index={
+            req_id: i
+            for i, req_id in enumerate(req_ids)
+        },
+        sampled_token_ids=[[0]] * len(req_ids),
+        logprobs=None,
+        prompt_logprobs_dict={},
+        pooler_output=[],
+    )
