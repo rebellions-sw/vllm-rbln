@@ -121,7 +121,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential
           python3 -m pip uninstall rebel-compiler -y
-          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
+          VERSION="${{ inputs.rebel_compiler_version }}"
+          if [ -z "$VERSION" ]; then
+            echo "Error: rebel_compiler_version is not set"
+            exit 1
+          fi
           python3 -m pip install --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler=="${VERSION}"
           echo "rebel-compiler ${VERSION}"
 
@@ -244,7 +248,11 @@ jobs:
           apt-get update
           apt-get install -y build-essential
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
+          VERSION="${{ inputs.rebel_compiler_version }}"
+          if [ -z "$VERSION" ]; then
+            echo "Error: rebel_compiler_version is not set"
+            exit 1
+          fi
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler=="${VERSION}"
 
       - name: Download wheel artifact
