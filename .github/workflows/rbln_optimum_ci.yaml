@@ -264,7 +264,7 @@ jobs:
 
   test_vllm_rbln_rsd8:
     name: Optimum Test CI RSD 8
-    runs-on: sw-k8s-ca22-8
+    runs-on: rbln-sw-k8s-ca22-8
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
     defaults:
