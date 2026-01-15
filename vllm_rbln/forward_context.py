@@ -45,6 +45,7 @@ class RBLNDPMetadata(DPMetadata):
         parallel_config = vllm_config.parallel_config
         dp_size = parallel_config.data_parallel_size
         dp_rank = parallel_config.data_parallel_rank
+        disable_dp = dp_size == 1
 
         scheduler_config = vllm_config.scheduler_config
         max_pad = scheduler_config.max_num_batched_tokens
@@ -55,7 +56,6 @@ class RBLNDPMetadata(DPMetadata):
             batchsize = attn_metadata.num_prefill_tokens + \
                 attn_metadata.num_decode_tokens
 
-            disable_dp = dp_size == 1
             use_dummy_prefill = envs.VLLM_RBLN_DP_IMPL == "dummy_prefill"
             if (disable_dp or use_dummy_prefill) and \
                 attn_metadata.num_decode_tokens > 0:
@@ -63,6 +63,10 @@ class RBLNDPMetadata(DPMetadata):
         else:
             # for v1 attention backends or no attn_metadata
             batchsize = num_tokens
+
+            meta = next(iter(attn_metadata.values()))
+            if disable_dp and not meta.is_prefills[0]:
+                max_pad = scheduler_config.max_num_seqs
 
         # If num_tokens_across_dp is None, it will be computed by all_reduce
         # Otherwise, num_tokens_across_dp[dp_rank] should be equal to batchsize
