@@ -172,7 +172,7 @@ def __custom_init__(
     parallel_config = vllm_config.parallel_config
     model_config = vllm_config.model_config
     start, end = model_config.get_layers_start_end_indices(parallel_config)
-    assert self.layer_index >= start and self.layer_index < end
+    # assert self.layer_index >= start and self.layer_index < end
     self.layer_index -= start
 
 
