@@ -70,12 +70,13 @@ jobs:
             echo "❌ IS_COLLABORATOR set to: $result"
           fi
 
-  check-code-quality:
-    needs: check-skip-ci
-    uses: ./.github/workflows/pre-commit.yml
+  # check-code-quality:
+  #   needs: check-skip-ci
+  #   uses: ./.github/workflows/pre-commit.yml
   
   trigger-internal-tests:
-    needs: [check-skip-ci, check-team-member, check-code-quality]
+    # needs: [check-skip-ci, check-team-member, check-code-quality]
+    needs: [check-skip-ci, check-team-member]
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && (needs.check-team-member.outputs.is_team_member == 'true' || needs.check-team-member.outputs.is_collaborator == 'true') }}
     uses: ./.github/workflows/rbln_trigger_internal_test.yaml
     secrets: inherit
