@@ -24,9 +24,9 @@ on:
         type: string
 
 jobs:
-  build:  
+  build:
     name: Build Container Image
-    runs-on: vllm-rbln-runner-atom
+    runs-on: fsw-r18s-atom-ext-rbln-sw-general-c3m48a1
     outputs:
       image_name: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
     steps:
@@ -106,7 +106,7 @@ jobs:
   test:
     if: github.repository_owner == 'rebellions-sw'
     name: Run Tests
-    runs-on: vllm-rbln-runner-atom
+    runs-on: fsw-r18s-atom-ext-rbln-sw-general-c3m48a1
     needs: build
     timeout-minutes: 1440
     container:
