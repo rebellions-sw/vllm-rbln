@@ -101,7 +101,8 @@ class PerformanceTracker:
                        token_count: int,
                        request_ids: Optional[list[str]] = None):
         """Record prefill step metrics."""
-        self.check_dummy_request(request_ids)
+        if self.check_dummy_request(request_ids):
+            return
         self.prefill_metrics.add_measurement(latency, token_count)
 
     def record_decode(self,
@@ -109,7 +110,8 @@ class PerformanceTracker:
                       token_count: int,
                       request_ids: Optional[list[str]] = None):
         """Record decode step metrics."""
-        self.check_dummy_request(request_ids)
+        if self.check_dummy_request(request_ids):
+            return
         self.decode_metrics.add_measurement(latency, token_count)
 
     def print_final_stats(self):
