@@ -184,9 +184,6 @@ class RblnPlatform(Platform):
                 parallel_config.distributed_executor_backend,
             )
 
-        assert (not vllm_config.speculative_config
-                ), "Speculative decoding not yet supported for RBLN backend."
-
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationMode
 

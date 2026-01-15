@@ -47,7 +47,9 @@ def undo_uncomputed_block_caching(
         group.kv_cache_spec.block_size
         for group in kv_cache_manager.kv_cache_config.kv_cache_groups
     ]
-    for blocks, num_full_block in zip(grouped_blocks, num_computed_blocks):
+    for blocks, num_full_block in zip(grouped_blocks,
+                                      num_computed_blocks,
+                                      strict=False):
         for block in blocks[num_full_block:]:
             # NOTE(RBLN): this function call efficiently resets
             # the block hash and evicts the corresponding block from the cache.
@@ -558,7 +560,8 @@ class RBLNScheduler(Scheduler):
                 for req in scheduled_running_reqs:
                     req_to_new_blocks.pop(req.request_id)
                     num_scheduled_tokens.pop(req.request_id)
-                    scheduled_spec_decode_tokens.pop(req.request_id, None)
+                    req.spec_token_ids = scheduled_spec_decode_tokens.pop(
+                        req.request_id, [])
                     scheduled_encoder_inputs.pop(req.request_id, None)
                     undo_uncomputed_block_caching(req, self.kv_cache_manager)
 
