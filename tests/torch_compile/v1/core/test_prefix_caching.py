@@ -84,8 +84,10 @@ def test_basic():
 
     # check if blocks are properly cached
     block_pool = scheduler.kv_cache_manager.block_pool
-    cache = block_pool.cached_block_hash_to_block.values()
-    entry_with_multiple_blocks = [blks for blks in cache if len(blks) != 1]
+    cache = block_pool.cached_block_hash_to_block._cache.values()
+    entry_with_multiple_blocks = [
+        blks for blks in cache if isinstance(blks, dict) and len(blks) != 1
+    ]
     assert len(cache) == num_blocks_per_request
     assert len(entry_with_multiple_blocks) == 1
     assert len(entry_with_multiple_blocks[0]) == num_requests
@@ -135,12 +137,13 @@ def test_preallocation_in_prefill():
 
     # check if only the first block is cached
     first_block_id = block_ids[0]
-    cache = kv_cache_manager.block_pool.cached_block_hash_to_block
+    cache = kv_cache_manager.block_pool.cached_block_hash_to_block._cache
     entry = next(iter(cache.values()))
     assert all(block.block_hash is None for block in blocks[1:])
     assert len(cache) == 1
-    assert len(entry) == 1
-    assert first_block_id in entry
+    assert not isinstance(entry, dict) or len(entry) == 1
+    assert (isinstance(entry, dict) and first_block_id in entry) or (
+        not isinstance(entry, dict) and first_block_id == entry.block_id)
 
 
 def test_preallocation_in_decode():
@@ -164,6 +167,7 @@ def test_preallocation_in_decode():
             max_tokens=1,
             same_prompt=True,
         ))
+    assert req_a.prompt_token_ids
     req_a.prompt_token_ids.pop()
     req_a._all_token_ids.pop()
     req_a.num_prompt_tokens = len(req_a.prompt_token_ids)
