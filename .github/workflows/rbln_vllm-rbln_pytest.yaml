@@ -118,7 +118,9 @@ jobs:
       - name: Install rebel-compiler
         if: steps.should_skip.outputs.skip != 'true'
         run: |
-          sudo apt-get update
+          for i in {1..3}; do
+            sudo apt-get update && break || sleep 10
+          done
           sudo apt-get install -y build-essential
           python3 -m pip uninstall rebel-compiler -y
           VERSION="${{ inputs.rebel_compiler_version }}"
@@ -245,7 +247,9 @@ jobs:
       - name: Install rebel-compiler
         if: steps.should_skip.outputs.skip != 'true'
         run: |
-          apt-get update
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
           apt-get install -y build-essential
           uv pip uninstall --system rebel-compiler
           VERSION="${{ inputs.rebel_compiler_version }}"
