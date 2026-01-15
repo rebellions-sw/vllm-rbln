@@ -65,7 +65,7 @@ def test_basic():
         assert all(block.ref_cnt == 1 for block in
                    scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0])
 
-        model_runner_output = create_runner_output(scheduler_output)
+        model_runner_output = create_runner_output(scheduler_output, 0)
         scheduler.update_from_output(scheduler_output, model_runner_output)
 
     # check if every request drained
@@ -186,7 +186,7 @@ def test_preallocation_in_decode():
     assert req_a_block.block_hash is None
     assert len(kv_cache_manager.block_pool.cached_block_hash_to_block) == 0
 
-    model_runner_output = create_runner_output(scheduler_output)
+    model_runner_output = create_runner_output(scheduler_output, 0)
     scheduler.update_from_output(scheduler_output, model_runner_output)
 
     # second iteration
@@ -206,7 +206,7 @@ def test_preallocation_in_decode():
     # check if block allocated to request a is not cached yet
     assert req_a_block.block_hash is None
 
-    model_runner_output = create_runner_output(scheduler_output)
+    model_runner_output = create_runner_output(scheduler_output, 0)
     scheduler.update_from_output(scheduler_output, model_runner_output)
 
     # third iteration

@@ -17,6 +17,8 @@
 # Copied from https://github.com/vllm-project/vllm/blob/v0.12.0/tests/v1/core/utils.py
 # Search for NOTE(RBLN) or TODO(RBLN) for changes
 
+from typing import Optional
+
 import torch
 from vllm.config import ECTransferConfig  # KVTransferConfig,
 from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig,
@@ -262,7 +264,9 @@ def create_requests(
     return requests
 
 
-def create_runner_output(scheduler_output: SchedulerOutput):
+def create_runner_output(
+        scheduler_output: SchedulerOutput,
+        sampled_token_id: Optional[int] = None) -> ModelRunnerOutput:
     req_ids = list(scheduler_output.num_scheduled_tokens.keys())
     return ModelRunnerOutput(
         req_ids=req_ids,
@@ -270,7 +274,8 @@ def create_runner_output(scheduler_output: SchedulerOutput):
             req_id: i
             for i, req_id in enumerate(req_ids)
         },
-        sampled_token_ids=[[0]] * len(req_ids),
+        sampled_token_ids=[[sampled_token_id] if sampled_token_id is not None
+                           else []] * len(req_ids),
         logprobs=None,
         prompt_logprobs_dict={},
         pooler_output=[],
