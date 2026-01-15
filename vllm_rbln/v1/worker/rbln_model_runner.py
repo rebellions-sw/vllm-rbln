@@ -92,6 +92,7 @@ from vllm_rbln.lora.mask import LoRAMask
 from vllm_rbln.v1.attention.backends.flash_attention import (
     RBLNFlashAttentionMetadataBuilder)
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
+from vllm_rbln.v1.worker.bucketing import get_bucketing_manager_class
 from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
@@ -423,6 +424,19 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.max_prefill_batch_size = 1
         self.max_num_batched_tokens = (
             self.scheduler_config.max_num_batched_tokens)
+
+        bucketing_manager_class = get_bucketing_manager_class(
+            envs.VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY)
+        self.bucketing_manager = bucketing_manager_class(
+            max_batch_size=self.max_batch_size,
+            min_batch_size=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_MIN,
+            step=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_STEP,
+            limit=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT,
+        )
+        logger.info("Using %s bucketing manager",
+                    bucketing_manager_class.__name__)
+        logger.info("decode batch buckets: %s",
+                    self.bucketing_manager.decode_batch_buckets)
 
         self.performance_tracker = None
         if envs.VLLM_RBLN_METRICS:
@@ -1400,13 +1414,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     @torch.inference_mode()
     def warm_up_model(self) -> None:
-        # compile prefill graph
+        num_kv_cache_groups = len(self.kv_cache_config.kv_cache_groups)
+
+        logger.info("Warm up prefill graph")
         prefill_seq_len = (self.scheduler_config.max_num_batched_tokens
                            if self.scheduler_config.enable_chunked_prefill else
                            self.model_config.max_model_len)
         dummy_prefill_requests = []
         dummy_prefill_num_scheduled_tokens = {}
-        num_kv_cache_groups = len(self.kv_cache_config.kv_cache_groups)
         self._add_dummy_requests(
             requests=dummy_prefill_requests,
             num_scheduled_tokens=dummy_prefill_num_scheduled_tokens,
@@ -1424,29 +1439,30 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                      num_kv_cache_groups)
 
         # compile decode graph
-        decode_max_seq_len = self.model_config.max_model_len
+        for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
+            logger.info("Warm up decode graph with batch_size: %d",
+                        batch_bucket_size)
+            decode_max_seq_len = self.max_model_len
 
-        dummy_decode_requests = []
-        dummy_decode_num_scheduled_tokens = {}
-        for _ in range(self.max_batch_size):
-            self._add_dummy_requests(
-                requests=dummy_decode_requests,
-                num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
-                total_tokens=decode_max_seq_len - 1,
-                num_computed_tokens=decode_max_seq_len - 1,
-                num_kv_cache_groups=num_kv_cache_groups,
-                sampling_params=None
-                if self.is_pooling_model else SamplingParams(temperature=0.0),
-                pooling_params=PoolingParams(
-                    task=self.get_supported_pooling_tasks()[0])
-                if self.is_pooling_model else None,
-            )
+            dummy_decode_requests = []
+            dummy_decode_num_scheduled_tokens = {}
+            for _ in range(batch_bucket_size):
+                self._add_dummy_requests(
+                    requests=dummy_decode_requests,
+                    num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
+                    total_tokens=decode_max_seq_len - 1,
+                    num_computed_tokens=decode_max_seq_len - 1,
+                    num_kv_cache_groups=num_kv_cache_groups,
+                    sampling_params=None if self.is_pooling_model else
+                    SamplingParams(temperature=0.0),
+                    pooling_params=PoolingParams(
+                        task=self.get_supported_pooling_tasks()[0])
+                    if self.is_pooling_model else None,
+                )
 
-        self._execute_dummy_requests(
-            requests=dummy_decode_requests,
-            num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
-            num_kv_cache_groups=num_kv_cache_groups,
-        )
+            self._execute_dummy_requests(dummy_decode_requests,
+                                         dummy_decode_num_scheduled_tokens,
+                                         num_kv_cache_groups)
 
     def _add_dummy_requests(
         self,
@@ -1458,7 +1474,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         sampling_params: Optional[SamplingParams] = None,
         pooling_params: Optional[PoolingParams] = None,
     ) -> None:
-
         num_blocks = round_up(
             total_tokens,
             self.cache_config.block_size) // self.cache_config.block_size
@@ -1743,9 +1758,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 input_ids = rbln_utils.pad(input_ids, -1, prefill_size)
                 positions = rbln_utils.pad(positions, -1, prefill_size)
             else:
+                batch_bucket_size = \
+                    self.bucketing_manager.find_decode_batch_bucket(
+                        self.input_batch.num_reqs)
                 # decode batch padding
-                input_ids = rbln_utils.pad(input_ids, 0, self.max_batch_size)
-                positions = rbln_utils.pad(positions, -2, self.max_batch_size)
+                input_ids = rbln_utils.pad(input_ids, 0, batch_bucket_size)
+                positions = rbln_utils.pad(positions, -2, batch_bucket_size)
 
             if self.lora_config is not None:
                 lora_ids = [
