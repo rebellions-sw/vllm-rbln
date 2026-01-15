@@ -28,7 +28,7 @@ jobs:
     name: Build Container Image
     runs-on: fsw-r18s-atom-ext-rbln-sw-general-c3m48a1
     outputs:
-      image_name: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
+      image_name: ghcr.io/${{ steps.lowercase.outputs.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
     steps:
       - name: Checkout Repository with Submodules
         uses: actions/checkout@v4
@@ -37,6 +37,11 @@ jobs:
           token: ${{ secrets.GIT_PAT }}
           ref: ${{ inputs.ref || github.ref }}
           submodules: recursive
+
+      - name: Convert repository owner to lowercase
+        id: lowercase
+        run: |
+          echo "repository_owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
 
       - name: Calculate dependency hash
         id: dep_hash
@@ -62,7 +67,7 @@ jobs:
       - name: Check if image exists
         id: check_image
         run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}"
+          IMAGE="ghcr.io/${{ steps.lowercase.outputs.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}"
           if docker manifest inspect "${IMAGE}" > /dev/null 2>&1; then
             echo "exists=true" >> "${GITHUB_OUTPUT}"
             echo "Image already exists: ${IMAGE}" >&2
@@ -85,9 +90,9 @@ jobs:
           context: .
           file: ./assets/Dockerfile.ubi.ci
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:buildcache,mode=max
+          tags: ghcr.io/${{ steps.lowercase.outputs.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
+          cache-from: type=registry,ref=ghcr.io/${{ steps.lowercase.outputs.repository_owner }}/${{ github.event.repository.name }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ steps.lowercase.outputs.repository_owner }}/${{ github.event.repository.name }}:buildcache,mode=max
           build-args: |
             PYTHON_VERSION=${{ inputs.python_version || '3.12.9' }}
           secrets: |
@@ -99,7 +104,7 @@ jobs:
 
       - name: Image info
         run: |
-          echo "Using image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}" >&2
+          echo "Using image: ghcr.io/${{ steps.lowercase.outputs.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}" >&2
           echo "Image exists: ${{ steps.check_image.outputs.exists }}" >&2
           echo "Build skipped: ${{ steps.check_image.outputs.exists }}" >&2
 
