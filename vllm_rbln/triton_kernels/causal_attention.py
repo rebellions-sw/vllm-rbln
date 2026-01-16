@@ -176,11 +176,11 @@ def flash_causal_attention_naive_prefill(
 
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.causal_flash_attn_tile(qk_scaled, block_offset,
+                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset,
                                                      row_max_prev))
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.causal_flash_attn_tile(qk_scaled, block_offset))
+                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset))
 
                 v_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
@@ -384,11 +384,11 @@ def flash_causal_attention_naive_decode(
 
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.causal_flash_attn_tile(qk_scaled, block_offset,
+                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset,
                                                      row_max_prev))
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.causal_flash_attn_tile(qk_scaled, block_offset))
+                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset))
 
                 v_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
