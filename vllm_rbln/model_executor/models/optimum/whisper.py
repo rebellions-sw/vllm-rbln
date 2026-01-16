@@ -37,19 +37,16 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vllm_config=self.vllm_config,
             use_multiple_decoder=False,
-            default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
         self.dec_max_seq_len = self.model_config.max_model_len
         self.dec_lengths = [0] * self.batch_size
-        # self.table_mapping: Dict[str, int] = {}
-        # Result1T = list[int]
-        # Result2T = tuple[torch.Tensor, torch.Tensor]
 
-        self.strategy = InnerAttentionStrategy()
+        self.strategy = InnerAttentionStrategy(
+            decoder_batch_size=self.batch_size)
         self.attention_manager: AttentionManager[InnerAttentionStrategy,
                                                  InnerAttentionEntry, InnerR1,
                                                  InnerR2] = AttentionManager(
@@ -59,10 +56,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
                 **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         block_tables = model_input.block_tables
-
+        cache_position = model_input.input_positions  # not used
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-        request_nums = input_ids.shape[0]
+        request_nums = len(running_requests_ids)
 
         if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
@@ -75,7 +72,6 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             running_requests_ids,
             finished_requests_ids,
         )
-        valid_block_ids = torch.tensor(table_ids)
 
         if is_prompt:
             if model_input.multi_modal_kwargs:
@@ -84,14 +80,13 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             if input_features is None:
                 raise ValueError(
                     "Whisper requires `input_features` as an input.")
-
-        cache_position = torch.zeros(request_nums, 1, dtype=torch.int32)
-
-        kwargs = self.preprocess_for_decoder(is_prompt,
-                                             block_tables,
-                                             input_ids,
-                                             cache_position,
-                                             input_block_ids=valid_block_ids)
+        kwargs = self.preprocess_for_decoder(
+            is_prompt,
+            request_nums,
+            block_tables,
+            input_ids,
+            cache_position,
+            input_block_ids=table_ids[:request_nums])
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
@@ -104,11 +99,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             lm_logits[0][0][-1] = 1
-            self.attention_manager.add(
-                running_requests_ids[0],
-                table_ids[0],
-            )
-            self.dec_lengths[table_ids[0]] = 0
+            table_id = table_ids.item()
+            self.dec_lengths[table_id] = 0
 
         else:
             input_ids[input_ids == (
@@ -121,6 +113,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
                                                  self.dec_max_seq_len,
                                                  dtype=self.dtype)
             # Generate cache_position using dec_lengths
+            valid_block_ids = table_ids[:request_nums, 0].tolist()
             for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
                 decoder_attention_mask[batch_idx, :cache_position[batch_idx] +
@@ -144,6 +137,3 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         if input_features is not None:
             input_features = input_features.squeeze(0)
         return input_features
-
-    def clear_dict_table(self):
-        self.table_mapping.clear()

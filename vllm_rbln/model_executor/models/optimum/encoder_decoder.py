@@ -36,9 +36,8 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         self.enc_lengths = [0] * self.batch_size
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vllm_config=self.vllm_config,
             use_multiple_decoder=False,
-            default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=[self.batch_size],
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
@@ -124,13 +123,15 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
-
-        valid_block_ids = [
-            block_table[0].item() for block_table in block_tables
-        ]
+        # FIXME non-valid block ids are in block_tables
         batch_idx = block_tables[0][0] if is_prompt else None
-
+        request_nums = len(model_input.running_requests_ids)
+        valid_block_ids = [
+            block_table[0].item()
+            for block_table in block_tables[:request_nums]
+        ]
         kwargs = self.preprocess_for_decoder(is_prompt,
+                                             request_nums,
                                              block_tables,
                                              input_ids,
                                              cache_position,

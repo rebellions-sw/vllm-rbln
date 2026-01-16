@@ -94,13 +94,12 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vllm_config=self.vllm_config,
             use_multiple_decoder=getattr(
                 self.model.rbln_config.language_model,
                 "use_multiple_decoder",
                 False,
             ),
-            default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
@@ -109,7 +108,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # FIXME Loading tokenizer in model runner is a temporary solution.
         tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
 
-        self.strategy = HybridAttentionImageStrategy(tokenizer.pad_token_id)
+        self.strategy = HybridAttentionImageStrategy(
+            decoder_batch_size=self.batch_size,
+            pad_token_id=tokenizer.pad_token_id,
+            max_seq_len=self.model_config.max_model_len)
         self.attention_manager: HybridAttentionImageManager \
             = HybridAttentionImageManager(self.strategy)
 
@@ -126,21 +128,13 @@ class RBLNOptimumGemma3ForConditionalGeneration(
 
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-        request_nums = input_ids.shape[0]
+        request_nums = len(running_requests_ids)
 
-        # In prefill phase, the length of list must be 1
-        sliding_window_table_ids, padded_cache_lengths, attention_masks = \
-        self.attention_manager.get(
-                is_prompt,
-                self.decoder_batch_size,
-                running_requests_ids,
-                finished_requests_ids,
-                input_ids=input_ids,
-            )
-
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, position_ids)
-
+        kwargs = self.preprocess_for_decoder(is_prompt, request_nums,
+                                             block_tables, input_ids,
+                                             position_ids)
+        padded_batch_size = kwargs.pop("padded_batch_size",
+                                       self.decoder_batch_size)
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.
         # [decode] `cache_position` and `position_ids` are distinguished
@@ -150,10 +144,24 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         block_tables = kwargs.pop("block_tables")
 
         if is_prompt:
+            # Used for available table IDs
+            max_num_seqs = self.decoder_batch_size
+        else:
+            # Used for padding
+            max_num_seqs = padded_batch_size
+
+        # In prefill phase, the length of list must be 1
+        sliding_window_table_ids, padded_cache_lengths, attention_masks = \
+        self.attention_manager.get(
+                is_prompt,
+                max_num_seqs,
+                running_requests_ids,
+                finished_requests_ids,
+                input_ids=input_ids,
+            )
+
+        if is_prompt:
             inputs_embeds = None
-            prefill_batch_idx = sliding_window_table_ids[0]
-            local_block_table_id = torch.tensor([prefill_batch_idx],
-                                                dtype=torch.int16)
             # token_type_ids model_input != token_type_ids of gemma3
             # https://github.com/huggingface/transformers/blob/d0c9c66d1c09df3cd70bf036e813d88337b20d4c/src/transformers/models/gemma3/processing_gemma3.py#L143
             token_type_ids = torch.zeros_like(input_ids)
@@ -171,7 +179,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 inputs_embeds=inputs_embeds,
                 cache_position=cache_position,
                 attention_mask=attention_mask,
-                local_block_tables=local_block_table_id,
+                local_block_tables=sliding_window_table_ids,
                 block_tables=block_tables,
                 token_type_ids=token_type_ids,
             )
@@ -180,17 +188,14 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             updated_padded_cache_length = output.padded_cache_lengths
 
             assert len(running_requests_ids) == 1
-            self.attention_manager.add(
+            self.attention_manager.add_extra_values(
                 running_requests_id=running_requests_ids[0],
-                local_table_id=sliding_window_table_ids[0],
                 pad_len=updated_padded_cache_length,
                 attention_mask=updated_attention_mask,
             )
         else:
             if self.model.language_model.decoders is None:
                 raise ValueError("Decoders is None")
-            padded_batch_size = kwargs.pop("padded_batch_size",
-                                           self.decoder_batch_size)
             self.model.language_model.decoder = (
                 self.model.language_model.decoders[padded_batch_size])
             (
