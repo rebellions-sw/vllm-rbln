@@ -58,3 +58,6 @@ def register_ops():
         import vllm_rbln.models.qwen3  # noqa
         import vllm_rbln.models.qwen3_moe  # noqa
         import vllm_rbln.models.utils  # noqa
+        from vllm_rbln.triton_kernels import attention  # noqa
+        from vllm_rbln.triton_kernels import causal_attention  # noqa
+        from vllm_rbln.triton_kernels import sliding_window_attention  # noqa
