@@ -19,6 +19,7 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
 from vllm.config import LogprobsMode
+from vllm.v1.sample.ops import apply_top_k_top_p
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
 import vllm_rbln.rbln_envs as envs
@@ -28,79 +29,16 @@ logger = init_logger(__name__)
 _SAMPLING_EPS = 1e-5
 
 
-def random_sample(
-    probs: torch.Tensor,
-    generators: dict[int, torch.Generator],
-) -> torch.Tensor:
-    """Randomly sample from the probabilities.
-
-    We use this function instead of torch.multinomial because torch.multinomial
-    causes CPU-GPU synchronization.
-    """
-    q = torch.empty_like(probs)
-    # NOTE(woosuk): To batch-process the requests without their own seeds,
-    # which is the common case, we first assume that every request does
-    # not have its own seed. Then, we overwrite the values for the requests
-    # that have their own seeds.
-    if len(generators) != probs.shape[0]:
-        q.exponential_()
-    if generators:
-        # TODO(woosuk): This can be slow because we handle each request
-        # one by one. Optimize this.
-        for i, generator in generators.items():
-            q[i].exponential_(generator=generator)
-    return probs.div_(q).argmax(dim=-1).view(-1)
+@torch.library.custom_op("rbln::top_k_top_p", mutates_args=())
+def top_k_top_p(logits: torch.Tensor, k: torch.Tensor,
+                p: torch.Tensor) -> torch.Tensor:
+    return apply_top_k_top_p(logits, k, p)
 
 
-def top_p_sample(
-    probs: torch.Tensor,
-    top_p: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Mock implementation of `top_p_sample`
-    used for torch ops registration.
-
-    This function currently performs standard top-p (nucleus)
-    sampling that includes sorting the probabilities.
-    It serves as a placeholder implementation — in the actual version,
-    a dual-pivot algorithm is implemented in rebel and
-    it will be used to avoid the sorting step and improve efficiency.
-    """
-    probs_sort, logits_idx = probs.sort(dim=-1, descending=False)
-    # Apply top-p.
-    probs_sum = probs_sort.cumsum(dim=-1)
-    top_p_mask = probs_sum <= 1 - top_p.unsqueeze(dim=1)
-    # at least one
-    top_p_mask[:, -1] = False
-    probs_sort.masked_fill_(top_p_mask, -float("inf"))
-    # Re-sort the probabilities.
-    src = torch.arange(logits_idx.shape[-1],
-                       device=logits_idx.device).expand_as(logits_idx)
-    logits_idx_inv = torch.empty_like(logits_idx).scatter_(dim=-1,
-                                                           index=logits_idx,
-                                                           src=src)
-    logits = torch.gather(probs_sort, dim=-1, index=logits_idx_inv)
-    # The `generators` argument is usually derived from `sampling_metadata`,
-    # but in this mock implementation, an empty dictionary is passed
-    # for simplicity when invoking `random_sample`.
-    random_sampled = random_sample(logits, {})
-    return random_sampled
-
-
-@torch.library.custom_op("rbln::top_p_only", mutates_args=())
-def top_p_only(
-    probs: torch.Tensor,
-    top_p: torch.Tensor,
-) -> torch.Tensor:
-    return top_p_sample(probs, top_p)
-
-
-@top_p_only.register_fake
-def top_p_only_fake(
-    probs: torch.Tensor,
-    top_p: torch.Tensor,
-) -> torch.Tensor:
-    return top_p_sample(probs, top_p)
+@top_k_top_p.register_fake
+def top_k_top_p_fake(logits: torch.Tensor, k: torch.Tensor,
+                     p: torch.Tensor) -> torch.Tensor:
+    return apply_top_k_top_p(logits, k, p)
 
 
 class RBLNSampler(VLLMSampler):
@@ -108,14 +46,14 @@ class RBLNSampler(VLLMSampler):
     def __init__(self,
                  logprobs_mode: LogprobsMode = "raw_logprobs",
                  seed: int = 42):
-        super().__init__()
+        super().__init__()  # FIXME topk_topp_sampler duplicated?
         rebel.manual_seed(seed)
 
         options = {"compile_context": rebel.CompileContext()}
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
-        self._compiled_rbln_topp_sampler = torch.compile(
-            self._rbln_topp_sampler_impl,
+        self._compiled_rbln_topk_topp_sampler = torch.compile(
+            self._rbln_topk_topp_sampler_impl,
             dynamic=False,
             fullgraph=True,
             backend="rbln",
@@ -133,10 +71,11 @@ class RBLNSampler(VLLMSampler):
         # in torchinductor
         return logits.div(temp.unsqueeze(dim=1))
 
-    def apply_topp_sampler(
-            self, logits: torch.Tensor, top_p: torch.Tensor
+    def apply_topk_topp_sampler(
+            self, logits: torch.Tensor, top_k: torch.Tensor,
+            top_p: torch.Tensor
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        sampled = self.rbln_topp_sampler(logits, top_p)
+        sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
         logits_to_return = None
         if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
             logits_to_return = logits
@@ -158,15 +97,29 @@ class RBLNSampler(VLLMSampler):
         sampled = torch.ops.rbln.top_p_only(probs, top_p)
         return sampled
 
+    @staticmethod
+    def _rbln_topk_topp_sampler_impl(logits: torch.Tensor, top_k: torch.Tensor,
+                                     top_p: torch.Tensor) -> torch.Tensor:
+        """
+        Implementation of RBLN top-k top-p sampling.
+        To avoid self parameter issues when torch.compile is used,
+        we define this as a static method.
+        """
+        # Apply top-k top-p sampling using RBLN custom op.
+        # It requires softmax prior to calling the op.
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        sampled = torch.ops.rbln.top_k_top_p(probs, top_k, top_p)
+        return sampled
+
     @torch.compiler.disable
-    def rbln_topp_sampler(self, logits: torch.Tensor,
-                          top_p: torch.Tensor) -> torch.Tensor:
+    def rbln_topk_topp_sampler(self, logits: torch.Tensor, top_k: torch.Tensor,
+                               top_p: torch.Tensor) -> torch.Tensor:
         """
         Wrapper for the compiled RBLN top-p sampler.
         To avoid recompile on runtime, we decorate this method with
         `torch.compiler.disable` and call the pre-compiled function.
         """
-        return self._compiled_rbln_topp_sampler(logits, top_p)
+        return self._compiled_rbln_topk_topp_sampler(logits, top_k, top_p)
 
     def sample(
         self,
@@ -203,21 +156,8 @@ class RBLNSampler(VLLMSampler):
         for processor in sampling_metadata.logitsprocs.argmax_invariant:
             logits = processor.apply(logits)
 
-        # Currently, RBLN only supports top_p sampling.
-        # Covering other cases with RBLN is work in progress.
-        if (sampling_metadata.top_p is not None
-                and sampling_metadata.top_k is None):
-            random_sampled, processed_logprobs = self.apply_topp_sampler(
-                logits, sampling_metadata.top_p)
-
-        else:
-            # Apply top_k and/or top_p.
-            random_sampled, processed_logprobs = self.topk_topp_sampler(
-                logits,
-                sampling_metadata.generators,
-                sampling_metadata.top_k,
-                sampling_metadata.top_p,
-            )
+        random_sampled, processed_logprobs = self.apply_topk_topp_sampler(
+            logits, sampling_metadata.top_k, sampling_metadata.top_p)
 
         if greedy_sampled is None:
             return random_sampled, processed_logprobs
