@@ -177,7 +177,7 @@ def flash_causal_attention_naive_prefill(
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
                         rblib.dynamic_flash_attn_tile(qk_scaled, block_offset,
-                                                     row_max_prev))
+                                                      row_max_prev))
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
                         rblib.dynamic_flash_attn_tile(qk_scaled, block_offset))
@@ -385,7 +385,7 @@ def flash_causal_attention_naive_decode(
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
                         rblib.dynamic_flash_attn_tile(qk_scaled, block_offset,
-                                                     row_max_prev))
+                                                      row_max_prev))
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
                         rblib.dynamic_flash_attn_tile(qk_scaled, block_offset))
