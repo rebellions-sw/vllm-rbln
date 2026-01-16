@@ -135,8 +135,16 @@ class RblnPlatform(Platform):
             if parallel_config.worker_cls == "auto":
                 parallel_config.worker_cls = (
                     "vllm_rbln.v1.worker.rbln_worker.RBLNWorker")
-            scheduler_config.scheduler_cls = (
-                "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler")
+            if scheduler_config.async_scheduling:
+                logger.warning(
+                    "async scheduling is incomplete because asynchronous "
+                    "device-to-host memory copies are not yet supported")
+                scheduler_config.scheduler_cls = (
+                    "vllm_rbln.v1.core.rbln_async_scheduler.RBLNAsyncScheduler"
+                )
+            else:
+                scheduler_config.scheduler_cls = (
+                    "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler")
 
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
