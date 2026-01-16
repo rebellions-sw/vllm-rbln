@@ -10,20 +10,10 @@ on:
         description: "Optimum version to update"
         required: true
         type: string
-    secrets:
-      REBEL_PYPI_USERNAME:
-        required: true
-      REBEL_PYPI_PASSWORD:
-        required: true
-      REBEL_SW_DEVELOP_USERNAME:
-        required: true
-      REBEL_SW_DEVELOP_PASSWORD:
-        required: true
-      GIT_PAT:
-        required: true
+
 jobs:
   create-pr:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,9 +41,6 @@ jobs:
           done
           echo "All retries with --cache-dir failed."
           exit 1
-        env:
-          UV_INDEX_REBELLIONS_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-          UV_INDEX_REBELLIONS_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
 
       - name: Create PR for updated files
         id: create-pr-step

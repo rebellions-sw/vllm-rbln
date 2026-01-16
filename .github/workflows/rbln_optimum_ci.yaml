@@ -31,15 +31,12 @@ on:
         type: string
 
 env:
-  REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
-  REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-  REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
   test_vllm_rbln_rsd1:
     name: Optimum Test CI RSD 1
-    runs-on: sw-k8s-ca22-1
+    runs-on: rbln-sw-k8s-ca22-1
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
     defaults:
@@ -62,13 +59,14 @@ jobs:
 
       - name: Install rebel-compiler
         run: |
-          apt-get update
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
-          uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
@@ -130,7 +128,7 @@ jobs:
 
   test_vllm_rbln_rsd4:
     name: Optimum Test CI RSD 4
-    runs-on: sw-k8s-ca22-4
+    runs-on: rbln-sw-k8s-ca22-4
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
     defaults:
@@ -153,13 +151,14 @@ jobs:
 
       - name: Install rebel-compiler
         run: |
-          apt-get update
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
-          uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
@@ -265,7 +264,7 @@ jobs:
 
   test_vllm_rbln_rsd8:
     name: Optimum Test CI RSD 8
-    runs-on: sw-k8s-ca22-8
+    runs-on: rbln-sw-k8s-ca22-8
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
     defaults:
@@ -288,13 +287,14 @@ jobs:
 
       - name: Install rebel-compiler
         run: |
-          apt-get update
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
           VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
-          uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4

@@ -24,7 +24,7 @@ jobs:
 
   build-vllm-rbln:
     name: Build vllm-rbln wheel
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     outputs:
       wheel_filename: ${{ steps.get_wheel_filename.outputs.WHEEL_FILENAME }}
     steps:
