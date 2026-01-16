@@ -30,7 +30,7 @@ from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec, FullAttentionSpec
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
@@ -182,6 +182,36 @@ class RBLNWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
+        params_dict = dict(self.model_runner.model.named_parameters())
+        n_model_attentions = 0
+        n_model_experts = 0
+        if self.model_config.quantization is not None:
+            # FIXME(RBLN) - for now, mxfp4 quantization is only supported
+            assert self.model_config.quantization == "mxfp4"
+            nbits_per_param = 4
+            device_name = current_platform.get_device_name().lower()
+            assert "rbln" in device_name
+            if "ca" in device_name:
+                # ATOM DOES NOT support mxfp4 quantization, handled by bf16
+                nbits_per_param = 16
+            elif "cr" in device_name:
+                # REBEL can support mxfp4 quantization
+                nbits_per_param = 4
+            else:
+                assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+
+            # pack 2 mxfp4 elems into single uint8 elem
+            packed_num_elems = 8 // 4
+        else:
+            nbits_per_param = 16
+            packed_num_elems = 1
+        for key, value in params_dict.items():
+            if value.dtype == torch.bfloat16:
+                n_model_attentions += value.numel()
+            else:
+                n_model_experts += value.numel() * packed_num_elems
+
+        n_model_params = n_model_attentions + n_model_experts
         block_size = self.cache_config.block_size
 
         # This function comes from optimum-rbln.
@@ -191,9 +221,8 @@ class RBLNWorker(WorkerBase):
             parallel_config=self.parallel_config,
             kvcache_block_size=block_size,
             # quantization : 4 (This is an ad-hoc value. Need to fix it)
-            nbits_per_param=16 if not self.model_config.quantization else 4,
-            n_model_params=sum(p.numel()
-                               for p in self.model_runner.model.parameters()),
+            nbits_per_param=nbits_per_param,
+            n_model_params=n_model_params,
             # 2 : 1 for prefill and decode each
             num_runtimes=2)
 
@@ -205,17 +234,27 @@ class RBLNWorker(WorkerBase):
         num_gpu_blocks = min(
             int(max_num_blocks * self.cache_config.gpu_memory_utilization),
             max_required_num_blocks)
+        logger.info("max_num_blocks(%s), required_num_blocks(%s), num_blocks(%s)",
+            max_num_blocks, max_required_num_blocks, num_gpu_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks)
 
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        num_layers = len(kv_cache_spec)
         # TODO: Consider SWA hybrid models.
+        # NOTE - consider only FullAttention (not sliding window attention)
+        # based on assumption that non sliding window attention is full attention
+        num_attn_layers = 0
+        for spec in kv_cache_spec.values():
+            num_attn_layers += int(isinstance(spec, FullAttentionSpec))
+
         # Sync get_maximum_num_blocks with latest optimum-rbln.
         page_size = max(spec.page_size_bytes
                         for spec in kv_cache_spec.values())
-        return num_gpu_blocks * page_size * num_layers
+        available_memory = num_gpu_blocks * page_size * num_attn_layers
+        logger.info("blocks=%s, page_size=%s, num_attn_layers=%s, available_memory=%s",
+            num_gpu_blocks, page_size, num_attn_layers, available_memory)
+        return available_memory
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
