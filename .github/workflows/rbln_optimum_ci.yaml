@@ -9,11 +9,11 @@ on:
         type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
-        required: false
+        required: true
         type: string
       optimum_rbln_version:
         description: "Version of optimum-rbln to use (optional)"
-        required: false
+        required: true
         type: string
   workflow_call:
     inputs:
@@ -31,15 +31,12 @@ on:
         type: string
 
 env:
-  REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
-  REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-  REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
-  test_vllm_rbln:
-    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
-    runs-on: sw-k8s-ca22-8
+  test_vllm_rbln_rsd1:
+    name: Optimum Test CI RSD 1
+    runs-on: rbln-sw-k8s-ca22-1
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
     defaults:
@@ -54,7 +51,7 @@ jobs:
         if: ${{ !inputs.rebel_compiler_version }}
         id: get_latest_rebel_compiler
         run: |
-          echo "LATEST_COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
+          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
 
       - name: Install uv CLI
         run: |
@@ -62,13 +59,14 @@ jobs:
 
       - name: Install rebel-compiler
         run: |
-          apt-get update
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.LATEST_COMPILER_VER }}
-          uv pip install --system --extra-index-url $PYPI_URL rebel-compiler==${VERSION}
+          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
@@ -101,8 +99,104 @@ jobs:
           command: |
             uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
             VERSION=${{ inputs.optimum_rbln_version }}
-            uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==$VERSION")
-            echo "optimum-rbln $VERSION"
+            if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+              echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+            else
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+            fi
+
+      - name: Run gemma2 model (hybrid attention) (V1)
+        run: >
+          python3 examples/optimum/run_basic.py
+          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/gemma-2-2b-8k_batch4
+
+      - name : Run encoder-decoder (V1)
+        run: >
+          python3 examples/optimum/run_encoder_decoder.py
+          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
+          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/rbln_bart-small_batch2
+
+      - name : Run text embedding model (V1)
+        run: >
+          python3 examples/optimum/run_encoder_only.py
+          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
+          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/bge-m3-1k-batch4
+          --q_prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/q_prompts.txt
+          --p_prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/p_prompts.txt
+          --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_bge_m3_result_qp_prompts.json
+
+  test_vllm_rbln_rsd4:
+    name: Optimum Test CI RSD 4
+    runs-on: rbln-sw-k8s-ca22-4
+    container:
+      image: mcr.microsoft.com/devcontainers/python:3.12
+    defaults:
+      run:
+        shell: bash
+    env:
+      NUM_INPUT_PROMPT: 1
+      RBLN_VERBOSE: 6
+      VLLM_LOGGING_LEVEL: DEBUG
+    steps:
+      - name: Get latest rebel_compiler version
+        if: ${{ !inputs.rebel_compiler_version }}
+        id: get_latest_rebel_compiler
+        run: |
+          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
+
+      - name: Install uv CLI
+        run: |
+          pip install uv
+
+      - name: Install rebel-compiler
+        run: |
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
+          apt-get install -y build-essential
+          export CXX=$(which g++)
+          uv pip uninstall --system rebel-compiler
+          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
+
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fix git ownership
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Uninstall existing vllm-rbln
+        run: |
+          uv pip uninstall --system vllm-rbln
+
+      - name: Build vllm-rbln wheel
+        run: |
+          uv pip install --system build
+          python -m build --wheel
+
+      - name: Install local vllm-rbln package and dependencies
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          retry_on: any
+          shell: bash
+          command: |
+            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+            VERSION=${{ inputs.optimum_rbln_version }}
+            if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+              echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+            else
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+            fi
 
       - name: Run decoder-only test (eager attn) (V1)
         run: >
@@ -119,11 +213,6 @@ jobs:
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llama3_2-3b-128k_kv16k_batch4
           --prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/copy_prompts.txt
           --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_llama3_2_3b_instruct_128k_copy_prompts.json
-
-      - name: Run gemma2 model (hybrid attention) (V1)
-        run: >
-          python3 examples/optimum/run_basic.py
-          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/gemma-2-2b-8k_batch4
 
       - name : Run Llava-next (Eager mode) (V1)
         run: >
@@ -167,29 +256,87 @@ jobs:
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/blip2-opt-2.7b-2k-b4
 
-      - name : Run Qwen2.5_VL (V1)
-        run: >
-          python3 examples/optimum/run_qwen_vl.py
-          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/qwen2_5-vl-7b-32k-b4-kv16k
-
       - name : Run PaliGemma (Eager mode) (V1)
         run: >
           python3 examples/optimum/run_paligemma.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/paligemma-3b-8k-b4
 
-      - name : Run encoder-decoder (V1)
-        run: >
-          python3 examples/optimum/run_encoder_decoder.py
-          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/rbln_bart-small_batch2
+  test_vllm_rbln_rsd8:
+    name: Optimum Test CI RSD 8
+    runs-on: rbln-sw-k8s-ca22-8
+    container:
+      image: mcr.microsoft.com/devcontainers/python:3.12
+    defaults:
+      run:
+        shell: bash
+    env:
+      NUM_INPUT_PROMPT: 1
+      RBLN_VERBOSE: 6
+      VLLM_LOGGING_LEVEL: DEBUG
+    steps:
+      - name: Get latest rebel_compiler version
+        if: ${{ !inputs.rebel_compiler_version }}
+        id: get_latest_rebel_compiler
+        run: |
+          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
 
-      - name : Run text embedding model (V1)
+      - name: Install uv CLI
+        run: |
+          pip install uv
+
+      - name: Install rebel-compiler
+        run: |
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
+          apt-get install -y build-essential
+          export CXX=$(which g++)
+          uv pip uninstall --system rebel-compiler
+          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
+
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fix git ownership
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Uninstall existing vllm-rbln
+        run: |
+          uv pip uninstall --system vllm-rbln
+
+      - name: Build vllm-rbln wheel
+        run: |
+          uv pip install --system build
+          python -m build --wheel
+
+      - name: Install local vllm-rbln package and dependencies
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          retry_on: any
+          shell: bash
+          command: |
+            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
+            VERSION=${{ inputs.optimum_rbln_version }}
+            if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+              echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+            else
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+            fi
+
+      - name : Run Qwen2.5_VL (V1)
         run: >
-          python3 examples/optimum/run_encoder_only.py
+          python3 examples/optimum/run_qwen_vl.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/bge-m3-1k-batch4
-          --q_prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/q_prompts.txt
-          --p_prompt_txt ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/prompts/p_prompts.txt
-          --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_bge_m3_result_qp_prompts.json
+          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/qwen2_5-vl-7b-32k-b4-kv16k
+

@@ -13,7 +13,7 @@ on:
 
 jobs:
   check-skip:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,6 +41,8 @@ jobs:
           else
             VERSION=${{ inputs.optimum-version }}
           fi
+          # Remove 'v' prefix if present
+          VERSION="${VERSION#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check Skip PR (vllm-rbln)
@@ -69,15 +71,10 @@ jobs:
     with:
       python-version: ${{ inputs.python-version }}
       optimum-version: ${{ needs.check-skip.outputs.target-version }}
-    secrets:
-      REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-      REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
-      REBEL_SW_DEVELOP_USERNAME: ${{ secrets.REBEL_SW_DEVELOP_USERNAME }}
-      REBEL_SW_DEVELOP_PASSWORD: ${{ secrets.REBEL_SW_DEVELOP_PASSWORD }}
-      GIT_PAT: ${{ secrets.GIT_PAT }}
+    secrets: inherit
 
   summary:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     needs: [check-skip, vllm-rbln-pr]
     if: always() # Run even if dependencies fail or are skipped
     env:

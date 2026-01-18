@@ -46,54 +46,11 @@ on:
 
 env:
   RBLN_VERBOSE: 6
-  REBEL_PYPI_ENDPOINT: ${{ vars.REBEL_PYPI_INTERNAL_ENDPOINT }}
-  REBEL_PYPI_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-  REBEL_PYPI_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
-  HF_USER_ID: ${{ secrets.HF_USER_ID }}
-  HF_AUTH_TOKEN: ${{ secrets.HF_AUTH_TOKEN }}
 
 jobs:
-  build-vllm-rbln:
-    name: Build vllm-rbln wheel
-    runs-on: ubuntu-latest-rbln
-    outputs:
-      wheel_filename: ${{ steps.get_wheel_filename.outputs.WHEEL_FILENAME }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
-          fetch-depth: 0
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install build dependencies and build vllm-rbln wheel
-        run: |
-          python -m pip install build setuptools_scm
-          python -m build --wheel
-
-      - name: Get wheel filename
-        id: get_wheel_filename
-        run: |
-          WHEEL_FILENAME=$(ls dist/vllm_rbln-*.whl | xargs basename)
-          echo "Found wheel file: ${WHEEL_FILENAME}"
-          echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_OUTPUT
-      
-      - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vllm-wheel
-          path: dist/
-          retention-days: 7
-
   pytest:
-    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
     runs-on: ${{ matrix.test_type.runner }}
-    needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
@@ -101,11 +58,11 @@ jobs:
           [
             {
               name : "core",
-              runner : "ubuntu-latest-rbln"
+              runner : "rbln-sw-k8s-general"
             },
             {
               name : "worker",
-              runner : "ubuntu-latest-rbln"
+              runner : "rbln-sw-k8s-general"
             },
           ]
     steps:
@@ -150,6 +107,7 @@ jobs:
           esac
           
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
+          echo "Skip decision: $SKIP"
 
       - name: Set up Python 3.12
         if: steps.should_skip.outputs.skip != 'true'
@@ -160,27 +118,36 @@ jobs:
       - name: Install rebel-compiler
         if: steps.should_skip.outputs.skip != 'true'
         run: |
-          sudo apt-get update
+          for i in {1..3}; do
+            sudo apt-get update && break || sleep 10
+          done
           sudo apt-get install -y build-essential
           python3 -m pip uninstall rebel-compiler -y
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
-          python3 -m pip install --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+          VERSION="${{ inputs.rebel_compiler_version }}"
+          if [ -z "$VERSION" ]; then
+            echo "Error: rebel_compiler_version is not set"
+            exit 1
+          fi
+          echo "rebel-compiler ${VERSION}"
+          python3 -m pip install --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler=="${VERSION}"
 
       - name: Download wheel artifact
         if: steps.should_skip.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
+          path: dist
 
       - name: Install local vllm-rbln package and dependencies
         if: steps.should_skip.outputs.skip != 'true'
         run: |
           pip install packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
-          echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
-          VERSION=${{ inputs.optimum_rbln_version }}
-          pip install --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
-          echo "optimum-rbln $VERSION"
+          if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+            pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+            echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+          else
+            pip install --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+          fi
 
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
@@ -194,7 +161,7 @@ jobs:
               pytest tests/v1/core -vv --durations 0
               ;;
             "worker")
-              pytest tests/v1/worker -vv --durations 0
+              pytest tests/v1/worker/test_rebel_optimum_model_runner.py -vv --durations 0
               ;;
           esac
 
@@ -204,7 +171,6 @@ jobs:
           echo "Found [skip-${{ matrix.test_type.name }}] in commit message, skipping CI"
 
   pytest-arc:
-    if: ${{ inputs.rebel_compiler_version && inputs.optimum_rbln_version }}
     name: Pytest (${{ matrix.test_type.name }})
     runs-on: ${{ matrix.test_type.runner }}
     container:
@@ -212,7 +178,6 @@ jobs:
     defaults:
       run:
         shell: bash
-    needs: [build-vllm-rbln]
     strategy:
       fail-fast: ${{ inputs.fail_fast }}
       matrix:
@@ -220,8 +185,12 @@ jobs:
           [
             {
               name : "openai",
-              runner : "sw-k8s-ca22-8"
-            }
+              runner : "rbln-sw-k8s-ca22-4"
+            },
+            {
+              name : "sampler",
+              runner : "rbln-sw-k8s-ca22-1"
+            },
           ]
     steps:
       - name: Checkout the vllm-rbln repository
@@ -261,6 +230,11 @@ jobs:
                 SKIP=true
               fi
               ;;
+            "sampler")
+              if [[ "$COMMIT_MESSAGE" == *"[skip worker]"* ]]; then
+                SKIP=true
+              fi
+              ;;
           esac
           
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
@@ -273,18 +247,25 @@ jobs:
       - name: Install rebel-compiler
         if: steps.should_skip.outputs.skip != 'true'
         run: |
-          apt-get update
+          for i in {1..3}; do
+            apt-get update && break || sleep 10
+          done
           apt-get install -y build-essential
           uv pip uninstall --system rebel-compiler
-          PYPI_URL=$(echo ${{ env.REBEL_PYPI_ENDPOINT }} | sed "s/\/\//\0${{ env.REBEL_PYPI_USERNAME }}:${{ env.REBEL_PYPI_PASSWORD }}@/")
-          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
-          uv pip install --system --extra-index-url "$PYPI_URL" rebel-compiler=="${VERSION}"
+          VERSION="${{ inputs.rebel_compiler_version }}"
+          if [ -z "$VERSION" ]; then
+            echo "Error: rebel_compiler_version is not set"
+            exit 1
+          fi
+          echo "rebel-compiler ${VERSION}"
+          uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler=="${VERSION}"
 
       - name: Download wheel artifact
         if: steps.should_skip.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           name: vllm-wheel
+          path: dist
 
       - name: Install local vllm-rbln package and dependencies
         if: steps.should_skip.outputs.skip != 'true'
@@ -296,11 +277,13 @@ jobs:
           retry_on: any
           shell: bash
           command: |
-            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio
-            echo "whl file name is ${{ needs.build-vllm-rbln.outputs.wheel_filename }}"
-            VERSION=${{ inputs.optimum_rbln_version }}
-            uv pip install --system --force-reinstall --no-cache-dir ${{ needs.build-vllm-rbln.outputs.wheel_filename }} --constraint <(echo "optimum-rbln==$VERSION")
-            echo "optimum-rbln $VERSION"
+            uv pip install --system packaging setuptools wheel simphile pynvml huggingface_hub setuptools_scm fire pytest pytest-asyncio pytest-xdist
+            if [ -n "${{ inputs.optimum_rbln_version }}" ]; then
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --constraint <(echo "optimum-rbln==${{ inputs.optimum_rbln_version }}") --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+              echo "optimum-rbln ${{ inputs.optimum_rbln_version }}"
+            else
+              uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
+            fi
 
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
@@ -312,6 +295,10 @@ jobs:
           case "${{ matrix.test_type.name }}" in
             "openai")
               pytest tests/entrypoints/openai -vv --durations 0
+              ;;
+            "sampler")
+              pytest -n auto -k "warm_upTrue" tests/v1/worker/test_sampler.py -vv --durations 0
+              pytest -n auto -k "warm_upFalse" tests/v1/worker/test_sampler.py -vv --durations 0
               ;;
           esac
 
