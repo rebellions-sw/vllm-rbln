@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import torch
-import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 
@@ -120,10 +119,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
 
-        if envs.VLLM_USE_V1:
-            is_prompt = model_input.is_prompt
-        else:
-            is_prompt = model_input.sampling_metadata.num_prompts > 0
+        is_prompt = model_input.is_prompt
 
         valid_block_ids = [block_table[0].item() for block_table in block_tables]
         batch_idx = block_tables[0][0] if is_prompt else None

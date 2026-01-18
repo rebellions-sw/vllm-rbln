@@ -24,6 +24,7 @@ from vllm.distributed.parallel_state import get_pp_group
 from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
+from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.inputs import (BatchedTensorInputs, MultiModalKwargs,
                                     MultiModalKwargsItem)
 from vllm.multimodal.utils import group_mm_kwargs_by_modality
@@ -31,8 +32,8 @@ from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.utils.import_utils import LazyLoader
+from vllm.utils.torch_utils import kv_cache_dtype_str_to_dtype
 # from vllm.utils import LazyLoader, is_pin_memory_available)
-from vllm.utils.torch_utils import STR_DTYPE_TO_TORCH_DTYPE
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (
     FullAttentionSpec,
@@ -120,11 +121,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.device = device
         self.pin_memory = False
         self.dtype = self.model_config.dtype
-        if cache_config.cache_dtype == "auto":
-            self.kv_cache_dtype = self.dtype
-        else:
-            self.kv_cache_dtype = STR_DTYPE_TO_TORCH_DTYPE[
-                self.cache_config.cache_dtype]
+        self.kv_cache_dtype = kv_cache_dtype_str_to_dtype(
+            cache_config.cache_dtype, self.model_config)
+        # if cache_config.cache_dtype == "auto":
+        #     self.kv_cache_dtype = self.dtype
+        # else:
+        #     self.kv_cache_dtype = STR_DTYPE_TO_TORCH_DTYPE[
+        #         self.cache_config.cache_dtype]
         self.is_pooling_model = (model_config.runner_type == 'pooling')
         # When `is_multimodal_raw_input_only_model` is True, it means that
         # it extract multimodal raw inputs only and deliver as raw inputs to
@@ -141,29 +144,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # # NOTE There is a bug in vLLM MM registry internally in v0.10.X.
         # # As a workaround, VLLM_WORKER_MULTIPROC_METHOD should be set "spawn"
         # # in case of multi-modal encoder-decoder models.
-        # self.mm_registry = MULTIMODAL_REGISTRY
+        self.mm_registry = MULTIMODAL_REGISTRY
         # self.uses_mrope = model_config.uses_mrope
         self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
             model_config
-        )
-
-        self.req_states = RequestState(
-            max_num_reqs=self.max_num_reqs,
-            max_model_len=self.max_model_len,
-            max_num_batched_tokens=self.max_num_tokens,
-            num_speculative_steps=0,
-            vocab_size=self.vocab_size,
-            device=self.device,
-            pin_memory=self.pin_memory,
-        )
-        self.input_buffers = InputBuffers(
-            max_num_reqs=self.max_num_reqs,
-            max_num_tokens=self.max_num_tokens,
-            inputs_embeds_size=self.inputs_embeds_size,
-            vocab_size=self.vocab_size,
-            dtype=self.dtype,
-            device=self.device,
-            pin_memory=self.pin_memory,
         )
 
         # Sampler
@@ -203,6 +187,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             pin_memory=self.pin_memory,
             vocab_size=self.model_config.get_vocab_size(),
             block_sizes=[cache_config.block_size],
+            kernel_block_sizes=[cache_config.block_size
+                                ],  # FIXME: why do we need this?
             is_spec_decode=False,  # No spec decode in optimum model runner
             logitsprocs=build_logitsprocs(
                 self.vllm_config,
@@ -531,7 +517,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 num_kv_heads=num_kv_heads,
                 head_size=head_size,
                 dtype=self.kv_cache_dtype,
-                use_mla=False,
             )
         return kv_cache_spec
 
@@ -782,7 +767,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_state = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
-                mm_kwargs=new_req_data.mm_kwargs,
+                # mm_kwargs=new_req_data.mm_kwargs,
                 mm_positions=new_req_data.mm_positions,
                 mm_hashes=new_req_data.mm_hashes,
                 sampling_params=sampling_params,
@@ -1353,7 +1338,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     (bucket_size, self.model_config.get_vocab_size()),
                     dtype=self.model.dtype,
                 )
-        torch._dynamo.config.recompile_limit = len(self.bucket_sizes) * len(
-            WARM_UP_CONFIGS
-        )
-        self.sampler = torch.compile(self.sampler, dynamic=False, fullgraph=False)
+        torch._dynamo.config.recompile_limit = len(
+            self.bucket_sizes) * len(WARM_UP_CONFIGS)
+        self.sampler = torch.compile(self.sampler,
+                                     dynamic=False,
+                                     fullgraph=False)

@@ -14,14 +14,12 @@
 from typing import Any
 
 import torch
-import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.blip2 import (
-    Blip2ImageEmbeddingInputs,
-    Blip2ImageInputs,
-    Blip2ImagePixelInputs,
-)
+from vllm.model_executor.models.blip2 import (Blip2ImageEmbeddingInputs,
+                                              Blip2ImageInputs,
+                                              Blip2ImagePixelInputs)
+from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN
@@ -30,9 +28,10 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumBlip2ForConditionalGeneration(
-    RBLNOptimumModelBase, RBLNOptimumDecoderMixin
-):
+class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
+                                               RBLNOptimumDecoderMixin,
+                                               SupportsMultiModal):
+
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -56,10 +55,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
 
-        if envs.VLLM_USE_V1:
-            is_prompt = model_input.is_prompt
-        else:
-            is_prompt = model_input.sampling_metadata.num_prompts > 0
+        is_prompt = model_input.is_prompt
 
         image_input = None
         pixel_values = None
