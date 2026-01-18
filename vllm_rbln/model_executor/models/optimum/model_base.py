@@ -19,7 +19,6 @@ from typing import Any, Optional
 import optimum.rbln
 import torch
 import torch.nn as nn
-import vllm.envs as envs
 from optimum.rbln.transformers.models.decoderonly import (
     decoderonly_runtime_utils as runtime_utils)
 from vllm.config import VllmConfig
@@ -53,7 +52,6 @@ class KVCacheBlockAdapter:
     ):
         self.vllm_config = vllm_config
         self.estimated_kvcache_num_blocks = estimated_kvcache_num_blocks
-        self.use_v1 = envs.VLLM_USE_V1
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -98,10 +96,10 @@ class KVCacheBlockAdapter:
 
         if self.is_full_block_available():
             new_estimated = self._estimated_num_blocks() * blk_ratio
-            return new_estimated + 1 if self.use_v1 else new_estimated
+            return new_estimated + 1
 
         new_estimated = (self._estimated_num_blocks() - 1) * blk_ratio + 1
-        return new_estimated if self.use_v1 else max(0, new_estimated - 1)
+        return new_estimated
 
 
 class RBLNOptimumModelBase(nn.Module):
