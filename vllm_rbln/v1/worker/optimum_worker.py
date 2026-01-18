@@ -26,7 +26,7 @@ from vllm.tasks import SupportedTask
 from vllm.v1.core.kv_cache_utils import get_uniform_page_size
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import KVCacheSpec
-from vllm.v1.outputs import ModelRunnerOutput
+from vllm.v1.outputs import AsyncModelRunnerOutput, ModelRunnerOutput
 from vllm.v1.worker.worker_base import WorkerBase
 
 import vllm_rbln.rbln_envs as envs
@@ -102,12 +102,18 @@ class RBLNOptimumWorker(WorkerBase):
         """
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
         num_layers = len(kv_cache_spec)
-        page_size = get_uniform_page_size(kv_cache_spec)
+        page_size = get_uniform_page_size(kv_cache_spec.values())
 
         adapter = self.model_runner.model.kv_block_adapter
         num_gpu_blocks = adapter.get_available_num_blocks()
 
         return num_gpu_blocks * page_size * num_layers
+
+    @torch.inference_mode()
+    def sample_tokens(
+        self, grammar_output: "GrammarOutput | None"
+    ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
+        return self.model_runner.sample_tokens(grammar_output)
 
     def execute_model(
         self,
