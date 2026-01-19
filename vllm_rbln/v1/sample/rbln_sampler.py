@@ -30,14 +30,14 @@ _SAMPLING_EPS = 1e-5
 
 
 @torch.library.custom_op("rbln::top_k_top_p", mutates_args=())
-def top_k_top_p(logits: torch.Tensor, k: torch.Tensor,
-                p: torch.Tensor) -> torch.Tensor:
+def top_k_top_p(logits: torch.Tensor, k: torch.Tensor | None,
+                p: torch.Tensor | None) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
 
 @top_k_top_p.register_fake
-def top_k_top_p_fake(logits: torch.Tensor, k: torch.Tensor,
-                     p: torch.Tensor) -> torch.Tensor:
+def top_k_top_p_fake(logits: torch.Tensor, k: torch.Tensor | None,
+                     p: torch.Tensor | None) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
 
