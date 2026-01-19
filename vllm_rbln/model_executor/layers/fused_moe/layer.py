@@ -238,13 +238,16 @@ def unquantized_fused_moe_method_rbln(
     return final_hidden_states.reshape(orig_shape)
 
 
-def get_tokens_mask(left=1.0, right=float('-inf')):
-    num_tokens = \
+def get_tokens_mask(num_tokens: int, left=1.0, right=float('-inf')):
+    num_tokens_across_dp = \
         get_forward_context().dp_metadata.num_tokens_across_dp_cpu
-    num_tokens = num_tokens.unsqueeze(1)
-    max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+    num_tokens_across_dp = num_tokens_across_dp.unsqueeze(1)
+    if num_tokens_across_dp.size(0) == 1:
+        max_pad = num_tokens
+    else:
+        max_pad = get_forward_context().dp_metadata.max_pads_across_dp
     pos = torch.arange(max_pad, dtype=torch.int32).unsqueeze(0)  # [1, max_pad]
-    tokens_mask = torch.where(pos < num_tokens, left,
+    tokens_mask = torch.where(pos < num_tokens_across_dp, left,
                               right)  # [dp_size, max_pad]
     tokens_mask = tokens_mask.reshape(-1, 1)  #[dp_size * max_pad, 1]
     return tokens_mask
@@ -269,7 +272,7 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
 
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if use_moe_tokens_mask:
-        tokens_mask = get_tokens_mask(1.0, 0.0)
+        tokens_mask = get_tokens_mask(router_logits.shape[0], 1.0, 0.0)
         selected_weights = selected_weights * tokens_mask
 
     n_expert = router_logits.shape[1]
@@ -396,7 +399,7 @@ def unquantized_fused_optimize_moe_method_custom(
 
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if use_moe_tokens_mask:
-        tokens_mask = get_tokens_mask()
+        tokens_mask = get_tokens_mask(num_tokens)
         router_logits = router_logits * tokens_mask
 
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/
