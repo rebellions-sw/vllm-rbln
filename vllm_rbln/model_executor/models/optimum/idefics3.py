@@ -14,14 +14,12 @@
 from typing import Any
 
 import torch
-import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.idefics3 import (
-    Idefics3ImageEmbeddingInputs,
-    Idefics3ImagePixelInputs,
-    ImageInputs,
-)
+from vllm.model_executor.models.idefics3 import (Idefics3ImageEmbeddingInputs,
+                                                 Idefics3ImagePixelInputs,
+                                                 ImageInputs)
+from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN
@@ -56,10 +54,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
         block_tables = model_input.block_tables
 
         request_nums = input_ids.shape[0]
-        if envs.VLLM_USE_V1:
-            is_prompt = model_input.is_prompt
-        else:
-            is_prompt = model_input.sampling_metadata.num_prompts > 0
+        is_prompt = model_input.is_prompt
 
         kwargs = self.preprocess_for_decoder(
             is_prompt, block_tables, input_ids, cache_position

@@ -205,27 +205,23 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self._init_device_properties()
 
         # NOTE The shape of input_ids, positions are modified for optimum
-        self.input_ids = torch.zeros(
-            self.max_num_reqs,
-            self.max_num_tokens,
-            dtype=torch.int64,
-            device=self.device,
-        )
-        self.positions = torch.zeros(
-            self.max_num_reqs,
-            self.max_num_tokens,
-            dtype=torch.int32,
-            device=self.device,
-        )
+        # self.input_ids = torch.zeros(self.max_num_reqs,
+        #                              self.max_num_tokens,
+        #                              dtype=torch.int64,
+        #                              device=self.device)
+        # self.positions = torch.zeros(self.max_num_reqs,
+        #                              self.max_num_tokens,
+        #                              dtype=torch.int32,
+        #                              device=self.device)
         self.enable_prefix_caching = cache_config.enable_prefix_caching
         self.seq_lens = np.zeros(self.max_num_reqs, dtype=np.int32)
 
-        self.uniform_decode_query_len = 1
+        # self.uniform_decode_query_len = 1
 
         # Attention layers that are only in the KVCacheConfig of the runner
         # (e.g., KV sharing, encoder-only attention), but not in the
         # KVCacheConfig of the scheduler.
-        self.runner_only_attn_layers: set[str] = set()
+        # self.runner_only_attn_layers: set[str] = set()
         # D2H copy for sampled token ids (output)
         # unintentionally block all other copy operations
         # To prevent this, we use a pinned buffer for sampled token ids.
@@ -240,6 +236,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
+
+        # Ephemeral state transferred between execute_model() and sample_tokens().
+        self.execute_model_state: ExecuteModelState | None = None
+
+        # FIXME async_scheduling?
 
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
@@ -721,7 +722,15 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # they will be scheduled again sometime in the future.
         scheduled_req_ids = scheduler_output.num_scheduled_tokens.keys()
         cached_req_ids = self.input_batch.req_id_to_index.keys()
-        unscheduled_req_ids = cached_req_ids - scheduled_req_ids
+        resumed_req_ids = scheduler_output.scheduled_cached_reqs.resumed_req_ids
+        # NOTE(zhuohan): cached_req_ids and resumed_req_ids are usually disjoint,
+        # so `(scheduled_req_ids - resumed_req_ids) == scheduled_req_ids` holds
+        # apart from the forced-preemption case in reset_prefix_cache. And in
+        # that case we include the resumed_req_ids in the unscheduled set so
+        # that they get cleared from the persistent batch before being re-scheduled
+        # in the normal resumed request path.
+        unscheduled_req_ids = cached_req_ids - (scheduled_req_ids -
+                                                resumed_req_ids)
         # NOTE(woosuk): The persistent batch optimization assumes that
         # consecutive batches contain mostly the same requests. If batches
         # have low request overlap (e.g., alternating between two distinct
@@ -736,10 +745,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             sampling_params = new_req_data.sampling_params
             pooling_params = new_req_data.pooling_params
 
-            if (
-                sampling_params
-                and sampling_params.sampling_type == SamplingType.RANDOM_SEED
-            ):
+            if (sampling_params and sampling_params.sampling_type
+                    == SamplingType.RANDOM_SEED):
                 generator = torch.Generator(device=self.device)
                 generator.manual_seed(sampling_params.seed)
             else:
@@ -767,9 +774,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             req_state = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
-                # mm_kwargs=new_req_data.mm_kwargs,
-                mm_positions=new_req_data.mm_positions,
-                mm_hashes=new_req_data.mm_hashes,
+                prompt_embeds=new_req_data.prompt_embeds,
+                mm_features=new_req_data.mm_features,
                 sampling_params=sampling_params,
                 pooling_params=pooling_params,
                 generator=generator,
@@ -780,16 +786,37 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             )
             self.requests[req_id] = req_state
 
+            if sampling_params and sampling_params.prompt_logprobs is not None:
+                self.num_prompt_logprobs[req_id] = (
+                    self.input_batch.vocab_size
+                    if sampling_params.prompt_logprobs == -1 else
+                    sampling_params.prompt_logprobs)
+
+            # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
+            # if self.uses_mrope:
+            #     self._init_mrope_positions(req_state)
+
+            # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
+            # if self.uses_xdrope_dim > 0:
+            #     self._init_xdrope_positions(req_state)
+
             reqs_to_add.append(req_state)
 
         # Update the states of the running/resumed requests.
         is_last_rank = get_pp_group().is_last_rank
         req_data = scheduler_output.scheduled_cached_reqs
+
+        # Wait until valid_sampled_tokens_count is copied to cpu,
+        # then use it to update actual num_computed_tokens of each request.
+        valid_sampled_token_count = self._get_valid_sampled_token_count()
+
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
             num_computed_tokens = req_data.num_computed_tokens[i]
             new_block_ids = req_data.new_block_ids[i]
-            resumed_from_preemption = req_data.resumed_from_preemption[i]
+            resumed_from_preemption = req_id in req_data.resumed_req_ids
+            num_output_tokens = req_data.num_output_tokens[i]
+            req_index = self.input_batch.req_id_to_index.get(req_id)
 
             # Update the cached states.
             req_state.num_computed_tokens = num_computed_tokens
@@ -818,21 +845,23 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                                   new_block_ids):
                         block_ids.extend(new_ids)
             else:
+                assert req_index is None
                 assert new_block_ids is not None
                 # The request is resumed from preemption.
                 # Replace the existing block IDs with the new ones.
                 req_state.block_ids = new_block_ids
 
-            req_index = self.input_batch.req_id_to_index.get(req_id)
             if req_index is None:
                 # The request is not in the persistent batch.
                 # The request was either preempted and resumed later, or was not
                 # scheduled in the previous step and needs to be added again.
+
                 reqs_to_add.append(req_state)
                 continue
 
             # Update the persistent batch.
-            self.input_batch.num_computed_tokens_cpu[req_index] = num_computed_tokens
+            self.input_batch.num_computed_tokens_cpu[
+                req_index] = num_computed_tokens
             if new_block_ids is not None:
                 self.input_batch.block_table.append_row(new_block_ids, req_index)
 
@@ -852,7 +881,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # The smaller empty indices are filled first.
         for request in reqs_to_add:
             self.input_batch.add_request(request)
-
         # Condense the batched states if there are gaps left by removed requests
         self.input_batch.condense()
 
@@ -1008,23 +1036,29 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         )
 
         hidden_states = hidden_states[:num_scheduled_tokens]
+
         pooling_metadata = self.input_batch.get_pooling_metadata()
-        pooling_metadata.build_pooling_cursor(
-            num_scheduled_tokens_np.tolist(), device=hidden_states.device
+        pooling_metadata.build_pooling_cursor(num_scheduled_tokens_np.tolist(),
+                                              seq_lens_cpu,
+                                              device=hidden_states.device)
+
+        model = cast(VllmModelForPooling, self.model)
+        raw_pooler_output: PoolerOutput = model.pooler(
+            hidden_states=hidden_states,
+            pooling_metadata=pooling_metadata,
         )
-        seq_lens = self.seq_lens[: self.input_batch.num_reqs]
-        # Pooling models D2H & synchronize occurs in pooler.py:build_output
-        raw_pooler_output = self.model.pooler(
-            hidden_states=hidden_states, pooling_metadata=pooling_metadata
+        raw_pooler_output = json_map_leaves(
+            lambda x: x.to("cpu", non_blocking=True) if x is not None else x,
+            raw_pooler_output,
         )
 
         pooler_output: list[torch.Tensor | None] = []
         for raw_output, seq_len, prompt_len in zip(
                 raw_pooler_output,
-                seq_lens,
-                pooling_metadata.prompt_lens):
-
-            output = raw_output.data if seq_len == prompt_len else None
+                seq_lens_cpu,
+                pooling_metadata.prompt_lens,
+                strict=False):
+            output = raw_output if seq_len == prompt_len else None
             pooler_output.append(output)
 
         return ModelRunnerOutput(
@@ -1050,24 +1084,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         supported_tasks = list(model.pooler.get_supported_tasks())
 
-        if (
-            self.scheduler_config.chunked_prefill_enabled
-            and "encode" in supported_tasks
-        ):
-            supported_tasks.remove("encode")
-
-            logger.debug(
-                "Chunked prefill is not supported with "
-                "encode task which using ALL pooling. "
-                "Please turn off chunked prefill by "
-                "`--no-enable-chunked-prefill` before using it."
-            )
-
         if "score" in supported_tasks:
             num_labels = getattr(self.model_config.hf_config, "num_labels", 0)
             if num_labels != 1:
                 supported_tasks.remove("score")
-                logger.debug("Score API is only enabled for num_labels == 1.")
+                logger.debug_once(
+                    "Score API is only enabled for num_labels == 1.")
 
         return supported_tasks
 
