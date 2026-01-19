@@ -129,8 +129,7 @@ class RBLNWorker(WorkerBase):
 
         total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
-        distributed_backend = self.parallel_config.distributed_executor_backend
-        if env_var not in os.environ or distributed_backend == "ray":
+        if env_var not in os.environ:
             dev_begin = total_device_count * \
                 self.parallel_config.data_parallel_rank
             dev_end = dev_begin + total_device_count
@@ -140,18 +139,19 @@ class RBLNWorker(WorkerBase):
             selected_devices = ",".join(device_ids[start_idx:end_idx])
         else:
             device_ids = os.environ[env_var].split(",")
-            assert len(
-                device_ids
-            ) == world_size, f"device_ids: {device_ids} should have device count: {world_size}"
+            assert len(device_ids) == world_size, \
+                f"device_ids: {device_ids} " \
+                f"should have device count: {world_size}"
             try:
                 device_id = int(device_ids[self.local_rank])
                 start_idx = device_id * envs.VLLM_RBLN_TP_SIZE
                 end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
                 device_ids = [str(i) for i in range(start_idx, end_idx)]
                 selected_devices = ",".join(device_ids)
-            except ValueError:
+            except ValueError as e:
                 raise ValueError(
-                    f"device_ids: {device_ids} should be a list of integers")
+                    f"device_ids: {device_ids} should be a list of integers") \
+                        from e
 
         os.environ[env_var] = selected_devices
         logger.info(
@@ -348,7 +348,6 @@ class RBLNWorker(WorkerBase):
 
     def execute_dummy_batch(self) -> None:
         self.model_runner.dummy_run()
-        return
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
