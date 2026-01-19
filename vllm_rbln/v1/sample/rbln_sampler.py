@@ -19,7 +19,7 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
 from vllm.config import LogprobsMode
-from vllm.v1.sample.ops import apply_top_k_top_p
+from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
 import vllm_rbln.rbln_envs as envs
@@ -46,7 +46,7 @@ class RBLNSampler(VLLMSampler):
     def __init__(self,
                  logprobs_mode: LogprobsMode = "raw_logprobs",
                  seed: int = 42):
-        super().__init__()  # FIXME topk_topp_sampler duplicated?
+        super().__init__()
         rebel.manual_seed(seed)
 
         options = {"compile_context": rebel.CompileContext()}
