@@ -111,20 +111,6 @@ class RBLNSampler(VLLMSampler):
         return sampled, logits_to_return
 
     @staticmethod
-    def _rbln_topp_sampler_impl(logits: torch.Tensor,
-                                top_p: torch.Tensor) -> torch.Tensor:
-        """
-        Implementation of RBLN top-p sampling.
-        To avoid self parameter issues when torch.compile is used,
-        we define this as a static method.
-        """
-        # Apply top-p sampling using RBLN custom op.
-        # It requires softmax prior to calling the op.
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        sampled = torch.ops.rbln.top_p_only(probs, top_p)
-        return sampled
-
-    @staticmethod
     def _rbln_topk_topp_sampler_impl(logits: torch.Tensor, top_k: torch.Tensor,
                                      top_p: torch.Tensor) -> torch.Tensor:
         """
