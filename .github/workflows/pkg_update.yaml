@@ -13,7 +13,7 @@ on:
 
 jobs:
   check-skip:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,7 +74,7 @@ jobs:
     secrets: inherit
 
   summary:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     needs: [check-skip, vllm-rbln-pr]
     if: always() # Run even if dependencies fail or are skipped
     env:
