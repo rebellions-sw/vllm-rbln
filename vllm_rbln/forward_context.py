@@ -56,22 +56,15 @@ class RBLNDPMetadata(DPMetadata):
     @staticmethod
     def make(
         vllm_config: VllmConfig,
-        attn_metadata: Any,
         num_tokens: int,
     ) -> "RBLNDPMetadata":
         parallel_config = vllm_config.parallel_config
         dp_size = parallel_config.data_parallel_size
         dp_rank = parallel_config.data_parallel_rank
-        disable_dp = dp_size == 1
 
         scheduler_config = vllm_config.scheduler_config
         max_pad = scheduler_config.max_num_batched_tokens
-
         batchsize = num_tokens
-
-        meta = next(iter(attn_metadata.values()))
-        if disable_dp and not meta.is_prefills[0]:
-            max_pad = scheduler_config.max_num_seqs
 
         num_tokens_across_dp_cpu = RBLNDPMetadata.num_tokens_across_dp(
             batchsize, dp_size, dp_rank)
@@ -106,8 +99,7 @@ def _set_forward_context(
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if (enable_dp or use_moe_tokens_mask) and (attn_metadata is not None
                                                or num_tokens is not None):
-        dp_metadata = RBLNDPMetadata.make(vllm_config, attn_metadata,
-                                          num_tokens or 0)
+        dp_metadata = RBLNDPMetadata.make(vllm_config, num_tokens or 0)
 
     forward_context = create_forward_context(
         attn_metadata,
