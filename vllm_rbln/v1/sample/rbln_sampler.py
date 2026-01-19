@@ -29,15 +29,39 @@ logger = init_logger(__name__)
 _SAMPLING_EPS = 1e-5
 
 
+def random_sample(
+    probs: torch.Tensor,
+    generators: dict[int, torch.Generator],
+) -> torch.Tensor:
+    """Randomly sample from the probabilities.
+
+    We use this function instead of torch.multinomial because torch.multinomial
+    causes CPU-GPU synchronization.
+    """
+    q = torch.empty_like(probs)
+    # NOTE(woosuk): To batch-process the requests without their own seeds,
+    # which is the common case, we first assume that every request does
+    # not have its own seed. Then, we overwrite the values for the requests
+    # that have their own seeds.
+    if len(generators) != probs.shape[0]:
+        q.exponential_()
+    if generators:
+        # TODO(woosuk): This can be slow because we handle each request
+        # one by one. Optimize this.
+        for i, generator in generators.items():
+            q[i].exponential_(generator=generator)
+    return probs.div_(q).argmax(dim=-1).view(-1)
+
+
 @torch.library.custom_op("rbln::top_k_top_p", mutates_args=())
-def top_k_top_p(logits: torch.Tensor, k: torch.Tensor | None,
-                p: torch.Tensor | None) -> torch.Tensor:
+def top_k_top_p(logits: torch.Tensor, k: Optional[torch.Tensor],
+                p: Optional[torch.Tensor]) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
 
 @top_k_top_p.register_fake
-def top_k_top_p_fake(logits: torch.Tensor, k: torch.Tensor | None,
-                     p: torch.Tensor | None) -> torch.Tensor:
+def top_k_top_p_fake(logits: torch.Tensor, k: Optional[torch.Tensor],
+                     p: Optional[torch.Tensor]) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
 
@@ -72,10 +96,13 @@ class RBLNSampler(VLLMSampler):
         return logits.div(temp.unsqueeze(dim=1))
 
     def apply_topk_topp_sampler(
-            self, logits: torch.Tensor, top_k: torch.Tensor,
-            top_p: torch.Tensor
+        self, logits: torch.Tensor, top_k: Optional[torch.Tensor],
+        top_p: Optional[torch.Tensor]
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
-        sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
+        if top_k is not None or top_p is not None:
+            sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
+        else:
+            sampled = random_sample(logits)
         logits_to_return = None
         if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
             logits_to_return = logits
