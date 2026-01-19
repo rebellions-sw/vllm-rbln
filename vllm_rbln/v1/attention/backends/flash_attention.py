@@ -241,7 +241,8 @@ def flash_causal_attention_naive_prefill_impl(
         partition_start = p * partition_size
         partition_end = (p + 1) * partition_size
 
-        # Tokens we're writing go from cache_start_pos to cache_start_pos + seq_len
+        # Tokens we're writing go from cache_start_pos to
+        # cache_start_pos + seq_len
         write_start = max(cache_start_pos, partition_start)
         write_end = min(cache_start_pos + seq_len, partition_end)
 
@@ -320,7 +321,8 @@ def flash_causal_attention_naive_prefill_impl(
     attn_weights = attn_weights + causal_mask
 
     # Apply attention sinks if provided
-    # sinks shape: [n_heads, sink_len] -> expand to [batch, n_kv_heads, n_groups, seq_len, sink_len]
+    # sinks shape: [n_heads, sink_len] ->
+    # expand to [batch, n_kv_heads, n_groups, seq_len, sink_len]
     if sinks is not None:
         # sinks: [n_heads, sink_len] where n_heads = n_kv_heads * n_groups
         sink_len = sinks.size(-1)
@@ -468,7 +470,8 @@ def flash_causal_attention_naive_decode_impl(
         # So no causal masking needed for decode
 
         # Apply attention sinks if provided
-        # sinks shape: [n_heads, sink_len] -> expand to [1, n_kv_heads, n_groups, seq_len, sink_len]
+        # sinks shape: [n_heads, sink_len] ->
+        # expand to [1, n_kv_heads, n_groups, seq_len, sink_len]
         if sinks is not None:
             sink_len = sinks.size(-1)
             # Reshape sinks to match attention weight dimensions
@@ -897,6 +900,7 @@ class RBLNFlashAttentionMetadataBuilder(
         fast_build: bool = False,
         num_tokens=None,
         positions=None,
+        batch_pad=None,
     ) -> RBLNFlashAttentionMetadata:
         num_reqs = common_attn_metadata.num_reqs
         num_actual_tokens = common_attn_metadata.num_actual_tokens
@@ -932,6 +936,8 @@ class RBLNFlashAttentionMetadataBuilder(
 
         assert num_tokens is not None, (
             "num_tokens is required for RBLN Attention Backend")
+        assert batch_pad is not None, (
+            "batch_pad is required for RBLN Attention Backend")
         is_prefills = (
             common_attn_metadata.num_computed_tokens_cpu[:num_reqs].numpy()
             < num_tokens[:num_reqs] - 1)
@@ -970,13 +976,12 @@ class RBLNFlashAttentionMetadataBuilder(
                 attn_masks = attn_masks.to(self.device)
         else:
             # batch padding
-            seq_lens_tensor = rbln_utils.pad(
-                seq_lens_tensor, 0, self.scheduler_config.max_num_seqs)
-            block_tables_tensor = rbln_utils.pad(
-                block_tables_tensor, 0, self.scheduler_config.max_num_seqs)
+            seq_lens_tensor = rbln_utils.pad(seq_lens_tensor, 0, batch_pad)
+            block_tables_tensor = rbln_utils.pad(block_tables_tensor, 0,
+                                                 batch_pad)
             if not self.is_causal:
                 decode_attention_mask = torch.zeros(
-                    self.scheduler_config.max_num_seqs,
+                    batch_pad,
                     1,
                     1,
                     1,
@@ -1003,10 +1008,8 @@ class RBLNFlashAttentionMetadataBuilder(
                                          max=sliding_window)
             cache_offsets = cache_seq_lens + query_lens
             if not is_prefills[0]:
-                cache_seq_lens = rbln_utils.pad(
-                    cache_seq_lens, 0, self.scheduler_config.max_num_seqs)
-                cache_offsets = rbln_utils.pad(
-                    cache_offsets, 0, self.scheduler_config.max_num_seqs)
+                cache_seq_lens = rbln_utils.pad(cache_seq_lens, 0, batch_pad)
+                cache_offsets = rbln_utils.pad(cache_offsets, 0, batch_pad)
             local_block_tables = block_tables_tensor[..., :1]
 
         attn_metadata = RBLNFlashAttentionMetadata(
