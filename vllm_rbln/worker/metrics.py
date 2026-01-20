@@ -14,6 +14,7 @@
 
 import atexit
 from dataclasses import dataclass, field
+from typing import List, Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -23,15 +24,31 @@ logger = init_logger(__name__)
 @dataclass
 class StepMetrics:
     """Metrics for a single execution step."""
-    latencies: list[float] = field(default_factory=list)
-    token_counts: list[int] = field(default_factory=list)
+    latencies: List[float] = field(default_factory=list)
+    token_counts: List[int] = field(default_factory=list)
+    host_times: List[int] = field(default_factory=list)
+    device_times: List[int] = field(default_factory=list)
+    ccl_times: List[int] = field(default_factory=list)
 
-    def add_measurement(self, latency: float, token_count: int):
-        """Add a latency and token count measurement."""
+    def add_measurement(
+        self,
+        latency: float,
+        token_count: int,
+        host_time: Optional[int] = None,
+        device_time: Optional[int] = None,
+        ccl_time: Optional[int] = None,
+    ):
+        """Add a latency, token count, and timing measurements."""
         self.latencies.append(latency)
         self.token_counts.append(token_count)
+        if host_time is not None:
+            self.host_times.append(host_time)
+        if device_time is not None:
+            self.device_times.append(device_time)
+        if ccl_time is not None:
+            self.ccl_times.append(ccl_time)
 
-    def _without_outlier_f(self, values: list[float]) -> list[float]:
+    def _without_outlier_f(self, values: List[float]) -> List[float]:
         """Return values excluding one outlier (max absolute deviation)."""
         if len(values) <= 1:
             return values
@@ -40,7 +57,7 @@ class StepMetrics:
         max_idx = deviations.index(max(deviations))
         return [v for i, v in enumerate(values) if i != max_idx]
 
-    def _without_outlier_i(self, values: list[int]) -> list[int]:
+    def _without_outlier_i(self, values: List[int]) -> List[int]:
         """Return values excluding one outlier (max absolute deviation)."""
         if len(values) <= 1:
             return values
@@ -69,6 +86,27 @@ class StepMetrics:
         total_tokens = sum(tokens)
         return total_tokens / total_time if total_time > 0 else 0.0
 
+    def get_avg_host_time(self, ignore_outlier: bool = True) -> float:
+        """Get average host time in microseconds,
+        optionally ignoring one outlier."""
+        values = self._without_outlier_i(
+            self.host_times) if ignore_outlier else self.host_times
+        return sum(values) / len(values) if values else 0.0
+
+    def get_avg_device_time(self, ignore_outlier: bool = True) -> float:
+        """Get average device time in microseconds,
+        optionally ignoring one outlier."""
+        values = self._without_outlier_i(
+            self.device_times) if ignore_outlier else self.device_times
+        return sum(values) / len(values) if values else 0.0
+
+    def get_avg_ccl_time(self, ignore_outlier: bool = True) -> float:
+        """Get average ccl time in microseconds,
+        optionally ignoring one outlier."""
+        values = self._without_outlier_i(
+            self.ccl_times) if ignore_outlier else self.ccl_times
+        return sum(values) / len(values) if values else 0.0
+
     def get_call_counts(self) -> int:
         """Get total number of requests processed."""
         return len(self.latencies)
@@ -88,13 +126,29 @@ class PerformanceTracker:
             atexit.register(self.print_final_stats)
             self._registered_cleanup = True
 
-    def record_prefill(self, latency: float, token_count: int):
+    def record_prefill(
+        self,
+        latency: float,
+        token_count: int,
+        host_time: Optional[int] = None,
+        device_time: Optional[int] = None,
+        ccl_time: Optional[int] = None,
+    ):
         """Record prefill step metrics."""
-        self.prefill_metrics.add_measurement(latency, token_count)
+        self.prefill_metrics.add_measurement(latency, token_count, host_time,
+                                             device_time, ccl_time)
 
-    def record_decode(self, latency: float, token_count: int):
+    def record_decode(
+        self,
+        latency: float,
+        token_count: int,
+        host_time: Optional[int] = None,
+        device_time: Optional[int] = None,
+        ccl_time: Optional[int] = None,
+    ):
         """Record decode step metrics."""
-        self.decode_metrics.add_measurement(latency, token_count)
+        self.decode_metrics.add_measurement(latency, token_count, host_time,
+                                            device_time, ccl_time)
 
     def print_final_stats(self):
         logger.info("=" * 80)
@@ -112,6 +166,16 @@ class PerformanceTracker:
                         self.prefill_metrics.get_avg_latency())
             logger.info("  Average throughput: %.2f tokens/sec",
                         self.prefill_metrics.get_avg_throughput())
+            if self.prefill_metrics.host_times:
+                logger.info("  Average host time: %.2f us",
+                            self.prefill_metrics.get_avg_host_time())
+            if self.prefill_metrics.device_times:
+                logger.info("  Average device time: %.2f us",
+                            self.prefill_metrics.get_avg_device_time())
+            if self.prefill_metrics.ccl_times:
+                logger.info("  Average ccl time: %.2f us",
+                            self.prefill_metrics.get_avg_ccl_time())
+
         else:
             logger.info("PREFILL METRICS: No data recorded")
 
@@ -128,6 +192,16 @@ class PerformanceTracker:
                         self.decode_metrics.get_avg_latency())
             logger.info("  Average throughput: %.2f tokens/sec",
                         self.decode_metrics.get_avg_throughput())
+            if self.decode_metrics.host_times:
+                logger.info("  Average host time: %.2f us",
+                            self.decode_metrics.get_avg_host_time())
+            if self.decode_metrics.device_times:
+                logger.info("  Average device time: %.2f us",
+                            self.decode_metrics.get_avg_device_time())
+            if self.decode_metrics.ccl_times:
+                logger.info("  Average ccl time: %.2f us",
+                            self.decode_metrics.get_avg_ccl_time())
+
         else:
             logger.info("DECODE METRICS: No data recorded")
 

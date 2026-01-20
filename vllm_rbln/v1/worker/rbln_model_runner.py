@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
 import itertools
 import math
 import os
@@ -23,6 +24,7 @@ from copy import copy, deepcopy
 from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Union, cast
 
 import numpy as np
+import rebel
 import torch
 import torch.nn as nn
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionType,
@@ -1956,6 +1958,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 input_ids = rbln_utils.pad(input_ids, 0, batch_bucket_size)
                 positions = rbln_utils.pad(positions, -2, batch_bucket_size)
 
+            if hasattr(rebel, "capture_reports"):
+                capture_ctx = rebel.capture_reports()
+            else:
+                # use a dummy context manager that does nothing
+                capture_ctx = contextlib.nullcontext()
+
             if self.lora_config is not None:
                 lora_ids = [
                     self.requests[req_id].lora_request.lora_int_id
@@ -1984,33 +1992,51 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 LoRAInputs.set_sampler_indices_padded(sampler_indices_padded)
 
             start_time = time.perf_counter()
-            if not self.use_wrapped_compute_logits():
-                model_output = self.model_executable(
-                    input_ids=input_ids,
-                    positions=positions,
-                    intermediate_tensors=intermediate_tensors,
-                    inputs_embeds=inputs_embeds,
-                    **model_kwargs,
-                )
-            else:
-                model_output = self.model_executable(
-                    input_ids=input_ids,
-                    positions=positions,
-                    intermediate_tensors=intermediate_tensors,
-                    selected_token_indices=token_indices,
-                    inputs_embeds=inputs_embeds,
-                    **model_kwargs,
-                )
+            with capture_ctx as reports:
+                if not self.use_wrapped_compute_logits():
+                    model_output = self.model_executable(
+                        input_ids=input_ids,
+                        positions=positions,
+                        intermediate_tensors=intermediate_tensors,
+                        inputs_embeds=inputs_embeds,
+                        **model_kwargs,
+                    )
+                else:
+                    model_output = self.model_executable(
+                        input_ids=input_ids,
+                        positions=positions,
+                        intermediate_tensors=intermediate_tensors,
+                        selected_token_indices=token_indices,
+                        inputs_embeds=inputs_embeds,
+                        **model_kwargs,
+                    )
             if self.performance_tracker is not None:
                 # Record performance metrics
                 end_time = time.perf_counter()
                 execution_time = end_time - start_time
+                host_time = None
+                device_time = None
+                ccl_time = None
+
+                if reports is not None and len(reports) > 0:
+                    host_time = reports[0].get('total_host', None)
+                    device_time = reports[0].get('total_device', None)
+                    ccl_time = reports[0].get('total_ccl', None)
+
                 if is_prefills[0]:
                     self.performance_tracker.record_prefill(
-                        execution_time, num_scheduled_tokens)
+                        execution_time,
+                        num_scheduled_tokens,
+                        host_time=host_time,
+                        device_time=device_time,
+                        ccl_time=ccl_time)
                 else:
                     self.performance_tracker.record_decode(
-                        execution_time, num_scheduled_tokens)
+                        execution_time,
+                        num_scheduled_tokens,
+                        host_time=host_time,
+                        device_time=device_time,
+                        ccl_time=ccl_time)
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
