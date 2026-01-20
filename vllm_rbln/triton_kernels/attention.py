@@ -283,7 +283,7 @@ def flash_attention_naive_decode(
             block_number = block_number.cast(tl.int32)
             block_offset = block_offset.cast(tl.int32)
 
-            if not rblib.partition_skip(block_offset):
+            if rblib.partition_skip(block_offset) == False:  # noqa: E712
                 k_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
                     shape=(2, B, H, 1, P, D),
@@ -491,12 +491,4 @@ def _(
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
-    value: torch.Tensor,
-    kv_cache: torch.Tensor,
-    mask: torch.Tensor,
-    qk_scale: torch.Tensor,
-    seq_idx: torch.Tensor,
-    block_table: torch.Tensor,
-    dummy0: torch.Tensor,
-) -> torch.Tensor:
-    return torch.empty_like(query)
+    value: torch.Tensor, kv_cache: torch.Tensor, mask: torch.Tensor, qk_scale: torch.Tensor, seq_idx: torch.Tensor, block_table: torch.Tensor, dummy0: torch.Tensor,) -> torch.Tensor: return torch.empty_like(query)
