@@ -1831,10 +1831,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 execution_time = end_time - start_time
                 if is_prefills[0]:
                     self.performance_tracker.record_prefill(
-                        execution_time, num_scheduled_tokens)
+                        execution_time, num_scheduled_tokens,
+                        self.input_batch.req_ids)
                 else:
                     self.performance_tracker.record_decode(
-                        execution_time, num_scheduled_tokens)
+                        execution_time, num_scheduled_tokens,
+                        self.input_batch.req_ids)
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
