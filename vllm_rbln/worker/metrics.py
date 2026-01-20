@@ -115,7 +115,7 @@ class PerformanceTracker:
             self._registered_cleanup = True
 
     def check_dummy_request(self, request_ids: Optional[list[str]]) -> bool:
-        if request_ids is not None:
+        if request_ids:
             request_id = request_ids[0]
             if request_id.startswith("dummy_request_"):
                 return True
