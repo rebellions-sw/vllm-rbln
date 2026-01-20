@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_ENABLE_WARM_UP: bool = True
     VLLM_RBLN_USE_VLLM_MODEL: bool = False
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
+    VLLM_RBLN_BATCH_ATTN_OPT: bool = False
     VLLM_RBLN_DISABLE_MM: bool = False
     VLLM_RBLN_DP_IMPL: str = "padded_decode"
     VLLM_RBLN_USE_MOE_TOKENS_MASK: bool = True
@@ -81,6 +82,10 @@ environment_variables = {
     # Use flash attention for causal attention
     "VLLM_RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
+     ("true", "1")),
+    # Use batch attention optimization for paged attention
+    "VLLM_RBLN_BATCH_ATTN_OPT":
+    (lambda: os.environ.get("VLLM_RBLN_BATCH_ATTN_OPT", "False").lower() in
      ("true", "1")),
     # Disable multimodal input
     "VLLM_RBLN_DISABLE_MM":
