@@ -130,7 +130,10 @@ class PerformanceTracker:
             return
         request_id = None
         if request_ids is not None:
-            assert len(request_ids) == 1
+            assert len(request_ids) == 1, (
+                f"Expected exactly one request_id during prefill, "
+                f"got {len(request_ids)}: {request_ids}"
+            )
             request_id = request_ids[0]
         self.prefill_metrics.add_measurement(latency, token_count)
         if request_id:
