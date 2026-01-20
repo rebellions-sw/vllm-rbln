@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+import math
 import time
 from typing import TYPE_CHECKING, Optional, Union, cast
 
@@ -124,6 +125,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.dcp_world_size = 1
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
         self.max_num_reqs = scheduler_config.max_num_seqs
+        if self.cache_config.enable_prefix_caching:
+            block_size = self.vllm_config.additional_config["attn_block_size"]
+        else:
+            block_size = self.cache_config.block_size
+        self.num_blocks_per_seq = math.ceil(self.max_model_len / block_size)
 
         # Model-related.
         self.num_query_heads = model_config.get_num_attention_heads(
@@ -196,14 +202,22 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # self._init_device_properties()
 
         # NOTE The shape of input_ids, positions are modified for optimum
-        self.input_ids = torch.zeros(self.max_num_reqs,
-                                     self.max_num_tokens,
-                                     dtype=torch.int64,
-                                     device=self.device)
-        self.positions = torch.zeros(self.max_num_reqs,
-                                     self.max_num_tokens,
-                                     dtype=torch.int32,
-                                     device=self.device)
+        self.prefill_positions = torch.arange(self.max_model_len,
+                                              dtype=torch.int32,
+                                              device=self.device).unsqueeze(
+                                                  0)  # [1, max_model_len]
+        self.decode_input_ids = torch.zeros(self.max_num_reqs,
+                                            1,
+                                            dtype=torch.int64,
+                                            device=self.device)
+        self.decode_positions = torch.zeros(self.max_num_reqs,
+                                            1,
+                                            dtype=torch.int32,
+                                            device=self.device)
+        self.decode_block_tables = torch.zeros(self.max_num_reqs,
+                                               self.num_blocks_per_seq,
+                                               dtype=torch.int16,
+                                               device=self.device)
         self.enable_prefix_caching = cache_config.enable_prefix_caching
         self.seq_lens = np.zeros(self.max_num_reqs, dtype=np.int32)
 
@@ -230,6 +244,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
             self.model = get_optimum_model(vllm_config=self.vllm_config)
+        self.use_block_table = getattr(self.model.model.rbln_config,
+                                       "cache_impl", None) != "sliding_window"
         self.use_optimum_lora = getattr(self.model.model.rbln_config,
                                         "use_lora", None)
         if self.lora_config and not self.use_optimum_lora:
@@ -514,10 +530,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduler_output: "RBLNSchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], list[int],
                Optional[MultiModalKwargs], list[str]]:
-        input_tokens: list[list[int]] = []
-        input_positions: list[list[int]] = []
         running_request_ids = []
         batched_mm_inputs: Optional[BatchedTensorInputs] = None
+        is_new_request = (len(scheduler_output.scheduled_new_reqs) == 1)
 
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0].num_blocks_per_row
@@ -526,75 +541,61 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         cached_block_table = []
         cached_length = []
 
-        if len(scheduler_output.scheduled_new_reqs) == 1:
+        if is_new_request:
             # New request started
-            scheduled = scheduler_output.scheduled_new_reqs[0]
-            req_id = scheduled.req_id
-            req_index = self.input_batch.req_id_to_index[req_id]
-            prompt_tokens = np.array(scheduled.prompt_token_ids)
-            block_ids = scheduled.block_ids[0]
-        elif scheduler_output.scheduled_cached_reqs.num_reqs == 1:
+            req_id = scheduler_output.scheduled_new_reqs[0].req_id
+        else:
             # Preempted request resumed
             req_id = scheduler_output.scheduled_cached_reqs.req_ids[0]
-            req_index = self.input_batch.req_id_to_index[req_id]
             logger.warning("Request %s is resumed.", req_id)
-            num_token = int(self.input_batch.num_tokens[req_index])
-            prompt_tokens = self.input_batch.token_ids_cpu[
-                req_index][:num_token]
-            block_ids = scheduler_output.scheduled_cached_reqs.new_block_ids[0]
-        else:
-            raise RuntimeError(
-                "Prefill stage request cannot processed with other requests.")
 
-        seq_len = len(prompt_tokens)
-        input_positions = list(range(seq_len))
-        num_blocks = num_blocks_per_req[req_index]
+        req_index = self.input_batch.req_id_to_index[req_id]
+        num_tokens = int(self.input_batch.num_tokens[req_index])
+
+        # prompt_tokens, input_positions: [1, num_tokens]
+        prompt_tokens = self.input_batch.token_ids_cpu_tensor[
+            req_index:req_index + 1, :num_tokens]
+        input_positions = self.prefill_positions[:, :num_tokens]
+
+        # FIXME skip block_table if not use_block_table
         if self.enable_prefix_caching:
-            logger.debug(
-                "Request %s is now scheduled. Prompt tokens: %s, "
-                "Already generated tokens: %s, Allocated block(s): %s", req_id,
-                len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids), block_ids)
             block_table = scheduler_output.block_table_dict[req_id]
             cached_block_table = scheduler_output.cached_block_table
             cached_length = scheduler_output.cached_length
             total_cached_length = sum(cached_length)
             if total_cached_length > 0:
-                prompt_tokens = prompt_tokens[total_cached_length:]
-                input_positions = input_positions[total_cached_length:]
-                assert len(prompt_tokens) > 0, (
+                prompt_tokens = prompt_tokens[:, total_cached_length:]
+                input_positions = input_positions[:, total_cached_length:]
+                assert prompt_tokens.shape[1] > 0, (
                     "The prompt tokens is empty after removing the "
                     "cached tokens.")
         else:
             block_table = block_tables_cpu[req_index]
+            num_blocks = num_blocks_per_req[req_index]
+            # FIXME: It is required to mask the block table for prefill?
             block_table = self.mask_block_table(block_table, num_blocks)
-            logger.debug(
-                "Request %s is now scheduled. Prompt tokens: %s, "
-                "Already generated tokens: %s, Allocated block(s): %s", req_id,
-                len(self.requests[req_id].prompt_token_ids),
-                len(self.requests[req_id].output_token_ids),
-                block_table.tolist())
+        logger.debug(
+            "Request %s is now scheduled. Prompt tokens: %s, "
+            "Already generated tokens: %s, Allocated block(s): %s", req_id,
+            len(self.requests[req_id].prompt_token_ids),
+            len(self.requests[req_id].output_token_ids), block_table.tolist())
 
         running_request_ids.append(req_id)
 
         if self.supports_mm_inputs:
             batched_mm_inputs = self._extract_mm_kwargs(scheduler_output)
 
-        input_tokens = torch.tensor(prompt_tokens).unsqueeze(0)
-        input_positions = torch.tensor(input_positions).unsqueeze(0)
         block_table = block_table.unsqueeze(0)
         # NOTE The cached_block_table is not unsqueezed for convenience.
         # It is used only for prefill
-        return input_tokens, input_positions, block_table, cached_block_table, \
-        cached_length, batched_mm_inputs, running_request_ids
+        return prompt_tokens, input_positions, block_table, \
+            cached_block_table, cached_length, batched_mm_inputs, \
+            running_request_ids
 
     def _prepare_decode(
         self,
         scheduler_output: "SchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
-        input_tokens: list[list[int]] = []
-        input_positions: list[list[int]] = []
-        block_tables_list = []
         running_request_ids = []
         block_tables_cpu = self.input_batch.block_table.block_tables[
             0].get_cpu_tensor()
@@ -602,28 +603,28 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             0].num_blocks_per_row
 
         req_ids = self.input_batch.req_ids
-        for req_id in req_ids:
+        if self.use_block_table and scheduler_output.dummy_block is not None:
+            self.decode_block_tables.fill_(scheduler_output.dummy_block)
+        for i, req_id in enumerate(req_ids):
             req_index = self.input_batch.req_id_to_index[req_id]
             input_position = int(
                 self.input_batch.num_computed_tokens_cpu[req_index])
-            input_tokens.append(
-                [self.input_batch.token_ids_cpu[req_index][input_position]])
-            input_positions.append([input_position])
-            num_blocks = num_blocks_per_req[req_index]
-            if self.enable_prefix_caching:
-                block_tables_list.append(
-                    scheduler_output.block_table_dict[req_id])
-            else:
-                block_table = block_tables_cpu[req_index]
-                block_table = self.mask_block_table(block_table, num_blocks)
-                block_tables_list.append(block_table)
+            input_id = int(
+                self.input_batch.token_ids_cpu[req_index][input_position])
+            self.decode_input_ids[i, 0] = input_id
+            self.decode_positions[i, 0] = input_position
+            if self.use_block_table:
+                if self.enable_prefix_caching:
+                    num_blocks = len(scheduler_output.block_table_dict[req_id])
+                    block_table = scheduler_output.block_table_dict[req_id]
+                else:
+                    num_blocks = num_blocks_per_req[req_index]
+                    block_table = block_tables_cpu[req_index, :num_blocks]
+                self.decode_block_tables[i, :num_blocks] = block_table
             running_request_ids.append(req_id)
 
-        input_tokens = torch.tensor(input_tokens)
-        input_positions = torch.tensor(input_positions)
-        block_tables = torch.stack(block_tables_list)
-
-        return input_tokens, input_positions, block_tables, running_request_ids
+        return self.decode_input_ids, self.decode_positions, \
+            self.decode_block_tables, running_request_ids
 
     def _update_states(self, scheduler_output: "RBLNSchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler

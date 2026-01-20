@@ -32,10 +32,9 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vllm_config=self.vllm_config,
             use_multiple_decoder=getattr(self.model.rbln_config,
                                          "use_multiple_decoder", False),
-            default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
@@ -47,13 +46,14 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         block_tables = model_input.block_tables
         dummy_block = model_input.dummy_block
 
-        request_nums = input_ids.shape[0]
+        request_nums = len(model_input.running_requests_ids)
         if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         kwargs = self.preprocess_for_decoder(is_prompt,
+                                             request_nums,
                                              block_tables,
                                              input_ids,
                                              cache_position,
@@ -74,7 +74,4 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             self.model.decoder = self.model.decoders[padded_batch_size]
 
             logits = self.model.decoder(**kwargs).logits
-            if self.attn_impl != "flash_attn":
-                return logits[:request_nums]
-
-            return logits[:model_input.block_tables.shape[0]]
+            return logits[:request_nums]

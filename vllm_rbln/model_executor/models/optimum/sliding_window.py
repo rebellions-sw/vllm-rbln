@@ -49,15 +49,15 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vllm_config=self.vllm_config,
             use_multiple_decoder=getattr(self.model.rbln_config,
                                          "use_multiple_decoder", False),
-            default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
-        self.strategy = InnerAttentionStrategy()
+        self.strategy = InnerAttentionStrategy(
+            decoder_batch_size=self.decoder_batch_size)
         self.attention_manager: AttentionManager[InnerAttentionStrategy,
                                                  InnerAttentionEntry, InnerR1,
                                                  InnerR2] = AttentionManager(
@@ -73,26 +73,33 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
 
         finished_requests_ids = model_input.finished_requests_ids
         running_requests_ids = model_input.running_requests_ids
-        request_nums = input_ids.shape[0]
+        request_nums = len(running_requests_ids)
         if envs.VLLM_USE_V1:
             is_prompt = model_input.is_prompt
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
         # In prefill phase, the length of list must be 1
-        sliding_window_table_ids = self.attention_manager.get(
-            is_prompt,
-            self.decoder_batch_size,
-            running_requests_ids,
-            finished_requests_ids,
-        )
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, cache_position)
+        kwargs = self.preprocess_for_decoder(is_prompt, request_nums,
+                                             block_tables, input_ids,
+                                             cache_position)
 
         padded_batch_size = kwargs.pop("padded_batch_size",
                                        self.decoder_batch_size)
+        if is_prompt:
+            # Used for available table IDs
+            max_num_seqs = self.decoder_batch_size
+        else:
+            # Used for padding
+            max_num_seqs = padded_batch_size
 
+        sliding_window_table_ids = self.attention_manager.get(
+            is_prompt,
+            max_num_seqs,
+            running_requests_ids,
+            finished_requests_ids,
+        )
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.
         # [decode] `cache_position` and `position_ids` are distinguished
@@ -104,21 +111,14 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         if is_prompt:
             if self.model.prefill_decoder is None:
                 raise version_error
-            prefill_batch_idx = sliding_window_table_ids[0]
-            local_block_table_id = torch.tensor([prefill_batch_idx],
-                                                dtype=torch.int16)
             output = self.model.prefill_decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
-                local_block_tables=local_block_table_id,
+                local_block_tables=sliding_window_table_ids,
                 block_tables=block_tables if self.is_hybrid else None,
             )
             logits = output.logits
             assert len(running_requests_ids) == 1
-            self.attention_manager.add(
-                running_requests_id=running_requests_ids[0],
-                local_table_id=prefill_batch_idx,
-            )
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]
             local_block_table_id, cache_position = \

@@ -37,10 +37,9 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         super().__init__(vllm_config=vllm_config)
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vllm_config=self.vllm_config,
             use_multiple_decoder=getattr(self.model.rbln_config.language_model,
                                          "use_multiple_decoder", False),
-            default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.language_model.
             decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
@@ -115,7 +114,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
-        request_nums = input_ids.shape[0]
+        request_nums = len(model_input.running_requests_ids)
 
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
@@ -128,8 +127,9 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             pixel_values = None
             image_sizes = None
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, cache_position)
+        kwargs = self.preprocess_for_decoder(is_prompt, request_nums,
+                                             block_tables, input_ids,
+                                             cache_position)
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
