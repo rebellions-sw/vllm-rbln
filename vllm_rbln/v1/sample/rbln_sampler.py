@@ -57,10 +57,14 @@ def apply_top_k_top_p(
     k: Optional[torch.Tensor],
     p: Optional[torch.Tensor],
 ) -> torch.Tensor:
-    """Apply top-k and top-p masks to the logits.
-
-    k: [batch, ]
-    p: [batch, ]
+    """
+    Mock implementation of `top_k_top_p`
+    used for torch ops registration.
+    This function currently performs standard top-p, top-k (nucleus)
+    sampling that includes sorting the probabilities.
+    It serves as a placeholder implementation — in the actual version,
+    a dual-pivot algorithm is implemented in rebel and
+    it will be used to avoid the sorting step and improve efficiency.
     """
 
     logits_sort, logits_idx = logits.sort(dim=-1,
