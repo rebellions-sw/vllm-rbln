@@ -118,6 +118,8 @@ environment_variables = {
     "VLLM_RBLN_METRICS":
     (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
      ("true", "1")),
+    "VLLM_RBLN_KERNEL_MODE":
+    (lambda: os.environ.get("RBLN_KERNEL_MODE", "torch_triton").lower()),
 }
 
 
