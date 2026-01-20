@@ -54,8 +54,8 @@ def random_sample(
 
 def apply_top_k_top_p(
     logits: torch.Tensor,
-    k: torch.Tensor,
-    p: torch.Tensor,
+    k: Optional[torch.Tensor],
+    p: Optional[torch.Tensor],
 ) -> torch.Tensor:
     """Apply top-k and top-p masks to the logits.
 
