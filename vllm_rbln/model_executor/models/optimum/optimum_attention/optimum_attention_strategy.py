@@ -246,9 +246,9 @@ HybridR2 = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
                                                      HybridR1, HybridR2]):
 
-    def __init__(self, pad_token_id):
+    def __init__(self, delimiter_token_id):
         super().__init__()
-        self.pad_token_id = pad_token_id
+        self.delimiter_token_id = delimiter_token_id
 
     def add(self, running_requests_id: str, local_table_id: int,
             **kwargs) -> None:
@@ -277,7 +277,7 @@ class HybridAttentionImageStrategy(AttentionStrategy[HybridAttentionImageEntry,
         assert input_ids is not None
 
         if is_prompt:
-            attention_mask = ((input_ids != self.pad_token_id).to(
+            attention_mask = ((input_ids != self.delimiter_token_id).to(
                 torch.int64).squeeze(0))
         else:
             get_extra_values_fn = lambda entry: (

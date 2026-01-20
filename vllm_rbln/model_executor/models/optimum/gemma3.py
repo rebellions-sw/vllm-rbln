@@ -15,7 +15,6 @@ from typing import Any, Optional
 
 import torch
 import vllm.envs as envs
-from transformers import AutoTokenizer
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
@@ -58,9 +57,12 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
             padded_seq_len += pad_needed
 
         pad_token = self.info.get_hf_processor().tokenizer.pad_token
-        pad_token_id = self.info.get_hf_processor().tokenizer.pad_token_id
+        # To pad the image token
+        # not using pad_token_id
+        delimiter_token_id = self.info.get_hf_processor(
+        ).tokenizer.vocab_size + 1
         # NOTE: Left padding for Gemma3
-        prompt_ids = [pad_token_id] * padded_seq_len + prompt_ids
+        prompt_ids = [delimiter_token_id] * padded_seq_len + prompt_ids
         prompt = pad_token * padded_seq_len + prompt
         return prompt_ids, prompt
 
@@ -106,10 +108,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
-        # FIXME Loading tokenizer in model runner is a temporary solution.
-        tokenizer = AutoTokenizer.from_pretrained(self.model_config.tokenizer)
-
-        self.strategy = HybridAttentionImageStrategy(tokenizer.pad_token_id)
+        self.delimiter_token_id = self.model_config.get_vocab_size() + 1
+        self.strategy = HybridAttentionImageStrategy(self.delimiter_token_id)
         self.attention_manager: HybridAttentionImageManager \
             = HybridAttentionImageManager(self.strategy)
 
