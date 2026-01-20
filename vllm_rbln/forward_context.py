@@ -54,12 +54,6 @@ class RBLNDPMetadata(DPMetadata):
             # for v0 attention backends
             batchsize = attn_metadata.num_prefill_tokens + \
                 attn_metadata.num_decode_tokens
-
-            disable_dp = dp_size == 1
-            use_dummy_prefill = envs.VLLM_RBLN_DP_IMPL == "dummy_prefill"
-            if (disable_dp or use_dummy_prefill) and \
-                attn_metadata.num_decode_tokens > 0:
-                max_pad = scheduler_config.max_num_seqs
         else:
             # for v1 attention backends or no attn_metadata
             batchsize = num_tokens

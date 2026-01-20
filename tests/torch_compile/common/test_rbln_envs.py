@@ -49,8 +49,8 @@ def test_rbln_envs():
             ), f"Expected VLLM_RBLN_DISABLE_MM to be False, \
         got {rbln_envs.VLLM_RBLN_DISABLE_MM}"
 
-    assert (rbln_envs.VLLM_RBLN_DP_IMPL == "dummy_prefill"
-            ), f"Expected VLLM_RBLN_DP_IMPL to be dummy_prefill, \
+    assert (rbln_envs.VLLM_RBLN_DP_IMPL == "padded_decode"
+            ), f"Expected VLLM_RBLN_DP_IMPL to be padded_decode, \
         got {rbln_envs.VLLM_RBLN_DP_IMPL}"
 
     assert (not rbln_envs.VLLM_RBLN_ENFORCE_MODEL_FP32
