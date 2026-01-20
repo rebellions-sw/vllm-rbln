@@ -76,8 +76,7 @@ def get_maximum_num_blocks(
     tp_size = parallel_config.tensor_parallel_size
     dp_size = parallel_config.data_parallel_size
     ep = parallel_config.enable_expert_parallel
-    ep_size = tp_size * dp_size
-    num_devices = tp_size * dp_size * envs.VLLM_RBLN_TP_SIZE
+    rsd_size = envs.VLLM_RBLN_TP_SIZE
 
     # TODO(jongho): Update if target npu is REBEL.
 
@@ -88,8 +87,8 @@ def get_maximum_num_blocks(
         # ATOM DRAM - 16GB (single chip)
         ATOM_DRAM_NBYTES = 16 * 2**30
         ATOM_SYS_DRAM_NBYTES = 288 * 2**20
-        available_dram_bytes = num_devices * (ATOM_DRAM_NBYTES -
-                                             ATOM_SYS_DRAM_NBYTES)
+        available_dram_bytes = rsd_size * (ATOM_DRAM_NBYTES -
+                                           ATOM_SYS_DRAM_NBYTES)
         # ATOM - basic data type fp16
         default_bits_per_param = 16
     elif "cr" in device_name:
@@ -98,7 +97,7 @@ def get_maximum_num_blocks(
         REBEL_DRAM_NBYTES = 144 * 2**30
         REBEL_SYS_DRAM_NBYTES = 4 * 2**30
         REBEL_DRAM_NBYTES -= REBEL_SYS_DRAM_NBYTES
-        available_dram_bytes = num_devices * REBEL_DRAM_NBYTES
+        available_dram_bytes = rsd_size * REBEL_DRAM_NBYTES
         # FIXME(RBLN) - basic data type fp8 for REBEL, for now fp16
         default_bits_per_param = 16
     else:
@@ -113,19 +112,22 @@ def get_maximum_num_blocks(
             raise ValueError("`n_model_params` should be specified \
                 to estimate the kernel memory.")
         # Get estimated kernel size (approximated)
-
-        # expert based on expert parallel (quantization, mxfp4)
+        # kernel_size
+        # - QKV params    - model parallel (tp) sharded
+        # - MLP or expert - model parallel (ep) sharded
+        # - word embedding- non sharded,  not included into device, hidden_size * vocab_size
+        # - lm head       - model parallel (tp) sharded, hidden_size * vocab_size
         lm_heads_params = align(vocab_size, 64) * hidden_size
         lm_heads_nbytes = (align_2MB(
             lm_heads_params * default_bits_per_param // 8 / tp_size) * tp_size)
-        params = n_model_params - lm_heads_params
+        word_embedding_params = lm_heads_params
+        params = n_model_params - lm_heads_params - word_embedding_params
         layer_nbytes = (align_2MB(params * nbits_per_param // 8 / num_layers) * num_layers)
         kernel_size = layer_nbytes + lm_heads_nbytes
     elif n_model_params is not None:
         raise ValueError(
             "Both `n_model_params` and `kernel_size` cannot be specified.")
 
-    # available dram bytes
     available_dram_bytes -= kernel_size
 
     if buffer is None:
@@ -133,19 +135,17 @@ def get_maximum_num_blocks(
         buffer_per_runtime_per_core = 2**28  # 256MB per runtime
         # 1 for prefill, 1 for decoder
         buffer_per_core = buffer_per_runtime_per_core * num_runtimes
-        buffer = buffer_per_core * num_devices
+        buffer = buffer_per_core * rsd_size
     available_dram_bytes -= buffer
 
     check_oom(available_dram_bytes)
 
     kv = 2
     kv_bytes = 2
-    num_kv_heads = math.ceil(num_key_value_heads / tp_size) * tp_size
+    num_kv_heads = math.ceil(num_key_value_heads / rsd_size) * rsd_size
     head_dim = align(head_dim, 64)
-    # NOTE - SHOULD consider attention & sliding window attention
     # [2(=kv), H(=num_kv_heads), 1, B(=block_size), D(=head_dim)]
     kv_cache_block_bytes = kv * kvcache_block_size * head_dim * num_kv_heads * kv_bytes * num_layers
-    print(f"available_dram_bytes = {available_dram_bytes}, page_size = {kv_cache_block_bytes}")
     # for each k, v, max_num_blocks calculation is done
     max_num_blocks = available_dram_bytes / kv_cache_block_bytes
     return max_num_blocks
