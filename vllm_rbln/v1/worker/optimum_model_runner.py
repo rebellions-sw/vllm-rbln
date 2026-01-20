@@ -847,7 +847,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         def populate_reqs(input_batch, base_config, batch_size):
             for i in range(batch_size):
-                req_id = f"{base_config['name']}_req_{i}"
+                req_id = f"dummy_request_{i}"
                 input_batch._req_ids.append(req_id)
                 input_batch.req_id_to_index[req_id] = i
 
