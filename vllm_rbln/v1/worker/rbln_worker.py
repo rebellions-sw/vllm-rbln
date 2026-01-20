@@ -194,9 +194,14 @@ class RBLNWorker(WorkerBase):
             if "ca" in device_name:
                 # ATOM DOES NOT support mxfp4 quantization, handled by bf16
                 nbits_per_param = 16
+                # mlp weight scale is merged into params
+                # FIXME(RBLN) - expert scale merged into expert weight param
+                # ratio scale vs weight = 1 : 16
+                ratio = 16 / 17
             elif "cr" in device_name:
                 # REBEL can support mxfp4 quantization
                 nbits_per_param = 4
+                ratio = 1
             else:
                 assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
@@ -205,12 +210,14 @@ class RBLNWorker(WorkerBase):
         else:
             nbits_per_param = 16
             packed_num_elems = 1
+            ratio = 1
         for key, value in params_dict.items():
             if value.dtype == torch.bfloat16:
                 n_model_attentions += value.numel()
             else:
-                n_model_experts += value.numel() * packed_num_elems
+                n_model_experts += value.numel() * packed_num_elems * ratio
 
+        # NOTE - model parallel(tp, dp, ep, pp) already applied into model params
         n_model_params = n_model_attentions + n_model_experts
         block_size = self.cache_config.block_size
 
@@ -226,6 +233,18 @@ class RBLNWorker(WorkerBase):
             # 2 : 1 for prefill and decode each
             num_runtimes=2)
 
+        # NOTE -  adjust max_num_blocks considering swa block sharing
+        # max_num_blocks - based on FullAttentionSpec for model
+        # SHOULD adjust num blocks considering non full attent
+        kv_cache_spec = self.model_runner.get_kv_cache_spec()
+        page_size = max(spec.page_size_bytes
+                        for spec in kv_cache_spec.values())
+        num_layers = len(kv_cache_spec)
+        num_attn_layers = 0
+        for spec in kv_cache_spec.values():
+            num_attn_layers += int(isinstance(spec, FullAttentionSpec))
+        max_num_blocks = max_num_blocks * num_layers / num_attn_layers
+
         # for partition skip, we need dummy block slot.
         no_dummy_slots = 1
         max_required_num_blocks = (self.model_config.max_model_len *
@@ -240,20 +259,9 @@ class RBLNWorker(WorkerBase):
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks)
 
-        kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        # TODO: Consider SWA hybrid models.
-        # NOTE - consider only FullAttention (not sliding window attention)
-        # based on assumption that non sliding window attention is full attention
-        num_attn_layers = 0
-        for spec in kv_cache_spec.values():
-            num_attn_layers += int(isinstance(spec, FullAttentionSpec))
-
-        # Sync get_maximum_num_blocks with latest optimum-rbln.
-        page_size = max(spec.page_size_bytes
-                        for spec in kv_cache_spec.values())
+        # NOTE - consider SWA hybrid models
+        # SWA shares blocks with Full Attention, DO NOT count SWA layers
         available_memory = num_gpu_blocks * page_size * num_attn_layers
-        logger.info("blocks=%s, page_size=%s, num_attn_layers=%s, available_memory=%s",
-            num_gpu_blocks, page_size, num_attn_layers, available_memory)
         return available_memory
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
