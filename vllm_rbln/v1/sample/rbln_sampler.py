@@ -138,7 +138,7 @@ class RBLNSampler(VLLMSampler):
         if top_k is not None or top_p is not None:
             sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
         else:
-            sampled = random_sample(logits)
+            sampled = random_sample(logits, {})
         logits_to_return = None
         if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
             logits_to_return = logits
