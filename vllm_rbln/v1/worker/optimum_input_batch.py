@@ -33,13 +33,6 @@ class RBLNInputBatch(InputBatch):
             # Overwrite sampling_metadata with RBLN sampling metadata
             self.sampling_metadata = self._make_sampling_metadata_rbln(
                 self.num_reqs)
-            # Add top_k as vocab_size
-            # to prevent runtime error while running top_p_top_k_ops
-            # https://github.com/vllm-project/vllm/blob/01efc7ef781391e744ed08c3292817a773d654e6/vllm/v1/worker/gpu_input_batch.py#L348
-            # If not, error will be raised here:
-            # https://github.com/vllm-project/vllm/blob/01efc7ef781391e744ed08c3292817a773d654e6/vllm/v1/sample/ops/topk_topp_sampler.py#L151
-            self.top_k.fill_(self.vocab_size)
-            self.top_k_cpu_tensor.fill_(self.vocab_size)
 
     def refresh_metadata_rbln(self, bucket_size: int):
         """Apply any batch updates to sampling metadata."""
