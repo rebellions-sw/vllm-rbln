@@ -123,6 +123,8 @@ environment_variables = {
     "VLLM_RBLN_NUMA":
     (lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in
      ("true", "1")),
+    "VLLM_RBLN_KERNEL_MODE":
+    (lambda: os.environ.get("RBLN_KERNEL_MODE", "torch_triton").lower()),
 }
 
 
