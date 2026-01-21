@@ -15,7 +15,6 @@ from typing import Any, Optional
 
 import torch
 import vllm.envs as envs
-from transformers import AutoTokenizer
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
@@ -38,6 +37,7 @@ logger = init_logger(__name__)
 
 IMG_PAD_TOKEN_ID = -1
 PAD_TOKEN_ID = 0
+
 
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
@@ -138,19 +138,19 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 finished_requests_ids,
                 input_ids=input_ids,
             )
-        # When processing input_ids, we initially pad them with img_pad_token_id
-        # instead of pad_token_id.
+        # When processing input_ids, we initially pad them with IMG_PAD_TOKEN_ID
+        # instead of PAD_TOKEN_ID.
         #
-        # img_pad_token_id does not have an embedding. It is used only to mark
+        # IMG_PAD_TOKEN_ID does not have an embedding. It is used only to mark
         # image boundaries and to prevent multiple images from being placed
         # within the same attention window. It is used in generating
         # attention mask during the prefill phase.
         #
-        # pad_token_id, on the other hand, has a valid embedding and is used for
+        # PAD_TOKEN_ID, on the other hand, has a valid embedding and is used for
         # standard padding.
         #
-        # After the attention mask is generated, img_pad_token_id is replaced
-        # with pad_token_id.
+        # After the attention mask is generated, IMG_PAD_TOKEN_ID is replaced
+        # with PAD_TOKEN_ID.
         input_ids = self.postprocess_input_ids(input_ids)
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
