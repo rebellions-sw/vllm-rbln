@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import torch
 import vllm.envs as envs
+from transformers import AutoTokenizer
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
@@ -59,10 +60,10 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
         pad_token = self.info.get_hf_processor().tokenizer.pad_token
         # To pad the image token
         # not using pad_token_id
-        delimiter_token_id = self.info.get_hf_processor(
+        img_pad_token_id = self.info.get_hf_processor(
         ).tokenizer.vocab_size + 1
         # NOTE: Left padding for Gemma3
-        prompt_ids = [delimiter_token_id] * padded_seq_len + prompt_ids
+        prompt_ids = [img_pad_token_id] * padded_seq_len + prompt_ids
         prompt = pad_token * padded_seq_len + prompt
         return prompt_ids, prompt
 
@@ -94,9 +95,15 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__(vllm_config=vllm_config)
+        model_path = self.vllm_config.model_config.model
+        tokenizer = AutoTokenizer.from_pretrained(model_path,
+                                                  trust_remote_code=True)
+        # NOTE:
+        # model_config.vocab_size != tokenizer.vocab_size in Gemma3
+        vocab_size = tokenizer.vocab_size
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=self.model_config.get_vocab_size,
+            vocab_size=vocab_size,
             use_multiple_decoder=getattr(
                 self.model.rbln_config.language_model,
                 "use_multiple_decoder",
@@ -107,9 +114,9 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
-
-        self.delimiter_token_id = self.model_config.get_vocab_size() + 1
-        self.strategy = HybridAttentionImageStrategy(self.delimiter_token_id)
+        self.img_pad_token_id = vocab_size + 1
+        self.pad_token_id = tokenizer.pad_token_id
+        self.strategy = HybridAttentionImageStrategy(self.img_pad_token_id)
         self.attention_manager: HybridAttentionImageManager \
             = HybridAttentionImageManager(self.strategy)
 
@@ -137,6 +144,20 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 finished_requests_ids,
                 input_ids=input_ids,
             )
+        # When processing input_ids, we initially pad them with img_pad_token_id
+        # instead of pad_token_id.
+        #
+        # img_pad_token_id does not have an embedding. It is used only to mark
+        # image boundaries and to prevent multiple images from being placed
+        # within the same attention window. It is used in generating
+        # attention mask during the prefill phase.
+        #
+        # pad_token_id, on the other hand, has a valid embedding and is used for
+        # standard padding.
+        #
+        # After the attention mask is generated, img_pad_token_id is replaced
+        # with pad_token_id.
+        input_ids = self.postprocess_input_ids(input_ids)
 
         kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
                                              input_ids, position_ids)
@@ -268,3 +289,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 "h": image_size,
                 "w": image_size
             })
+
+    def postprocess_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+        is_delimiter_token = (input_ids == self.img_pad_token_id)
+        input_ids[is_delimiter_token] = self.pad_token_id
+        return input_ids
