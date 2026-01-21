@@ -16,7 +16,6 @@ from typing import List, Optional
 
 import torch
 from vllm.multimodal.inputs import BatchedTensorInputs
-from vllm.v1.pool.metadata import PoolingMetadata
 
 
 # FIXME(eunji): In original vLLM, this dataclasss is located in model_runner.
@@ -37,7 +36,6 @@ class ModelInputForRBLN:
     cached_lengths: List[int] = field(
         default_factory=list)  # for prefix caching
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
-    pooling_metadata: Optional[PoolingMetadata] = None
     dummy_block: Optional[int] = None  # for prefix caching
 
 
