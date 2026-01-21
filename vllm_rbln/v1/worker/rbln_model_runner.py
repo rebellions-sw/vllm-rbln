@@ -1088,6 +1088,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.num_accepted_tokens.copy_to_gpu()
 
         max_num_scheduled_tokens = int(num_scheduled_tokens.max())
+        batch_bucket_size = \
+            self.bucketing_manager.find_decode_batch_bucket(self.input_batch.num_reqs)
         # Prepare the attention metadata for each KV cache group and make layers
         # in the same group share the same metadata.
         for kv_cache_group_id, kv_cache_group_spec in enumerate(
@@ -1169,7 +1171,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     extra_attn_metadata_args["num_tokens"] = \
                         self.input_batch.num_tokens_no_spec
                     extra_attn_metadata_args["positions"] = self.positions.cpu
-                    extra_attn_metadata_args["batch_pad"] = self.max_batch_size
+                    extra_attn_metadata_args["batch_pad"] = batch_bucket_size
                 attn_metadata_i = builder.build(
                     common_prefix_len=common_prefix_len,
                     common_attn_metadata=common_attn_metadata,
@@ -1624,6 +1626,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             so, cso = self._make_dummy_scheduler_outputs(
                 dummy_decode_requests, dummy_decode_num_scheduled_tokens,
                 num_kv_cache_groups)
+            self._prepare_decode_intermediate_tensors(batch_bucket_size)
             self._execute_dummy_requests(so, cso, self.decode_intermediate_tensors)
 
     def _add_dummy_requests(
@@ -1831,6 +1834,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         num_computed_tokens_cpu = (
             input_batch.num_computed_tokens_cpu_tensor[:num_reqs])
 
+        batch_bucket_size = \
+            self.bucketing_manager.find_decode_batch_bucket(input_batch.num_reqs)
         # Prepare the attention metadata for each KV cache group and make layers
         # in the same group share the same metadata.
         for kv_cache_group_id, kv_cache_group_spec in enumerate(
@@ -1885,7 +1890,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     extra_attn_metadata_args["num_tokens"] = \
                         input_batch.num_tokens
                     extra_attn_metadata_args["positions"] = positions
-                    extra_attn_metadata_args["batch_pad"] = self.max_batch_size
+                    extra_attn_metadata_args["batch_pad"] = batch_bucket_size
                 attn_metadata_i = builder.build(
                     common_prefix_len=common_prefix_len,
                     common_attn_metadata=common_attn_metadata,
@@ -1904,8 +1909,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         positions = positions.view(num_reqs, -1)
 
         # decode batch padding
-        input_ids = rbln_utils.pad(input_ids, 0, self.max_batch_size)
-        positions = rbln_utils.pad(positions, -2, self.max_batch_size)
+        input_ids = rbln_utils.pad(input_ids, 0, batch_bucket_size)
+        positions = rbln_utils.pad(positions, -2, batch_bucket_size)
 
         return DummyRunState(attn_metadata=attn_metadata,
                              num_input_tokens=num_input_tokens,
@@ -2315,7 +2320,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 sampler_indices_padded = create_sampler_indices_padded(
                     lora_ids,
                     self.lora_manager._adapter_manager.lora_index_to_id,
-                    self.max_batch_size,
+                    batch_bucket_size,
                     is_prefills[0],
                     self.lora_config.max_loras,
                     self.device,
@@ -2865,12 +2870,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         distributed_executor_backend = \
             self.vllm_config.parallel_config.distributed_executor_backend
         if distributed_executor_backend == "ray":
-            self._prepare_intermediate_tensors()
+            self._prepare_prefill_intermediate_tensors()
         else:
             with torch.inference_mode():
-                self._prepare_intermediate_tensors()
+                self._prepare_prefill_intermediate_tensors()
 
-    def _prepare_intermediate_tensors(self) -> None:
+    def _prepare_prefill_intermediate_tensors(self) -> None:
 
         def _reshape(
                 batch_size: int, seq_len: int,
@@ -2890,7 +2895,18 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 dtype=self.model_config.dtype,
                 device=self.device))
 
-        batch_size = self.max_batch_size
+    def _prepare_decode_intermediate_tensors(self, batch_bucket_size) -> None:
+
+        def _reshape(
+                batch_size: int, seq_len: int,
+                intermediate_tensors: IntermediateTensors
+        ) -> IntermediateTensors:
+            return IntermediateTensors({
+                k: v.view(batch_size, seq_len, -1)
+                for k, v in intermediate_tensors.items()
+            })
+
+        batch_size = batch_bucket_size
         seq_len = 1
         self.decode_intermediate_tensors = _reshape(
             batch_size, seq_len,
@@ -2898,6 +2914,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 batch_size=batch_size * seq_len,
                 dtype=self.model_config.dtype,
                 device=self.device))
+
 
     def save_tensorized_model(
         self,

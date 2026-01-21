@@ -141,7 +141,7 @@ environment_variables = {
     lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_STEP", 2)),
     # Decode batch bucket limit
     "VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT":
-    lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 32)),
+    lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 1)),
 }
 
 
