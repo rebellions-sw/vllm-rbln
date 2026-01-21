@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from contextlib import nullcontext
+from types import NoneType
 from typing import Any, Optional
 
 import torch
@@ -109,6 +111,20 @@ class RBLNOptimumWorker(WorkerBase):
 
         return num_gpu_blocks * page_size * num_layers
 
+    def annotate_profile(self, scheduler_output):
+        # add trace annotation so that we can easily distinguish
+        # new/cached request numbers in each iteration
+        if not self.profiler:
+            return nullcontext()
+
+        self.profiler.step()
+
+        num_new = len(scheduler_output.scheduled_new_reqs)
+        num_cached = len(scheduler_output.scheduled_cached_reqs.req_ids)
+
+        return self.profiler.annotate_context_manager(
+            f"execute_new_{num_new}_cached_{num_cached}")
+
     @torch.inference_mode()
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
@@ -122,10 +138,12 @@ class RBLNOptimumWorker(WorkerBase):
         intermediate_tensors = None
         # TODO setting intermediate_tensors for PP
 
-        output = self.model_runner.execute_model(scheduler_output,
-                                                 intermediate_tensors)
-        assert isinstance(output, ModelRunnerOutput)
-        return output if self.is_driver_worker else None
+        with self.annotate_profile(scheduler_output):
+            output = self.model_runner.execute_model(scheduler_output,
+                                                     intermediate_tensors)
+            if isinstance(output, (ModelRunnerOutput, NoneType)):
+                return output
+        return None
 
     def profile(self, is_start: bool = True):
         if self.profiler is None:

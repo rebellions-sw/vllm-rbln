@@ -13,7 +13,7 @@
 # limitations under the License.
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, NamedTuple, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -38,10 +38,12 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheSpec)
 # yapf: enable
-from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, LogprobsLists,
-                             LogprobsTensors, ModelRunnerOutput, SamplerOutput)
+from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
+                             LogprobsLists, LogprobsTensors, ModelRunnerOutput,
+                             PoolerOutput, SamplerOutput)
 from vllm.v1.sample.logits_processor import build_logitsprocs
 from vllm.v1.sample.sampler import Sampler
+from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.utils import record_function_or_nullcontext
 from vllm.v1.worker.gpu_input_batch import CachedRequestState
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
@@ -65,6 +67,16 @@ else:
     xgr = LazyLoader("xgr", globals(), "xgrammar")
 
 logger = init_logger(__name__)
+
+
+class ExecuteModelState(NamedTuple):
+    """Ephemeral cached state transferred between execute_model() and
+    sample_tokens(), after execute_model() returns None."""
+
+    scheduler_output: "SchedulerOutput"
+    logits: torch.Tensor
+    hidden_states: torch.Tensor
+    sample_hidden_states: torch.Tensor
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
@@ -155,7 +167,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         # # Request states.
         self.requests: dict[str, CachedRequestState] = {}
-
+        self.num_prompt_logprobs: dict[str, int] = {}
         # Input Batch
         # NOTE(Chen): Ideally, we should initialize the input batch inside
         # `initialize_kv_cache` based on the kv cache config. However, as in
@@ -184,6 +196,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             use_rbln_sampler=self.use_rbln_sampler,
         )
 
+        self.use_async_scheduling = self.scheduler_config.async_scheduling
         # Cache the device properties.
         # self._init_device_properties()
 
@@ -256,10 +269,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors]:
+        if self.execute_model_state is not None:
+            raise RuntimeError("State error: sample_tokens() must be called "
+                               "after execute_model() returns None.")
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
-        with record_function_or_nullcontext("Preprocess"):
+        with record_function_or_nullcontext("rbln_model_runner: preprocess"):
+            # with self.synchronize_input_prep():
             self._update_states(scheduler_output)
-            if not scheduler_output.total_num_scheduled_tokens:
+            if not num_scheduled_tokens:
                 # FIXME If local block table exists in the model,
                 # clear the local block table.
                 # Because in the case of LLM (not AsyncLLMEngine),
@@ -274,9 +291,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             model_input, num_scheduled_tokens_np = self._prepare_inputs(
                 scheduler_output)
 
-        with record_function_or_nullcontext("Forward"):
+        with record_function_or_nullcontext("rbln_model_runner: forward"):
             start_time = time.perf_counter()
+            # FIXME model_input must be modified to be padded
             hidden_states = self.model(model_input)
+            sample_hidden_states = hidden_states.clone()
             end_time = time.perf_counter()
             if envs.VLLM_RBLN_METRICS:
                 # Record performance metrics
@@ -288,70 +307,20 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                     self.performance_tracker.record_decode(
                         execution_time, num_scheduled_tokens)
 
-        with record_function_or_nullcontext("Postprocess"):
+        with record_function_or_nullcontext("rbln_model_runner: postprocess"):
             if self.is_pooling_model:
                 return self._pool(hidden_states, num_scheduled_tokens,
                                   num_scheduled_tokens_np)
             # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
             hidden_states = hidden_states.squeeze(1)
             logits = self.model.compute_logits(hidden_states, None)
-            if scheduler_output.grammar_bitmask is not None:
-                self.apply_grammar_bitmask(
-                    scheduler_output,
-                    logits,
-                )
-
-        with record_function_or_nullcontext("Sample"):
-            use_padding = self.use_rbln_sampler and not model_input.is_prompt
-            if use_padding:
-                num_reqs = self.input_batch.num_reqs
-                padded_logits = self.pooled_tensors[self.bucket_size]
-                padded_logits[:num_reqs].copy_(logits)
-            else:
-                padded_logits = logits
-            sampler_output = self.sampler(
-                logits=padded_logits,
-                sampling_metadata=self.input_batch.sampling_metadata,
-            )
-            if use_padding:
-                sampler_output.sampled_token_ids = \
-                    sampler_output.sampled_token_ids[:num_reqs]
-                if sampler_output.logprobs_tensors is not None:
-                    sampler_output.logprobs_tensors = \
-                        self.post_process_logprobs_tensors(
-                            sampler_output.logprobs_tensors,
-                            num_reqs
-                        )
-
-        with record_function_or_nullcontext("Bookkeep"):
-            (
-                num_nans_in_logits,
-                logprobs_lists,
-                valid_sampled_token_ids,
-                prompt_logprobs_dict,
-                req_ids_output_copy,
-                req_id_to_index_output_copy,
-                invalid_req_indices,
-            ) = self._bookkeeping_sync(scheduler_output, sampler_output,
-                                       logits, hidden_states,
-                                       num_scheduled_tokens)
-
-        valid_sampled_token_ids = sampler_output.sampled_token_ids
-        max_gen_len = valid_sampled_token_ids.shape[-1]
-        if max_gen_len == 1:
-            # No spec decode tokens.
-            valid_sampled_token_ids = valid_sampled_token_ids.tolist()
-
-        return ModelRunnerOutput(
-            req_ids=self.input_batch.req_ids,
-            req_id_to_index=self.input_batch.req_id_to_index,
-            sampled_token_ids=valid_sampled_token_ids,
-            logprobs=logprobs_lists,
-            prompt_logprobs_dict=prompt_logprobs_dict,
-            pooler_output=[],
-            kv_connector_output=None,
-            num_nans_in_logits={},
+        self.execute_model_state = ExecuteModelState(
+            scheduler_output=scheduler_output,
+            logits=logits,
+            hidden_states=hidden_states,
+            sample_hidden_states=sample_hidden_states,
         )
+        return None
 
     def mask_block_table(
         self,
@@ -1052,75 +1021,66 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         return tuple(tasks)
 
     def _bookkeeping_sync(
-        self, scheduler_output: "SchedulerOutput",
-        sampler_output: SamplerOutput, logits: Optional[torch.Tensor],
-        hidden_states: torch.Tensor, num_scheduled_tokens: int
+        self,
+        scheduler_output: "SchedulerOutput",
+        sampler_output: SamplerOutput,
+        logits: torch.Tensor | None,
+        hidden_states: torch.Tensor,
+        num_scheduled_tokens: int,
+        spec_decode_metadata: SpecDecodeMetadata | None,
     ) -> tuple[
             dict[str, int],
-            Optional[LogprobsLists],
+            LogprobsLists | None,
             list[list[int]],
-            dict[str, Optional[LogprobsTensors]],
+            dict[str, LogprobsTensors | None],
             list[str],
             dict[str, int],
             list[int],
     ]:
-        # FIXME we don't need sync
-        # So almost prune the code here
         num_nans_in_logits = {}
         if envs.VLLM_COMPUTE_NANS_IN_LOGITS:
             num_nans_in_logits = self._get_nans_in_logits(logits)
 
-        # TODO(woosuk): The following loop can be slow since it iterates over
-        # the requests one by one. Optimize.
-        discard_sampled_tokens_req_indices = []
-        for i, req_id in enumerate(self.input_batch.req_ids):
-            req_state = self.requests[req_id]
-            seq_len = (req_state.num_computed_tokens +
-                       scheduler_output.num_scheduled_tokens[req_id])
-            if seq_len < req_state.num_tokens:
-                # Ignore the sampled token for partial prefills.
-                # Rewind the generator state as if the token was not sampled.
-                # This relies on cuda-specific torch-internal impl details
-                generator = self.input_batch.generators.get(i)
-                if generator is not None:
-                    generator.set_offset(generator.get_offset() - 4)
-                # Record the index of the request that should not be sampled,
-                # so that we could clear the sampled tokens before returning.
-                discard_sampled_tokens_req_indices.append(i)
+        num_reqs = self.input_batch.num_reqs
 
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
         req_ids_output_copy = self.input_batch.req_ids.copy()
-        req_id_to_index_output_copy = \
-            self.input_batch.req_id_to_index.copy()
-
-        # NOTE: GPU -> CPU Sync happens here.
-        # Move as many CPU operations as possible before this sync point.
-        logprobs_tensors = sampler_output.logprobs_tensors
-        logprobs_lists = logprobs_tensors.tolists() \
-            if logprobs_tensors is not None else None
-
-        # Compute prompt logprobs if needed.
-        prompt_logprobs_dict = {}
+        req_id_to_index_output_copy = self.input_batch.req_id_to_index.copy()
 
         num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
         sampled_token_ids = sampler_output.sampled_token_ids
+        logprobs_tensors = sampler_output.logprobs_tensors
         invalid_req_indices = []
-
-        # Get the valid generated tokens.
-        max_gen_len = sampled_token_ids.shape[-1]
-        if max_gen_len == 1:
+        cu_num_tokens: list[int] | None = None
+        if not self.use_async_scheduling:
+            # Get the valid generated tokens.
+            max_gen_len = sampled_token_ids.shape[-1]
+            assert max_gen_len == 1, "No spec decode tokens. Max generation length must be 1."
             # No spec decode tokens.
             valid_sampled_token_ids = self._to_list(sampled_token_ids)
+            # Mask out the sampled tokens that should not be sampled.
+            # for i in discard_sampled_tokens_req_indices:
+            #     valid_sampled_token_ids[int(i)].clear()
         else:
-            # Includes spec decode tokens.
-            valid_sampled_token_ids = self.rejection_sampler.parse_output(
-                sampled_token_ids,
-                self.input_batch.vocab_size,
-            )
-        # Mask out the sampled tokens that should not be sampled.
-        for i in discard_sampled_tokens_req_indices:
-            valid_sampled_token_ids[i].clear()
+            valid_sampled_token_ids = []
+            # FIXME: we need disacrd_sampled_tokens_req_indices for async scheduling
+            # invalid_req_indices = discard_sampled_tokens_req_indices.tolist()
+            invalid_req_indices = []
+            invalid_req_indices_set = set(invalid_req_indices)
+
+            # Cache the sampled tokens on the GPU and avoid CPU sync.
+            # These will be copied into input_ids in the next step
+            # when preparing inputs.
+            # With spec decoding, this is done in propose_draft_token_ids().
+            if self.input_batch.prev_sampled_token_ids is None:
+                assert sampled_token_ids.shape[-1] == 1
+                self.input_batch.prev_sampled_token_ids = sampled_token_ids
+            self.input_batch.prev_req_id_to_index = {
+                req_id: i
+                for i, req_id in enumerate(self.input_batch.req_ids)
+                if i not in invalid_req_indices_set
+            }
 
         # Cache the sampled tokens in the model runner, so that the scheduler
         # doesn't need to send them back.
@@ -1129,12 +1089,20 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # between the first-stage worker and the last-stage worker.
         req_ids = self.input_batch.req_ids
         for req_idx in range(num_sampled_tokens):
-            sampled_ids = valid_sampled_token_ids[req_idx]
+            if self.use_async_scheduling:
+                sampled_ids = [
+                    -1
+                ] if req_idx not in invalid_req_indices_set else None
+            else:
+                sampled_ids = valid_sampled_token_ids[req_idx]
+
+            num_sampled_ids: int = len(sampled_ids) if sampled_ids else 0
+
             if not sampled_ids:
                 continue
 
             start_idx = self.input_batch.num_tokens_no_spec[req_idx]
-            end_idx = start_idx + len(sampled_ids)
+            end_idx = start_idx + num_sampled_ids
             assert end_idx <= self.max_model_len, (
                 "Sampled token IDs exceed the max model length. "
                 f"Total number of tokens: {end_idx} > max_model_len: "
@@ -1142,12 +1110,23 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
             self.input_batch.token_ids_cpu[req_idx,
                                            start_idx:end_idx] = sampled_ids
+            self.input_batch.is_token_ids[req_idx, start_idx:end_idx] = True
             self.input_batch.num_tokens_no_spec[req_idx] = end_idx
             self.input_batch.num_tokens[req_idx] = end_idx
 
             req_id = req_ids[req_idx]
             req_state = self.requests[req_id]
             req_state.output_token_ids.extend(sampled_ids)
+        # FIXME padding handling
+        logprobs_lists = (logprobs_tensors.tolists(cu_num_tokens)
+                          if not self.use_async_scheduling
+                          and logprobs_tensors is not None else None)
+
+        # Compute prompt logprobs if needed.
+        prompt_logprobs_dict = self._get_prompt_logprobs_dict(
+            hidden_states[:num_scheduled_tokens],
+            scheduler_output.num_scheduled_tokens,
+        )
 
         return (
             num_nans_in_logits,
@@ -1293,3 +1272,217 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     # FIXME: this is not implemented yet
     # def sample_tokens(self, grammar_output: "GrammarOutput | None") -> ModelRunnerOutput | AsyncModelRunnerOutput:
     #     return self.sampler.sample_tokens(grammar_output)
+
+    @torch.inference_mode
+    def sample_tokens(
+        self, grammar_output: "GrammarOutput | None"
+    ) -> ModelRunnerOutput | AsyncModelRunnerOutput | IntermediateTensors:
+        # kv_connector_output = self.kv_connector_output
+        # self.kv_connector_output = None
+        assert self.execute_model_state is not None
+
+        # Unpack ephemeral state.
+        (
+            scheduler_output,
+            logits,
+            hidden_states,
+            sample_hidden_states,
+        ) = self.execute_model_state
+        # Clear ephemeral state.
+        self.execute_model_state = None
+
+        # Apply structured output bitmasks if present.
+        if grammar_output is not None:
+            self.apply_grammar_bitmask(scheduler_output, grammar_output,
+                                       self.input_batch, logits)
+
+        with record_function_or_nullcontext("rbln_model_runner: sample"):
+            use_padding = self.use_rbln_sampler and not model_input.is_prompt
+            if use_padding:
+                num_reqs = self.input_batch.num_reqs
+                padded_logits = self.pooled_tensors[self.bucket_size]
+                padded_logits[:num_reqs].copy_(logits)
+            else:
+                padded_logits = logits
+            sampler_output = self._sample(padded_logits,
+                                          spec_decode_metadata=None)
+            if use_padding:
+                sampler_output.sampled_token_ids = \
+                    sampler_output.sampled_token_ids[:num_reqs]
+                if sampler_output.logprobs_tensors is not None:
+                    sampler_output.logprobs_tensors = \
+                        self.post_process_logprobs_tensors(
+                            sampler_output.logprobs_tensors,
+                            num_reqs
+                        )
+        self.input_batch.prev_sampled_token_ids = None
+
+        with record_function_or_nullcontext("rbln_model_runner: bookkeep"):
+            (
+                num_nans_in_logits,
+                logprobs_lists,
+                valid_sampled_token_ids,
+                prompt_logprobs_dict,
+                req_ids_output_copy,
+                req_id_to_index_output_copy,
+                invalid_req_indices,
+            ) = self._bookkeeping_sync(
+                scheduler_output,
+                sampler_output,
+                logits,
+                hidden_states,
+                scheduler_output.total_num_scheduled_tokens,
+                spec_decode_metadata=None,
+            )
+
+        with record_function_or_nullcontext(
+                "rbln_model_runner: ModelRunnerOutput"):
+            output = ModelRunnerOutput(
+                req_ids=req_ids_output_copy,
+                req_id_to_index=req_id_to_index_output_copy,
+                sampled_token_ids=valid_sampled_token_ids,
+                logprobs=logprobs_lists,
+                prompt_logprobs_dict=prompt_logprobs_dict,
+                pooler_output=[],
+                # kv_connector_output=kv_connector_output,
+                num_nans_in_logits=num_nans_in_logits,
+            )
+
+        if not self.use_async_scheduling:
+            return output
+        with record_function_or_nullcontext(
+                "rbln_model_runner: AsyncGPUModelRunnerOutput"):
+            async_output = AsyncGPUModelRunnerOutput(
+                model_runner_output=output,
+                sampled_token_ids=sampler_output.sampled_token_ids,
+                logprobs_tensors=sampler_output.logprobs_tensors,
+                invalid_req_indices=invalid_req_indices,
+                async_output_copy_stream=self.async_output_copy_stream,
+                vocab_size=self.input_batch.vocab_size,
+            )
+        with record_function_or_nullcontext(
+                "gpu_model_runner: set_async_sampled_token_ids"):
+            # Save ref of sampled_token_ids CPU tensor if the batch contains
+            # any requests with sampling params that require output ids.
+            self.input_batch.set_async_sampled_token_ids(
+                async_output.sampled_token_ids_cpu,
+                async_output.async_copy_ready_event,
+            )
+
+        return async_output
+
+    def _sample(
+        self,
+        logits: torch.Tensor | None,
+        spec_decode_metadata: SpecDecodeMetadata | None,
+    ) -> SamplerOutput:
+        # Sample the next token and get logprobs if needed.
+        sampling_metadata = self.input_batch.sampling_metadata
+        # Update output token ids with tokens sampled in last step
+        # if async scheduling and required by current sampling params.
+        self.input_batch.update_async_output_token_ids()
+        return self.sampler(
+            logits=logits,
+            sampling_metadata=sampling_metadata,
+        )
+
+    def _get_prompt_logprobs_dict(
+        self,
+        hidden_states: torch.Tensor,
+        num_scheduled_tokens: dict[str, int],
+    ) -> dict[str, LogprobsTensors | None]:
+        num_prompt_logprobs_dict = self.num_prompt_logprobs
+        if not num_prompt_logprobs_dict:
+            return {}
+
+        in_progress_dict = self.input_batch.in_progress_prompt_logprobs_cpu
+        prompt_logprobs_dict: dict[str, LogprobsTensors | None] = {}
+
+        # Since prompt logprobs are a rare feature, prioritize simple,
+        # maintainable loop over optimal performance.
+        completed_prefill_reqs = []
+        for req_id, num_prompt_logprobs in num_prompt_logprobs_dict.items():
+            num_tokens = num_scheduled_tokens.get(req_id)
+            if num_tokens is None:
+                # This can happen if the request was preempted in prefill stage.
+                continue
+
+            # Get metadata for this request.
+            request = self.requests[req_id]
+            if request.prompt_token_ids is None:
+                # Prompt logprobs is incompatible with prompt embeddings
+                continue
+
+            num_prompt_tokens = len(request.prompt_token_ids)
+            prompt_token_ids = torch.tensor(request.prompt_token_ids).to(
+                self.device, non_blocking=True)
+
+            # Set up target LogprobsTensors object.
+            logprobs_tensors = in_progress_dict.get(req_id)
+            if not logprobs_tensors:
+                # Create empty logprobs CPU tensors for the entire prompt.
+                # If chunked, we'll copy in slice by slice.
+                logprobs_tensors = LogprobsTensors.empty_cpu(
+                    num_prompt_tokens - 1, num_prompt_logprobs + 1)
+                in_progress_dict[req_id] = logprobs_tensors
+
+            # Determine number of logits to retrieve.
+            start_idx = request.num_computed_tokens
+            start_tok = start_idx + 1
+            num_remaining_tokens = num_prompt_tokens - start_tok
+            if num_tokens <= num_remaining_tokens:
+                # This is a chunk, more tokens remain.
+                # In the == case, there are no more prompt logprobs to produce
+                # but we want to defer returning them to the next step where we
+                # have new generated tokens to return.
+                num_logits = num_tokens
+            else:
+                # This is the last chunk of prompt tokens to return.
+                num_logits = num_remaining_tokens
+                completed_prefill_reqs.append(req_id)
+                prompt_logprobs_dict[req_id] = logprobs_tensors
+
+            if num_logits <= 0:
+                # This can happen for the final chunk if we prefilled exactly
+                # (num_prompt_tokens - 1) tokens for this request in the prior
+                # step. There are no more prompt logprobs to produce.
+                continue
+
+            # Get the logits corresponding to this req's prompt tokens.
+            # If this is a partial request (i.e. chunked prefill),
+            # then there is prompt logprob generated for each index.
+            req_idx = self.input_batch.req_id_to_index[req_id]
+            offset = self.query_start_loc.np[req_idx].item()
+            prompt_hidden_states = hidden_states[offset:offset + num_logits]
+            logits = self.model.compute_logits(prompt_hidden_states)
+
+            # Get the "target" tokens for each index. For prompt at index i,
+            # the token at prompt index i+1 is the "sampled" token we want
+            # to gather the logprob for.
+            tgt_token_ids = prompt_token_ids[start_tok:start_tok + num_logits]
+
+            # Compute prompt logprobs.
+            logprobs = self.sampler.compute_logprobs(logits)
+            token_ids, logprobs, ranks = self.sampler.gather_logprobs(
+                logprobs, num_prompt_logprobs, tgt_token_ids)
+
+            # Transfer GPU->CPU async.
+            chunk_slice = slice(start_idx, start_idx + num_logits)
+            logprobs_tensors.logprob_token_ids[chunk_slice].copy_(
+                token_ids, non_blocking=True)
+            logprobs_tensors.logprobs[chunk_slice].copy_(logprobs,
+                                                         non_blocking=True)
+            logprobs_tensors.selected_token_ranks[chunk_slice].copy_(
+                ranks, non_blocking=True)
+
+        # Remove requests that have completed prefill from the batch
+        # num_prompt_logprobs_dict.
+        for req_id in completed_prefill_reqs:
+            del num_prompt_logprobs_dict[req_id]
+            del in_progress_dict[req_id]
+
+        # Must synchronize the non-blocking GPU->CPU transfers.
+        # if prompt_logprobs_dict:
+        #     self._sync_device()
+
+        return prompt_logprobs_dict
