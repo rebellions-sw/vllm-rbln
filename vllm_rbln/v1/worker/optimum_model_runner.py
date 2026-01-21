@@ -20,6 +20,8 @@ import torch
 import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig, set_current_vllm_config
+from vllm.distributed.kv_transfer import (get_kv_transfer_group,
+                                          has_kv_transfer_group)
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
@@ -43,6 +45,8 @@ from vllm.v1.sample.logits_processor import build_logitsprocs
 from vllm.v1.sample.sampler import Sampler
 from vllm.v1.utils import record_function_or_nullcontext
 from vllm.v1.worker.gpu_input_batch import CachedRequestState
+from vllm.v1.worker.kv_connector_model_runner_mixin import (
+    KVConnectorModelRunnerMixin, KVConnectorOutput)
 from vllm.v1.worker.lora_model_runner_mixin import LoRAModelRunnerMixin
 from vllm.v1.worker.utils import AttentionGroup
 
@@ -67,7 +71,7 @@ else:
 logger = init_logger(__name__)
 
 
-class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
+class RBLNOptimumModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     input_batch: RBLNInputBatch
 
     def __init__(self, vllm_config: VllmConfig, device: torch.device):
@@ -263,16 +267,19 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         with record_function_or_nullcontext("Preprocess"):
             self._update_states(scheduler_output)
             if not scheduler_output.total_num_scheduled_tokens:
-                # FIXME If local block table exists in the model,
-                # clear the local block table.
-                # Because in the case of LLM (not AsyncLLMEngine),
-                # `finished_request_ids` is provided separately
-                # from new requests.
-                # It is a temporary solution.
-                if getattr(self.model, "attention_manager", None):
-                    self.model.attention_manager.clear()
-                # Return empty ModelRunnerOutput if there's no work to do.
-                return EMPTY_MODEL_RUNNER_OUTPUT
+                if not has_kv_transfer_group():
+                    # FIXME If local block table exists in the model,
+                    # clear the local block table.
+                    # Because in the case of LLM (not AsyncLLMEngine),
+                    # `finished_request_ids` is provided separately
+                    # from new requests.
+                    # It is a temporary solution.
+                    if getattr(self.model, "attention_manager", None):
+                        self.model.attention_manager.clear()
+                    # Return empty ModelRunnerOutput if there's no work to do.
+                    return EMPTY_MODEL_RUNNER_OUTPUT
+                return self.kv_connector_no_forward(scheduler_output,
+                                    self.vllm_config)
             # Prepare the decoder inputs.
             model_input, num_scheduled_tokens_np = self._prepare_inputs(
                 scheduler_output)
@@ -941,6 +948,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         hidden_states: torch.Tensor,
         num_scheduled_tokens: int,
         num_scheduled_tokens_np: np.ndarray,
+        kv_connector_output: Optional[KVConnectorOutput] = None,
     ) -> ModelRunnerOutput:
         assert self.input_batch.num_reqs ==\
             len(self.input_batch.pooling_params), \
@@ -970,6 +978,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             logprobs=None,
             prompt_logprobs_dict={},
             pooler_output=pooler_output,
+            kv_connector_output=kv_connector_output,
         )
 
     def _update_states_after_model_execute(

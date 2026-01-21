@@ -19,6 +19,12 @@ from typing import Optional
 
 import torch
 from vllm.config import VllmConfig
+from vllm.distributed.kv_transfer.kv_connector.factory import KVConnectorFactory
+from vllm.distributed.kv_transfer.kv_connector.v1 import (
+    KVConnectorBase_V1,
+    KVConnectorRole,
+)
+from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.v1.core.encoder_cache_manager import EncoderCacheManager
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
@@ -92,8 +98,24 @@ class RBLNOptimumScheduler(Scheduler):
         self.max_num_scheduled_tokens = \
             self.scheduler_config.max_num_batched_tokens
         self.max_model_len = self.scheduler_config.max_model_len
-        # KVConnector and KVEventPublisher is not used in RBLN.
+
+        # Create KVConnector for the Scheduler. Note that each Worker
+        # will have a corresponding KVConnector with Role=WORKER.
+        # KV Connector pushes/pull of remote KVs for P/D and offloading.
         self.connector = None
+        if self.vllm_config.kv_transfer_config is not None:
+            assert not self.is_encoder_decoder, (
+                "Encoder-decoder models are not currently supported with KV connectors"
+            )
+            self.connector = KVConnectorFactory.create_connector(
+                config=self.vllm_config,
+                role=KVConnectorRole.SCHEDULER,
+            )
+            kv_load_failure_policy = (
+                self.vllm_config.kv_transfer_config.kv_load_failure_policy
+            )
+            self.recompute_kv_load_failures = kv_load_failure_policy == "recompute"
+
         self.kv_event_publisher = None
         num_gpu_blocks = self.cache_config.num_gpu_blocks
         assert num_gpu_blocks is not None and num_gpu_blocks > 0
@@ -471,6 +493,16 @@ class RBLNOptimumScheduler(Scheduler):
             cached_length=cached_length,
             dummy_block=dummy_block,
         )
+
+        # NOTE(Kuntai): this function is designed for multiple purposes:
+        # 1. Plan the KV cache store
+        # 2. Wrap up all the KV cache load / save ops into an opaque object
+        # 3. Clear the internal states of the connector
+        if self.connector is not None:
+            meta: KVConnectorMetadata = self.connector.build_connector_meta(
+                scheduler_output
+            )
+            scheduler_output.kv_connector_metadata = meta
 
         self._update_after_schedule(scheduler_output)
         return scheduler_output
