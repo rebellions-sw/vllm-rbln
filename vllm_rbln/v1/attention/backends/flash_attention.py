@@ -1400,30 +1400,17 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             # batched attention - seq_lens[B, 1] == seq_idx, original sequence index
             # otherwise         - seq_lens[B, P] == dyn_size_for_partitions, dynamic size for each partition
             if q_len == 1:
-                if self.is_batch_attention_opt:
-                    attn_output = torch.ops.rbln_custom_ops.flash_causal_batch_attention_naive_decode(  # noqa: E501
-                        query,
-                        key,
-                        value,
-                        kv_cache,
-                        self.scale,
-                        attn_metadata.seq_lens.to(torch.int16),
-                        attn_metadata.block_tables.to(torch.int16),
-                        self.scale,  # dummy
-                        self.sinks,
-                    )
-                else:
-                    attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode(  # noqa: E501
-                        query,
-                        key,
-                        value,
-                        kv_cache,
-                        self.scale,
-                        attn_metadata.seq_lens.to(torch.int16),
-                        attn_metadata.block_tables.to(torch.int16),
-                        self.scale,  # dummy
-                        self.sinks,
-                    )
+                attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode(  # noqa: E501
+                    query,
+                    key,
+                    value,
+                    kv_cache,
+                    self.scale,
+                    attn_metadata.seq_lens.to(torch.int16),
+                    attn_metadata.block_tables.to(torch.int16),
+                    self.scale,  # dummy
+                    self.sinks,
+                )
             else:
                 attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill(  # noqa: E501
                     query,
