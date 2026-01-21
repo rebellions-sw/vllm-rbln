@@ -20,6 +20,9 @@ import torch
 from vllm.config import VllmConfig
 from vllm.distributed.kv_events import EventPublisherFactory
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
+from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
+                                                EncoderDecoderCacheManager,
+                                                compute_encoder_budget)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.request_queue import (
@@ -172,6 +175,29 @@ class RBLNOptimumScheduler(Scheduler):
             attn_block_size=attn_block_size,
             max_num_seqs=self.max_num_running_reqs,
         )
+
+        # Encoder-related.
+        # Calculate encoder cache size if applicable
+        # NOTE: For now we use the same budget for both compute and space.
+        # This can be changed when we make encoder cache for embedding caching
+        # across requests.
+        encoder_compute_budget, encoder_cache_size = compute_encoder_budget(
+            model_config=vllm_config.model_config,
+            scheduler_config=vllm_config.scheduler_config,
+            mm_registry=mm_registry,
+        )
+
+        # NOTE(woosuk): Here, "encoder" includes the vision encoder (and
+        # projector if needed) for MM models as well as encoder-decoder
+        # transformers.
+        self.max_num_encoder_input_tokens = encoder_compute_budget
+        # NOTE: For the models without encoder (e.g., text-only models),
+        # the encoder cache will not be initialized because cache size is 0
+        # for these models.
+        self.encoder_cache_manager = (EncoderDecoderCacheManager(
+            cache_size=encoder_cache_size) if self.is_encoder_decoder else
+                                      EncoderCacheManager(
+                                          cache_size=encoder_cache_size))
 
         self.use_pp = False
         self.use_v2_model_runner = False
