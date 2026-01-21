@@ -36,6 +36,8 @@ from .optimum_attention import (HybridAttentionImageManager,
 
 logger = init_logger(__name__)
 
+IMG_PAD_TOKEN_ID = -1
+PAD_TOKEN_ID = 0
 
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
@@ -60,10 +62,8 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
         pad_token = self.info.get_hf_processor().tokenizer.pad_token
         # To pad the image token
         # not using pad_token_id
-        img_pad_token_id = self.info.get_hf_processor(
-        ).tokenizer.vocab_size + 1
         # NOTE: Left padding for Gemma3
-        prompt_ids = [img_pad_token_id] * padded_seq_len + prompt_ids
+        prompt_ids = [IMG_PAD_TOKEN_ID] * padded_seq_len + prompt_ids
         prompt = pad_token * padded_seq_len + prompt
         return prompt_ids, prompt
 
@@ -95,15 +95,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         vllm_config: VllmConfig,
     ) -> None:
         super().__init__(vllm_config=vllm_config)
-        model_path = self.vllm_config.model_config.model
-        tokenizer = AutoTokenizer.from_pretrained(model_path,
-                                                  trust_remote_code=True)
         # NOTE:
         # model_config.vocab_size != tokenizer.vocab_size in Gemma3
-        vocab_size = tokenizer.vocab_size
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
-            vocab_size=vocab_size,
+            vocab_size=self.model_config.get_vocab_size,
             use_multiple_decoder=getattr(
                 self.model.rbln_config.language_model,
                 "use_multiple_decoder",
@@ -114,9 +110,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
-        self.img_pad_token_id = vocab_size + 1
-        self.pad_token_id = tokenizer.pad_token_id
-        self.strategy = HybridAttentionImageStrategy(self.img_pad_token_id)
+        self.strategy = HybridAttentionImageStrategy(IMG_PAD_TOKEN_ID)
         self.attention_manager: HybridAttentionImageManager \
             = HybridAttentionImageManager(self.strategy)
 
@@ -291,6 +285,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             })
 
     def postprocess_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-        is_delimiter_token = (input_ids == self.img_pad_token_id)
-        input_ids[is_delimiter_token] = self.pad_token_id
+        is_image_pad_token = (input_ids == IMG_PAD_TOKEN_ID)
+        input_ids[is_image_pad_token] = PAD_TOKEN_ID
         return input_ids
