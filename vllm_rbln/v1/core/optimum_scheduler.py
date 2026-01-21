@@ -175,10 +175,9 @@ class RBLNOptimumScheduler(Scheduler):
         )
 
         # Encoder-related.
-        # Calculate encoder cache size if applicable
-        # NOTE: For now we use the same budget for both compute and space.
-        # This can be changed when we make encoder cache for embedding caching
-        # across requests.
+        # It is not used in RBLN.
+        # But for reuse original functions(e.g. free_request) in vLLM,
+        # we keep it here.
         encoder_compute_budget, encoder_cache_size = compute_encoder_budget(
             model_config=vllm_config.model_config,
             scheduler_config=vllm_config.scheduler_config,
