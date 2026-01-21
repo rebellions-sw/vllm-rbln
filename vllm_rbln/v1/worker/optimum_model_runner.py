@@ -168,7 +168,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.attn_groups = []  # type: ignore
 
         # # Request states.
-        # self.requests: dict[str, CachedRequestState] = {}
+        self.requests: dict[str, CachedRequestState] = {}
 
         # Input Batch
         # NOTE(Chen): Ideally, we should initialize the input batch inside
@@ -483,12 +483,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         model_input = ModelInputForRBLN(
             input_tokens=input_ids,
             input_positions=positions,
-            sampling_metadata=None,
             multi_modal_kwargs=multi_modal_kwargs if is_prefill else None,
             block_tables=block_tables,
             running_requests_ids=running_request_ids,
             finished_requests_ids=list(finished_requests_ids),
-            pooling_metadata=None,  # FIXME
             cached_block_tables=cached_block_tables,
             cached_lengths=cached_lengths,
             is_prompt=is_prefill,
@@ -808,7 +806,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         # Wait until valid_sampled_tokens_count is copied to cpu,
         # then use it to update actual num_computed_tokens of each request.
-        valid_sampled_token_count = self._get_valid_sampled_token_count()
+        # valid_sampled_token_count = self._get_valid_sampled_token_count()
 
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
