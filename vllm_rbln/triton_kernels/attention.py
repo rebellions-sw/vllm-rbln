@@ -491,4 +491,12 @@ def _(
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
-    value: torch.Tensor, kv_cache: torch.Tensor, mask: torch.Tensor, qk_scale: torch.Tensor, seq_idx: torch.Tensor, block_table: torch.Tensor, dummy0: torch.Tensor,) -> torch.Tensor: return torch.empty_like(query)
+    value: torch.Tensor,
+    kv_cache: torch.Tensor,
+    mask: torch.Tensor,
+    qk_scale: torch.Tensor,
+    seq_idx: torch.Tensor,
+    block_table: torch.Tensor,
+    dummy0: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(query)
