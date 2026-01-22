@@ -443,6 +443,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         self.dummy_run_state: DummyRunState | None = None
 
+        self.specialized_moe_decode = parallel_config.data_parallel_size > 1 \
+            and envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE
+
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],
                      dtype: torch.dtype,
@@ -1379,6 +1382,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         so, cso = self._make_dummy_scheduler_outputs(
             dummy_decode_requests, dummy_decode_num_scheduled_tokens,
             num_kv_cache_groups)
+
+        if self.specialized_moe_decode:
+            self._execute_dummy_requests(
+                so,
+                cso,
+                self.decode_intermediate_tensors,
+                num_padded_tokens=self.max_num_batched_tokens)
+
         self._execute_dummy_requests(so, cso, self.decode_intermediate_tensors)
 
     def _add_dummy_requests(
@@ -1449,14 +1460,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         sched_output: SchedulerOutput,
         cleanup_sched_output: SchedulerOutput,
         intermediate_tensors: IntermediateTensors,
+        num_padded_tokens: int | None = None,
     ) -> None:
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
 
-        output = self.execute_model(sched_output, intermediate_tensors)
+        output = self.execute_model(sched_output, intermediate_tensors,
+                                    num_padded_tokens)
         if output is None:
             self.sample_tokens(None)
-        output = self.execute_model(cleanup_sched_output, intermediate_tensors)
+        output = self.execute_model(cleanup_sched_output, intermediate_tensors,
+                                    num_padded_tokens)
         if output is None:
             self.sample_tokens(None)
 
@@ -1783,11 +1797,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         else:
             intermediate_tensors = self.decode_intermediate_tensors
 
+        num_padded_tokens = self.max_batch_size \
+            if self.specialized_moe_decode else None
+
         with set_forward_context(
                 attn_metadata,
                 self.vllm_config,
                 num_tokens=num_input_tokens,
                 num_tokens_across_dp=num_tokens_across_dp,
+                num_padded_tokens=num_padded_tokens,
         ):
             token_indices = None
             inputs_embeds = None
@@ -1939,6 +1957,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self,
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        num_padded_tokens: int | None = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors, None]:
         if self.execute_model_state is not None:
             raise RuntimeError("State error: sample_tokens() must be called "
@@ -1972,6 +1991,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 model_kwargs,
             ) = self._preprocess(scheduler_output)
 
+        is_prefills = (self.input_batch.num_computed_tokens_cpu
+                       < self.input_batch.num_tokens - 1)
+        if self.specialized_moe_decode and num_padded_tokens is None:
+            num_padded_tokens = self.max_num_batched_tokens \
+                if is_prefills[0] else self.max_batch_size
         # Run the model.
         # Use persistent buffers for CUDA graphs.
         with (set_forward_context(
@@ -1979,6 +2003,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self.vllm_config,
                 num_tokens=num_input_tokens,
                 num_tokens_across_dp=num_tokens_across_dp,
+                num_padded_tokens=num_padded_tokens,
         ), record_function_or_nullcontext("Forward"),
               self.maybe_get_kv_connector_output(scheduler_output) as
               kv_connector_output):
@@ -1991,8 +2016,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_reqs = self.input_batch.num_reqs
             input_ids = input_ids.view(num_reqs, -1).to(torch.long)
             positions = positions.view(num_reqs, -1)
-            is_prefills = (self.input_batch.num_computed_tokens_cpu
-                           < self.input_batch.num_tokens - 1)
 
             token_indices = None
             if is_prefills[0]:

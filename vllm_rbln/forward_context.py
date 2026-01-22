@@ -35,7 +35,7 @@ logger = init_logger(__name__)
 
 @dataclass
 class RBLNDPMetadata(DPMetadata):
-    max_pads_across_dp: int = 0
+    max_pads_across_dp: torch.Tensor | None = None
 
     @staticmethod
     def num_tokens_across_dp(num_tokens: int, dp_size: int,
@@ -57,22 +57,53 @@ class RBLNDPMetadata(DPMetadata):
     def make(
         vllm_config: VllmConfig,
         num_tokens: int,
+        num_padded_tokens: int | None = None,
     ) -> "RBLNDPMetadata":
         parallel_config = vllm_config.parallel_config
         dp_size = parallel_config.data_parallel_size
         dp_rank = parallel_config.data_parallel_rank
 
-        scheduler_config = vllm_config.scheduler_config
-        max_pad = scheduler_config.max_num_batched_tokens
-        batchsize = num_tokens
+        if dp_size > 1:
+            scheduler_config = vllm_config.scheduler_config
+            max_pad = scheduler_config.max_num_batched_tokens
+            batchsize = num_tokens
 
-        num_tokens_across_dp_cpu = RBLNDPMetadata.num_tokens_across_dp(
-            batchsize, dp_size, dp_rank)
-        max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp_cpu)
+            if envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE:
+                num_padded_tokens = num_padded_tokens or max_pad
+
+                pad_flag = 1 << 16
+                pad_mask = pad_flag - 1
+                assert max_pad % num_padded_tokens == 0 and pad_flag > max_pad
+
+                if max_pad == num_padded_tokens:
+                    batchsize |= pad_flag
+
+                tokens_across_dp_cpu = RBLNDPMetadata.num_tokens_across_dp(
+                    batchsize, dp_size, dp_rank)
+                max_across_dp = torch.max(tokens_across_dp_cpu)
+                max_pad = max_pad if max_across_dp > pad_flag \
+                    else num_padded_tokens
+
+                mask_tensor = torch.tensor([pad_mask] * dp_size,
+                                           device="cpu",
+                                           dtype=torch.int32)
+                num_tokens_across_dp_cpu = tokens_across_dp_cpu & mask_tensor
+            else:
+                num_tokens_across_dp_cpu = RBLNDPMetadata.num_tokens_across_dp(
+                    batchsize, dp_size, dp_rank)
+
+            max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp_cpu)
+            max_pads_across_dp = torch.empty(max_pad, device="cpu")
+        else:
+            num_tokens_across_dp_cpu = torch.tensor([num_tokens],
+                                                    device="cpu",
+                                                    dtype=torch.int32)
+            max_tokens_across_dp_cpu = num_tokens
+            max_pads_across_dp = None
 
         return RBLNDPMetadata(max_tokens_across_dp_cpu,
                               num_tokens_across_dp_cpu,
-                              max_pads_across_dp=max_pad)
+                              max_pads_across_dp=max_pads_across_dp)
 
 
 @contextmanager
@@ -85,6 +116,7 @@ def _set_forward_context(
     cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE,
     batch_descriptor: BatchDescriptor | None = None,
     ubatch_slices: UBatchSlices | None = None,
+    num_padded_tokens: int | None = None,
 ):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
@@ -99,7 +131,8 @@ def _set_forward_context(
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if (enable_dp or use_moe_tokens_mask) and (attn_metadata is not None
                                                or num_tokens is not None):
-        dp_metadata = RBLNDPMetadata.make(vllm_config, num_tokens or 0)
+        dp_metadata = RBLNDPMetadata.make(vllm_config, num_tokens or 0,
+                                          num_padded_tokens)
 
     forward_context = create_forward_context(
         attn_metadata,
