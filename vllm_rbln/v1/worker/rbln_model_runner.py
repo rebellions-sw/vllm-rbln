@@ -96,6 +96,7 @@ from vllm_rbln.lora.mask import LoRAMask
 from vllm_rbln.v1.attention.backends.flash_attention import (
     RBLNFlashAttentionMetadataBuilder)
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
+from vllm_rbln.v1.sample import RBLNSampler
 from vllm_rbln.v1.worker.bucketing import get_bucketing_manager_class
 from vllm_rbln.worker.metrics import PerformanceTracker
 
@@ -238,7 +239,18 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.max_encoder_len = 0
 
         # Sampler
-        self.sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
+        self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
+        if self.use_rbln_sampler:
+            logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
+            self.pooled_tensors: dict[int, torch.Tensor] = {}
+            sampler = RBLNSampler(
+                logprobs_mode=self.model_config.logprobs_mode,
+                seed=self.vllm_config.model_config.seed,
+            )
+        else:
+            logger.info("Using default vLLM sampler.")
+            sampler = Sampler(logprobs_mode=self.model_config.logprobs_mode)
+        self.sampler = sampler
 
         # Lazy initialization
         self.compute_logits_model: nn.Module
