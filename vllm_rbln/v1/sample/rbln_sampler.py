@@ -124,11 +124,15 @@ class RBLNTopKTopPSampler(nn.Module):
     def __init__(self,
                  logprobs_mode: LogprobsMode = "raw_logprobs",
                  seed: int = 42):
+        # TODO(rbln): Merge more ops to rbln context.
+        #       Currently, we only have softmax in rbln context.
         super().__init__()
         self.logprobs_mode = logprobs_mode
+
         assert self.logprobs_mode not in (
             "processed_logits", "processed_logprobs"), (
                 "RBLN Sampling does not support returning logits/logprobs")
+
         rebel.manual_seed(seed)
         options = {"compile_context": rebel.CompileContext()}
         self._compiled_rbln_topk_topp_sampler = torch.compile(
@@ -168,13 +172,12 @@ class RBLNSampler(VLLMSampler):
                  seed: int = 42):
         super().__init__()
         if logprobs_mode in ("raw_logprobs", "raw_logits"):
+            self.topk_topp_sampler = RBLNTopKTopPSampler(
+                logprobs_mode=logprobs_mode, seed=seed)
+        else:
             logger.warning_once(
                 f"RBLN Sampling does not support logprobs_mode: {logprobs_mode}. Using native sampler instead."
             )
-
-        else:
-            self.topk_topp_sampler = RBLNTopKTopPSampler(
-                logprobs_mode=logprobs_mode, seed=seed)
 
     def apply_penalties(
         self,
