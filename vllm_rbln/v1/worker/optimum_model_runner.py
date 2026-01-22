@@ -23,6 +23,7 @@ from vllm.config import VllmConfig, set_current_vllm_config
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.parallel_state import get_pp_group
+from vllm.forward_context import set_forward_context
 from vllm.model_executor.models.interfaces import supports_transcription
 from vllm.model_executor.models.interfaces_base import (
     VllmModelForPooling, is_pooling_model, is_text_generation_model)
@@ -266,8 +267,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         with record_function_or_nullcontext("Preprocess"):
             self._update_states(scheduler_output)
+            logger.info("****************************** scheduler_output: %s", scheduler_output)
             if not scheduler_output.total_num_scheduled_tokens:
+                logger.info("****************************** scheduler_output.total_num_scheduled_tokens is 0")
                 if not has_kv_transfer_group():
+                    logger.info("****************************** has_kv_transfer_group() is False")
                     # FIXME If local block table exists in the model,
                     # clear the local block table.
                     # Because in the case of LLM (not AsyncLLMEngine),
@@ -278,13 +282,28 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         self.model.attention_manager.clear()
                     # Return empty ModelRunnerOutput if there's no work to do.
                     return EMPTY_MODEL_RUNNER_OUTPUT
+                logger.info("****************************** return self.kv_connector_no_forward")
                 return self.kv_connector_no_forward(scheduler_output,
                                     self.vllm_config)
             # Prepare the decoder inputs.
             model_input, num_scheduled_tokens_np = self._prepare_inputs(
                 scheduler_output)
 
-        with record_function_or_nullcontext("Forward"):
+        logger.info(f"*************************** maybe_get_kv_connector_output")
+        with (
+            # set_forward_context(
+            #     attn_metadata,
+            #     self.vllm_config,
+            #     num_tokens=num_tokens_padded,
+            #     num_tokens_across_dp=num_tokens_across_dp,
+            #     cudagraph_runtime_mode=cudagraph_mode,
+            #     batch_descriptor=batch_desc,
+            #     ubatch_slices=ubatch_slices_padded,
+            # ),
+            record_function_or_nullcontext("Forward"),
+            # self.maybe_get_kv_connector_output(scheduler_output) as kv_connector_output,
+        ):
+            logger.info(f"*************************** maybe_get_kv_connector_output done")
             start_time = time.perf_counter()
             hidden_states = self.model(model_input)
             end_time = time.perf_counter()

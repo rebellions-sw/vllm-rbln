@@ -108,13 +108,7 @@ class RBLNOptimumScheduler(Scheduler):
                 "Encoder-decoder models are not currently supported with KV connectors"
             )
             self.connector = KVConnectorFactory.create_connector(
-                config=self.vllm_config,
-                role=KVConnectorRole.SCHEDULER,
-            )
-            kv_load_failure_policy = (
-                self.vllm_config.kv_transfer_config.kv_load_failure_policy
-            )
-            self.recompute_kv_load_failures = kv_load_failure_policy == "recompute"
+                config=self.vllm_config, role=KVConnectorRole.SCHEDULER)
 
         self.kv_event_publisher = None
         num_gpu_blocks = self.cache_config.num_gpu_blocks
