@@ -82,6 +82,7 @@ class ExecuteModelState(NamedTuple):
     logits: torch.Tensor
     hidden_states: torch.Tensor
     sample_hidden_states: torch.Tensor
+    is_prompt: bool
 
 
 class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
@@ -208,19 +209,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             use_rbln_sampler=self.use_rbln_sampler,
         )
 
+        # FIXME enable async scheduling for optimum model runner
         self.use_async_scheduling = self.scheduler_config.async_scheduling
-        # Cache the device properties.
-        # self._init_device_properties()
-
-        # NOTE The shape of input_ids, positions are modified for optimum
-        # self.input_ids = torch.zeros(self.max_num_reqs,
-        #                              self.max_num_tokens,
-        #                              dtype=torch.int64,
-        #                              device=self.device)
-        # self.positions = torch.zeros(self.max_num_reqs,
-        #                              self.max_num_tokens,
-        #                              dtype=torch.int32,
-        #                              device=self.device)
         self.enable_prefix_caching = cache_config.enable_prefix_caching
         self.seq_lens = np.zeros(self.max_num_reqs, dtype=np.int32)
 
@@ -338,6 +328,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             logits=logits,
             hidden_states=hidden_states,
             sample_hidden_states=sample_hidden_states,
+            is_prompt=model_input.is_prompt,
         )
         return None
 
@@ -663,6 +654,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 )
 
             self.requests.pop(req_id, None)
+            self.num_prompt_logprobs.pop(req_id, None)
         # Remove the finished requests from the persistent batch.
         # NOTE(woosuk): There could be an edge case where finished_req_ids and
         # scheduled_req_ids overlap. This happens when a request is aborted and
@@ -1096,15 +1088,17 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_nans_in_logits = self._get_nans_in_logits(logits)
 
         num_reqs = self.input_batch.num_reqs
-
         # Copy some objects so they don't get modified after returning.
         # This is important when using async scheduling.
         req_ids_output_copy = self.input_batch.req_ids.copy()
         req_id_to_index_output_copy = self.input_batch.req_id_to_index.copy()
 
-        num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
-        sampled_token_ids = sampler_output.sampled_token_ids
-        logprobs_tensors = sampler_output.logprobs_tensors
+        # num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
+        # sampled_token_ids = sampler_output.sampled_token_ids
+        # logprobs_tensors = sampler_output.logprobs_tensors
+        # Remove the padding from sampler_output
+        num_sampled_tokens, sampled_token_ids, logprobs_tensors = \
+            self.postprocess_sampler_output(sampler_output, num_reqs)
         invalid_req_indices = []
         cu_num_tokens: list[int] | None = None
         if not self.use_async_scheduling:
@@ -1347,6 +1341,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             logits,
             hidden_states,
             sample_hidden_states,
+            is_prompt,
         ) = self.execute_model_state
         # Clear ephemeral state.
         self.execute_model_state = None
@@ -1357,7 +1352,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                        self.input_batch, logits)
 
         with record_function_or_nullcontext("rbln_model_runner: sample"):
-            use_padding = self.use_rbln_sampler and not model_input.is_prompt
+            use_padding = self.use_rbln_sampler and not is_prompt
             if use_padding:
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
@@ -1546,3 +1541,21 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         #     self._sync_device()
 
         return prompt_logprobs_dict
+
+    def postprocess_sampler_output(
+            self, sampler_output: SamplerOutput,
+            num_reqs: int) -> tuple[int, torch.Tensor, LogprobsTensors]:
+        dict = {}
+        num_spec_decode_token = 1
+        num_sampled_tokens = num_reqs
+        print("[before] sampler_output.sampled_token_ids",
+              sampler_output.sampled_token_ids.shape)
+        sampled_token_ids = sampler_output.sampled_token_ids[:num_reqs]
+        print("[after] sampler_output.sampled_token_ids",
+              sampler_output.sampled_token_ids.shape)
+        for field_name in sampler_output.logprobs_tensors._fields:
+            tensor = getattr(sampler_output.logprobs_tensors, field_name)
+            dict[field_name] = tensor[:num_reqs * num_spec_decode_token]
+        logprobs_tensors = LogprobsTensors(**dict)
+
+        return num_sampled_tokens, sampled_token_ids, logprobs_tensors
