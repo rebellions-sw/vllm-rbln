@@ -187,8 +187,17 @@ class RBLNWorker(WorkerBase):
         n_model_experts = 0
         if self.model_config.quantization is not None:
             # FIXME(RBLN) - for now, mxfp4 quantization is only supported
-            assert self.model_config.quantization == "mxfp4"
-            nbits_per_param = 4
+            logger.info("model quantization scheme = %s", self.model_config.quantization)
+            quantization = self.model_config.quantization
+            if quantization == "mxfp4":
+                nbits_per_param = 4
+            elif quantization == "fp8":
+                nbits_per_param = 8
+            else:
+                assert False, "invalid quantization scheme for RBLN"
+            # pack 2 mxfp4 elems into single uint8 elem
+            packed_num_elems = 8 // nbits_per_param
+
             device_name = current_platform.get_device_name().lower()
             assert "rbln" in device_name
             if "ca" in device_name:
@@ -199,19 +208,15 @@ class RBLNWorker(WorkerBase):
                 # ratio scale vs weight = 1 : 16
                 ratio = 16 / 17
             elif "cr" in device_name:
-                # REBEL can support mxfp4 quantization
-                nbits_per_param = 4
                 ratio = 1
             else:
                 assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
-
-            # pack 2 mxfp4 elems into single uint8 elem
-            packed_num_elems = 8 // 4
         else:
             nbits_per_param = 16
             packed_num_elems = 1
             ratio = 1
         for key, value in params_dict.items():
+            logger.info("%s %s %s", key, value.shape, value.dtype)
             if value.dtype == torch.bfloat16:
                 n_model_attentions += value.numel()
             else:
@@ -221,6 +226,8 @@ class RBLNWorker(WorkerBase):
         n_model_params = n_model_attentions + n_model_experts
         block_size = self.cache_config.block_size
 
+        logger.info("n_model_params = %s(B), n_model_experts = %s(B)",
+            n_model_params // 2**30, n_model_experts // 2**30)
         # This function comes from optimum-rbln.
         # We must keep it updated as optimum is upgraded.
         max_num_blocks = get_maximum_num_blocks(

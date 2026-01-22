@@ -91,15 +91,20 @@ def get_maximum_num_blocks(
                                            ATOM_SYS_DRAM_NBYTES)
         # ATOM - basic data type fp16
         default_bits_per_param = 16
+        # ATOM device == single chip
+        num_cores_per_device = 1
     elif "cr" in device_name:
         # REBEL - RBLN-CR[xxx]
         # REBEL DRAM - 144GB (quad chips, chiplet) - system(4G) = 140GB
         REBEL_DRAM_NBYTES = 144 * 2**30
         REBEL_SYS_DRAM_NBYTES = 4 * 2**30
         REBEL_DRAM_NBYTES -= REBEL_SYS_DRAM_NBYTES
-        available_dram_bytes = rsd_size * REBEL_DRAM_NBYTES
+        available_dram_bytes = REBEL_DRAM_NBYTES
         # FIXME(RBLN) - basic data type fp8 for REBEL, for now fp16
         default_bits_per_param = 16
+        # REBEL device == Quad chiplet
+        num_cores_per_device = 4
+        assert rsd_size == 1, "REBEL DOES NOT use VLLM_RBLN_TP_SIZE"
     else:
         assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
@@ -135,7 +140,7 @@ def get_maximum_num_blocks(
         buffer_per_runtime_per_core = 2**28  # 256MB per runtime
         # 1 for prefill, 1 for decoder
         buffer_per_core = buffer_per_runtime_per_core * num_runtimes
-        buffer = buffer_per_core * rsd_size
+        buffer = buffer_per_core * num_cores_per_device
     available_dram_bytes -= buffer
 
     check_oom(available_dram_bytes)
