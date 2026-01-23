@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_NUM_RAY_NODES: int = 1
     VLLM_RBLN_METRICS: bool = False
     VLLM_RBLN_NUMA: bool = True
+    VLLM_RBLN_SORT_BATCH: bool = False
     VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY: str = "exponential"
     VLLM_RBLN_DECODE_BATCH_BUCKET_MIN: int = 1
     VLLM_RBLN_DECODE_BATCH_BUCKET_STEP: int = 2
@@ -131,6 +132,9 @@ environment_variables = {
      ("true", "1")),
     "VLLM_RBLN_KERNEL_MODE":
     (lambda: os.environ.get("RBLN_KERNEL_MODE", "torch_triton").lower()),
+    "VLLM_RBLN_SORT_BATCH":
+    (lambda: os.environ.get("VLLM_RBLN_SORT_BATCH", "False").lower() in
+     ("true", "1")),
     # Decode batch bucket strategy [exponential, exp, linear]
     "VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY":
     lambda: os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY",
