@@ -242,7 +242,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
-            self.pooled_tensors: dict[int, torch.Tensor] = {}
             sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 seed=self.vllm_config.model_config.seed,
