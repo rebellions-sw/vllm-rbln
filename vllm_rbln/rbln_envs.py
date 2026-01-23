@@ -36,6 +36,10 @@ if TYPE_CHECKING:
     VLLM_RBLN_NUM_RAY_NODES: int = 1
     VLLM_RBLN_METRICS: bool = False
     VLLM_RBLN_SORT_BATCH: bool = False
+    VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY: str = "exponential"
+    VLLM_RBLN_DECODE_BATCH_BUCKET_MIN: int = 1
+    VLLM_RBLN_DECODE_BATCH_BUCKET_STEP: int = 2
+    VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT: int = 4
 
 
 def get_dp_impl():
@@ -122,6 +126,19 @@ environment_variables = {
     "VLLM_RBLN_SORT_BATCH":
     (lambda: os.environ.get("VLLM_RBLN_SORT_BATCH", "False").lower() in
      ("true", "1")),
+    # Decode batch bucket strategy [exponential, exp, linear]
+    "VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY":
+    lambda: os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_STRATEGY",
+                           "exponential"),
+    # Decode batch bucket min
+    "VLLM_RBLN_DECODE_BATCH_BUCKET_MIN":
+    lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_MIN", 1)),
+    # Decode batch bucket step
+    "VLLM_RBLN_DECODE_BATCH_BUCKET_STEP":
+    lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_STEP", 2)),
+    # Decode batch bucket limit
+    "VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT":
+    lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 32)),
 }
 
 

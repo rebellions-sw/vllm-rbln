@@ -75,7 +75,6 @@ setup(name="vllm-rbln",
           "Repository": "https://github.com/rebellions-sw/vllm-rbln"
       },
       classifiers=[
-          "Programming Language :: Python :: 3.9",
           "Programming Language :: Python :: 3.10",
           "Programming Language :: Python :: 3.11",
           "Programming Language :: Python :: 3.12",
@@ -89,7 +88,7 @@ setup(name="vllm-rbln",
           "Topic :: Scientific/Engineering :: Information Analysis",
       ],
       packages=find_packages(),
-      python_requires=">=3.9",
+      python_requires=">=3.10",
       install_requires=get_requirements(),
       entry_points={
           "vllm.platform_plugins": ["rbln = vllm_rbln:register"],

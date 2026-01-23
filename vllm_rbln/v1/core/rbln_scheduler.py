@@ -15,8 +15,9 @@
 import time
 from typing import Optional
 
-from vllm.distributed.kv_events import KVEventBatch
-from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.distributed.ec_transfer.ec_connector.base import ECConnectorMetadata
+from vllm.distributed.kv_transfer.kv_connector.v1.base import (
+    KVConnectorMetadata)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.request_queue import (SchedulingPolicy,
@@ -24,6 +25,7 @@ from vllm.v1.core.sched.request_queue import (SchedulingPolicy,
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.v1.engine import EngineCoreEventType
 from vllm.v1.request import Request, RequestStatus
+from vllm.v1.utils import record_function_or_nullcontext
 
 from vllm_rbln.logger import init_logger
 
@@ -45,7 +47,9 @@ def undo_uncomputed_block_caching(
         group.kv_cache_spec.block_size
         for group in kv_cache_manager.kv_cache_config.kv_cache_groups
     ]
-    for blocks, num_full_block in zip(grouped_blocks, num_computed_blocks):
+    for blocks, num_full_block in zip(grouped_blocks,
+                                      num_computed_blocks,
+                                      strict=False):
         for block in blocks[num_full_block:]:
             # NOTE(RBLN): this function call efficiently resets
             # the block hash and evicts the corresponding block from the cache.
@@ -61,11 +65,11 @@ def undo_uncomputed_block_caching(
 class RBLNScheduler(Scheduler):
 
     def schedule(self) -> SchedulerOutput:
-        # Copied from vllm.v1.core.sched.Scheduler.schedule: https://github.com/vllm-project/vllm/blob/01efc7ef781391e744ed08c3292817a773d654e6/vllm/v1/core/sched/scheduler.py#L177-L628
+        # Copied from vllm.v1.core.sched.Scheduler.schedule: https://github.com/vllm-project/vllm/blob/4fd9d6a85c00ac0186aa9abbeff73fc2ac6c721e/vllm/v1/core/sched/scheduler.py#L205-L747
         # The only differences are:
         # - Disable mixed batching
         # - Limit prefill batch size to 1
-        # - Create grammar bitmask for scheduled requests only
+        # - Limit decode batch size to (max_num_seqs // pipeline_parallel_size)
         # Search for NOTE(RBLN) for details
 
         # NOTE(woosuk) on the scheduling algorithm:
@@ -106,6 +110,24 @@ class RBLNScheduler(Scheduler):
         while req_index < len(self.running) and token_budget > 0:
             request = self.running[req_index]
 
+            if (request.num_output_placeholders > 0
+                    # This is
+                    # (num_computed_tokens + 1) - (num_output_placeholders - 1)
+                    # Since output placeholders are also included in the
+                    # computed tokens count, we subtract
+                    # (num_output_placeholders - 1) to remove any draft tokens,
+                    # so that we can be sure no further steps are needed even
+                    # if they are all rejected.
+                    and request.num_computed_tokens + 2 -
+                    request.num_output_placeholders
+                    >= request.num_prompt_tokens + request.max_tokens):
+                # Async scheduling: Avoid scheduling an extra step when we are
+                # sure that the previous step has reached request.max_tokens.
+                # We don't schedule partial draft tokens since this prevents
+                # uniform decode optimizations.
+                req_index += 1
+                continue
+
             num_new_tokens = (request.num_tokens_with_spec +
                               request.num_output_placeholders -
                               request.num_computed_tokens)
@@ -123,13 +145,21 @@ class RBLNScheduler(Scheduler):
 
             # Schedule encoder inputs.
             encoder_inputs_to_schedule = None
+            external_load_encoder_input: list[int] = []
             new_encoder_compute_budget = encoder_compute_budget
             if request.has_encoder_inputs:
-                (encoder_inputs_to_schedule, num_new_tokens,
-                 new_encoder_compute_budget
-                 ) = self._try_schedule_encoder_inputs(
-                     request, request.num_computed_tokens, num_new_tokens,
-                     encoder_compute_budget)
+                (
+                    encoder_inputs_to_schedule,
+                    num_new_tokens,
+                    new_encoder_compute_budget,
+                    external_load_encoder_input,
+                ) = self._try_schedule_encoder_inputs(
+                    request,
+                    request.num_computed_tokens,
+                    num_new_tokens,
+                    encoder_compute_budget,
+                    shift_computed_tokens=1 if self.use_eagle else 0,
+                )
 
             if num_new_tokens == 0:
                 # The request cannot be scheduled because one of the following
@@ -147,12 +177,19 @@ class RBLNScheduler(Scheduler):
                 req_index += 1
                 continue
 
-            while True:
-                new_blocks = self.kv_cache_manager.allocate_slots(
-                    request,
-                    num_new_tokens,
-                    num_lookahead_tokens=self.num_lookahead_tokens)
-                if new_blocks is None:
+            # Schedule newly needed KV blocks for the request.
+            with record_function_or_nullcontext("schedule: allocate_slots"):
+                while True:
+                    new_blocks = self.kv_cache_manager.allocate_slots(
+                        request,
+                        num_new_tokens,
+                        num_lookahead_tokens=self.num_lookahead_tokens,
+                    )
+
+                    if new_blocks is not None:
+                        # The request can be scheduled.
+                        break
+
                     # The request cannot be scheduled.
                     # Preempt the lowest-priority request.
                     if self.policy == SchedulingPolicy.PRIORITY:
@@ -163,30 +200,37 @@ class RBLNScheduler(Scheduler):
                         self.running.remove(preempted_req)
                         if preempted_req in scheduled_running_reqs:
                             scheduled_running_reqs.remove(preempted_req)
+                            token_budget += num_scheduled_tokens[
+                                preempted_req.request_id]
+                            req_to_new_blocks.pop(preempted_req.request_id)
+                            num_scheduled_tokens.pop(preempted_req.request_id)
+                            scheduled_spec_decode_tokens.pop(
+                                preempted_req.request_id, None)
+                            preempted_encoder_inputs = \
+                                scheduled_encoder_inputs.pop(
+                                    preempted_req.request_id, None)
+                            if preempted_encoder_inputs:
+                                # Restore encoder compute budget if the
+                                # preempted request had encoder inputs
+                                # scheduled in this step.
+                                num_tokens_to_restore = sum(
+                                    preempted_req.get_num_encoder_tokens(i)
+                                    for i in preempted_encoder_inputs)
+                                encoder_compute_budget += num_tokens_to_restore
+                            req_index -= 1
                     else:
                         preempted_req = self.running.pop()
 
-                    self.kv_cache_manager.free(preempted_req)
-                    self.encoder_cache_manager.free(preempted_req)
-                    preempted_req.status = RequestStatus.PREEMPTED
-                    preempted_req.num_computed_tokens = 0
-                    if self.log_stats:
-                        preempted_req.record_event(
-                            EngineCoreEventType.PREEMPTED, scheduled_timestamp)
-
-                    self.waiting.prepend_request(preempted_req)
+                    self._preempt_request(preempted_req, scheduled_timestamp)
                     preempted_reqs.append(preempted_req)
                     if preempted_req == request:
                         # No more request to preempt.
-                        can_schedule = False
+                        # Cannot schedule this request.
                         break
-                else:
-                    # The request can be scheduled.
-                    can_schedule = True
-                    break
-            if not can_schedule:
+
+            if new_blocks is None:
+                # Cannot schedule this request.
                 break
-            assert new_blocks is not None
 
             # Schedule the request.
             scheduled_running_reqs.append(request)
@@ -199,12 +243,16 @@ class RBLNScheduler(Scheduler):
             if request.spec_token_ids:
                 num_scheduled_spec_tokens = (num_new_tokens +
                                              request.num_computed_tokens -
-                                             request.num_tokens)
+                                             request.num_tokens -
+                                             request.num_output_placeholders)
                 if num_scheduled_spec_tokens > 0:
                     # Trim spec_token_ids list to num_scheduled_spec_tokens.
                     del request.spec_token_ids[num_scheduled_spec_tokens:]
                     scheduled_spec_decode_tokens[request.request_id] = (
                         request.spec_token_ids)
+                # New spec tokens will be set in `update_draft_token_ids`
+                # before the next step when applicable.
+                request.spec_token_ids = []
 
             # Encoder-related.
             if encoder_inputs_to_schedule:
@@ -214,6 +262,19 @@ class RBLNScheduler(Scheduler):
                 for i in encoder_inputs_to_schedule:
                     self.encoder_cache_manager.allocate(request, i)
                 encoder_compute_budget = new_encoder_compute_budget
+            if external_load_encoder_input:
+                for i in external_load_encoder_input:
+                    self.encoder_cache_manager.allocate(request, i)
+                    if self.ec_connector is not None:
+                        self.ec_connector.update_state_after_alloc(request, i)
+
+            # NOTE(RBLN): We restrict the decode batch size to
+            # (max_num_seqs // pipeline_parallel_size) to prevent pipeline
+            # bubbles.
+            if len(scheduled_running_reqs) >= (
+                    self.max_num_running_reqs //
+                    self.vllm_config.parallel_config.pipeline_parallel_size):
+                break
 
         # Record the LoRAs in scheduled_running_reqs
         scheduled_loras: set[int] = set()
@@ -250,13 +311,14 @@ class RBLNScheduler(Scheduler):
                     else:
                         logger.debug(
                             "%s is still in WAITING_FOR_REMOTE_KVS state.",
-                            request.request_id)
+                            request.request_id,
+                        )
                         self.waiting.pop_request()
                         skipped_waiting_requests.prepend_request(request)
                         continue
 
-                # Skip request if the structured output request is still waiting
-                # for FSM compilation.
+                # Skip request if the structured output request is still
+                # waiting for FSM compilation.
                 if request.status == RequestStatus.WAITING_FOR_FSM:
                     structured_output_req = request.structured_output_request
                     if structured_output_req and structured_output_req.grammar:
@@ -282,17 +344,16 @@ class RBLNScheduler(Scheduler):
                 # Get already-cached tokens.
                 if request.num_computed_tokens == 0:
                     # Get locally-cached tokens.
-                    new_computed_blocks, num_new_local_computed_tokens = \
-                        self.kv_cache_manager.get_computed_blocks(
-                            request)
+                    new_computed_blocks, num_new_local_computed_tokens = (
+                        self.kv_cache_manager.get_computed_blocks(request))
 
                     # Get externally-cached tokens if using a KVConnector.
                     if self.connector is not None:
-                        num_external_computed_tokens, load_kv_async = (
+                        ext_tokens, load_kv_async = (
                             self.connector.get_num_new_matched_tokens(
                                 request, num_new_local_computed_tokens))
 
-                        if num_external_computed_tokens is None:
+                        if ext_tokens is None:
                             # The request cannot be scheduled because
                             # the KVConnector couldn't determine
                             # the number of matched tokens.
@@ -300,53 +361,65 @@ class RBLNScheduler(Scheduler):
                             skipped_waiting_requests.prepend_request(request)
                             continue
 
+                        request.num_external_computed_tokens = ext_tokens
+                        num_external_computed_tokens = ext_tokens
+
                     # Total computed tokens (local + external).
                     num_computed_tokens = (num_new_local_computed_tokens +
                                            num_external_computed_tokens)
-                # KVTransfer: WAITING reqs have num_computed_tokens > 0
-                # after async KV recvs are completed.
                 else:
-                    new_computed_blocks = (
-                        self.kv_cache_manager.create_empty_block_list())
+                    # KVTransfer: WAITING reqs have num_computed_tokens > 0
+                    # after async KV recvs are completed.
+                    new_computed_blocks = \
+                        self.kv_cache_manager.empty_kv_cache_blocks
                     num_new_local_computed_tokens = 0
                     num_computed_tokens = request.num_computed_tokens
 
                 encoder_inputs_to_schedule = None
+                external_load_encoder_input = []
                 new_encoder_compute_budget = encoder_compute_budget
 
-                # KVTransfer: loading remote KV, do not allocate for new work.
                 if load_kv_async:
+                    # KVTransfer: loading remote KV, do not allocate for new
+                    # work.
                     assert num_external_computed_tokens > 0
                     num_new_tokens = 0
-                # Number of tokens to be scheduled.
                 else:
+                    # Number of tokens to be scheduled.
                     # We use `request.num_tokens` instead of
                     # `request.num_prompt_tokens` to consider the resumed
                     # requests, which have output tokens.
                     num_new_tokens = request.num_tokens - num_computed_tokens
-                    if (0 < self.scheduler_config.long_prefill_token_threshold
-                            < num_new_tokens):
-                        num_new_tokens = (
-                            self.scheduler_config.long_prefill_token_threshold)
+                    threshold = \
+                        self.scheduler_config.long_prefill_token_threshold
+                    if 0 < threshold < num_new_tokens:
+                        num_new_tokens = threshold
 
                     # chunked prefill has to be enabled explicitly to allow
                     # pooling requests to be chunked
-                    if not self.scheduler_config.enable_chunked_prefill and \
-                        num_new_tokens > prefill_token_budget:
-                        self.waiting.pop_request()
-                        skipped_waiting_requests.prepend_request(request)
-                        continue
+                    if (not self.scheduler_config.enable_chunked_prefill
+                            and num_new_tokens > prefill_token_budget):
+                        # If chunked_prefill is disabled,
+                        # we can stop the scheduling here.
+                        break
 
                     num_new_tokens = min(num_new_tokens, prefill_token_budget)
                     assert num_new_tokens > 0
 
                     # Schedule encoder inputs.
                     if request.has_encoder_inputs:
-                        (encoder_inputs_to_schedule, num_new_tokens,
-                         new_encoder_compute_budget
-                         ) = self._try_schedule_encoder_inputs(
-                             request, num_computed_tokens, num_new_tokens,
-                             encoder_compute_budget)
+                        (
+                            encoder_inputs_to_schedule,
+                            num_new_tokens,
+                            new_encoder_compute_budget,
+                            external_load_encoder_input,
+                        ) = self._try_schedule_encoder_inputs(
+                            request,
+                            num_computed_tokens,
+                            num_new_tokens,
+                            encoder_compute_budget,
+                            shift_computed_tokens=1 if self.use_eagle else 0,
+                        )
                         if num_new_tokens == 0:
                             # The request cannot be scheduled.
                             break
@@ -364,15 +437,10 @@ class RBLNScheduler(Scheduler):
                 if self.is_encoder_decoder and request.has_encoder_inputs:
                     # TODO(russellb): For Whisper, we know that the input is
                     # always padded to the maximum length. If we support other
-                    # encoder-decoder models, this will need to be updated if we
-                    # want to only allocate what is needed.
-                    assert ("whisper"
-                            in self.vllm_config.model_config.model.lower()), (
-                                "Whisper is the only supported "
-                                "encoder-decoder model.")
-                    num_encoder_tokens = MULTIMODAL_REGISTRY.\
-                        get_encdec_max_encoder_len(
-                        self.vllm_config.model_config)
+                    # encoder-decoder models, this will need to be updated if
+                    # we want to only allocate what is needed.
+                    num_encoder_tokens = (
+                        self.scheduler_config.max_num_encoder_input_tokens)
                 else:
                     num_encoder_tokens = 0
 
@@ -410,7 +478,7 @@ class RBLNScheduler(Scheduler):
                     num_computed_tokens + num_new_tokens)
 
                 # KVTransfer: the connector uses this info to determine
-                # if a load is needed. NOTE that
+                # if a load is needed. Note that
                 # This information is used to determine if a load is
                 # needed for this request.
                 if self.connector is not None:
@@ -429,6 +497,8 @@ class RBLNScheduler(Scheduler):
                     skipped_waiting_requests.prepend_request(request)
                     request.status = RequestStatus.WAITING_FOR_REMOTE_KVS
                     continue
+
+                self._update_connector_prefix_cache_stats(request)
 
                 req_index += 1
                 self.running.append(request)
@@ -462,6 +532,13 @@ class RBLNScheduler(Scheduler):
                     for i in encoder_inputs_to_schedule:
                         self.encoder_cache_manager.allocate(request, i)
                     encoder_compute_budget = new_encoder_compute_budget
+                # Allocate for external load encoder cache
+                if external_load_encoder_input:
+                    for i in external_load_encoder_input:
+                        self.encoder_cache_manager.allocate(request, i)
+                        if self.ec_connector is not None:
+                            self.ec_connector.update_state_after_alloc(
+                                request, i)
 
                 # NOTE(RBLN): Reaching this point means that this request
                 # can now be added to the running batch.
@@ -483,7 +560,8 @@ class RBLNScheduler(Scheduler):
                 for req in scheduled_running_reqs:
                     req_to_new_blocks.pop(req.request_id)
                     num_scheduled_tokens.pop(req.request_id)
-                    scheduled_spec_decode_tokens.pop(req.request_id, None)
+                    req.spec_token_ids = scheduled_spec_decode_tokens.pop(
+                        req.request_id, [])
                     scheduled_encoder_inputs.pop(req.request_id, None)
                     undo_uncomputed_block_caching(req, self.kv_cache_manager)
 
@@ -500,37 +578,59 @@ class RBLNScheduler(Scheduler):
         # Check if the scheduling constraints are satisfied.
         total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
         assert total_num_scheduled_tokens <= self.max_num_scheduled_tokens
+
         assert token_budget >= 0
         assert len(self.running) <= self.max_num_running_reqs
         # Since some requests in the RUNNING queue may not be scheduled in
         # this step, the total number of scheduled requests can be smaller than
         # len(self.running).
-        assert (len(scheduled_new_reqs) + len(scheduled_resumed_reqs) +
-                len(scheduled_running_reqs) <= len(self.running))
+        assert len(scheduled_new_reqs) + len(scheduled_resumed_reqs) + len(
+            scheduled_running_reqs) <= len(self.running)
 
-        # Get the longest common prefix among all requests in the running queue.
-        # This can be potentially used for cascade attention.
+        # Get the longest common prefix among all requests in the running
+        # queue. This can be potentially used for cascade attention.
         num_common_prefix_blocks = [0] * len(
             self.kv_cache_config.kv_cache_groups)
-        if self.running:
-            any_request = self.running[0]
-            num_common_prefix_blocks = (
-                self.kv_cache_manager.get_num_common_prefix_blocks(
-                    any_request.request_id))
+        with record_function_or_nullcontext(
+                "schedule: get_num_common_prefix_blocks"):
+            if self.running:
+                any_request = self.running[0]
+                num_common_prefix_blocks = (
+                    self.kv_cache_manager.get_num_common_prefix_blocks(
+                        any_request.request_id))
 
         # Construct the scheduler output.
-        new_reqs_data = [
-            NewRequestData.from_request(
-                req, req_to_new_blocks[req.request_id].get_block_ids())
-            for req in scheduled_new_reqs
-        ]
-        cached_reqs_data = self._make_cached_request_data(
-            scheduled_running_reqs,
-            scheduled_resumed_reqs,
-            num_scheduled_tokens,
-            scheduled_spec_decode_tokens,
-            req_to_new_blocks,
-        )
+        if self.use_v2_model_runner:
+            scheduled_new_reqs = scheduled_new_reqs + scheduled_resumed_reqs
+            scheduled_resumed_reqs = []
+            new_reqs_data = [
+                NewRequestData.from_request(
+                    req,
+                    req_to_new_blocks[req.request_id].get_block_ids(),
+                    req._all_token_ids,
+                ) for req in scheduled_new_reqs
+            ]
+        else:
+            new_reqs_data = [
+                NewRequestData.from_request(
+                    req, req_to_new_blocks[req.request_id].get_block_ids())
+                for req in scheduled_new_reqs
+            ]
+
+        with record_function_or_nullcontext(
+                "schedule: make_cached_request_data"):
+            cached_reqs_data = self._make_cached_request_data(
+                scheduled_running_reqs,
+                scheduled_resumed_reqs,
+                num_scheduled_tokens,
+                scheduled_spec_decode_tokens,
+                req_to_new_blocks,
+            )
+
+        # Record the request ids that were scheduled in this step.
+        self.prev_step_scheduled_req_ids.clear()
+        self.prev_step_scheduled_req_ids.update(num_scheduled_tokens.keys())
+
         scheduler_output = SchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=cached_reqs_data,
@@ -539,6 +639,8 @@ class RBLNScheduler(Scheduler):
             scheduled_spec_decode_tokens=scheduled_spec_decode_tokens,
             scheduled_encoder_inputs=scheduled_encoder_inputs,
             num_common_prefix_blocks=num_common_prefix_blocks,
+            preempted_req_ids={req.request_id
+                               for req in preempted_reqs},
             # finished_req_ids is an existing state in the scheduler,
             # instead of being newly scheduled in this step.
             # It contains the request IDs that are finished in between
@@ -553,25 +655,17 @@ class RBLNScheduler(Scheduler):
         # 2. Wrap up all the KV cache load / save ops into an opaque object
         # 3. Clear the internal states of the connector
         if self.connector is not None:
-            meta = self.connector.build_connector_meta(scheduler_output)
+            meta: KVConnectorMetadata = self.connector.build_connector_meta(
+                scheduler_output)
             scheduler_output.kv_connector_metadata = meta
 
-        # collect KV cache events from KV cache manager
-        events = self.kv_cache_manager.take_events()
+        # Build the connector meta for ECConnector
+        if self.ec_connector is not None:
+            ec_meta: ECConnectorMetadata = \
+                self.ec_connector.build_connector_meta(
+                    scheduler_output)
+            scheduler_output.ec_connector_metadata = ec_meta
 
-        # collect KV cache events from connector
-        if self.connector is not None:
-            connector_events = self.connector.take_events()
-            if connector_events:
-                if events is None:
-                    events = list(connector_events)
-                else:
-                    events.extend(connector_events)
-
-        # publish collected KV cache events
-        if events:
-            batch = KVEventBatch(ts=time.time(), events=events)
-            self.kv_event_publisher.publish(batch)
-
-        self._update_after_schedule(scheduler_output)
+        with record_function_or_nullcontext("schedule: update_after_schedule"):
+            self._update_after_schedule(scheduler_output)
         return scheduler_output
