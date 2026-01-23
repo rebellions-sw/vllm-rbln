@@ -43,7 +43,9 @@ def apply_top_k_top_p(
     it will be used to avoid the sorting step and improve efficiency.
     """
     if p is None and k is None:
-        return logits
+        # Custom operators in torch.compile must not return aliases of inputs.
+        # We return a clone to satisfy this strict aliasing constraint.
+        return logits.clone()
 
     logits_sort, logits_idx = logits.sort(dim=-1,
                                           descending=False,
