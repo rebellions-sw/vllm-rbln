@@ -36,8 +36,8 @@ if TYPE_CHECKING:
     VLLM_RBLN_DP_INPUT_ALL_GATHER: bool = True
     VLLM_RBLN_LOGITS_ALL_GATHER: bool = True
     VLLM_RBLN_NUM_RAY_NODES: int = 1
-    VLLM_RBLN_METRICS: bool = False
-    VLLM_RBLN_SORT_BATCH: bool = False
+    VLLM_RBLN_METRICS: bool = True
+    VLLM_RBLN_SORT_BATCH: bool = True
 
 
 def get_dp_impl():
