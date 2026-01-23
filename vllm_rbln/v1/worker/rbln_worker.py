@@ -185,12 +185,20 @@ class RBLNWorker(WorkerBase):
         params_dict = dict(self.model_runner.model.named_parameters())
         n_model_attentions = 0
         n_model_experts = 0
+        device_name = current_platform.get_device_name().lower()
+        assert "rbln" in device_name
+        if "ca" in device_name:
+            # consider RSD size for ATOM
+            num_runtimes = 2 * envs.VLLM_RBLN_TP_SIZE
+        elif "cr" in device_name:
+            # single device == Quad chiplet
+            num_runtimes = 2 * 4
+        else:
+            assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+
         if self.model_config.quantization is not None:
             # FIXME(RBLN) - for now, mxfp4 quantization is only supported
             assert self.model_config.quantization == "mxfp4"
-            nbits_per_param = 4
-            device_name = current_platform.get_device_name().lower()
-            assert "rbln" in device_name
             if "ca" in device_name:
                 # ATOM DOES NOT support mxfp4 quantization, handled by bf16
                 nbits_per_param = 16
@@ -215,6 +223,7 @@ class RBLNWorker(WorkerBase):
             if value.dtype == torch.bfloat16:
                 n_model_attentions += value.numel()
             else:
+                # quantized params is handled
                 n_model_experts += value.numel() * packed_num_elems * ratio
 
         # NOTE - model parallel(tp, dp, ep, pp) already applied into model params
@@ -230,8 +239,7 @@ class RBLNWorker(WorkerBase):
             # quantization : 4 (This is an ad-hoc value. Need to fix it)
             nbits_per_param=nbits_per_param,
             n_model_params=n_model_params,
-            # 2 : 1 for prefill and decode each
-            num_runtimes=2)
+            num_runtimes=num_runtimes)
 
         # NOTE -  adjust max_num_blocks considering swa block sharing
         # max_num_blocks - based on FullAttentionSpec for model
