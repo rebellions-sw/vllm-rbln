@@ -1134,6 +1134,7 @@ class RBLNFlashAttentionMetadataBuilder(
                 attn_masks = attn_masks.to(self.device)
         else:
             # batch padding
+            seq_idx = rbln_utils.pad(seq_idx, 0, batch_pad)
             seq_lens_tensor = rbln_utils.pad(seq_lens_tensor, 0, batch_pad)
             block_tables_tensor = rbln_utils.pad(block_tables_tensor, 0,
                                                  batch_pad)
