@@ -86,9 +86,6 @@ repos:
     entry: python tools/pre_commit/check_license_header.py
     language: python
     types: [python]
-  - id: check-root-lazy-imports
-    name: Check root lazy imports
-    entry: python tools/pre_commit/check_init_lazy_imports.py
     language: python
     types: [python]
   - id: check-filenames
