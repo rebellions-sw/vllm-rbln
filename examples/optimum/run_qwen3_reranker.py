@@ -67,7 +67,7 @@ def get_input_prompts(model_id, max_length, suffix_tokens,
          "is responsible for the movement of planets around the sun.")
     ]
 
-    pairs = list(zip(queries, documents))
+    pairs = list(zip(queries, documents, strict=False))
     inputs = process_inputs(pairs, task, max_length - len(suffix_tokens),
                             suffix_tokens, tokenizer)
 

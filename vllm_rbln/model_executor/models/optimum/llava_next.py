@@ -163,11 +163,11 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             return None
 
         if pixel_values is not None:
-            if not isinstance(pixel_values, (torch.Tensor, list)):
+            if not isinstance(pixel_values, torch.Tensor | list):
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
-            if not isinstance(image_sizes, (torch.Tensor, list)):
+            if not isinstance(image_sizes, torch.Tensor | list):
                 raise ValueError("Incorrect type of image sizes. "
                                  f"Got type: {type(image_sizes)}")
 
