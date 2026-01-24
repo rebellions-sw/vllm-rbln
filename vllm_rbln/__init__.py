@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import vllm_rbln.rbln_envs as envs
+import rbln_envs as envs
 
 
 def register():
@@ -23,41 +23,42 @@ def register():
 def register_model():
     if not envs.VLLM_RBLN_USE_VLLM_MODEL:
         from vllm import ModelRegistry
+
         ModelRegistry.register_model(
             "T5WithLMHeadModel",
-            "vllm_rbln.model_executor.models.optimum.t5:RBLNT5ForConditionalGeneration"
+            "vllm_rbln.model_executor.models.optimum.t5:RBLNT5ForConditionalGeneration",
         )
         ModelRegistry.register_model(
             "T5ForConditionalGeneration",
-            "vllm_rbln.model_executor.models.optimum.t5:RBLNT5ForConditionalGeneration"
+            "vllm_rbln.model_executor.models.optimum.t5:RBLNT5ForConditionalGeneration",
         )
         ModelRegistry.register_model(
             "T5EncoderModel",
-            "vllm_rbln.model_executor.models.optimum.encoder:RBLNOptimumForEncoderModel"
+            "vllm_rbln.model_executor.models.optimum.encoder:RBLNOptimumForEncoderModel",
         )
         ModelRegistry.register_model(
             "Gemma3ForConditionalGeneration",
-            "vllm_rbln.model_executor.models.optimum.gemma3:RBLNOptimumGemma3ForConditionalGeneration"
+            "vllm_rbln.model_executor.models.optimum.gemma3:RBLNOptimumGemma3ForConditionalGeneration",
         )
 
 
 def register_ops():
     if envs.VLLM_RBLN_USE_VLLM_MODEL:
-        import vllm_rbln.attention.layer  # noqa
-        import vllm_rbln.forward_context  # noqa
-        import vllm_rbln.lora.layer  # noqa
-        import vllm_rbln.model_executor.layers.fused_moe.layer  # noqa
-        import vllm_rbln.model_executor.layers.logits_processor  # noqa
-        import vllm_rbln.model_executor.layers.quantization.kernels.mixed_precision  # noqa
-        import vllm_rbln.model_executor.layers.rotary_embedding.base  # noqa
-        import vllm_rbln.model_executor.layers.rotary_embedding.deepseek_scaling_rope  # noqa
-        import vllm_rbln.model_executor.layers.vocab_parallel_embedding  # noqa
-        import vllm_rbln.model_executor.model_loader.weight_loader  # noqa
-        import vllm_rbln.models.deepseek_v2  # noqa
-        import vllm_rbln.models.qwen2_moe  # noqa
-        import vllm_rbln.models.qwen3  # noqa
-        import vllm_rbln.models.qwen3_moe  # noqa
-        import vllm_rbln.models.utils  # noqa
-        from vllm_rbln.triton_kernels import attention  # noqa
-        from vllm_rbln.triton_kernels import causal_attention  # noqa
-        from vllm_rbln.triton_kernels import sliding_window_attention  # noqa
+        import attention.layer  # noqa
+        import forward_context  # noqa
+        import lora.layer  # noqa
+        import model_executor.layers.fused_moe.layer  # noqa
+        import model_executor.layers.logits_processor  # noqa
+        import model_executor.layers.quantization.kernels.mixed_precision  # noqa
+        import model_executor.layers.rotary_embedding.base  # noqa
+        import model_executor.layers.rotary_embedding.deepseek_scaling_rope  # noqa
+        import model_executor.layers.vocab_parallel_embedding  # noqa
+        import model_executor.model_loader.weight_loader  # noqa
+        import models.deepseek_v2  # noqa
+        import models.qwen2_moe  # noqa
+        import models.qwen3  # noqa
+        import models.qwen3_moe  # noqa
+        import models.utils  # noqa
+        from triton_kernels import attention  # noqa
+        from triton_kernels import causal_attention  # noqa
+        from triton_kernels import sliding_window_attention  # noqa

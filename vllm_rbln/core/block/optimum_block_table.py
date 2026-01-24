@@ -21,7 +21,6 @@ from vllm.core.block.interfaces import Block, DeviceAwareBlockAllocator
 
 
 class RBLNOptimumBlockTable(BlockTable):
-
     def __init__(
         self,
         block_size: int,
@@ -40,7 +39,8 @@ class RBLNOptimumBlockTable(BlockTable):
         self._num_full_slots = self._get_num_token_ids()
 
     def get_num_blocks_touched_by_append_slots(
-            self, token_ids: List[int], num_lookahead_slots: int) -> int:
+        self, token_ids: List[int], num_lookahead_slots: int
+    ) -> int:
         """Determine how many blocks will be "touched" by appending the token
         ids.
 
@@ -53,8 +53,9 @@ class RBLNOptimumBlockTable(BlockTable):
         # return len(token_blocks)
 
         num_token_ids = len(token_ids) + num_lookahead_slots
-        first_chunk_size = self._block_size - (self._num_full_slots %
-                                               self._block_size)
+        first_chunk_size = self._block_size - (
+            self._num_full_slots % self._block_size
+        )
         if first_chunk_size == self._block_size:
             return math.ceil(num_token_ids / self._block_size)
 

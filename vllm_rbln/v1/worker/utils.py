@@ -45,7 +45,8 @@ def get_autobind_cpu_ids(
         Comma-separated string of CPU IDs, or "all" or "nobind".
     """
     allowed_numa_nodes, logical_cpu_list = (
-        CpuPlatform.get_allowed_cpu_core_node_list())
+        CpuPlatform.get_allowed_cpu_core_node_list()
+    )
 
     # Calculate rank_across_dp for CPU binding
     # This ensures different DP groups get different CPU allocations
@@ -72,15 +73,18 @@ def get_autobind_cpu_ids(
     ]
 
     if not available_numa_nodes:
-        logger.error("Auto thread-binding failed: no available NUMA nodes "
-                     "with allowed CPUs. Please try to bind threads manually.")
+        logger.error(
+            "Auto thread-binding failed: no available NUMA nodes "
+            "with allowed CPUs. Please try to bind threads manually."
+        )
         return "all"
 
     numa_node_idx = rank_across_dp % len(available_numa_nodes)
     selected_numa_node = available_numa_nodes[numa_node_idx]
     numa_node_cpu_list = numa_node_to_cpus[selected_numa_node]
     ranks_in_same_numa = [
-        r for r in range(world_size_across_dp)
+        r
+        for r in range(world_size_across_dp)
         if r % len(available_numa_nodes) == numa_node_idx
     ]
 
@@ -104,9 +108,11 @@ def get_autobind_cpu_ids(
 
         rank_position = ranks_in_same_numa.index(rank_across_dp)
         start_idx = rank_position * cpus_per_rank + min(
-            rank_position, remainder)
-        end_idx = (start_idx + cpus_per_rank +
-                   (1 if rank_position < remainder else 0))
+            rank_position, remainder
+        )
+        end_idx = (
+            start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
+        )
         logical_cpu_list = selected_cpu_list[start_idx:end_idx]
     else:
         logical_cpu_list = selected_cpu_list
@@ -166,13 +172,16 @@ def set_cpu_affinity(
         if cpu_arch in (CpuArchEnum.POWERPC, CpuArchEnum.S390X):
             # For S390X/POWERPC SMT-8/4/2
             local_omp_cpuid = get_autobind_cpu_ids(
-                rank, local_rank, parallel_config,
-                lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4])
+                rank,
+                local_rank,
+                parallel_config,
+                lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4],
+            )
         elif cpu_arch == CpuArchEnum.X86:
             # For x86 SMT-2, use 1 CPU per core
-            local_omp_cpuid = get_autobind_cpu_ids(rank, local_rank,
-                                                   parallel_config,
-                                                   lambda cpus: cpus[-1:])
+            local_omp_cpuid = get_autobind_cpu_ids(
+                rank, local_rank, parallel_config, lambda cpus: cpus[-1:]
+            )
         else:
             local_omp_cpuid = "nobind"
     else:
@@ -180,9 +189,7 @@ def set_cpu_affinity(
 
     if local_omp_cpuid not in ("all", "nobind"):
         # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
-        cpu_ids = [
-            int(cpu_id.strip()) for cpu_id in local_omp_cpuid.split(",")
-        ]
+        cpu_ids = [int(cpu_id.strip()) for cpu_id in local_omp_cpuid.split(",")]
         # Set CPU affinity for current process
         try:
             os.sched_setaffinity(0, cpu_ids)
@@ -207,8 +214,7 @@ def set_cpu_affinity(
                 )
         except OSError as e:
             logger.error(
-                "Failed to set CPU affinity for rank %d (local_rank %d): "
-                "%s",
+                "Failed to set CPU affinity for rank %d (local_rank %d): %s",
                 rank,
                 local_rank,
                 str(e),
@@ -216,8 +222,7 @@ def set_cpu_affinity(
             raise
     elif local_omp_cpuid == "nobind":
         logger.info(
-            "Skipping CPU affinity binding for rank %d (local_rank %d): "
-            "nobind",
+            "Skipping CPU affinity binding for rank %d (local_rank %d): nobind",
             rank,
             local_rank,
         )

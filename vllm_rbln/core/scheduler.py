@@ -20,12 +20,18 @@ from typing import Deque, List, Optional, Set, Tuple
 
 from vllm.config import SchedulerConfig
 from vllm.core.interfaces import AllocStatus
-from vllm.core.scheduler import (ARTIFICIAL_PREEMPTION_PROB,
-                                 PartialPrefillMetadata, PreemptionMode,
-                                 ScheduledSequenceGroup, Scheduler,
-                                 SchedulerOutputs, SchedulerPrefillOutputs,
-                                 SchedulerRunningOutputs,
-                                 SchedulerSwappedInOutputs, SchedulingBudget)
+from vllm.core.scheduler import (
+    ARTIFICIAL_PREEMPTION_PROB,
+    PartialPrefillMetadata,
+    PreemptionMode,
+    ScheduledSequenceGroup,
+    Scheduler,
+    SchedulerOutputs,
+    SchedulerPrefillOutputs,
+    SchedulerRunningOutputs,
+    SchedulerSwappedInOutputs,
+    SchedulingBudget,
+)
 from vllm.sequence import SequenceGroup, SequenceStage, SequenceStatus
 
 from vllm_rbln.logger import init_logger
@@ -34,7 +40,6 @@ logger = init_logger(__name__)
 
 
 class RBLNScheduler(Scheduler):
-
     def _schedule_running(
         self,
         budget: SchedulingBudget,
@@ -62,7 +67,8 @@ class RBLNScheduler(Scheduler):
             SchedulerRunningOutputs.
         """
         ret: SchedulerRunningOutputs = self._scheduler_running_outputs_cache[
-            self.cache_id].get_object()
+            self.cache_id
+        ].get_object()
         ret.blocks_to_swap_out.clear()
         ret.blocks_to_copy.clear()
         ret.decode_seq_groups.clear()
@@ -71,7 +77,8 @@ class RBLNScheduler(Scheduler):
         ret.swapped_out.clear()
 
         ret.num_lookahead_slots = self._get_num_lookahead_slots(
-            is_prefill=False, enable_chunking=enable_chunking)
+            is_prefill=False, enable_chunking=enable_chunking
+        )
 
         ret.decode_seq_groups_list.clear()
         ret.prefill_seq_groups_list.clear()
@@ -81,8 +88,9 @@ class RBLNScheduler(Scheduler):
         blocks_to_copy: List[Tuple[int, int]] = ret.blocks_to_copy
 
         decode_seq_groups: List[ScheduledSequenceGroup] = ret.decode_seq_groups
-        prefill_seq_groups: List[
-            ScheduledSequenceGroup] = ret.prefill_seq_groups
+        prefill_seq_groups: List[ScheduledSequenceGroup] = (
+            ret.prefill_seq_groups
+        )
         preempted: List[SequenceGroup] = ret.preempted
         swapped_out: List[SequenceGroup] = ret.swapped_out
 
@@ -97,7 +105,7 @@ class RBLNScheduler(Scheduler):
             #   2. If a sequence is running with non-chunked prefill, then
             #      there it's a decoding sequence, and the cached tokens info is
             #      irrelevant.
-            num_uncached_new_tokens, _ = \
+            num_uncached_new_tokens, _ = (
                 self._get_num_new_uncached_and_cached_tokens(
                     seq_group,
                     SequenceStatus.RUNNING,
@@ -105,6 +113,7 @@ class RBLNScheduler(Scheduler):
                     budget,
                     partial_prefill_metadata,
                 )
+            )
 
             num_running_tokens = num_uncached_new_tokens
             if num_running_tokens == 0:
@@ -117,23 +126,28 @@ class RBLNScheduler(Scheduler):
             # to process the final tokens. The check below avoids this extra
             # decode run when the model max len is reached, in order to avoid
             # a memory overflow.
-            if self.use_async_output_proc and seq_group.seqs[0].get_len(
-            ) > self.scheduler_config.max_model_len:
+            if (
+                self.use_async_output_proc
+                and seq_group.seqs[0].get_len()
+                > self.scheduler_config.max_model_len
+            ):
                 self._async_stopped.append(seq_group)
                 continue
 
             # NOTE(woosuk): Preemption happens only when there is no available
             # slot to keep all the sequence groups in the RUNNING state.
             while not self._can_append_slots(seq_group, enable_chunking):
-                budget.subtract_num_batched_tokens(seq_group.request_id,
-                                                   num_running_tokens)
+                budget.subtract_num_batched_tokens(
+                    seq_group.request_id, num_running_tokens
+                )
                 num_running_seqs = seq_group.get_max_num_running_seqs()
-                budget.subtract_num_seqs(seq_group.request_id,
-                                         num_running_seqs)
+                budget.subtract_num_seqs(seq_group.request_id, num_running_seqs)
 
-                if curr_loras is not None and \
-                    seq_group.lora_int_id > 0 and \
-                    seq_group.lora_int_id in curr_loras:
+                if (
+                    curr_loras is not None
+                    and seq_group.lora_int_id > 0
+                    and seq_group.lora_int_id in curr_loras
+                ):
                     curr_loras.remove(seq_group.lora_int_id)
 
                 # Determine victim sequence
@@ -155,7 +169,8 @@ class RBLNScheduler(Scheduler):
                 if self.use_async_output_proc:
                     assert self.output_proc_callback is not None
                     self.output_proc_callback(
-                        request_id=victim_seq_group.request_id)
+                        request_id=victim_seq_group.request_id
+                    )
 
                     # It may be that the async pending "victim_seq_group"
                     # becomes finished, in which case we simply free it.
@@ -165,8 +180,9 @@ class RBLNScheduler(Scheduler):
 
                 # Do preemption
                 if do_preempt:
-                    preempted_mode = self._preempt(victim_seq_group,
-                                                   blocks_to_swap_out)
+                    preempted_mode = self._preempt(
+                        victim_seq_group, blocks_to_swap_out
+                    )
                     if preempted_mode == PreemptionMode.RECOMPUTE:
                         preempted.append(victim_seq_group)
                     else:
@@ -178,9 +194,9 @@ class RBLNScheduler(Scheduler):
                 self._append_slots(seq_group, blocks_to_copy, enable_chunking)
                 is_prefill = seq_group.is_prefill()
 
-                scheduled_seq_group: ScheduledSequenceGroup = \
-                    self._scheduled_seq_group_cache[
-                    self.cache_id].get_object()
+                scheduled_seq_group: ScheduledSequenceGroup = (
+                    self._scheduled_seq_group_cache[self.cache_id].get_object()
+                )
                 scheduled_seq_group.seq_group = seq_group
                 if is_prefill:
                     scheduled_seq_group.token_chunk_size = num_running_tokens
@@ -191,8 +207,9 @@ class RBLNScheduler(Scheduler):
                     decode_seq_groups.append(scheduled_seq_group)
                     ret.decode_seq_groups_list.append(seq_group)
 
-                budget.add_num_batched_tokens(seq_group.request_id,
-                                              num_running_tokens)
+                budget.add_num_batched_tokens(
+                    seq_group.request_id, num_running_tokens
+                )
                 # OPTIMIZATION:  Note that get_max_num_running_seqs is
                 # expensive. For the default scheduling chase where
                 # enable_chunking is False, num_seqs are updated before running
@@ -251,7 +268,8 @@ class RBLNScheduler(Scheduler):
                 seq_groups=[],
                 ignored_seq_groups=[],
                 num_lookahead_slots=self._get_num_lookahead_slots(
-                    is_prefill=True, enable_chunking=enable_chunking),
+                    is_prefill=True, enable_chunking=enable_chunking
+                ),
             )
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []
@@ -264,10 +282,12 @@ class RBLNScheduler(Scheduler):
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
             assert len(waiting_seqs) == 1, (
-                "Waiting sequence group should have only one prompt "
-                "sequence.")
-            if (partial_prefill_metadata is not None
-                    and not partial_prefill_metadata.can_schedule(seq_group)):
+                "Waiting sequence group should have only one prompt sequence."
+            )
+            if (
+                partial_prefill_metadata is not None
+                and not partial_prefill_metadata.can_schedule(seq_group)
+            ):
                 leftover_waiting_sequences.appendleft(seq_group)
                 waiting_queue.popleft()
                 continue
@@ -278,7 +298,8 @@ class RBLNScheduler(Scheduler):
                     enable_chunking,
                     budget,
                     partial_prefill_metadata=partial_prefill_metadata,
-                ))
+                )
+            )
             num_new_tokens = num_new_tokens_uncached + num_new_tokens_cached
 
             if not enable_chunking:
@@ -296,7 +317,8 @@ class RBLNScheduler(Scheduler):
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 self.remove_seq_from_computed_blocks_tracker(
-                    seq_group, SequenceStatus.FINISHED_IGNORED)
+                    seq_group, SequenceStatus.FINISHED_IGNORED
+                )
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
                 continue
@@ -305,10 +327,12 @@ class RBLNScheduler(Scheduler):
 
             # If the sequence group cannot be allocated, stop.
             can_allocate = self.block_manager.can_allocate(
-                seq_group, num_lookahead_slots=num_lookahead_slots)
+                seq_group, num_lookahead_slots=num_lookahead_slots
+            )
             if can_allocate == AllocStatus.LATER:
                 self.remove_seq_from_computed_blocks_tracker(
-                    seq_group, SequenceStatus.WAITING)
+                    seq_group, SequenceStatus.WAITING
+                )
                 break
             elif can_allocate == AllocStatus.NEVER:
                 logger.warning(
@@ -320,7 +344,8 @@ class RBLNScheduler(Scheduler):
                 for seq in waiting_seqs:
                     seq.status = SequenceStatus.FINISHED_IGNORED
                 self.remove_seq_from_computed_blocks_tracker(
-                    seq_group, SequenceStatus.FINISHED_IGNORED)
+                    seq_group, SequenceStatus.FINISHED_IGNORED
+                )
                 ignored_seq_groups.append(seq_group)
                 waiting_queue.popleft()
                 continue
@@ -331,7 +356,8 @@ class RBLNScheduler(Scheduler):
                 using_prompt_embeds = seq_group.uses_prompt_embeds()
             if using_prompt_embeds != seq_group.uses_prompt_embeds():
                 self.remove_seq_from_computed_blocks_tracker(
-                    seq_group, SequenceStatus.WAITING)
+                    seq_group, SequenceStatus.WAITING
+                )
                 leftover_waiting_sequences.appendleft(seq_group)
                 waiting_queue.popleft()
                 continue
@@ -341,33 +367,41 @@ class RBLNScheduler(Scheduler):
                 lora_int_id = seq_group.lora_int_id
                 assert curr_loras is not None
                 assert self.lora_config is not None
-                if (self.lora_enabled and lora_int_id > 0
-                        and lora_int_id not in curr_loras
-                        and len(curr_loras) >= self.lora_config.max_loras):
+                if (
+                    self.lora_enabled
+                    and lora_int_id > 0
+                    and lora_int_id not in curr_loras
+                    and len(curr_loras) >= self.lora_config.max_loras
+                ):
                     # We don't have a space for another LoRA, so
                     # we ignore this request for now.
                     self.remove_seq_from_computed_blocks_tracker(
-                        seq_group, SequenceStatus.WAITING)
+                        seq_group, SequenceStatus.WAITING
+                    )
                     leftover_waiting_sequences.appendleft(seq_group)
                     waiting_queue.popleft()
                     continue
 
-            if (budget.num_batched_tokens
-                    >= self.scheduler_config.max_num_batched_tokens):
+            if (
+                budget.num_batched_tokens
+                >= self.scheduler_config.max_num_batched_tokens
+            ):
                 # We've reached the budget limit - since there might be
                 # continuous prefills in the running queue, we should break
                 # to avoid scheduling any new prefills.
                 self.remove_seq_from_computed_blocks_tracker(
-                    seq_group, SequenceStatus.WAITING)
+                    seq_group, SequenceStatus.WAITING
+                )
                 break
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
             if num_new_tokens_uncached == 0 or not budget.can_schedule(
-                    num_new_tokens=num_new_tokens_uncached,
-                    num_new_seqs=num_new_seqs,
+                num_new_tokens=num_new_tokens_uncached,
+                num_new_seqs=num_new_seqs,
             ):
                 self.remove_seq_from_computed_blocks_tracker(
-                    seq_group, SequenceStatus.WAITING)
+                    seq_group, SequenceStatus.WAITING
+                )
                 break
 
             # Can schedule this request.
@@ -378,11 +412,14 @@ class RBLNScheduler(Scheduler):
 
             if partial_prefill_metadata is not None:
                 partial_prefill_metadata.maybe_increment_partial_prefills(
-                    seq_group)
+                    seq_group
+                )
 
             seq_groups.append(
-                ScheduledSequenceGroup(seq_group=seq_group,
-                                       token_chunk_size=num_new_tokens))
+                ScheduledSequenceGroup(
+                    seq_group=seq_group, token_chunk_size=num_new_tokens
+                )
+            )
             budget.add_num_batched_tokens(
                 seq_group.request_id,
                 num_batched_tokens=num_new_tokens_uncached,
@@ -404,7 +441,8 @@ class RBLNScheduler(Scheduler):
             seq_groups=seq_groups,
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(
-                is_prefill=True, enable_chunking=enable_chunking),
+                is_prefill=True, enable_chunking=enable_chunking
+            ),
         )
 
     def _schedule_chunked_prefill(self) -> SchedulerOutputs:
@@ -432,19 +470,19 @@ class RBLNScheduler(Scheduler):
         swapped_in = SchedulerSwappedInOutputs.create_empty()
 
         # Create partial prefill metadata
-        partial_prefill_metadata = \
-            RBLNPartialPrefillMetadata.from_queues(
-                running=self.running,
-                waiting=self.waiting,
-                scheduler_config=self.scheduler_config,
-            )
+        partial_prefill_metadata = RBLNPartialPrefillMetadata.from_queues(
+            running=self.running,
+            waiting=self.waiting,
+            scheduler_config=self.scheduler_config,
+        )
 
         # NOTE(jiwoo.park): If there are remaining Prefills,
         # perform all of them as a single batch first,
         # then perform decoding as a multi-batch.
         if partial_prefill_metadata.schedulable_prefills == 0 or (
-                len(self.running) > 0 and self.running[0].first_seq.data.stage
-                == SequenceStage.PREFILL):
+            len(self.running) > 0
+            and self.running[0].first_seq.data.stage == SequenceStage.PREFILL
+        ):
             # Decoding should be always scheduled first by fcfs.
             running_scheduled = self._schedule_running(
                 budget,
@@ -453,9 +491,12 @@ class RBLNScheduler(Scheduler):
                 partial_prefill_metadata=partial_prefill_metadata,
             )
 
-            if partial_prefill_metadata.schedulable_prefills == 0 and \
-                len(running_scheduled.preempted) + len(
-                        running_scheduled.swapped_out) == 0:
+            if (
+                partial_prefill_metadata.schedulable_prefills == 0
+                and len(running_scheduled.preempted)
+                + len(running_scheduled.swapped_out)
+                == 0
+            ):
                 swapped_in = self._schedule_swapped(budget, curr_loras)
         else:
             prefills = self._schedule_prefills(
@@ -465,11 +506,13 @@ class RBLNScheduler(Scheduler):
                 partial_prefill_metadata=partial_prefill_metadata,
             )
 
-        assert (budget.num_batched_tokens
-                <= self.scheduler_config.max_num_batched_tokens)
         assert (
-            budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
-        ), f"{budget.num_curr_seqs} <= {self.scheduler_config.max_num_seqs}"
+            budget.num_batched_tokens
+            <= self.scheduler_config.max_num_batched_tokens
+        )
+        assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs, (
+            f"{budget.num_curr_seqs} <= {self.scheduler_config.max_num_seqs}"
+        )
 
         # Update waiting requests.
         self.waiting.extendleft(running_scheduled.preempted)
@@ -498,60 +541,71 @@ class RBLNScheduler(Scheduler):
         #         running_scheduled.prefill_seq_groups))
         # self.running.extend([s.seq_group for s in prefills.seq_groups])
         finishing, not_finishing = self._split_prefills(
-            running_scheduled.prefill_seq_groups)
+            running_scheduled.prefill_seq_groups
+        )
         self.running.extendleft([s.seq_group for s in prefills.seq_groups])
         self.running.extendleft(not_finishing)
         self.running.extendleft(
-            [s.seq_group for s in swapped_in.prefill_seq_groups])
+            [s.seq_group for s in swapped_in.prefill_seq_groups]
+        )
+        self.running.extend([s.seq_group for s in swapped_in.decode_seq_groups])
         self.running.extend(
-            [s.seq_group for s in swapped_in.decode_seq_groups])
-        self.running.extend(
-            [s.seq_group for s in running_scheduled.decode_seq_groups])
+            [s.seq_group for s in running_scheduled.decode_seq_groups]
+        )
         self.running.extend(finishing)
 
         # Update swapped requests.
         self.swapped.extend(running_scheduled.swapped_out)
         # Put prefills first due to Attention backend ordering assumption.
-        scheduled_seq_groups = (prefills.seq_groups +
-                                running_scheduled.prefill_seq_groups +
-                                swapped_in.prefill_seq_groups +
-                                running_scheduled.decode_seq_groups +
-                                swapped_in.decode_seq_groups)
-        num_prefill_groups = (len(prefills.seq_groups) +
-                              len(swapped_in.prefill_seq_groups) +
-                              len(running_scheduled.prefill_seq_groups))
+        scheduled_seq_groups = (
+            prefills.seq_groups
+            + running_scheduled.prefill_seq_groups
+            + swapped_in.prefill_seq_groups
+            + running_scheduled.decode_seq_groups
+            + swapped_in.decode_seq_groups
+        )
+        num_prefill_groups = (
+            len(prefills.seq_groups)
+            + len(swapped_in.prefill_seq_groups)
+            + len(running_scheduled.prefill_seq_groups)
+        )
         return SchedulerOutputs(
             scheduled_seq_groups=scheduled_seq_groups,
             num_prefill_groups=num_prefill_groups,
-            num_batched_tokens=budget.num_batched_tokens +
-            budget.num_cached_tokens,
+            num_batched_tokens=budget.num_batched_tokens
+            + budget.num_cached_tokens,
             blocks_to_swap_in=swapped_in.blocks_to_swap_in,
             blocks_to_swap_out=running_scheduled.blocks_to_swap_out,
-            blocks_to_copy=running_scheduled.blocks_to_copy +
-            swapped_in.blocks_to_copy,
-            ignored_seq_groups=prefills.ignored_seq_groups +
-            swapped_in.infeasible_seq_groups,
+            blocks_to_copy=running_scheduled.blocks_to_copy
+            + swapped_in.blocks_to_copy,
+            ignored_seq_groups=prefills.ignored_seq_groups
+            + swapped_in.infeasible_seq_groups,
             num_lookahead_slots=0,
             running_queue_size=len(self.running),
-            preempted=(len(running_scheduled.preempted) +
-                       len(running_scheduled.swapped_out)),
+            preempted=(
+                len(running_scheduled.preempted)
+                + len(running_scheduled.swapped_out)
+            ),
         )
 
     def _split_prefills(
         self, scheduled_prefill_seqs: List[ScheduledSequenceGroup]
     ) -> Tuple[List[SequenceGroup], List[SequenceGroup]]:
         finishing = [
-            s.seq_group for s in scheduled_prefill_seqs
+            s.seq_group
+            for s in scheduled_prefill_seqs
             if s.seq_group.get_num_uncomputed_tokens() == s.token_chunk_size
         ]
         not_finishing = [
-            s.seq_group for s in scheduled_prefill_seqs
+            s.seq_group
+            for s in scheduled_prefill_seqs
             if s.seq_group.get_num_uncomputed_tokens() != s.token_chunk_size
         ]
         return finishing, not_finishing
 
-    def _can_append_slots(self, seq_group: SequenceGroup,
-                          enable_chunking: bool) -> bool:
+    def _can_append_slots(
+        self, seq_group: SequenceGroup, enable_chunking: bool
+    ) -> bool:
         """Determine whether or not we have enough space in the KV cache to
         continue generation of the sequence group.
         """
@@ -569,23 +623,26 @@ class RBLNScheduler(Scheduler):
         #     return True
 
         # It is True only for testing case to trigger artificial preemption.
-        if (self.enable_artificial_preemption
-                and random.uniform(0, 1) < ARTIFICIAL_PREEMPTION_PROB
-                and self.artificial_preempt_cnt > 0):
+        if (
+            self.enable_artificial_preemption
+            and random.uniform(0, 1) < ARTIFICIAL_PREEMPTION_PROB
+            and self.artificial_preempt_cnt > 0
+        ):
             self.artificial_preempt_cnt -= 1
             return False
 
         is_prefill = seq_group.is_prefill()
         num_lookahead_slots = self._get_num_lookahead_slots(
-            is_prefill, enable_chunking)
+            is_prefill, enable_chunking
+        )
 
         return self.block_manager.can_append_slots(
-            seq_group=seq_group, num_lookahead_slots=num_lookahead_slots)
+            seq_group=seq_group, num_lookahead_slots=num_lookahead_slots
+        )
 
 
 @dataclass
 class RBLNPartialPrefillMetadata(PartialPrefillMetadata):
-
     @classmethod
     def from_queues(
         cls,
@@ -608,8 +665,10 @@ class RBLNPartialPrefillMetadata(PartialPrefillMetadata):
         for sg in running:
             if sg.first_seq.data.stage == SequenceStage.PREFILL:
                 prefills += 1
-                if sg.first_seq.get_num_new_tokens(
-                ) > scheduler_config.long_prefill_token_threshold:
+                if (
+                    sg.first_seq.get_num_new_tokens()
+                    > scheduler_config.long_prefill_token_threshold
+                ):
                     long_prefills += 1
             # NOTE(jiwoo.park):
             # count running decode requests for the decoding-priority policy
@@ -625,7 +684,8 @@ class RBLNPartialPrefillMetadata(PartialPrefillMetadata):
             return RBLNPartialPrefillMetadata(
                 schedulable_prefills=0,
                 long_prefills=0,
-                scheduler_config=scheduler_config)
+                scheduler_config=scheduler_config,
+            )
 
         for sg in waiting:
             # Don't bother looping through the rest of the queue if we know
@@ -636,10 +696,14 @@ class RBLNPartialPrefillMetadata(PartialPrefillMetadata):
 
             # Don't count long requests from the waiting queue if we aren't
             # going to schedule them anyway
-            if sg.first_seq.get_num_new_tokens(
-            ) > scheduler_config.long_prefill_token_threshold:
-                if long_prefills + waiting_long_prefills >= \
-                    scheduler_config.max_long_partial_prefills:
+            if (
+                sg.first_seq.get_num_new_tokens()
+                > scheduler_config.long_prefill_token_threshold
+            ):
+                if (
+                    long_prefills + waiting_long_prefills
+                    >= scheduler_config.max_long_partial_prefills
+                ):
                     continue
                 waiting_long_prefills += 1
             prefills += 1
@@ -649,7 +713,8 @@ class RBLNPartialPrefillMetadata(PartialPrefillMetadata):
         # this metadata to track how many have actually been scheduled.
         return RBLNPartialPrefillMetadata(
             schedulable_prefills=min(
-                prefills, scheduler_config.max_num_partial_prefills),
+                prefills, scheduler_config.max_num_partial_prefills
+            ),
             long_prefills=long_prefills,
             scheduler_config=scheduler_config,
         )

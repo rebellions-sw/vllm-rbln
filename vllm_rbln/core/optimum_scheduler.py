@@ -20,10 +20,15 @@ from typing import Callable, Deque, List, Optional, Set, Tuple
 from vllm.config import CacheConfig, SchedulerConfig
 from vllm.config.lora import LoRAConfig
 from vllm.core.interfaces import AllocStatus, BlockSpaceManager
-from vllm.core.scheduler import (ARTIFICIAL_PREEMPTION_PROB,
-                                 PartialPrefillMetadata, PreemptionMode,
-                                 ScheduledSequenceGroup, Scheduler,
-                                 SchedulerPrefillOutputs, SchedulingBudget)
+from vllm.core.scheduler import (
+    ARTIFICIAL_PREEMPTION_PROB,
+    PartialPrefillMetadata,
+    PreemptionMode,
+    ScheduledSequenceGroup,
+    Scheduler,
+    SchedulerPrefillOutputs,
+    SchedulingBudget,
+)
 from vllm.sequence import SequenceGroup, SequenceStatus
 
 from vllm_rbln.core.optimum_block_manager import RBLNOptimumBlockSpaceManager
@@ -33,7 +38,6 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumScheduler(Scheduler):
-
     def __init__(
         self,
         scheduler_config: SchedulerConfig,
@@ -42,17 +46,26 @@ class RBLNOptimumScheduler(Scheduler):
         pipeline_parallel_size: int = 1,
         output_proc_callback: Optional[Callable] = None,
     ) -> None:
-        super().__init__(scheduler_config, cache_config, lora_config,
-                         pipeline_parallel_size, output_proc_callback)
+        super().__init__(
+            scheduler_config,
+            cache_config,
+            lora_config,
+            pipeline_parallel_size,
+            output_proc_callback,
+        )
 
         version = "selfattn"
-        if (self.scheduler_config.runner_type == "pooling"
-                or self.cache_config.is_attention_free):
+        if (
+            self.scheduler_config.runner_type == "pooling"
+            or self.cache_config.is_attention_free
+        ):
             version = "placeholder"
 
         BlockSpaceManagerImpl = (
-            RBLNOptimumBlockSpaceManager if version == "selfattn" else
-            BlockSpaceManager.get_block_space_manager_class(version))
+            RBLNOptimumBlockSpaceManager
+            if version == "selfattn"
+            else BlockSpaceManager.get_block_space_manager_class(version)
+        )
 
         num_gpu_blocks = cache_config.num_gpu_blocks
         if num_gpu_blocks:
@@ -109,7 +122,8 @@ class RBLNOptimumScheduler(Scheduler):
                 seq_groups=[],
                 ignored_seq_groups=[],
                 num_lookahead_slots=self._get_num_lookahead_slots(
-                    is_prefill=True, enable_chunking=enable_chunking),
+                    is_prefill=True, enable_chunking=enable_chunking
+                ),
             )
         ignored_seq_groups: List[SequenceGroup] = []
         seq_groups: List[ScheduledSequenceGroup] = []
@@ -122,10 +136,12 @@ class RBLNOptimumScheduler(Scheduler):
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
             assert len(waiting_seqs) == 1, (
-                "Waiting sequence group should have only one prompt "
-                "sequence.")
-            if (partial_prefill_metadata is not None
-                    and not partial_prefill_metadata.can_schedule(seq_group)):
+                "Waiting sequence group should have only one prompt sequence."
+            )
+            if (
+                partial_prefill_metadata is not None
+                and not partial_prefill_metadata.can_schedule(seq_group)
+            ):
                 leftover_waiting_sequences.appendleft(seq_group)
                 waiting_queue.popleft()
                 continue
@@ -136,7 +152,8 @@ class RBLNOptimumScheduler(Scheduler):
                     enable_chunking,
                     budget,
                     partial_prefill_metadata=partial_prefill_metadata,
-                ))
+                )
+            )
             num_new_tokens = num_new_tokens_uncached + num_new_tokens_cached
 
             if not enable_chunking:
@@ -161,7 +178,8 @@ class RBLNOptimumScheduler(Scheduler):
 
             # If the sequence group cannot be allocated, stop.
             can_allocate = self.block_manager.can_allocate(
-                seq_group, num_lookahead_slots=num_lookahead_slots)
+                seq_group, num_lookahead_slots=num_lookahead_slots
+            )
             if can_allocate == AllocStatus.LATER:
                 break
             elif can_allocate == AllocStatus.NEVER:
@@ -182,17 +200,22 @@ class RBLNOptimumScheduler(Scheduler):
                 lora_int_id = seq_group.lora_int_id
                 assert curr_loras is not None
                 assert self.lora_config is not None
-                if (self.lora_enabled and lora_int_id > 0
-                        and lora_int_id not in curr_loras
-                        and len(curr_loras) >= self.lora_config.max_loras):
+                if (
+                    self.lora_enabled
+                    and lora_int_id > 0
+                    and lora_int_id not in curr_loras
+                    and len(curr_loras) >= self.lora_config.max_loras
+                ):
                     # We don't have a space for another LoRA, so
                     # we ignore this request for now.
                     leftover_waiting_sequences.appendleft(seq_group)
                     waiting_queue.popleft()
                     continue
 
-            if (budget.num_batched_tokens
-                    >= self.scheduler_config.max_num_batched_tokens):
+            if (
+                budget.num_batched_tokens
+                >= self.scheduler_config.max_num_batched_tokens
+            ):
                 # We've reached the budget limit - since there might be
                 # continuous prefills in the running queue, we should break
                 # to avoid scheduling any new prefills.
@@ -200,8 +223,8 @@ class RBLNOptimumScheduler(Scheduler):
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
             if num_new_tokens_uncached == 0 or not budget.can_schedule(
-                    num_new_tokens=num_new_tokens_uncached,
-                    num_new_seqs=num_new_seqs,
+                num_new_tokens=num_new_tokens_uncached,
+                num_new_seqs=num_new_seqs,
             ):
                 break
 
@@ -213,11 +236,14 @@ class RBLNOptimumScheduler(Scheduler):
 
             if partial_prefill_metadata is not None:
                 partial_prefill_metadata.maybe_increment_partial_prefills(
-                    seq_group)
+                    seq_group
+                )
 
             seq_groups.append(
-                ScheduledSequenceGroup(seq_group=seq_group,
-                                       token_chunk_size=num_new_tokens))
+                ScheduledSequenceGroup(
+                    seq_group=seq_group, token_chunk_size=num_new_tokens
+                )
+            )
             budget.add_num_batched_tokens(
                 seq_group.request_id,
                 num_batched_tokens=num_new_tokens_uncached,
@@ -240,29 +266,33 @@ class RBLNOptimumScheduler(Scheduler):
             seq_groups=seq_groups,
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(
-                is_prefill=True, enable_chunking=enable_chunking),
+                is_prefill=True, enable_chunking=enable_chunking
+            ),
         )
 
-    def _can_append_slots(self, seq_group: SequenceGroup,
-                          enable_chunking: bool) -> bool:
+    def _can_append_slots(
+        self, seq_group: SequenceGroup, enable_chunking: bool
+    ) -> bool:
         """Determine whether or not we have enough space in the KV cache to
         continue generation of the sequence group.
         """
-        if (self.cache_config.block_size == self.scheduler_config.max_model_len
-            ):
+        if self.cache_config.block_size == self.scheduler_config.max_model_len:
             # Workaround: always append for RBLN eager atten
             return True
 
         # It is True only for testing case to trigger artificial preemption.
-        if (self.enable_artificial_preemption
-                and random.uniform(0, 1) < ARTIFICIAL_PREEMPTION_PROB
-                and self.artificial_preempt_cnt > 0):
+        if (
+            self.enable_artificial_preemption
+            and random.uniform(0, 1) < ARTIFICIAL_PREEMPTION_PROB
+            and self.artificial_preempt_cnt > 0
+        ):
             self.artificial_preempt_cnt -= 1
             return False
 
         is_prefill = seq_group.is_prefill()
         num_lookahead_slots = self._get_num_lookahead_slots(
-            is_prefill, enable_chunking)
+            is_prefill, enable_chunking
+        )
 
         if is_prefill and num_lookahead_slots > 0:
             # Appending prefill slots only happens multi-step and
@@ -270,10 +300,14 @@ class RBLNOptimumScheduler(Scheduler):
             assert self.scheduler_config.is_multi_step and enable_chunking
 
         return self.block_manager.can_append_slots(
-            seq_group=seq_group, num_lookahead_slots=num_lookahead_slots)
+            seq_group=seq_group, num_lookahead_slots=num_lookahead_slots
+        )
 
-    def _preempt(self, seq_group: SequenceGroup,
-                 blocks_to_swap_out: List[Tuple[int, int]]) -> PreemptionMode:
+    def _preempt(
+        self,
+        seq_group: SequenceGroup,
+        blocks_to_swap_out: List[Tuple[int, int]],
+    ) -> PreemptionMode:
         # If preemption mode is not specified, we determine the mode as follows:
         # We use recomputation by default since it incurs lower overhead than
         # swapping. However, when the sequence group has multiple sequences
@@ -301,8 +335,11 @@ class RBLNOptimumScheduler(Scheduler):
             "not enough KV cache space. This can affect the end-to-end "
             "performance. Increase gpu_memory_utilization or "
             "tensor_parallel_size to provide more KV cache memory. "
-            "total_num_cumulative_preemption=%d", seq_group.request_id,
-            preemption_mode, self.num_cumulative_preemption + 1)
+            "total_num_cumulative_preemption=%d",
+            seq_group.request_id,
+            preemption_mode,
+            self.num_cumulative_preemption + 1,
+        )
         self.num_cumulative_preemption += 1
 
         if preemption_mode == PreemptionMode.RECOMPUTE:

@@ -38,7 +38,8 @@ def get_system_prompted_questions():
         "over 5 years of professional experience, having served as an assistant teacher "
         "in a large, co-educational public school, with substantial background in "
         "curriculum design, classroom leadership, and instructional strategies for "
-        "middle school mathematics students.")
+        "middle school mathematics students."
+    )
     # Sample prompts.
     prompts = [
         "Hello, my name is",
@@ -150,10 +151,12 @@ def main():
         print("-" * 50)
 
     # Compare the results and display the speedup
-    generated_same = all([
-        regular_generated_texts[i] == cached_generated_texts[i]
-        for i in range(len(prompts))
-    ])
+    generated_same = all(
+        [
+            regular_generated_texts[i] == cached_generated_texts[i]
+            for i in range(len(prompts))
+        ]
+    )
     print(f"Generated answers are the same: {generated_same}")
     print(f"Time without prefix caching: {wo_prefix_time} sec")
     print(f"Time with prefix caching: {w_prefix_time} sec")

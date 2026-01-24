@@ -22,14 +22,14 @@ from vllm.v1.request import Request
 
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.core.optimum_kv_cache_coordinator import (
-    RBLNKVCacheCoordinator)
+    RBLNKVCacheCoordinator,
+)
 from vllm_rbln.v1.core.prefix_cache_manager import RBLNPrefixKVCacheManager
 
 logger = init_logger(__name__)
 
 
 class RBLNKVCacheManager(KVCacheManager):
-
     def __init__(
         self,
         kv_cache_config: KVCacheConfig,
@@ -57,12 +57,18 @@ class RBLNKVCacheManager(KVCacheManager):
 
         self.block_size: Optional[int] = None
         if self.enable_caching:
-            assert len(
-                set(g.kv_cache_spec.block_size
-                    for g in kv_cache_config.kv_cache_groups)
-            ) == 1, "Only one block size is supported for now"
+            assert (
+                len(
+                    set(
+                        g.kv_cache_spec.block_size
+                        for g in kv_cache_config.kv_cache_groups
+                    )
+                )
+                == 1
+            ), "Only one block size is supported for now"
             self.block_size = kv_cache_config.kv_cache_groups[
-                0].kv_cache_spec.block_size
+                0
+            ].kv_cache_spec.block_size
 
             if dcp_world_size > 1:
                 assert len(kv_cache_config.kv_cache_groups) == 1
@@ -92,11 +98,11 @@ class RBLNKVCacheManager(KVCacheManager):
             )
 
     def free(self, request: Request, preemption: int = False) -> None:
-        """Free the blocks allocated for the request.
-        """
+        """Free the blocks allocated for the request."""
         if self.enable_caching:
-            self.prefix_cache_manager.free_request(request.request_id,
-                                                   preemption=preemption)
+            self.prefix_cache_manager.free_request(
+                request.request_id, preemption=preemption
+            )
         self.coordinator.free(request.request_id)
 
     def allocate_slots(
@@ -122,7 +128,8 @@ class RBLNKVCacheManager(KVCacheManager):
         # When allocating new blocks, we do not reuse the provided
         # `new_computed_blocks` and we need to allocate new blocks.
         empty_computed_block_list = tuple(
-            [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
+            [] for _ in range(len(self.kv_cache_config.kv_cache_groups))
+        )
 
         # In prefill,
         # `num_computed_tokens` = 0,
@@ -143,11 +150,10 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new blocks
             return None
 
-        if self.enable_caching and \
-            not self.prefix_cache_manager.can_allocate(
-                    num_blocks_to_allocate,
-                    num_computed_tokens,
-            ):
+        if self.enable_caching and not self.prefix_cache_manager.can_allocate(
+            num_blocks_to_allocate,
+            num_computed_tokens,
+        ):
             # Cannot allocate new outer blocks for prefix caching
             return None
 
@@ -161,7 +167,8 @@ class RBLNKVCacheManager(KVCacheManager):
         )
 
         new_blocks = self.coordinator.allocate_new_blocks(
-            request.request_id, num_tokens_need_slot, 0)
+            request.request_id, num_tokens_need_slot, 0
+        )
 
         # P/D: delay caching blocks if we have to recv from
         # remote. Update state for locally cached blocks.
@@ -192,10 +199,12 @@ class RBLNKVCacheManager(KVCacheManager):
         num_new_computed_tokens: int,
     ) -> tuple[list[int], list[int]]:
         cached_blocks = new_computed_blocks.get_block_ids()[0]
-        cached_block_table, cached_length = \
+        cached_block_table, cached_length = (
             self.prefix_cache_manager.get_matched_outer_blocks(
-            request.request_id, cached_blocks,
-            num_new_computed_tokens,
+                request.request_id,
+                cached_blocks,
+                num_new_computed_tokens,
+            )
         )
 
         return cached_block_table, cached_length

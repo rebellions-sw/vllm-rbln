@@ -17,8 +17,11 @@ from collections.abc import Iterable
 import torch
 from torch import nn
 from vllm.distributed import get_tensor_model_parallel_world_size
-from vllm.model_executor.models.utils import (AutoWeightsLoader,
-                                              PPMissingLayer, logger)
+from vllm.model_executor.models.utils import (
+    AutoWeightsLoader,
+    PPMissingLayer,
+    logger,
+)
 
 
 def __auto_weights_loader__load_module(
@@ -38,8 +41,8 @@ def __auto_weights_loader__load_module(
             loaded_params = module_load_weights(weights)
             if loaded_params is None:
                 logger.warning(
-                    "Unable to collect loaded parameters "
-                    "for module %s", module)
+                    "Unable to collect loaded parameters for module %s", module
+                )
             else:
                 yield from map(
                     lambda x: self._get_qualname(base_prefix, x),
@@ -55,8 +58,7 @@ def __auto_weights_loader__load_module(
 
     EMBED_TOKENS = "embed_tokens"
     LM_HEAD = "lm_head"
-    tie_word_embeddings = \
-        any(p.startswith(LM_HEAD) for p in self.skip_prefixes)
+    tie_word_embeddings = any(p.startswith(LM_HEAD) for p in self.skip_prefixes)
     tp_enabled = get_tensor_model_parallel_world_size() > 1
 
     embed_tokens: list[tuple[str, torch.Tensor]] = []
@@ -79,16 +81,18 @@ def __auto_weights_loader__load_module(
 
             if tie_word_embeddings and tp_enabled:
                 child_weights = gen_weights(child_weights)
-            yield from self._load_module(prefix, child_modules[child_prefix],
-                                         child_weights)
+            yield from self._load_module(
+                prefix, child_modules[child_prefix], child_weights
+            )
         elif child_prefix in child_params:
             if self._can_skip(prefix):
                 logger.debug("Skipping param %s", prefix)
 
                 continue
 
-            yield from self._load_param(prefix, child_params[child_prefix],
-                                        child_weights)
+            yield from self._load_param(
+                prefix, child_params[child_prefix], child_weights
+            )
         else:
             can_skip_module = self._can_skip(prefix + ".")
             can_skip_param = self._can_skip(prefix)
@@ -104,23 +108,26 @@ def __auto_weights_loader__load_module(
 
                 continue
 
-            msg = (f"There is no module or parameter named '{prefix}' "
-                   f"in {type(self.module).__name__}")
+            msg = (
+                f"There is no module or parameter named '{prefix}' "
+                f"in {type(self.module).__name__}"
+            )
             raise ValueError(msg)
 
     assert len(embed_tokens) < 2
     if len(embed_tokens) != 0:
         org_skip_prefixes = self.skip_prefixes
-        self.skip_prefixes = \
-            [p for p in org_skip_prefixes if not p.startswith(LM_HEAD)]
+        self.skip_prefixes = [
+            p for p in org_skip_prefixes if not p.startswith(LM_HEAD)
+        ]
 
         for child_prefix, child_weights in self._groupby_prefix(embed_tokens):
             assert child_prefix == LM_HEAD
             prefix = self._get_qualname(base_prefix, child_prefix)
             if child_prefix in child_modules:
-                yield from self._load_module(prefix,
-                                             child_modules[child_prefix],
-                                             child_weights)
+                yield from self._load_module(
+                    prefix, child_modules[child_prefix], child_weights
+                )
 
         self.skip_prefixes = org_skip_prefixes
 

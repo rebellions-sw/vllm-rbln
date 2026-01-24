@@ -17,11 +17,13 @@
 """
 Script to test add_lora, remove_lora, pin_lora, list_loras functions.
 """
+
 import pytest
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.engine.llm_engine import LLMEngine
 from vllm.entrypoints.openai.api_server import (
-    build_async_engine_client_from_engine_args)
+    build_async_engine_client_from_engine_args,
+)
 from vllm.lora.request import LoRARequest
 
 MODEL_PATH = "Qwen/Qwen3-0.6B"
@@ -30,9 +32,9 @@ LORA_RANK = 8
 
 
 def make_lora_request(lora_id: int):
-    return LoRARequest(lora_name=f"{lora_id}",
-                       lora_int_id=lora_id,
-                       lora_path=LORA_MODULE_PATH)
+    return LoRARequest(
+        lora_name=f"{lora_id}", lora_int_id=lora_id, lora_path=LORA_MODULE_PATH
+    )
 
 
 def test_lora_functions_sync(monkeypatch):

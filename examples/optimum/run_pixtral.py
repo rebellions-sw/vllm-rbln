@@ -21,24 +21,25 @@ from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
 def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("HuggingFaceM4/ChartQA",
-                           split="train").shuffle(seed=42)
+    dataset = load_dataset("HuggingFaceM4/ChartQA", split="train").shuffle(
+        seed=42
+    )
     processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
-    messages = [[
-        {
-            "role":
-            "user",
-            "content": [
-                {
-                    "type": "image"
-                },
-                {
-                    "type": "text",
-                    "text": dataset[i]["query"],
-                },
-            ],
-        },
-    ] for i in range(batch_size)]
+    messages = [
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {
+                        "type": "text",
+                        "text": dataset[i]["query"],
+                    },
+                ],
+            },
+        ]
+        for i in range(batch_size)
+    ]
     images = [[dataset[i]["image"]] for i in range(batch_size)]
     texts = processor.apply_chat_template(
         messages,
@@ -46,12 +47,10 @@ def generate_prompts(batch_size: int, model_id: str):
         tokenize=False,
     )
 
-    inputs = [{
-        "prompt": text,
-        "multi_modal_data": {
-            "image": image
-        }
-    } for text, image in zip(texts, images)]
+    inputs = [
+        {"prompt": text, "multi_modal_data": {"image": image}}
+        for text, image in zip(texts, images)
+    ]
     labels = [dataset[i]["label"] for i in range(batch_size)]
     return inputs, labels
 
@@ -59,11 +58,13 @@ def generate_prompts(batch_size: int, model_id: str):
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     results_generator = engine.generate(
         request,
-        SamplingParams(temperature=0,
-                       ignore_eos=False,
-                       skip_special_tokens=True,
-                       stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=500),
+        SamplingParams(
+            temperature=0,
+            ignore_eos=False,
+            skip_special_tokens=True,
+            stop_token_ids=[tokenizer.eos_token_id],
+            max_tokens=500,
+        ),
         str(request_id),
     )
 
@@ -87,7 +88,9 @@ async def main(
     for request_id, request in enumerate(inputs):
         futures.append(
             asyncio.create_task(
-                generate(engine, tokenizer, request_id, request)))
+                generate(engine, tokenizer, request_id, request)
+            )
+        )
 
     results = await asyncio.gather(*futures)
     for i, (result, label) in enumerate(zip(results, labels)):
@@ -106,10 +109,12 @@ def entry_point(
     num_input_prompt: int = 4,
     model_id: str = "/pixtral-12b-b4",
 ):
-    asyncio.run(main(
-        num_input_prompt=num_input_prompt,
-        model_id=model_id,
-    ))
+    asyncio.run(
+        main(
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        )
+    )
 
 
 if __name__ == "__main__":

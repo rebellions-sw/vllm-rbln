@@ -47,8 +47,10 @@ def get_dp_impl():
     choices = set(["padded_decode", "dummy_prefill"])
     current_impl = dp_impl.lower()
     if current_impl not in choices:
-        raise ValueError(f"Invalid VLLM_RBLN_DP_IMPL: {current_impl}, "
-                         f"Valid choices: {choices}")
+        raise ValueError(
+            f"Invalid VLLM_RBLN_DP_IMPL: {current_impl}, "
+            f"Valid choices: {choices}"
+        )
     return current_impl
 
 
@@ -57,76 +59,91 @@ environment_variables = {
     **vllm_envs,
     # If true, will compile models using torch.compile.
     # Otherwise, run the CPU eager mode, if possible.
-    "VLLM_RBLN_COMPILE_MODEL":
-    (lambda: os.environ.get("VLLM_RBLN_COMPILE_MODEL", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_COMPILE_MODEL": (
+        lambda: os.environ.get("VLLM_RBLN_COMPILE_MODEL", "True").lower()
+        in ("true", "1")
+    ),
     # If true, will compile models using strict mode.
-    "VLLM_RBLN_COMPILE_STRICT_MODE": (lambda: os.environ.get(
-        "VLLM_RBLN_COMPILE_STRICT_MODE", "False").lower() in ("true", "1")),
+    "VLLM_RBLN_COMPILE_STRICT_MODE": (
+        lambda: os.environ.get("VLLM_RBLN_COMPILE_STRICT_MODE", "False").lower()
+        in ("true", "1")
+    ),
     # TP Size for RSD.
-    "VLLM_RBLN_TP_SIZE":
-    lambda: int(os.environ.get("VLLM_RBLN_TP_SIZE", 1)),
+    "VLLM_RBLN_TP_SIZE": lambda: int(os.environ.get("VLLM_RBLN_TP_SIZE", 1)),
     # Use customized sampler
-    "VLLM_RBLN_SAMPLER":
-    (lambda: os.environ.get("VLLM_RBLN_SAMPLER", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_SAMPLER": (
+        lambda: os.environ.get("VLLM_RBLN_SAMPLER", "True").lower()
+        in ("true", "1")
+    ),
     # Enable warm_up
-    "VLLM_RBLN_ENABLE_WARM_UP":
-    (lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_ENABLE_WARM_UP": (
+        lambda: os.environ.get("VLLM_RBLN_ENABLE_WARM_UP", "True").lower()
+        in ("true", "1")
+    ),
     # If true, it uses the natively compiled vLLM model
     # rather than the optimum-rbln compiled model.
-    "VLLM_RBLN_USE_VLLM_MODEL":
-    (lambda: os.environ.get("VLLM_RBLN_USE_VLLM_MODEL", "False").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_USE_VLLM_MODEL": (
+        lambda: os.environ.get("VLLM_RBLN_USE_VLLM_MODEL", "False").lower()
+        in ("true", "1")
+    ),
     # Use flash attention for causal attention
-    "VLLM_RBLN_FLASH_CAUSAL_ATTN":
-    (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_FLASH_CAUSAL_ATTN": (
+        lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower()
+        in ("true", "1")
+    ),
     # Disable multimodal input
-    "VLLM_RBLN_DISABLE_MM":
-    (lambda: os.environ.get("VLLM_RBLN_DISABLE_MM", "False").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_DISABLE_MM": (
+        lambda: os.environ.get("VLLM_RBLN_DISABLE_MM", "False").lower()
+        in ("true", "1")
+    ),
     # DP implementation, see choices in get_dp_impl
-    "VLLM_RBLN_DP_IMPL":
-    get_dp_impl,
+    "VLLM_RBLN_DP_IMPL": get_dp_impl,
     # If true, it uses the tokens mask applied to moe expert kernel
-    "VLLM_RBLN_USE_MOE_TOKENS_MASK":
-    (lambda: os.environ.get("VLLM_RBLN_USE_MOE_TOKENS_MASK", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_USE_MOE_TOKENS_MASK": (
+        lambda: os.environ.get("VLLM_RBLN_USE_MOE_TOKENS_MASK", "True").lower()
+        in ("true", "1")
+    ),
     # enforce model data type into fp32 not model_config.dtype
-    "VLLM_RBLN_ENFORCE_MODEL_FP32":
-    (lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_ENFORCE_MODEL_FP32": (
+        lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower()
+        in ("true", "1")
+    ),
     # use moe custom kernel, by default disabled
-    "VLLM_RBLN_MOE_CUSTOM_KERNEL":
-    (lambda: os.environ.get("VLLM_RBLN_MOE_CUSTOM_KERNEL", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_MOE_CUSTOM_KERNEL": (
+        lambda: os.environ.get("VLLM_RBLN_MOE_CUSTOM_KERNEL", "True").lower()
+        in ("true", "1")
+    ),
     # enable moe optimization if RBLN_MoE_OPT is set to 1
-    "VLLM_RBLN_MOE_USE_OPT_KERNEL":
-    (lambda: os.environ.get("VLLM_RBLN_MOE_USE_OPT_KERNEL", "True").lower() in
-     ("true", "1")),
-
+    "VLLM_RBLN_MOE_USE_OPT_KERNEL": (
+        lambda: os.environ.get("VLLM_RBLN_MOE_USE_OPT_KERNEL", "True").lower()
+        in ("true", "1")
+    ),
     # DP_INPUT_ALL_GATHER, use DP input all_gather
-    "VLLM_RBLN_DP_INPUT_ALL_GATHER":
-    (lambda: os.environ.get("VLLM_RBLN_DP_INPUT_ALL_GATHER", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_DP_INPUT_ALL_GATHER": (
+        lambda: os.environ.get("VLLM_RBLN_DP_INPUT_ALL_GATHER", "True").lower()
+        in ("true", "1")
+    ),
     # LOGITS_ALL_GATHER, include logits all_gather into model compilation
-    "VLLM_RBLN_LOGITS_ALL_GATHER":
-    (lambda: os.environ.get("VLLM_RBLN_LOGITS_ALL_GATHER", "True").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_LOGITS_ALL_GATHER": (
+        lambda: os.environ.get("VLLM_RBLN_LOGITS_ALL_GATHER", "True").lower()
+        in ("true", "1")
+    ),
     # Number of Ray nodes
-    "VLLM_RBLN_NUM_RAY_NODES":
-    lambda: int(os.environ.get("VLLM_RBLN_NUM_RAY_NODES", 1)),
-    "VLLM_RBLN_METRICS":
-    (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
-     ("true", "1")),
+    "VLLM_RBLN_NUM_RAY_NODES": lambda: int(
+        os.environ.get("VLLM_RBLN_NUM_RAY_NODES", 1)
+    ),
+    "VLLM_RBLN_METRICS": (
+        lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower()
+        in ("true", "1")
+    ),
     # Enable NUMA-based CPU affinity binding for OpenMP threads
-    "VLLM_RBLN_NUMA":
-    (lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in
-     ("true", "1")),
-    "VLLM_RBLN_KERNEL_MODE":
-    (lambda: os.environ.get("RBLN_KERNEL_MODE", "torch_triton").lower()),
+    "VLLM_RBLN_NUMA": (
+        lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower()
+        in ("true", "1")
+    ),
+    "VLLM_RBLN_KERNEL_MODE": (
+        lambda: os.environ.get("RBLN_KERNEL_MODE", "torch_triton").lower()
+    ),
 }
 
 

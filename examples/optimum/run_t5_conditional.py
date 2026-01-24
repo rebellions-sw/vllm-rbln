@@ -35,13 +35,14 @@ async def generate(
     }
     # start the generation
     encoder_prompt_token_ids = tokenizer.encode(
-        prompt, truncation=True, max_length=truncate_prompt_tokens)
+        prompt, truncation=True, max_length=truncate_prompt_tokens
+    )
     results_generator = engine.generate(
         prompt={
             "encoder_prompt": {
                 "prompt_token_ids": encoder_prompt_token_ids,
             },
-            "decoder_prompt": ""
+            "decoder_prompt": "",
         },
         sampling_params=SamplingParams(
             temperature=example_input["temperature"],
@@ -94,7 +95,9 @@ async def main(
                     model=model_id,
                     requst_id=i,
                     truncate_prompt_tokens=truncate_prompt_tokens,
-                )))
+                )
+            )
+        )
 
     result = await asyncio.gather(*futures)
 
@@ -111,7 +114,8 @@ def entry_point(
             num_input_prompt=num_input_prompt,
             truncate_prompt_tokens=truncate_prompt_tokens,
             model_id=model_id,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":

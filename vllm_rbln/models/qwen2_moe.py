@@ -23,16 +23,20 @@ def __qwen2_moe_forward_rsd(self, hidden_states: torch.Tensor) -> torch.Tensor:
     if self.shared_expert is not None:
         shared_output = self.shared_expert(hidden_states)
         if self.shared_expert_gate is not None:
-            shared_output = F.sigmoid(
-                self.shared_expert_gate(hidden_states)) * shared_output
+            shared_output = (
+                F.sigmoid(self.shared_expert_gate(hidden_states))
+                * shared_output
+            )
     router_logits, _ = self.gate(hidden_states)
-    final_hidden_states = self.experts(hidden_states=hidden_states,
-                                       router_logits=router_logits)
+    final_hidden_states = self.experts(
+        hidden_states=hidden_states, router_logits=router_logits
+    )
     if shared_output is not None:
         final_hidden_states = final_hidden_states + shared_output
     if self.tp_size > 1:
         final_hidden_states = tensor_model_parallel_all_reduce(
-            final_hidden_states)
+            final_hidden_states
+        )
     return final_hidden_states
 
 

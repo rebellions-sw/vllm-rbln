@@ -15,11 +15,14 @@
 from typing import Optional
 
 import torch
-from vllm.distributed import (tensor_model_parallel_all_gather,
-                              tensor_model_parallel_gather)
+from vllm.distributed import (
+    tensor_model_parallel_all_gather,
+    tensor_model_parallel_gather,
+)
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.vocab_parallel_embedding import (
-    VocabParallelEmbedding)
+    VocabParallelEmbedding,
+)
 
 import vllm_rbln.rbln_envs as envs
 
@@ -31,9 +34,9 @@ def logits_processor_get_logits(
     embedding_bias: Optional[torch.Tensor],
 ) -> Optional[torch.Tensor]:
     # Get the logits for the next tokens.
-    logits = lm_head.quant_method.apply(lm_head,
-                                        hidden_states,
-                                        bias=embedding_bias)
+    logits = lm_head.quant_method.apply(
+        lm_head, hidden_states, bias=embedding_bias
+    )
     return logits
 
 
@@ -47,7 +50,7 @@ def logits_processor_gather_logits(self, logits: torch.Tensor) -> torch.Tensor:
 
     # Remove paddings in vocab (if any).
     if logits is not None:
-        logits = logits[..., :self.org_vocab_size]
+        logits = logits[..., : self.org_vocab_size]
     return logits
 
 

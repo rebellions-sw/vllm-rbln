@@ -26,7 +26,8 @@ from vllm.config import CacheConfig, get_current_vllm_config
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.model_executor.layers.linear import UnquantizedLinearMethod
 from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig)
+    QuantizationConfig,
+)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
@@ -80,9 +81,10 @@ def __custom_init__(
         calculate_kv_scales = False
     if num_kv_heads is None:
         num_kv_heads = num_heads
-    assert num_heads % num_kv_heads == 0, \
-        f"num_heads ({num_heads}) is not " \
+    assert num_heads % num_kv_heads == 0, (
+        f"num_heads ({num_heads}) is not "
         f"divisible by num_kv_heads ({num_kv_heads})"
+    )
 
     # The default k/v_scale is set to 1.0. This is ignored
     # when kv-cache is not fp8, and should be used with
@@ -116,16 +118,21 @@ def __custom_init__(
     self.sliding_window = sliding_window
     self.has_sink = extra_impl_args.get("sinks") is not None
 
-    quant_method = quant_config.get_quant_method(
-        self, prefix=prefix) if quant_config else None
-    if quant_method is not None and not isinstance(quant_method,
-                                                   UnquantizedLinearMethod):
+    quant_method = (
+        quant_config.get_quant_method(self, prefix=prefix)
+        if quant_config
+        else None
+    )
+    if quant_method is not None and not isinstance(
+        quant_method, UnquantizedLinearMethod
+    ):
         assert isinstance(quant_method, BaseKVCacheMethod)
         # TODO (mgoin): kv cache dtype should be specified in the FP8
         # checkpoint config and become the "auto" behavior
         if self.kv_cache_dtype == "fp8_e5m2":
-            raise ValueError("fp8_e5m2 kv-cache is not supported with "
-                             "fp8 checkpoints.")
+            raise ValueError(
+                "fp8_e5m2 kv-cache is not supported with fp8 checkpoints."
+            )
         # If quantization is enabled, we make "k_scale" and "v_scale"
         # parameters so that it can be loaded from the model checkpoint.
         # The k/v_scale will then be converted back to native float32
@@ -137,21 +144,32 @@ def __custom_init__(
     # weight and activation dtype.
     dtype = torch.get_default_dtype()
     if attn_backend is None:
-        self.attn_backend = get_attn_backend(head_size,
-                                             dtype,
-                                             kv_cache_dtype,
-                                             block_size,
-                                             is_attention_free,
-                                             use_mla=use_mla,
-                                             has_sink=self.has_sink)
+        self.attn_backend = get_attn_backend(
+            head_size,
+            dtype,
+            kv_cache_dtype,
+            block_size,
+            is_attention_free,
+            use_mla=use_mla,
+            has_sink=self.has_sink,
+        )
     else:
         self.attn_backend = attn_backend
 
     impl_cls = self.attn_backend.get_impl_cls()
-    self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
-                         alibi_slopes, sliding_window, kv_cache_dtype,
-                         logits_soft_cap, attn_type,
-                         kv_sharing_target_layer_name, **extra_impl_args)
+    self.impl = impl_cls(
+        num_heads,
+        head_size,
+        scale,
+        num_kv_heads,
+        alibi_slopes,
+        sliding_window,
+        kv_cache_dtype,
+        logits_soft_cap,
+        attn_type,
+        kv_sharing_target_layer_name,
+        **extra_impl_args,
+    )
     self.backend = backend_name_to_enum(self.attn_backend.get_name())
     self.dtype = dtype
 
@@ -181,8 +199,10 @@ def __custom_init__(
     # by bind_kv_cache
     # this variable will not be accessed if use_direct_call is True
     self.kv_cache = [
-        torch.tensor([]) for _ in range(
-            get_current_vllm_config().parallel_config.pipeline_parallel_size)
+        torch.tensor([])
+        for _ in range(
+            get_current_vllm_config().parallel_config.pipeline_parallel_size
+        )
     ]
 
     self.q_range = torch.tensor(envs.Q_SCALE_CONSTANT, dtype=torch.float32)
@@ -225,11 +245,10 @@ def custom_attention_forward(
         if attn_metadata.enable_kv_scales_calculation:
             self.calc_kv_scales(query, key, value)
     if self.use_output:
-        output_shape = (output_shape
-                        if output_shape is not None else query.shape)
-        output = torch.zeros(output_shape,
-                             dtype=query.dtype,
-                             device=query.device)
+        output_shape = output_shape if output_shape is not None else query.shape
+        output = torch.zeros(
+            output_shape, dtype=query.dtype, device=query.device
+        )
         hidden_size = output_shape[-1]
         # We skip reshaping query, key and value tensors for the MLA
         # backend since these tensors have different semantics and are
@@ -271,7 +290,8 @@ def custom_attention_forward(
             )
         else:
             torch.ops.vllm.unified_attention_with_output(
-                query, key, value, output, self.layer_name)
+                query, key, value, output, self.layer_name
+            )
         return output.view(-1, hidden_size)
     else:
         if self.use_direct_call:
@@ -290,11 +310,13 @@ def custom_attention_forward(
             assert attn_metadata.kv_caches is not None
             assert self.layer_index < len(attn_metadata.kv_caches)
             self_kv_cache = attn_metadata.kv_caches[self.layer_index]
-            return self.impl.forward(self, query, key, value, self_kv_cache,
-                                     attn_metadata)
+            return self.impl.forward(
+                self, query, key, value, self_kv_cache, attn_metadata
+            )
         else:
-            return torch.ops.vllm.unified_attention(query, key, value,
-                                                    self.layer_name)
+            return torch.ops.vllm.unified_attention(
+                query, key, value, self.layer_name
+            )
 
 
 Attention.__init__ = __custom_init__

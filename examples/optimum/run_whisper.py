@@ -21,20 +21,26 @@ from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
 def generate_prompts(batch_size: int, model_id: str):
-    dataset = load_dataset("distil-whisper/librispeech_asr-noise",
-                           "test-pub-noise",
-                           streaming=True,
-                           split="40")
+    dataset = load_dataset(
+        "distil-whisper/librispeech_asr-noise",
+        "test-pub-noise",
+        streaming=True,
+        split="40",
+    )
     dataset = dataset.take(batch_size)
     messages = []
     for item in dataset:
-        messages.append({
-            "prompt": "<|startoftranscript|>",
-            "multi_modal_data": {
-                "audio":
-                (item["audio"]["array"], item["audio"]["sampling_rate"])
-            },
-        })
+        messages.append(
+            {
+                "prompt": "<|startoftranscript|>",
+                "multi_modal_data": {
+                    "audio": (
+                        item["audio"]["array"],
+                        item["audio"]["sampling_rate"],
+                    )
+                },
+            }
+        )
 
     return messages
 
@@ -42,11 +48,13 @@ def generate_prompts(batch_size: int, model_id: str):
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
     results_generator = engine.generate(
         request,
-        SamplingParams(temperature=0,
-                       ignore_eos=False,
-                       skip_special_tokens=True,
-                       stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=448),
+        SamplingParams(
+            temperature=0,
+            ignore_eos=False,
+            skip_special_tokens=True,
+            stop_token_ids=[tokenizer.eos_token_id],
+            max_tokens=448,
+        ),
         str(request_id),
     )
 
@@ -60,8 +68,9 @@ async def main(
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(model=model_id,
-                                  limit_mm_per_prompt={"audio": 1})
+    engine_args = AsyncEngineArgs(
+        model=model_id, limit_mm_per_prompt={"audio": 1}
+    )
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -71,14 +80,17 @@ async def main(
     for request_id, request in enumerate(inputs):
         futures.append(
             asyncio.create_task(
-                generate(engine, tokenizer, request_id, request)))
+                generate(engine, tokenizer, request_id, request)
+            )
+        )
 
     results = await asyncio.gather(*futures)
 
     for i, result in enumerate(results):
         output = result.outputs[0].text
         print(
-            f"===================== Output {i} ==============================")
+            f"===================== Output {i} =============================="
+        )
         print(output)
         print(
             "===============================================================\n"
@@ -89,10 +101,12 @@ def entry_point(
     num_input_prompt: int = 1,
     model_id: str = "/whisper-base-b4-wo-token-timestamps",
 ):
-    asyncio.run(main(
-        num_input_prompt=num_input_prompt,
-        model_id=model_id,
-    ))
+    asyncio.run(
+        main(
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        )
+    )
 
 
 if __name__ == "__main__":

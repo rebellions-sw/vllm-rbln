@@ -64,15 +64,20 @@ def test_basic():
         assert req_index == 0 or num_computed_tokens == num_cached_tokens
 
         # check if ref count of blocks are properly counted
-        assert all(block.ref_cnt == 1 for block in
-                   scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0])
+        assert all(
+            block.ref_cnt == 1
+            for block in scheduler.kv_cache_manager.get_blocks(
+                req_ids[0]
+            ).blocks[0]
+        )
 
         model_runner_output = ModelRunnerOutput(
             req_ids=req_ids,
             req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
             sampled_token_ids=[
                 [0],
-            ] * len(req_ids),
+            ]
+            * len(req_ids),
             logprobs=None,
             prompt_logprobs_dict={},
             pooler_output=[],
@@ -163,7 +168,8 @@ def test_preallocation_in_decode():
             num_tokens=block_size,
             max_tokens=1,
             same_prompt=True,
-        ))
+        )
+    )
     req_a.prompt_token_ids.pop()
     req_a._all_token_ids.pop()
     req_a.num_prompt_tokens = len(req_a.prompt_token_ids)
@@ -198,7 +204,8 @@ def test_preallocation_in_decode():
         req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
         sampled_token_ids=[
             [0],
-        ] * len(req_ids),
+        ]
+        * len(req_ids),
         logprobs=None,
         prompt_logprobs_dict={},
         pooler_output=[],
@@ -227,7 +234,8 @@ def test_preallocation_in_decode():
         req_id_to_index=dict(map(lambda t: t[::-1], enumerate(req_ids))),
         sampled_token_ids=[
             [0],
-        ] * len(req_ids),
+        ]
+        * len(req_ids),
         logprobs=None,
         prompt_logprobs_dict={},
         pooler_output=[],

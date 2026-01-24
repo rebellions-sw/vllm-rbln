@@ -18,8 +18,10 @@ import vllm.envs as envs
 from optimum.rbln.configuration_utils import RBLNModelConfig
 from vllm.config import VllmConfig
 from vllm.model_executor.models.paligemma import (
-    PaliGemmaImageEmbeddingInputs, PaliGemmaImageInputs,
-    PaliGemmaImagePixelInputs)
+    PaliGemmaImageEmbeddingInputs,
+    PaliGemmaImageInputs,
+    PaliGemmaImagePixelInputs,
+)
 from vllm.model_executor.models.utils import flatten_bn
 
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
@@ -27,9 +29,9 @@ from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 
 
-class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
-                                                   RBLNOptimumDecoderMixin):
-
+class RBLNOptimumPaliGemmaForConditionalGeneration(
+    RBLNOptimumModelBase, RBLNOptimumDecoderMixin
+):
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -38,16 +40,17 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
             vocab_size=self.model_config.get_vocab_size,
-            use_multiple_decoder=getattr(self.model.rbln_config.language_model,
-                                         "use_multiple_decoder", False),
+            use_multiple_decoder=getattr(
+                self.model.rbln_config.language_model,
+                "use_multiple_decoder",
+                False,
+            ),
             default_batch_size=self.scheduler_config.max_num_seqs,
-            decoder_batch_sizes=self.model.rbln_config.language_model.
-            decoder_batch_sizes,
+            decoder_batch_sizes=self.model.rbln_config.language_model.decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
@@ -58,8 +61,9 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, cache_position)
+        kwargs = self.preprocess_for_decoder(
+            is_prompt, block_tables, input_ids, cache_position
+        )
 
         if is_prompt:
             if model_input.multi_modal_kwargs:
@@ -81,20 +85,25 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
                 block_tables=block_tables,
             ).logits
         else:
-            padded_batch_size = kwargs.pop("padded_batch_size",
-                                           self.decoder_batch_size)
-            self.model.language_model.decoder = \
+            padded_batch_size = kwargs.pop(
+                "padded_batch_size", self.decoder_batch_size
+            )
+            self.model.language_model.decoder = (
                 self.model.language_model.decoders[padded_batch_size]
+            )
             # NOTE(eunji.lee): attention_mask, position_ids are required
             # to paligemma in optimum-rbln.
             # They depends on the version of gemma in paligemma.
             attention_mask, position_ids = self.generate_params_for_gemma(
-                padded_batch_size, self.model.rbln_config.language_model,
-                kwargs["cache_position"])
+                padded_batch_size,
+                self.model.rbln_config.language_model,
+                kwargs["cache_position"],
+            )
             logits = self.model.language_model.decoder(
                 attention_mask=attention_mask,
                 position_ids=position_ids,
-                **kwargs).logits
+                **kwargs,
+            ).logits
         if not is_prompt:
             logits = logits[:request_nums]
         return logits
@@ -104,7 +113,8 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
 
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
-                **model_input.multi_modal_kwargs)
+                **model_input.multi_modal_kwargs
+            )
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["data"]
@@ -114,7 +124,8 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
         return pixel_values
 
     def _parse_and_validate_image_input(
-            self, **kwargs: Any) -> Optional[PaliGemmaImageInputs]:
+        self, **kwargs: Any
+    ) -> Optional[PaliGemmaImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         config = self.vllm_config.model_config.hf_config
@@ -126,12 +137,11 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
             pixel_values = flatten_bn(pixel_values, concat=True)
 
             h = w = config.vision_config.image_size
-            return PaliGemmaImagePixelInputs(type="pixel_values",
-                                             data=pixel_values,
-                                             resolve_bindings={
-                                                 "h": h,
-                                                 "w": w
-                                             })
+            return PaliGemmaImagePixelInputs(
+                type="pixel_values",
+                data=pixel_values,
+                resolve_bindings={"h": h, "w": w},
+            )
 
         if image_embeds is not None:
             image_embeds = flatten_bn(image_embeds, concat=True)
@@ -144,14 +154,18 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(RBLNOptimumModelBase,
         raise AssertionError("This line should be unreachable.")
 
     def generate_params_for_gemma(
-            self, padded_batch_size: int, rbln_model_config: RBLNModelConfig,
-            cache_position: torch.Tensor) -> torch.Tensor:
+        self,
+        padded_batch_size: int,
+        rbln_model_config: RBLNModelConfig,
+        cache_position: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Generate attention mask and position ids for gemma.
         """
         max_seq_len = rbln_model_config.max_seq_len
         seq_range = torch.arange(max_seq_len).unsqueeze(0)  # (1, max_seq_len,)
-        attention_mask = (seq_range
-                          <= cache_position).to(rbln_model_config.torch_dtype)
+        attention_mask = (seq_range <= cache_position).to(
+            rbln_model_config.torch_dtype
+        )
         position_ids = cache_position.clone()
         return attention_mask, position_ids

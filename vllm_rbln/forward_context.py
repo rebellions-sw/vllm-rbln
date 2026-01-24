@@ -20,8 +20,13 @@ from typing import Any, Optional
 import torch
 import vllm.forward_context as vfc
 from vllm.config import CUDAGraphMode, VllmConfig
-from vllm.forward_context import (BatchDescriptor, DPMetadata, ForwardContext,
-                                  batchsize_logging_interval, track_batchsize)
+from vllm.forward_context import (
+    BatchDescriptor,
+    DPMetadata,
+    ForwardContext,
+    batchsize_logging_interval,
+    track_batchsize,
+)
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
@@ -39,9 +44,8 @@ class RBLNDPMetadata(DPMetadata):
         vllm_config: VllmConfig,
         attn_metadata: Any,
         num_tokens: int,
-        num_tokens_across_dp: Optional[torch.Tensor] = None
+        num_tokens_across_dp: Optional[torch.Tensor] = None,
     ) -> "RBLNDPMetadata":
-
         parallel_config = vllm_config.parallel_config
         dp_size = parallel_config.data_parallel_size
         dp_rank = parallel_config.data_parallel_rank
@@ -49,39 +53,48 @@ class RBLNDPMetadata(DPMetadata):
         scheduler_config = vllm_config.scheduler_config
         max_pad = scheduler_config.max_num_batched_tokens
 
-        if attn_metadata is not None and hasattr(attn_metadata,
-                                                 "num_prefill_tokens"):
+        if attn_metadata is not None and hasattr(
+            attn_metadata, "num_prefill_tokens"
+        ):
             # for v0 attention backends
-            batchsize = attn_metadata.num_prefill_tokens + \
-                attn_metadata.num_decode_tokens
+            batchsize = (
+                attn_metadata.num_prefill_tokens
+                + attn_metadata.num_decode_tokens
+            )
         else:
             # for v1 attention backends or no attn_metadata
             batchsize = num_tokens
 
         # If num_tokens_across_dp is None, it will be computed by all_reduce
         # Otherwise, num_tokens_across_dp[dp_rank] should be equal to batchsize
-        assert (num_tokens_across_dp is None
-                or num_tokens_across_dp[dp_rank] == batchsize)
+        assert (
+            num_tokens_across_dp is None
+            or num_tokens_across_dp[dp_rank] == batchsize
+        )
         if num_tokens_across_dp is None:
             num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
-                batchsize, dp_size, dp_rank)
+                batchsize, dp_size, dp_rank
+            )
         max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp)
         cu_tokens_across_dp_cpu = torch.cumsum(num_tokens_across_dp, dim=0)
-        return RBLNDPMetadata(max_tokens_across_dp_cpu,
-                              cu_tokens_across_dp_cpu,
-                              max_pads_across_dp=max_pad,
-                              num_tokens_across_dp_cpu=num_tokens_across_dp)
+        return RBLNDPMetadata(
+            max_tokens_across_dp_cpu,
+            cu_tokens_across_dp_cpu,
+            max_pads_across_dp=max_pad,
+            num_tokens_across_dp_cpu=num_tokens_across_dp,
+        )
 
 
 @contextmanager
 def _set_forward_context(
-        attn_metadata: Any,
-        vllm_config: VllmConfig,
-        virtual_engine: int = 0,
-        num_tokens: Optional[int] = None,
-        num_tokens_across_dp: Optional[torch.Tensor] = None,
-        cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE,
-        batch_descriptor: Optional[BatchDescriptor] = None):
+    attn_metadata: Any,
+    vllm_config: VllmConfig,
+    virtual_engine: int = 0,
+    num_tokens: Optional[int] = None,
+    num_tokens_across_dp: Optional[torch.Tensor] = None,
+    cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE,
+    batch_descriptor: Optional[BatchDescriptor] = None,
+):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
     Here we can inject common logic for every model forward pass.
@@ -92,16 +105,16 @@ def _set_forward_context(
     dp_metadata: Optional[DPMetadata] = None
     enable_dp = vllm_config.parallel_config.data_parallel_size > 1
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
-    if (enable_dp or use_moe_tokens_mask) and (attn_metadata is not None
-                                               or num_tokens is not None):
-        dp_metadata = RBLNDPMetadata.make(vllm_config, attn_metadata,
-                                          num_tokens or 0,
-                                          num_tokens_across_dp)
+    if (enable_dp or use_moe_tokens_mask) and (
+        attn_metadata is not None or num_tokens is not None
+    ):
+        dp_metadata = RBLNDPMetadata.make(
+            vllm_config, attn_metadata, num_tokens or 0, num_tokens_across_dp
+        )
 
     prev_context = vfc._forward_context
     vfc._forward_context = ForwardContext(
-        no_compile_layers=vllm_config.compilation_config.
-        static_forward_context,
+        no_compile_layers=vllm_config.compilation_config.static_forward_context,
         virtual_engine=virtual_engine,
         attn_metadata=attn_metadata,
         dp_metadata=dp_metadata,
@@ -115,8 +128,10 @@ def _set_forward_context(
         if need_to_track_batchsize:
             if hasattr(attn_metadata, "num_prefill_tokens"):
                 # for v0 attention backends
-                batchsize = attn_metadata.num_prefill_tokens + \
-                    attn_metadata.num_decode_tokens
+                batchsize = (
+                    attn_metadata.num_prefill_tokens
+                    + attn_metadata.num_decode_tokens
+                )
             else:
                 # for v1 attention backends
                 batchsize = num_tokens
@@ -124,13 +139,15 @@ def _set_forward_context(
             # adding a sync point here should not affect
             # scheduling of the next batch
             from vllm.platforms import current_platform
+
             synchronize = current_platform.synchronize
             if synchronize is not None:
                 synchronize()
             now = time.perf_counter()
             # time measurement is in milliseconds
             vfc.batchsize_forward_time[batchsize].append(
-                (now - vfc.forward_start_time) * 1000)
+                (now - vfc.forward_start_time) * 1000
+            )
             if now - vfc.last_logging_time > batchsize_logging_interval:
                 vfc.last_logging_time = now
                 forward_stats = []
@@ -143,9 +160,13 @@ def _set_forward_context(
                     forward_stats.append((bs, len(times), medium))
                 forward_stats.sort(key=lambda x: x[1], reverse=True)
                 if forward_stats:
-                    logger.info(("Batchsize forward time stats "
-                                 "(batchsize, count, median_time(ms)): %s"),
-                                forward_stats)
+                    logger.info(
+                        (
+                            "Batchsize forward time stats "
+                            "(batchsize, count, median_time(ms)): %s"
+                        ),
+                        forward_stats,
+                    )
 
         vfc._forward_context = prev_context
 

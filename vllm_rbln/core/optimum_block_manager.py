@@ -23,7 +23,6 @@ from vllm_rbln.core.block.optimum_block_table import RBLNOptimumBlockTable
 
 
 class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
-
     def _allocate_sequence(self, seq: Sequence) -> BlockTable:
         block_table = RBLNOptimumBlockTable(
             block_size=self.block_size,
@@ -36,14 +35,15 @@ class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
             extra_hash = seq.extra_hash()
 
             # Add blocks to the block table only if the sequence is non empty.
-            block_table.allocate(token_ids=seq.get_token_ids(),
-                                 extra_hash=extra_hash)
+            block_table.allocate(
+                token_ids=seq.get_token_ids(), extra_hash=extra_hash
+            )
 
         return block_table
 
-    def can_allocate(self,
-                     seq_group: SequenceGroup,
-                     num_lookahead_slots: int = 0) -> AllocStatus:
+    def can_allocate(
+        self, seq_group: SequenceGroup, num_lookahead_slots: int = 0
+    ) -> AllocStatus:
         # FIXME(woosuk): Here we assume that all sequences in the group share
         # the same prompt. This may not be true for preempted sequences.
 
@@ -57,15 +57,19 @@ class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
         )
 
         if self.max_block_sliding_window is not None:
-            num_required_blocks = min(num_required_blocks,
-                                      self.max_block_sliding_window)
+            num_required_blocks = min(
+                num_required_blocks, self.max_block_sliding_window
+            )
 
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
-            device=Device.GPU)
+            device=Device.GPU
+        )
 
         # Use watermark to avoid frequent cache eviction.
-        if (self.num_total_gpu_blocks - num_required_blocks
-                < self.watermark_blocks):
+        if (
+            self.num_total_gpu_blocks - num_required_blocks
+            < self.watermark_blocks
+        ):
             return AllocStatus.NEVER
         if num_free_gpu_blocks - num_required_blocks >= self.watermark_blocks:
             return AllocStatus.OK
@@ -75,8 +79,9 @@ class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
     def allocate(self, seq_group: SequenceGroup) -> None:
         # Allocate self-attention block tables for decoder sequences
         waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
-        assert not (set(seq.seq_id for seq in waiting_seqs)
-                    & self.block_tables.keys()), "block table already exists"
+        assert not (
+            set(seq.seq_id for seq in waiting_seqs) & self.block_tables.keys()
+        ), "block table already exists"
 
         # NOTE: Here we assume that all sequences in the group have the same
         # prompt.
@@ -100,9 +105,9 @@ class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
         # encoder prompt.
         request_id = seq_group.request_id
 
-        assert (request_id
-                not in self.cross_block_tables), \
+        assert request_id not in self.cross_block_tables, (
             "block table already exists"
+        )
 
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 

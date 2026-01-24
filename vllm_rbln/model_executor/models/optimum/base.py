@@ -33,6 +33,7 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     """
     Used by the RBLNModelRunner.
     """
+
     input_tokens: torch.Tensor
     input_positions: torch.Tensor
     block_tables: torch.Tensor
@@ -40,10 +41,12 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     finished_requests_ids: List[str]
     is_prompt: bool = False  # for V1
     cached_block_tables: List[int] = field(
-        default_factory=list)  # for prefix caching
+        default_factory=list
+    )  # for prefix caching
     cached_lengths: List[int] = field(
-        default_factory=list)  # for prefix caching
-    sampling_metadata: "SamplingMetadata" = None,  # for V0
+        default_factory=list
+    )  # for prefix caching
+    sampling_metadata: "SamplingMetadata" = (None,)  # for V0
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     pooling_metadata: Optional[PoolingMetadata] = None  # for V1
     lora_requests: Optional[List[LoRARequest]] = None  # for V0
@@ -51,7 +54,8 @@ class ModelInputForRBLN(ModelRunnerInputBase):
     dummy_block: Optional[int] = None  # for prefix caching
 
     def as_broadcastable_tensor_dict(
-            self) -> Dict[str, Union[int, torch.Tensor]]:
+        self,
+    ) -> Dict[str, Union[int, torch.Tensor]]:
         raise NotImplementedError("ModelInputForRBLN cannot be broadcast.")
 
     @classmethod
@@ -67,4 +71,5 @@ class ModelInputForRBLN(ModelRunnerInputBase):
 version_error = RuntimeError(
     "Incompatible vLLM version detected. "
     "This vLLM version is not compatible with optimum-rbln. "
-    "Please verify that you are using a supported version.")
+    "Please verify that you are using a supported version."
+)

@@ -19,9 +19,9 @@ from vllm import LLM, SamplingParams
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model",
-                        type=str,
-                        default="meta-llama/Llama-3.2-1B-instruct")
+    parser.add_argument(
+        "--model", type=str, default="meta-llama/Llama-3.2-1B-instruct"
+    )
     parser.add_argument("--max-num-seqs", type=int, default=8)
     parser.add_argument("--max-model-len", type=int, default=40 * 1024)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)

@@ -17,8 +17,10 @@ import torch
 import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.llava_next import (LlavaNextImageInputs,
-                                                   LlavaNextImagePixelInputs)
+from vllm.model_executor.models.llava_next import (
+    LlavaNextImageInputs,
+    LlavaNextImagePixelInputs,
+)
 from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN, version_error
@@ -27,9 +29,9 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
-                                                   RBLNOptimumDecoderMixin):
-
+class RBLNOptimumLlavaNextForConditionalGeneration(
+    RBLNOptimumModelBase, RBLNOptimumDecoderMixin
+):
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -38,11 +40,13 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
             vocab_size=self.model_config.get_vocab_size,
-            use_multiple_decoder=getattr(self.model.rbln_config.language_model,
-                                         "use_multiple_decoder", False),
+            use_multiple_decoder=getattr(
+                self.model.rbln_config.language_model,
+                "use_multiple_decoder",
+                False,
+            ),
             default_batch_size=self.scheduler_config.max_num_seqs,
-            decoder_batch_sizes=self.model.rbln_config.language_model.
-            decoder_batch_sizes,
+            decoder_batch_sizes=self.model.rbln_config.language_model.decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
@@ -60,7 +64,8 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             raise ValueError(
                 f"Attempted to assign {inputs_embeds[mask].shape}"
                 f" = {multimodal_embeddings.shape} "
-                f"multimodal tokens to {num_expected_tokens} placeholders")
+                f"multimodal tokens to {num_expected_tokens} placeholders"
+            )
 
         inputs_embeds[mask] = multimodal_embeddings
         return inputs_embeds
@@ -72,8 +77,9 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         input_ids: torch.LongTensor = None,
         pixel_values: Optional[torch.FloatTensor] = None,
         image_sizes: Optional[torch.LongTensor] = None,
-        cache_position: Union[List[torch.Tensor],
-                              torch.Tensor] = None,  # vllm keyword argument
+        cache_position: Union[
+            List[torch.Tensor], torch.Tensor
+        ] = None,  # vllm keyword argument
         **kwargs,
     ):
         if is_prefill:
@@ -104,8 +110,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
 
         return logits
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
@@ -119,7 +124,8 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
 
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
-                **model_input.multi_modal_kwargs)
+                **model_input.multi_modal_kwargs
+            )
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
@@ -128,16 +134,19 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             pixel_values = None
             image_sizes = None
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, cache_position)
+        kwargs = self.preprocess_for_decoder(
+            is_prompt, block_tables, input_ids, cache_position
+        )
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
         if not is_prompt:
-            padded_batch_size = kwargs.pop("padded_batch_size",
-                                           self.decoder_batch_size)
-            self.model.language_model.decoder = \
+            padded_batch_size = kwargs.pop(
+                "padded_batch_size", self.decoder_batch_size
+            )
+            self.model.language_model.decoder = (
                 self.model.language_model.decoders[padded_batch_size]
+            )
 
         logits = self._forward(
             is_prefill=is_prompt,
@@ -153,7 +162,8 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
         return logits
 
     def _parse_and_validate_image_input(
-            self, **kwargs: Any) -> Optional[LlavaNextImageInputs]:
+        self, **kwargs: Any
+    ) -> Optional[LlavaNextImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_sizes = kwargs.pop("image_sizes", None)
         image_embeds = kwargs.pop("image_embeds", None)
@@ -164,12 +174,16 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
 
         if pixel_values is not None:
             if not isinstance(pixel_values, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of pixel values. "
-                                 f"Got type: {type(pixel_values)}")
+                raise ValueError(
+                    "Incorrect type of pixel values. "
+                    f"Got type: {type(pixel_values)}"
+                )
 
             if not isinstance(image_sizes, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of image sizes. "
-                                 f"Got type: {type(image_sizes)}")
+                raise ValueError(
+                    "Incorrect type of image sizes. "
+                    f"Got type: {type(image_sizes)}"
+                )
 
             expected_h = expected_w = config.vision_config.image_size
             return LlavaNextImagePixelInputs(
@@ -179,14 +193,18 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
                 resolve_bindings={
                     "h": expected_h,
                     "w": expected_w,
-                })
+                },
+            )
 
         if image_embeds is not None:
             if not isinstance(image_embeds, torch.Tensor):
-                raise ValueError("Incorrect type of image embeds. "
-                                 f"Got type: {type(image_embeds)}")
+                raise ValueError(
+                    "Incorrect type of image embeds. "
+                    f"Got type: {type(image_embeds)}"
+                )
 
             raise NotImplementedError(
-                "Image embeds are not supported in this version for RBLN")
+                "Image embeds are not supported in this version for RBLN"
+            )
 
         raise AssertionError("This line should be unreachable.")

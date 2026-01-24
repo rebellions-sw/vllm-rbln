@@ -45,12 +45,16 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
     """
 
     def get_num_blocks_to_allocate(
-            self, request_id: str, num_tokens: int,
-            new_computed_blocks: list[KVCacheBlock]) -> int:
+        self,
+        request_id: str,
+        num_tokens: int,
+        new_computed_blocks: list[KVCacheBlock],
+    ) -> int:
         return 0 if self.req_to_blocks[request_id] else 1
 
-    def allocate_new_blocks(self, request_id: str,
-                            num_tokens: int) -> list[KVCacheBlock]:
+    def allocate_new_blocks(
+        self, request_id: str, num_tokens: int
+    ) -> list[KVCacheBlock]:
         if self.req_to_blocks[request_id]:
             return []
         new_blocks = self.block_pool.get_new_blocks(1)
@@ -73,16 +77,19 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
     def cache_blocks(self, request: Request, num_tokens: int) -> None:
         pass
 
-    def remove_skipped_blocks(self, request_id: str,
-                              num_computed_tokens: int) -> None:
+    def remove_skipped_blocks(
+        self, request_id: str, num_computed_tokens: int
+    ) -> None:
         pass
 
-    def get_num_common_prefix_blocks(self, request_id: str,
-                                     num_running_requests: int) -> int:
+    def get_num_common_prefix_blocks(
+        self, request_id: str, num_running_requests: int
+    ) -> int:
         return 0
 
 
-single_type_kv_cache_manager.spec_manager_map.update({
-    RBLNSlidingWindowSpec:
-    RBLNSlidingWindowManager,
-})
+single_type_kv_cache_manager.spec_manager_map.update(
+    {
+        RBLNSlidingWindowSpec: RBLNSlidingWindowManager,
+    }
+)

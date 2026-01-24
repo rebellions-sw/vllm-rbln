@@ -23,18 +23,29 @@ from typing import Any, Optional, Union
 
 import numpy as np
 import uvloop
-from benchmark_dataset import (AIMODataset, BurstGPTDataset,
-                               ConversationDataset, InstructCoderDataset,
-                               RandomDataset, SampleRequest, ShareGPTDataset,
-                               SonnetDataset, VisionArenaDataset)
-from benchmark_utils import (convert_to_pytorch_benchmark_format,
-                             get_llm_instance, write_to_json)
+from benchmark_dataset import (
+    AIMODataset,
+    BurstGPTDataset,
+    ConversationDataset,
+    InstructCoderDataset,
+    RandomDataset,
+    SampleRequest,
+    ShareGPTDataset,
+    SonnetDataset,
+    VisionArenaDataset,
+)
+from benchmark_utils import (
+    convert_to_pytorch_benchmark_format,
+    get_llm_instance,
+    write_to_json,
+)
 from transformers import AutoTokenizer
 from typing_extensions import deprecated
 from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.entrypoints.openai.api_server import (
-    build_async_engine_client_from_engine_args)
+    build_async_engine_client_from_engine_args,
+)
 from vllm.inputs import TextPrompt, TokensPrompt
 from vllm.lora.request import LoRARequest
 from vllm.outputs import RequestOutput
@@ -51,11 +62,13 @@ def run_vllm(
 ) -> tuple[float, Optional[list[RequestOutput]]]:
     llm = get_llm_instance(engine_args)
     assert all(
-        llm.llm_engine.model_config.max_model_len >= (
-            request.prompt_len + request.expected_output_len)
-        for request in requests), (
-            "Please ensure that max_model_len is greater than the sum of"
-            " prompt_len and expected_output_len for all requests.")
+        llm.llm_engine.model_config.max_model_len
+        >= (request.prompt_len + request.expected_output_len)
+        for request in requests
+    ), (
+        "Please ensure that max_model_len is greater than the sum of"
+        " prompt_len and expected_output_len for all requests."
+    )
 
     # Warm up the model
     if warmup_requests > 0:
@@ -68,9 +81,13 @@ def run_vllm(
                 TokensPrompt(
                     prompt_token_ids=request.prompt["prompt_token_ids"],
                     multi_modal_data=request.multi_modal_data,
-                ) if "prompt_token_ids" in request.prompt else TextPrompt(
+                )
+                if "prompt_token_ids" in request.prompt
+                else TextPrompt(
                     prompt=request.prompt,
-                    multi_modal_data=request.multi_modal_data))
+                    multi_modal_data=request.multi_modal_data,
+                )
+            )
             warmup_sampling_params.append(
                 SamplingParams(
                     n=n,
@@ -79,17 +96,20 @@ def run_vllm(
                     ignore_eos=True,
                     max_tokens=request.expected_output_len,
                     detokenize=not disable_detokenize,
-                ))
+                )
+            )
         warmup_lora_requests: Optional[list[LoRARequest]] = None
         if engine_args.enable_lora:
             warmup_lora_requests = [
                 request.lora_request for request in requests
             ]
 
-        _ = llm.generate(warmup_prompts,
-                         warmup_sampling_params,
-                         lora_request=warmup_lora_requests,
-                         use_tqdm=True)
+        _ = llm.generate(
+            warmup_prompts,
+            warmup_sampling_params,
+            lora_request=warmup_lora_requests,
+            use_tqdm=True,
+        )
 
     # Add the requests to the engine.
     print(f"Running the model with {len(requests)} requests")
@@ -100,9 +120,12 @@ def run_vllm(
             TokensPrompt(
                 prompt_token_ids=request.prompt["prompt_token_ids"],
                 multi_modal_data=request.multi_modal_data,
-            ) if "prompt_token_ids" in request.
-            prompt else TextPrompt(prompt=request.prompt,
-                                   multi_modal_data=request.multi_modal_data))
+            )
+            if "prompt_token_ids" in request.prompt
+            else TextPrompt(
+                prompt=request.prompt, multi_modal_data=request.multi_modal_data
+            )
+        )
         sampling_params.append(
             SamplingParams(
                 n=n,
@@ -111,7 +134,8 @@ def run_vllm(
                 ignore_eos=True,
                 max_tokens=request.expected_output_len,
                 detokenize=not disable_detokenize,
-            ))
+            )
+        )
     lora_requests: Optional[list[LoRARequest]] = None
     if engine_args.enable_lora:
         lora_requests = [request.lora_request for request in requests]
@@ -121,10 +145,9 @@ def run_vllm(
     outputs = None
     if not use_beam_search:
         start = time.perf_counter()
-        outputs = llm.generate(prompts,
-                               sampling_params,
-                               lora_request=lora_requests,
-                               use_tqdm=True)
+        outputs = llm.generate(
+            prompts, sampling_params, lora_request=lora_requests, use_tqdm=True
+        )
         end = time.perf_counter()
     else:
         assert lora_requests is None, "BeamSearch API does not support LoRA"
@@ -159,11 +182,13 @@ def run_vllm_chat(
     llm = get_llm_instance(engine_args)
 
     assert all(
-        llm.llm_engine.model_config.max_model_len >= (
-            request.prompt_len + request.expected_output_len)
-        for request in requests), (
-            "Please ensure that max_model_len is greater than the sum of "
-            "prompt_len and expected_output_len for all requests.")
+        llm.llm_engine.model_config.max_model_len
+        >= (request.prompt_len + request.expected_output_len)
+        for request in requests
+    ), (
+        "Please ensure that max_model_len is greater than the sum of "
+        "prompt_len and expected_output_len for all requests."
+    )
 
     prompts = []
     sampling_params: list[SamplingParams] = []
@@ -177,7 +202,8 @@ def run_vllm_chat(
                 ignore_eos=True,
                 max_tokens=request.expected_output_len,
                 detokenize=not disable_detokenize,
-            ))
+            )
+        )
     start = time.perf_counter()
     outputs = llm.chat(prompts, sampling_params, use_tqdm=True)
     end = time.perf_counter()
@@ -193,16 +219,18 @@ async def run_vllm_async(
 ) -> float:
     raise AssertionError("This function is not supported currently")
     async with build_async_engine_client_from_engine_args(
-            engine_args,
-            disable_frontend_multiprocessing=disable_frontend_multiprocessing,
+        engine_args,
+        disable_frontend_multiprocessing=disable_frontend_multiprocessing,
     ) as llm:
         model_config = await llm.get_model_config()
         assert all(
-            model_config.max_model_len >= (request.prompt_len +
-                                           request.expected_output_len)
-            for request in requests), (
-                "Please ensure that max_model_len is greater than the sum of"
-                " prompt_len and expected_output_len for all requests.")
+            model_config.max_model_len
+            >= (request.prompt_len + request.expected_output_len)
+            for request in requests
+        ), (
+            "Please ensure that max_model_len is greater than the sum of"
+            " prompt_len and expected_output_len for all requests."
+        )
 
         # Add the requests to the engine.
         prompts: list[Union[TextPrompt, TokensPrompt]] = []
@@ -213,9 +241,13 @@ async def run_vllm_async(
                 TokensPrompt(
                     prompt_token_ids=request.prompt["prompt_token_ids"],
                     multi_modal_data=request.multi_modal_data,
-                ) if "prompt_token_ids" in request.prompt else TextPrompt(
+                )
+                if "prompt_token_ids" in request.prompt
+                else TextPrompt(
                     prompt=request.prompt,
-                    multi_modal_data=request.multi_modal_data))
+                    multi_modal_data=request.multi_modal_data,
+                )
+            )
             sampling_params.append(
                 SamplingParams(
                     n=n,
@@ -224,17 +256,18 @@ async def run_vllm_async(
                     ignore_eos=True,
                     max_tokens=request.expected_output_len,
                     detokenize=not disable_detokenize,
-                ))
+                )
+            )
             lora_requests.append(request.lora_request)
 
         generators = []
         start = time.perf_counter()
-        for i, (prompt, sp,
-                lr) in enumerate(zip(prompts, sampling_params, lora_requests)):
-            generator = llm.generate(prompt,
-                                     sp,
-                                     lora_request=lr,
-                                     request_id=f"test{i}")
+        for i, (prompt, sp, lr) in enumerate(
+            zip(prompts, sampling_params, lora_requests)
+        ):
+            generator = llm.generate(
+                prompt, sp, lora_request=lr, request_id=f"test{i}"
+            )
             generators.append(generator)
         all_gens = merge_async_iterators(*generators)
         async for i, res in all_gens:
@@ -243,8 +276,9 @@ async def run_vllm_async(
         return end - start
 
 
-def save_to_pytorch_benchmark_format(args: argparse.Namespace,
-                                     results: dict[str, Any]) -> None:
+def save_to_pytorch_benchmark_format(
+    args: argparse.Namespace, results: dict[str, Any]
+) -> None:
     pt_records = convert_to_pytorch_benchmark_format(
         args=args,
         metrics={
@@ -288,7 +322,8 @@ def get_requests(args, tokenizer):
             sample_kwargs["enable_multimodal_chat"] = True
     elif args.dataset_name == "sonnet":
         assert tokenizer.chat_template or tokenizer.default_chat_template, (
-            "Tokenizer/model must have chat template for sonnet dataset.")
+            "Tokenizer/model must have chat template for sonnet dataset."
+        )
         dataset_cls = SonnetDataset
         sample_kwargs["prefix_len"] = args.prefix_len
         sample_kwargs["return_prompt_formatted"] = True
@@ -322,7 +357,8 @@ def get_requests(args, tokenizer):
 
 @deprecated(
     "benchmark_throughput.py is deprecated and will be removed in a "
-    "future version. Please use 'vllm bench throughput' instead.", )
+    "future version. Please use 'vllm bench throughput' instead.",
+)
 def main(args: argparse.Namespace):
     if args.seed is None:
         args.seed = 0
@@ -330,10 +366,12 @@ def main(args: argparse.Namespace):
     random.seed(args.seed)
     # Sample the requests.
     tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer, trust_remote_code=args.trust_remote_code)
+        args.tokenizer, trust_remote_code=args.trust_remote_code
+    )
     requests = get_requests(args, tokenizer)
-    is_multi_modal = any(request.multi_modal_data is not None
-                         for request in requests)
+    is_multi_modal = any(
+        request.multi_modal_data is not None for request in requests
+    )
     request_outputs: Optional[list[RequestOutput]] = None
     if args.backend == "vllm":
         if args.async_engine:
@@ -344,7 +382,8 @@ def main(args: argparse.Namespace):
                     AsyncEngineArgs.from_cli_args(args),
                     args.disable_frontend_multiprocessing,
                     args.disable_detokenize,
-                ))
+                )
+            )
         else:
             elapsed_time, request_outputs = run_vllm(
                 requests,
@@ -355,8 +394,11 @@ def main(args: argparse.Namespace):
             )
     elif args.backend == "vllm-chat":
         elapsed_time, request_outputs = run_vllm_chat(
-            requests, args.n, EngineArgs.from_cli_args(args),
-            args.disable_detokenize)
+            requests,
+            args.n,
+            EngineArgs.from_cli_args(args),
+            args.disable_detokenize,
+        )
     else:
         raise ValueError(f"Unknown backend: {args.backend}")
 
@@ -374,18 +416,23 @@ def main(args: argparse.Namespace):
         for ro in request_outputs:
             if not isinstance(ro, RequestOutput):
                 continue
-            total_prompt_tokens += (len(ro.prompt_token_ids)
-                                    if ro.prompt_token_ids else 0)
+            total_prompt_tokens += (
+                len(ro.prompt_token_ids) if ro.prompt_token_ids else 0
+            )
             total_output_tokens += sum(
-                len(o.token_ids) for o in ro.outputs if o)
+                len(o.token_ids) for o in ro.outputs if o
+            )
 
             if ro.metrics is not None:
                 num_output_tokens = sum(
-                    len(o.token_ids) for o in ro.outputs if o)
-                ttfts.append(ro.metrics.first_token_time -
-                             ro.metrics.arrival_time)
-                tpot = (ro.metrics.finished_time -
-                        ro.metrics.first_token_time) / (num_output_tokens - 1)
+                    len(o.token_ids) for o in ro.outputs if o
+                )
+                ttfts.append(
+                    ro.metrics.first_token_time - ro.metrics.arrival_time
+                )
+                tpot = (
+                    ro.metrics.finished_time - ro.metrics.first_token_time
+                ) / (num_output_tokens - 1)
                 tpots.append(tpot)
 
         total_num_tokens = total_prompt_tokens + total_output_tokens
@@ -398,28 +445,37 @@ def main(args: argparse.Namespace):
             mean_tpot_ms = np.mean(tpots) * 1000
             max_tpot_ms = np.max(tpots) * 1000
     else:
-        total_num_tokens = sum(r.prompt_len + r.expected_output_len
-                               for r in requests)
+        total_num_tokens = sum(
+            r.prompt_len + r.expected_output_len for r in requests
+        )
         total_output_tokens = sum(r.expected_output_len for r in requests)
         total_prompt_tokens = total_num_tokens - total_output_tokens
 
     if is_multi_modal and args.backend != "vllm-chat":
-        print("\033[91mWARNING\033[0m: Multi-modal request with "
-              f"{args.backend} backend detected. The "
-              "following metrics are not accurate because image tokens are not"
-              " counted. See vllm-project/vllm/issues/9778 for details.")
+        print(
+            "\033[91mWARNING\033[0m: Multi-modal request with "
+            f"{args.backend} backend detected. The "
+            "following metrics are not accurate because image tokens are not"
+            " counted. See vllm-project/vllm/issues/9778 for details."
+        )
         # TODO(vllm-project/vllm/issues/9778): Count multi-modal token length.
         # vllm-chat backend counts the image tokens now
 
-    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} total tokens/s, "
-          f"{total_output_tokens / elapsed_time:.2f} output tokens/s")
+    print(
+        f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
+        f"{total_num_tokens / elapsed_time:.2f} total tokens/s, "
+        f"{total_output_tokens / elapsed_time:.2f} output tokens/s"
+    )
     print(f"Total num prompt tokens:  {total_prompt_tokens}")
     print(f"Total num output tokens:  {total_output_tokens}")
-    print(f"Median TTFT: {median_ttft_ms:.2f} ms, ",
-          f"Mean TTFT: {mean_ttft_ms:.2f} ms, Max TTFT: {max_ttft_ms:.2f} ms")
-    print(f"Median TPOT: {median_tpot_ms:.2f} ms, ",
-          f"Mean TPOT: {mean_tpot_ms:.2f} ms, Max TPOT: {max_tpot_ms:.2f} ms")
+    print(
+        f"Median TTFT: {median_ttft_ms:.2f} ms, ",
+        f"Mean TTFT: {mean_ttft_ms:.2f} ms, Max TTFT: {max_ttft_ms:.2f} ms",
+    )
+    print(
+        f"Median TPOT: {median_tpot_ms:.2f} ms, ",
+        f"Mean TPOT: {mean_tpot_ms:.2f} ms, Max TPOT: {max_tpot_ms:.2f} ms",
+    )
 
     # Output JSON results if specified
     if args.output_json:
@@ -468,8 +524,7 @@ def validate_args(args):
 
     # === Dataset Configuration ===
     if not args.dataset and not args.dataset_path:
-        print(
-            "When dataset path is not set, it will default to random dataset")
+        print("When dataset path is not set, it will default to random dataset")
         args.dataset_name = "random"
         if args.input_len is None:
             raise ValueError("input_len must be provided for a random dataset")
@@ -478,8 +533,9 @@ def validate_args(args):
     # --hf-subset and --hf-split: only used
     # when dataset_name is 'hf'
     if args.dataset_name != "hf" and (
-            getattr(args, "hf_subset", None) is not None
-            or getattr(args, "hf_split", None) is not None):
+        getattr(args, "hf_subset", None) is not None
+        or getattr(args, "hf_split", None) is not None
+    ):
         warnings.warn(
             "--hf-subset and --hf-split will be ignored \
                 since --dataset-name is not 'hf'.",
@@ -487,19 +543,23 @@ def validate_args(args):
         )
     elif args.dataset_name == "hf":
         if args.dataset_path in (
-                VisionArenaDataset.SUPPORTED_DATASET_PATHS.keys()
-                | ConversationDataset.SUPPORTED_DATASET_PATHS):
+            VisionArenaDataset.SUPPORTED_DATASET_PATHS.keys()
+            | ConversationDataset.SUPPORTED_DATASET_PATHS
+        ):
             assert args.backend == "vllm-chat", (
                 f"{args.dataset_path} needs to use vllm-chat as the backend."
             )  # noqa: E501
-        elif args.dataset_path in (InstructCoderDataset.SUPPORTED_DATASET_PATHS
-                                   | AIMODataset.SUPPORTED_DATASET_PATHS):
+        elif args.dataset_path in (
+            InstructCoderDataset.SUPPORTED_DATASET_PATHS
+            | AIMODataset.SUPPORTED_DATASET_PATHS
+        ):
             assert args.backend == "vllm", (
                 f"{args.dataset_path} needs to use vllm as the backend."
             )  # noqa: E501
         else:
             raise ValueError(
-                f"{args.dataset_path} is not supported by hf dataset.")
+                f"{args.dataset_path} is not supported by hf dataset."
+            )
 
     # --random-range-ratio: only used when dataset_name is 'random'
     if args.dataset_name != "random" and args.random_range_ratio is not None:
@@ -511,8 +571,10 @@ def validate_args(args):
 
     # --prefix-len: only used when dataset_name is 'random', 'sonnet', or not
     # set.
-    if (args.dataset_name not in {"random", "sonnet", None}
-            and args.prefix_len is not None):
+    if (
+        args.dataset_name not in {"random", "sonnet", None}
+        and args.prefix_len is not None
+    ):
         warnings.warn(
             "--prefix-len will be ignored since --dataset-name\
                  is not 'random', 'sonnet', or not set.",
@@ -521,8 +583,7 @@ def validate_args(args):
 
     # === LoRA Settings ===
     if getattr(args, "enable_lora", False) and args.backend != "vllm":
-        raise ValueError(
-            "LoRA benchmarking is only supported for vLLM backend")
+        raise ValueError("LoRA benchmarking is only supported for vLLM backend")
     if getattr(args, "enable_lora", False) and args.lora_path is None:
         raise ValueError("LoRA path must be provided when enable_lora is True")
 
@@ -531,7 +592,8 @@ def validate_args(args):
     if args.data_parallel_size > 1:
         raise ValueError(
             "Data parallel is not supported in offline benchmark, "
-            "please use benchmark serving instead")
+            "please use benchmark serving instead"
+        )
 
 
 def create_argument_parser():
@@ -563,10 +625,9 @@ def create_argument_parser():
         "be a json in form of list[dict[..., conversations: "
         "list[dict[..., value: <prompt_or_response>]]]]",
     )
-    parser.add_argument("--dataset-path",
-                        type=str,
-                        default=None,
-                        help="Path to the dataset")
+    parser.add_argument(
+        "--dataset-path", type=str, default=None, help="Path to the dataset"
+    )
     parser.add_argument(
         "--input-len",
         type=int,
@@ -580,14 +641,18 @@ def create_argument_parser():
         help="Output length for each request. Overrides the "
         "output length from the dataset.",
     )
-    parser.add_argument("--n",
-                        type=int,
-                        default=1,
-                        help="Number of generated sequences per prompt.")
-    parser.add_argument("--num-prompts",
-                        type=int,
-                        default=1000,
-                        help="Number of prompts to process.")
+    parser.add_argument(
+        "--n",
+        type=int,
+        default=1,
+        help="Number of generated sequences per prompt.",
+    )
+    parser.add_argument(
+        "--num-prompts",
+        type=int,
+        default=1000,
+        help="Number of prompts to process.",
+    )
     parser.add_argument(
         "--hf-max-batch-size",
         type=int,
@@ -615,8 +680,10 @@ def create_argument_parser():
     parser.add_argument(
         "--disable-detokenize",
         action="store_true",
-        help=("Do not detokenize the response (i.e. do not include "
-              "detokenization time in the measurement)"),
+        help=(
+            "Do not detokenize the response (i.e. do not include "
+            "detokenization time in the measurement)"
+        ),
     )
     # LoRA
     parser.add_argument(
@@ -654,19 +721,19 @@ def create_argument_parser():
     )
 
     # hf dataset
-    parser.add_argument("--hf-subset",
-                        type=str,
-                        default=None,
-                        help="Subset of the HF dataset.")
-    parser.add_argument("--hf-split",
-                        type=str,
-                        default=None,
-                        help="Split of the HF dataset.")
+    parser.add_argument(
+        "--hf-subset", type=str, default=None, help="Subset of the HF dataset."
+    )
+    parser.add_argument(
+        "--hf-split", type=str, default=None, help="Split of the HF dataset."
+    )
 
-    parser.add_argument("--warmup-requests",
-                        type=int,
-                        default=1,
-                        help="Number of requests to warm up the model.")
+    parser.add_argument(
+        "--warmup-requests",
+        type=int,
+        default=1,
+        help="Number of requests to warm up the model.",
+    )
 
     parser = AsyncEngineArgs.add_cli_args(parser)
 

@@ -61,19 +61,22 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         # Encoder
         if batch_idx is not None:
             enc_attention_mask = torch.zeros(
-                1, self.model.rbln_config.enc_max_seq_len, dtype=self.dtype)
-            enc_attention_mask[0][:enc_lengths[batch_idx] + 1] = 1
+                1, self.model.rbln_config.enc_max_seq_len, dtype=self.dtype
+            )
+            enc_attention_mask[0][: enc_lengths[batch_idx] + 1] = 1
 
-            padding_need = (self.model.rbln_config.enc_max_seq_len -
-                            input_ids.shape[-1])
+            padding_need = (
+                self.model.rbln_config.enc_max_seq_len - input_ids.shape[-1]
+            )
             input_ids = torch.nn.functional.pad(input_ids, (0, padding_need))
 
-            _ = self.model.encoder(input_ids,
-                                   enc_attention_mask,
-                                   block_tables=block_tables)
+            _ = self.model.encoder(
+                input_ids, enc_attention_mask, block_tables=block_tables
+            )
 
             logits = torch.zeros(
-                1, 1, self.model.config.vocab_size + self.INVALID_TOKEN)
+                1, 1, self.model.config.vocab_size + self.INVALID_TOKEN
+            )
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             logits[0][0][-1] = 1
@@ -81,11 +84,13 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         # Decoder
         else:
             # Replace INVALID_TOKEN markers with the decoder start token ID
-            input_ids[input_ids == (
-                self.model.config.vocab_size + self.INVALID_TOKEN -
-                1)] = self.model.config.decoder_start_token_id
-            cache_position[cache_position !=
-                           0] = cache_position[cache_position != 0] - 2
+            input_ids[
+                input_ids
+                == (self.model.config.vocab_size + self.INVALID_TOKEN - 1)
+            ] = self.model.config.decoder_start_token_id
+            cache_position[cache_position != 0] = (
+                cache_position[cache_position != 0] - 2
+            )
 
             enc_attention_mask = torch.zeros(
                 self.model.rbln_config.batch_size,
@@ -99,7 +104,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             )
 
             for batch_idx in range(self.model.rbln_config.batch_size):
-                enc_attention_mask[batch_idx, :enc_lengths[batch_idx] + 1] = 1
+                enc_attention_mask[batch_idx, : enc_lengths[batch_idx] + 1] = 1
 
             if self.model.decoder is None:
                 raise version_error
@@ -114,8 +119,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
 
         return logits
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
@@ -130,11 +134,13 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         ]
         batch_idx = block_tables[0][0] if is_prompt else None
 
-        kwargs = self.preprocess_for_decoder(is_prompt,
-                                             block_tables,
-                                             input_ids,
-                                             cache_position,
-                                             input_block_ids=valid_block_ids)
+        kwargs = self.preprocess_for_decoder(
+            is_prompt,
+            block_tables,
+            input_ids,
+            cache_position,
+            input_block_ids=valid_block_ids,
+        )
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")

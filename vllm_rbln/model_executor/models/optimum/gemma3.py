@@ -17,21 +17,26 @@ import torch
 import vllm.envs as envs
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.gemma3_mm import (Gemma3DummyInputsBuilder,
-                                                  Gemma3ImageInputs,
-                                                  Gemma3ImagePixelInputs,
-                                                  Gemma3MultiModalProcessor,
-                                                  Gemma3ProcessingInfo)
+from vllm.model_executor.models.gemma3_mm import (
+    Gemma3DummyInputsBuilder,
+    Gemma3ImageInputs,
+    Gemma3ImagePixelInputs,
+    Gemma3MultiModalProcessor,
+    Gemma3ProcessingInfo,
+)
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.interfaces_base import (
-    VllmModelForTextGeneration)
+    VllmModelForTextGeneration,
+)
 from vllm.model_executor.models.utils import flatten_bn
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from .optimum_attention import (HybridAttentionImageManager,
-                                HybridAttentionImageStrategy)
+from .optimum_attention import (
+    HybridAttentionImageManager,
+    HybridAttentionImageStrategy,
+)
 
 logger = init_logger(__name__)
 
@@ -40,23 +45,25 @@ PAD_TOKEN_ID = 0
 
 
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
-
     def _pad_for_gemma3(self, prompt_ids: list[int], prompt: str):
-        token_type_ids = (torch.tensor(prompt_ids) ==
-                          self.info.get_hf_processor().image_token_id)
+        token_type_ids = (
+            torch.tensor(prompt_ids)
+            == self.info.get_hf_processor().image_token_id
+        )
 
-        image_prefill_chunk_size = self.info.get_hf_processor(
-        ).image_seq_length
+        image_prefill_chunk_size = self.info.get_hf_processor().image_seq_length
         # Find image start positions
         image_starts = [
-            s for s in torch.where(token_type_ids)[0]
-            if torch.all(token_type_ids[s:s + image_prefill_chunk_size])
+            s
+            for s in torch.where(token_type_ids)[0]
+            if torch.all(token_type_ids[s : s + image_prefill_chunk_size])
         ]
         padded_seq_len = 0
         for image_start in image_starts:
             pad_needed = (
-                image_prefill_chunk_size -
-                (image_start + padded_seq_len) % image_prefill_chunk_size)
+                image_prefill_chunk_size
+                - (image_start + padded_seq_len) % image_prefill_chunk_size
+            )
             padded_seq_len += pad_needed
 
         pad_token = self.info.get_hf_processor().tokenizer.pad_token
@@ -69,8 +76,9 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
     def apply(self, *args, **kwargs):
         output = super().apply(*args, **kwargs)
-        prompt_ids, prompt = self._pad_for_gemma3(output["prompt_token_ids"],
-                                                  output["prompt"])
+        prompt_ids, prompt = self._pad_for_gemma3(
+            output["prompt_token_ids"], output["prompt"]
+        )
 
         output["prompt_token_ids"] = prompt_ids
         output["prompt"] = prompt
@@ -84,12 +92,11 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
     dummy_inputs=Gemma3DummyInputsBuilder,
 )
 class RBLNOptimumGemma3ForConditionalGeneration(
-        RBLNOptimumModelBase,
-        RBLNOptimumDecoderMixin,
-        VllmModelForTextGeneration,
-        SupportsMultiModal,
+    RBLNOptimumModelBase,
+    RBLNOptimumDecoderMixin,
+    VllmModelForTextGeneration,
+    SupportsMultiModal,
 ):
-
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -106,16 +113,15 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 False,
             ),
             default_batch_size=self.scheduler_config.max_num_seqs,
-            decoder_batch_sizes=self.model.rbln_config.language_model.
-            decoder_batch_sizes,
+            decoder_batch_sizes=self.model.rbln_config.language_model.decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
         self.strategy = HybridAttentionImageStrategy(IMG_PAD_TOKEN_ID)
-        self.attention_manager: HybridAttentionImageManager \
-            = HybridAttentionImageManager(self.strategy)
+        self.attention_manager: HybridAttentionImageManager = (
+            HybridAttentionImageManager(self.strategy)
+        )
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         position_ids = model_input.input_positions
         block_tables = model_input.block_tables
@@ -130,14 +136,15 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         request_nums = input_ids.shape[0]
 
         # In prefill phase, the length of list must be 1
-        sliding_window_table_ids, padded_cache_lengths, attention_masks = \
-        self.attention_manager.get(
+        sliding_window_table_ids, padded_cache_lengths, attention_masks = (
+            self.attention_manager.get(
                 is_prompt,
                 self.decoder_batch_size,
                 running_requests_ids,
                 finished_requests_ids,
                 input_ids=input_ids,
             )
+        )
         # When processing input_ids, we initially pad them with IMG_PAD_TOKEN_ID
         # instead of PAD_TOKEN_ID.
         #
@@ -153,8 +160,9 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         # with PAD_TOKEN_ID.
         input_ids = self.postprocess_input_ids(input_ids)
 
-        kwargs = self.preprocess_for_decoder(is_prompt, block_tables,
-                                             input_ids, position_ids)
+        kwargs = self.preprocess_for_decoder(
+            is_prompt, block_tables, input_ids, position_ids
+        )
 
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.
@@ -167,17 +175,18 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         if is_prompt:
             inputs_embeds = None
             prefill_batch_idx = sliding_window_table_ids[0]
-            local_block_table_id = torch.tensor([prefill_batch_idx],
-                                                dtype=torch.int16)
+            local_block_table_id = torch.tensor(
+                [prefill_batch_idx], dtype=torch.int16
+            )
             # token_type_ids model_input != token_type_ids of gemma3
             # https://github.com/huggingface/transformers/blob/d0c9c66d1c09df3cd70bf036e813d88337b20d4c/src/transformers/models/gemma3/processing_gemma3.py#L143
             token_type_ids = torch.zeros_like(input_ids)
-            token_type_ids[input_ids ==
-                           self.model.config.image_token_index] = 1
+            token_type_ids[input_ids == self.model.config.image_token_index] = 1
 
             pixel_values = self.get_pixel_values(model_input)
             inputs_embeds = self.model._preprocess_prefill(
-                input_ids, inputs_embeds, pixel_values)
+                input_ids, inputs_embeds, pixel_values
+            )
             if self.model.language_model.prefill_decoder is None:
                 raise version_error
             assert attention_masks is not None
@@ -204,10 +213,12 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         else:
             if self.model.language_model.decoders is None:
                 raise ValueError("Decoders is None")
-            padded_batch_size = kwargs.pop("padded_batch_size",
-                                           self.decoder_batch_size)
+            padded_batch_size = kwargs.pop(
+                "padded_batch_size", self.decoder_batch_size
+            )
             self.model.language_model.decoder = (
-                self.model.language_model.decoders[padded_batch_size])
+                self.model.language_model.decoders[padded_batch_size]
+            )
             (
                 local_block_table_id,
                 cache_position,
@@ -246,7 +257,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
 
         if model_input.multi_modal_kwargs:
             image_input = self._parse_and_validate_image_input(
-                **model_input.multi_modal_kwargs)
+                **model_input.multi_modal_kwargs
+            )
             if image_input is not None:
                 assert image_input["type"] == "pixel_values"
                 pixel_values = image_input["pixel_values"]
@@ -256,7 +268,8 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         return pixel_values
 
     def _parse_and_validate_image_input(
-            self, **kwargs: Any) -> Optional[Gemma3ImageInputs]:
+        self, **kwargs: Any
+    ) -> Optional[Gemma3ImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         num_crops = kwargs.pop("num_crops", None)
         image_embeds = kwargs.pop("image_embeds", None)
@@ -267,24 +280,25 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             return None
 
         if not isinstance(pixel_values, (torch.Tensor, list)):
-            raise ValueError("Incorrect type of pixel values. "
-                             f"Got type: {type(pixel_values)}")
+            raise ValueError(
+                "Incorrect type of pixel values. "
+                f"Got type: {type(pixel_values)}"
+            )
 
         if not isinstance(num_crops, (torch.Tensor, list)):
-            raise ValueError("Incorrect type of num_crops. "
-                             f"Got type: {type(num_crops)}")
+            raise ValueError(
+                f"Incorrect type of num_crops. Got type: {type(num_crops)}"
+            )
 
         image_size = config.vision_config.image_size
 
         return Gemma3ImagePixelInputs(
             pixel_values=flatten_bn(pixel_values, concat=True),
             num_patches=flatten_bn(num_crops, concat=True) + 1,
-            resolve_bindings={
-                "h": image_size,
-                "w": image_size
-            })
+            resolve_bindings={"h": image_size, "w": image_size},
+        )
 
     def postprocess_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-        is_image_pad_token = (input_ids == IMG_PAD_TOKEN_ID)
+        is_image_pad_token = input_ids == IMG_PAD_TOKEN_ID
         input_ids[is_image_pad_token] = PAD_TOKEN_ID
         return input_ids

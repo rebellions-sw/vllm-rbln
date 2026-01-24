@@ -22,10 +22,9 @@ INPUT_PROMPT = "UN Chief Says There Is No <mask> in Syria"
 GOLDEN_PROMPT = "UN Chief Says There Is No Security in Syria"
 
 
-async def generate(engine: AsyncLLMEngine,
-                   prompt: str,
-                   model: str,
-                   request_id=0):
+async def generate(
+    engine: AsyncLLMEngine, prompt: str, model: str, request_id=0
+):
     print(f"generate request_id={request_id}, prompt={prompt}")
     example_input = {
         "stream": True,
@@ -86,7 +85,9 @@ async def main(
 
         futures.append(
             asyncio.create_task(
-                generate(engine, prompt=p, model=model_id, request_id=i)))
+                generate(engine, prompt=p, model=model_id, request_id=i)
+            )
+        )
 
     result = await asyncio.gather(*futures)
 
@@ -100,10 +101,12 @@ def entry_point(
     num_input_prompt: int = 10,
     model_id: str = "/rbln_bart-small_batch2",
 ):
-    asyncio.run(main(
-        num_input_prompt=num_input_prompt,
-        model_id=model_id,
-    ))
+    asyncio.run(
+        main(
+            num_input_prompt=num_input_prompt,
+            model_id=model_id,
+        )
+    )
 
 
 if __name__ == "__main__":

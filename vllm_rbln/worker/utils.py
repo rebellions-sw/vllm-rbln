@@ -72,14 +72,16 @@ def get_maximum_num_blocks(
     vocab_size = model_config.get_vocab_size()
     hidden_size = model_config.get_hidden_size()
     num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
-    tensor_parallel_size = parallel_config.tensor_parallel_size * \
-                           envs.VLLM_RBLN_TP_SIZE
+    tensor_parallel_size = (
+        parallel_config.tensor_parallel_size * envs.VLLM_RBLN_TP_SIZE
+    )
 
     # TODO(jongho): Update if target npu is REBEL.
     ATOM_DRAM_NBYTES = 16 * 2**30
     ATOM_SYS_DRAM_NBYTES = 288 * 2**20
-    available_dram = tensor_parallel_size * (ATOM_DRAM_NBYTES -
-                                             ATOM_SYS_DRAM_NBYTES)
+    available_dram = tensor_parallel_size * (
+        ATOM_DRAM_NBYTES - ATOM_SYS_DRAM_NBYTES
+    )
 
     def check_oom(available_dram: int) -> None:
         if available_dram <= 0:
@@ -87,21 +89,35 @@ def get_maximum_num_blocks(
 
     if kernel_size is None:
         if n_model_params is None:
-            raise ValueError("`n_model_params` should be specified \
-                to estimate the kernel memory.")
+            raise ValueError(
+                "`n_model_params` should be specified \
+                to estimate the kernel memory."
+            )
         # Get estimated kernel size (approximated)
         lm_heads_params = align(vocab_size, 64) * hidden_size
-        lm_heads_nbytes = (align_2MB(
-            lm_heads_params * nbits_per_param // 8 / tensor_parallel_size) *
-                           tensor_parallel_size)
+        lm_heads_nbytes = (
+            align_2MB(
+                lm_heads_params * nbits_per_param // 8 / tensor_parallel_size
+            )
+            * tensor_parallel_size
+        )
         params = n_model_params - lm_heads_params
-        layer_nbytes = (align_2MB(params * nbits_per_param // 8 / num_layers /
-                                  tensor_parallel_size) * num_layers *
-                        tensor_parallel_size)
+        layer_nbytes = (
+            align_2MB(
+                params
+                * nbits_per_param
+                // 8
+                / num_layers
+                / tensor_parallel_size
+            )
+            * num_layers
+            * tensor_parallel_size
+        )
         kernel_size = layer_nbytes + lm_heads_nbytes
     elif n_model_params is not None:
         raise ValueError(
-            "Both `n_model_params` and `kernel_size` cannot be specified.")
+            "Both `n_model_params` and `kernel_size` cannot be specified."
+        )
 
     available_dram -= kernel_size
 
@@ -115,8 +131,12 @@ def get_maximum_num_blocks(
 
     check_oom(available_dram)
 
-    b = kvcache_block_size * align(head_dim, 64) * math.ceil(
-        num_key_value_heads / tensor_parallel_size) * 2
+    b = (
+        kvcache_block_size
+        * align(head_dim, 64)
+        * math.ceil(num_key_value_heads / tensor_parallel_size)
+        * 2
+    )
     c = num_layers * 2 * tensor_parallel_size
     k = available_dram / c
     max_n_blocks = math.floor(2**21 / b * math.floor((k - 1) / 2**21))

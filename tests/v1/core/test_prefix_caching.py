@@ -17,8 +17,7 @@ import torch
 from vllm import SamplingParams
 from vllm.platforms import current_platform
 from vllm.utils import sha256
-from vllm.v1.core.kv_cache_utils import (get_request_block_hasher,
-                                         init_none_hash)
+from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
 from vllm.v1.request import Request, RequestStatus
 
 from .utils import create_model_runner_output, create_scheduler
@@ -118,9 +117,12 @@ def create_request(
         ),
     ],
 )
-def test_prefix_cache_hit_same_prompt(scheduler, token_length: int,
-                                      cached_block_table: list[int],
-                                      cached_length: list[int]):
+def test_prefix_cache_hit_same_prompt(
+    scheduler,
+    token_length: int,
+    cached_block_table: list[int],
+    cached_length: list[int],
+):
     init_none_hash(HASH_FN)
     """
     Check the prefix caching works as expected
@@ -158,22 +160,29 @@ def test_prefix_cache_hit_same_prompt(scheduler, token_length: int,
     assert output.cached_length == cached_length
 
 
-@pytest.mark.parametrize("token_length, decode_steps, allocated_blocks", [
-    pytest.param(
-        31,
-        1,
-        [0, 1, 2, -1],
-        id="decode_1_step_and_eviction",
-    ),
-    pytest.param(
-        25,
-        7,
-        [0, 1, 2, -1],
-        id="decode_7_steps_eviction",
-    ),
-])
-def test_eviction(limited_4blocks_scheduler, token_length: int,
-                  decode_steps: int, allocated_blocks: list[int]):
+@pytest.mark.parametrize(
+    "token_length, decode_steps, allocated_blocks",
+    [
+        pytest.param(
+            31,
+            1,
+            [0, 1, 2, -1],
+            id="decode_1_step_and_eviction",
+        ),
+        pytest.param(
+            25,
+            7,
+            [0, 1, 2, -1],
+            id="decode_7_steps_eviction",
+        ),
+    ],
+)
+def test_eviction(
+    limited_4blocks_scheduler,
+    token_length: int,
+    decode_steps: int,
+    allocated_blocks: list[int],
+):
     init_none_hash(HASH_FN)
     """
     Check the eviction works as expected.
@@ -203,8 +212,9 @@ def test_eviction(limited_4blocks_scheduler, token_length: int,
     for _ in range(until_to_preemption):
         output = limited_4blocks_scheduler.schedule()
         model_runner_output = create_model_runner_output(output)
-        limited_4blocks_scheduler.update_from_output(output,
-                                                     model_runner_output)
+        limited_4blocks_scheduler.update_from_output(
+            output, model_runner_output
+        )
     assert req1_id in output.block_table_dict
     # Now, req1 is preempted, and req0 continues.
     # req0 requires 1 more block.
@@ -256,11 +266,13 @@ def test_cache_hit_child_block(limited_6blocks_scheduler):
     req1 = create_request(req1_id, common_token_ids, IB_SIZE, HASH_FN)
 
     req2_id = "req2"
-    req2 = create_request(req2_id, [i + 100 for i in common_token_ids],
-                          IB_SIZE, HASH_FN)
+    req2 = create_request(
+        req2_id, [i + 100 for i in common_token_ids], IB_SIZE, HASH_FN
+    )
     req3_id = "req3"
-    req3 = create_request(req3_id, [i + 50 for i in common_token_ids], IB_SIZE,
-                          HASH_FN)
+    req3 = create_request(
+        req3_id, [i + 50 for i in common_token_ids], IB_SIZE, HASH_FN
+    )
 
     req4_id = "req4"
     req4 = create_request(req4_id, common_token_ids, IB_SIZE, HASH_FN)
@@ -288,8 +300,9 @@ def test_cache_hit_child_block(limited_6blocks_scheduler):
 
     # Finish req0 and schedule req3 [0, 1]
     # To remove the cache, the prompt of req3 is different from req0/req1
-    limited_6blocks_scheduler.finish_requests(req0_id,
-                                              RequestStatus.FINISHED_ABORTED)
+    limited_6blocks_scheduler.finish_requests(
+        req0_id, RequestStatus.FINISHED_ABORTED
+    )
     output = limited_6blocks_scheduler.schedule()
     model_runner_output = create_model_runner_output(output)
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
@@ -297,8 +310,9 @@ def test_cache_hit_child_block(limited_6blocks_scheduler):
 
     # Finish req2 and schedule req4 [4, 5]
     # Reuse the req1's blocks [2, 3] for req4
-    limited_6blocks_scheduler.finish_requests(req2_id,
-                                              RequestStatus.FINISHED_ABORTED)
+    limited_6blocks_scheduler.finish_requests(
+        req2_id, RequestStatus.FINISHED_ABORTED
+    )
     output = limited_6blocks_scheduler.schedule()
     model_runner_output = create_model_runner_output(output)
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
@@ -355,8 +369,9 @@ def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
     assert output.block_table_dict[req1_id].tolist() == [2, 3, -1, -1]
 
     # Schedule req2 [4, 5]
-    limited_6blocks_scheduler.finish_requests(req0_id,
-                                              RequestStatus.FINISHED_ABORTED)
+    limited_6blocks_scheduler.finish_requests(
+        req0_id, RequestStatus.FINISHED_ABORTED
+    )
     output = limited_6blocks_scheduler.schedule()
     model_runner_output = create_model_runner_output(output)
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)
@@ -369,10 +384,12 @@ def test_allocated_blocks_excluded_from_cache_hit(limited_6blocks_scheduler):
     # 2. req3 is allocated [0, 1] again
     # 3. So the cached blocks become [2, 3]
     # to exclude the allocated blocks [0, 1].
-    limited_6blocks_scheduler.finish_requests(req0_id,
-                                              RequestStatus.FINISHED_ABORTED)
-    limited_6blocks_scheduler.finish_requests(req1_id,
-                                              RequestStatus.FINISHED_ABORTED)
+    limited_6blocks_scheduler.finish_requests(
+        req0_id, RequestStatus.FINISHED_ABORTED
+    )
+    limited_6blocks_scheduler.finish_requests(
+        req1_id, RequestStatus.FINISHED_ABORTED
+    )
     output = limited_6blocks_scheduler.schedule()
     model_runner_output = create_model_runner_output(output)
     limited_6blocks_scheduler.update_from_output(output, model_runner_output)

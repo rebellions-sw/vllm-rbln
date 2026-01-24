@@ -111,24 +111,28 @@ def flash_causal_attention_naive_prefill(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
 
-        attn_out_prev = tl.zeros([1, NUM_HEAD, NUM_GROUP, QUERY_LEN, HEAD_DIM],
-                                 dtype=tl.float32)
-        row_sum_prev = tl.zeros([1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1],
-                                dtype=tl.float32)
-        row_max_prev = tl.zeros([1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1],
-                                dtype=tl.float32)
+        attn_out_prev = tl.zeros(
+            [1, NUM_HEAD, NUM_GROUP, QUERY_LEN, HEAD_DIM], dtype=tl.float32
+        )
+        row_sum_prev = tl.zeros(
+            [1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1], dtype=tl.float32
+        )
+        row_max_prev = tl.zeros(
+            [1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1], dtype=tl.float32
+        )
 
         for partition_id in tl.static_range(0, NUM_PARTITION, 1):
             block_table_ptr = tl.make_block_ptr(
                 base=block_table,
-                shape=(NUM_PARTITION, ),
-                strides=(1, ),
-                offsets=(partition_id, ),
-                block_shape=(1, ),
-                order=(0, ),
+                shape=(NUM_PARTITION,),
+                strides=(1,),
+                offsets=(partition_id,),
+                block_shape=(1,),
+                order=(0,),
             )
             tl.static_assert(
-                len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
+                len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE
+            )
             seq_idx_ptr = tl.make_block_ptr(
                 base=seq_idx,
                 shape=(NUM_BATCH, NUM_PARTITION),
@@ -146,8 +150,7 @@ def flash_causal_attention_naive_prefill(
             if rblib.partition_skip(block_offset) == False:  # noqa: E712
                 k_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
-                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE,
-                           HEAD_DIM),
+                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM),
                     strides=(
                         NUM_BLOCK * 1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
                         1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
@@ -162,30 +165,38 @@ def flash_causal_attention_naive_prefill(
                 )
                 k = rblib.dynamic_load(k_cache_ptr, DYNAMIC_AXIS, block_offset)
                 k_insert = rblib.insert(k, k_state, DYNAMIC_AXIS, block_offset)
-                rblib.dynamic_store(k_cache_ptr, k_insert, DYNAMIC_AXIS,
-                                    block_offset + QUERY_LEN)
+                rblib.dynamic_store(
+                    k_cache_ptr,
+                    k_insert,
+                    DYNAMIC_AXIS,
+                    block_offset + QUERY_LEN,
+                )
 
                 k_insert = tl.reshape(
-                    k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
+                    k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM)
+                )
                 k = tl.permute(k_insert, (0, 1, 2, 4, 3))
                 k = tl.broadcast_to(
-                    k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE))
+                    k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE)
+                )
                 qk = tl.dot(q, k)
 
                 qk_scaled = qk * qk_scale
 
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset,
-                                                      row_max_prev))
+                        rblib.dynamic_flash_attn_tile(
+                            qk_scaled, block_offset, row_max_prev
+                        )
+                    )
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset))
+                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset)
+                    )
 
                 v_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
-                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE,
-                           HEAD_DIM),
+                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM),
                     strides=(
                         NUM_BLOCK * 1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
                         1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
@@ -201,14 +212,19 @@ def flash_causal_attention_naive_prefill(
 
                 v = rblib.dynamic_load(v_cache_ptr, DYNAMIC_AXIS, block_offset)
                 v_insert = rblib.insert(v, v_state, DYNAMIC_AXIS, block_offset)
-                rblib.dynamic_store(v_cache_ptr, v_insert, DYNAMIC_AXIS,
-                                    block_offset + QUERY_LEN)
+                rblib.dynamic_store(
+                    v_cache_ptr,
+                    v_insert,
+                    DYNAMIC_AXIS,
+                    block_offset + QUERY_LEN,
+                )
 
                 v_insert = tl.reshape(
-                    v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
+                    v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM)
+                )
                 v = tl.broadcast_to(
-                    v_insert,
-                    (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM))
+                    v_insert, (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM)
+                )
                 attn_out_cur = tl.dot(row_exp_normalize, v)
                 if partition_id > 0:
                     row_sum_prev, attn_out_prev = rblib.flash_attn_recompute(
@@ -224,7 +240,7 @@ def flash_causal_attention_naive_prefill(
                     attn_out_prev = attn_out_cur
                 row_max_prev = row_max_global
 
-        attn_out = (attn_out_prev / row_sum_prev)
+        attn_out = attn_out_prev / row_sum_prev
         tl.store(output_ptr, attn_out)
 
 
@@ -319,12 +335,15 @@ def flash_causal_attention_naive_decode(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
 
-        attn_out_prev = tl.zeros([1, NUM_HEAD, NUM_GROUP, QUERY_LEN, HEAD_DIM],
-                                 dtype=tl.float32)
-        row_sum_prev = tl.zeros([1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1],
-                                dtype=tl.float32)
-        row_max_prev = tl.zeros([1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1],
-                                dtype=tl.float32)
+        attn_out_prev = tl.zeros(
+            [1, NUM_HEAD, NUM_GROUP, QUERY_LEN, HEAD_DIM], dtype=tl.float32
+        )
+        row_sum_prev = tl.zeros(
+            [1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1], dtype=tl.float32
+        )
+        row_max_prev = tl.zeros(
+            [1, NUM_HEAD, NUM_GROUP, QUERY_LEN, 1], dtype=tl.float32
+        )
 
         for partition_id in tl.static_range(0, NUM_PARTITION, 1):
             block_table_ptr = tl.make_block_ptr(
@@ -336,7 +355,8 @@ def flash_causal_attention_naive_decode(
                 order=(1, 0),
             )
             tl.static_assert(
-                len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
+                len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE
+            )
             seq_idx_ptr = tl.make_block_ptr(
                 base=seq_idx,
                 shape=(NUM_BATCH, NUM_PARTITION),
@@ -354,8 +374,7 @@ def flash_causal_attention_naive_decode(
             if rblib.partition_skip(block_offset) == False:  # noqa: E712
                 k_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
-                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE,
-                           HEAD_DIM),
+                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM),
                     strides=(
                         NUM_BLOCK * 1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
                         1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
@@ -370,30 +389,38 @@ def flash_causal_attention_naive_decode(
                 )
                 k = rblib.dynamic_load(k_cache_ptr, DYNAMIC_AXIS, block_offset)
                 k_insert = rblib.insert(k, k_state, DYNAMIC_AXIS, block_offset)
-                rblib.dynamic_store(k_cache_ptr, k_insert, DYNAMIC_AXIS,
-                                    block_offset + QUERY_LEN)
+                rblib.dynamic_store(
+                    k_cache_ptr,
+                    k_insert,
+                    DYNAMIC_AXIS,
+                    block_offset + QUERY_LEN,
+                )
 
                 k_insert = tl.reshape(
-                    k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
+                    k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM)
+                )
                 k = tl.permute(k_insert, (0, 1, 2, 4, 3))
                 k = tl.broadcast_to(
-                    k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE))
+                    k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE)
+                )
                 qk = tl.dot(q, k)
 
                 qk_scaled = qk * qk_scale
 
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset,
-                                                      row_max_prev))
+                        rblib.dynamic_flash_attn_tile(
+                            qk_scaled, block_offset, row_max_prev
+                        )
+                    )
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset))
+                        rblib.dynamic_flash_attn_tile(qk_scaled, block_offset)
+                    )
 
                 v_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
-                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE,
-                           HEAD_DIM),
+                    shape=(2, NUM_BLOCK, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM),
                     strides=(
                         NUM_BLOCK * 1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
                         1 * NUM_HEAD * PARTITION_SIZE * HEAD_DIM,
@@ -409,14 +436,19 @@ def flash_causal_attention_naive_decode(
 
                 v = rblib.dynamic_load(v_cache_ptr, DYNAMIC_AXIS, block_offset)
                 v_insert = rblib.insert(v, v_state, DYNAMIC_AXIS, block_offset)
-                rblib.dynamic_store(v_cache_ptr, v_insert, DYNAMIC_AXIS,
-                                    block_offset + QUERY_LEN)
+                rblib.dynamic_store(
+                    v_cache_ptr,
+                    v_insert,
+                    DYNAMIC_AXIS,
+                    block_offset + QUERY_LEN,
+                )
 
                 v_insert = tl.reshape(
-                    v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
+                    v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM)
+                )
                 v = tl.broadcast_to(
-                    v_insert,
-                    (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM))
+                    v_insert, (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM)
+                )
                 attn_out_cur = tl.dot(row_exp_normalize, v)
                 if partition_id > 0:
                     row_sum_prev, attn_out_prev = rblib.flash_attn_recompute(
@@ -432,19 +464,20 @@ def flash_causal_attention_naive_decode(
                     attn_out_prev = attn_out_cur
                 row_max_prev = row_max_global
 
-        attn_out = (attn_out_prev / row_sum_prev)
+        attn_out = attn_out_prev / row_sum_prev
         tl.store(output_ptr, attn_out)
 
 
 def warmup(func, *args):
-    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3")
+    kernel = func.warmup(*args, grid=(1,), host_layout="1:2:3")
     rblib.write_rtosa(kernel, args)
 
     return kernel
 
 
-@triton_op("rbln_triton_ops::flash_causal_attention_naive_prefill",
-           mutates_args=())
+@triton_op(
+    "rbln_triton_ops::flash_causal_attention_naive_prefill", mutates_args=()
+)
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -515,8 +548,9 @@ def _(
     return torch.empty_like(query)
 
 
-@triton_op("rbln_triton_ops::flash_causal_attention_naive_decode",
-           mutates_args=())
+@triton_op(
+    "rbln_triton_ops::flash_causal_attention_naive_decode", mutates_args=()
+)
 def _(
     query: torch.Tensor,
     key: torch.Tensor,

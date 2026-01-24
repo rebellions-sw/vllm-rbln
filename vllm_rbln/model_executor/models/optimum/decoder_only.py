@@ -24,7 +24,6 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
-
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -33,15 +32,15 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         self.setup_decoder_mixin(
             attn_impl=self.attn_impl,
             vocab_size=self.model_config.get_vocab_size,
-            use_multiple_decoder=getattr(self.model.rbln_config,
-                                         "use_multiple_decoder", False),
+            use_multiple_decoder=getattr(
+                self.model.rbln_config, "use_multiple_decoder", False
+            ),
             default_batch_size=self.scheduler_config.max_num_seqs,
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         cache_position = model_input.input_positions
         block_tables = model_input.block_tables
@@ -53,22 +52,27 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
-        kwargs = self.preprocess_for_decoder(is_prompt,
-                                             block_tables,
-                                             input_ids,
-                                             cache_position,
-                                             dummy_block=dummy_block)
-        padded_batch_size = kwargs.pop("padded_batch_size",
-                                       self.decoder_batch_size)
+        kwargs = self.preprocess_for_decoder(
+            is_prompt,
+            block_tables,
+            input_ids,
+            cache_position,
+            dummy_block=dummy_block,
+        )
+        padded_batch_size = kwargs.pop(
+            "padded_batch_size", self.decoder_batch_size
+        )
 
         if is_prompt:
             if self.model.prefill_decoder is None:
                 raise version_error
             if model_input.cached_block_tables:
-                self._copy_cached_kv_blocks(self.model.prefill_decoder,
-                                            model_input.cached_block_tables,
-                                            model_input.cached_lengths,
-                                            block_tables)
+                self._copy_cached_kv_blocks(
+                    self.model.prefill_decoder,
+                    model_input.cached_block_tables,
+                    model_input.cached_lengths,
+                    block_tables,
+                )
             return self.model.prefill_decoder(**kwargs).logits
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]
@@ -77,4 +81,4 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             if self.attn_impl != "flash_attn":
                 return logits[:request_nums]
 
-            return logits[:model_input.block_tables.shape[0]]
+            return logits[: model_input.block_tables.shape[0]]
