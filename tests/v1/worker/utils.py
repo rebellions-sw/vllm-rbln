@@ -225,7 +225,7 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
 
 def _schedule_new_request(
     *req_ids: str,
-    block_ids: list[int],
+    block_ids: tuple[list[int], ...],
     outer_block_ids: list[int],
     new_computed_tokens: int = 0,
     token_ids: Optional[list[int]] = None,
@@ -249,7 +249,7 @@ def _schedule_new_request(
                 mm_positions=[],
                 sampling_params=SamplingParams(),
                 pooling_params=None,
-                block_ids=(block_ids,),
+                block_ids=block_ids,
                 num_computed_tokens=new_computed_tokens,
                 lora_request=None,
             )
@@ -278,7 +278,7 @@ def _schedule_new_request(
 
 def _schedule_new_request_from_request(
     req: Request,
-    block_ids: list[int],
+    block_ids: tuple[list[int], ...],
     outer_block_ids: list[int],
     new_computed_tokens: int = 0,
     token_ids: Optional[list[int]] = None,
@@ -301,7 +301,7 @@ def _schedule_new_request_from_request(
             mm_positions=[],
             sampling_params=req.sampling_params,
             pooling_params=None,
-            block_ids=(block_ids,),
+            block_ids=block_ids,
             num_computed_tokens=new_computed_tokens,
             lora_request=None,
         )
@@ -406,7 +406,7 @@ def forward_steps(reqs: list[Request]):
     for i, req in enumerate(reqs):
         req_id = req.request_id
         scheduler_output = _schedule_new_request_from_request(
-            req, block_ids=[i], outer_block_ids=[i]
+            req, block_ids=([i],), outer_block_ids=[i]
         )
         if req.use_structured_output:
             vocab_size = runner.model_config.get_vocab_size()
