@@ -34,8 +34,14 @@ env:
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
+  get-compiler-version:
+    if: ${{ !inputs.rebel_compiler_version }}
+    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+    secrets: inherit
+
   test_vllm_rbln_rsd1:
     name: Optimum Test CI RSD 1
+    needs: [get-compiler-version]
     runs-on: rbln-sw-k8s-ca22-1
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -71,7 +77,7 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 
@@ -128,6 +134,7 @@ jobs:
 
   test_vllm_rbln_rsd4:
     name: Optimum Test CI RSD 4
+    needs: [get-compiler-version]
     runs-on: rbln-sw-k8s-ca22-4
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -163,7 +170,7 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 
@@ -264,6 +271,7 @@ jobs:
 
   test_vllm_rbln_rsd8:
     name: Optimum Test CI RSD 8
+    needs: [get-compiler-version]
     runs-on: rbln-sw-k8s-ca22-8
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -299,7 +307,7 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 

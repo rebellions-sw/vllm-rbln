@@ -24,6 +24,10 @@ on:
         required: false
         type: boolean
         default: true
+      test_level:
+        description: "Test level to run"
+        required: false
+        type: string
   workflow_call:
     inputs:
       ref:
@@ -152,7 +156,6 @@ jobs:
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
         env:
-          VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
           REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
         run: |
@@ -288,7 +291,6 @@ jobs:
       - name: Run pytest
         if: steps.should_skip.outputs.skip != 'true'
         env:
-          VLLM_RBLN_TEST_LEVEL: ${{ inputs.test_level }}
           REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
         run: |
