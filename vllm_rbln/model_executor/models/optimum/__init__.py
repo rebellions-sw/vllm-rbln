@@ -103,12 +103,8 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
     else:
         if getattr(
             model_config.hf_config, "sliding_window", None
-        ) is not None and getattr(
-            model_config.hf_config, "use_sliding_window", True
-        ):
-            logger.info(
-                "The model is initialized with Sliding Window Attention."
-            )
+        ) is not None and getattr(model_config.hf_config, "use_sliding_window", True):
+            logger.info("The model is initialized with Sliding Window Attention.")
             assert vllm_config.cache_config.enable_prefix_caching in (
                 False,
                 None,
@@ -116,9 +112,7 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                 "Prefix caching is not supported with sliding window "
                 "attention. Please set `enable_prefix_caching` to False."
             )
-            rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(
-                vllm_config
-            )
+            rbln_model = RBLNOptimumSlidingWindowAttentionForCausalLM(vllm_config)
         else:
             rbln_model = RBLNOptimumForCausalLM(vllm_config)
     return rbln_model.eval()

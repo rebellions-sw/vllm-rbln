@@ -39,9 +39,7 @@ class RBLNInt8UnpackedLinearKernel(MPLinearKernel):
         raise NotImplementedError
 
     @classmethod
-    def can_implement(
-        cls, c: MPLinearLayerConfig
-    ) -> tuple[bool, Optional[str]]:
+    def can_implement(cls, c: MPLinearLayerConfig) -> tuple[bool, Optional[str]]:
         if c.weight_type not in (scalar_types.uint4b8, scalar_types.uint8b128):
             return False, f"Weight type {c.weight_type} not supported"
         if c.zero_points:
@@ -94,9 +92,7 @@ class RBLNInt8UnpackedLinearKernel(MPLinearKernel):
 
         w_q, w_s, _, _ = self._get_weight_params(layer)
         if self.config.group_size > 0:
-            w_q = w_q.view(
-                out_features, in_features // 64, 64
-            )  # see transform_w_s
+            w_q = w_q.view(out_features, in_features // 64, 64)  # see transform_w_s
             w_fp = w_q.type(x.dtype) * w_s.unsqueeze(-1)
             w_fp = w_fp.view(out_features, in_features)
         else:

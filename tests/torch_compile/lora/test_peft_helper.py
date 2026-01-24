@@ -82,9 +82,7 @@ def test_peft_helper_pass(sql_lora_files, tmp_path):
     with open(config_path, "w") as f:
         json.dump(adapter_config, f)
 
-    peft_helper = PEFTHelper.from_local_dir(
-        test_dir, max_position_embeddings=4096
-    )
+    peft_helper = PEFTHelper.from_local_dir(test_dir, max_position_embeddings=4096)
     peft_helper.validate_legal(lora_config)
     scaling = peft_helper.lora_alpha / math.sqrt(peft_helper.r)
     assert abs(peft_helper.vllm_lora_scaling_factor - scaling) < 1e-3

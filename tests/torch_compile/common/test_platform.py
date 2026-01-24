@@ -49,16 +49,13 @@ def test_register_ops(monkeypatch: pytest.MonkeyPatch, vllm_config):
 
     attention = Attention(16, 32, 16, 16, prefix="layer.0")
     assert hasattr(attention, "layer_index"), (
-        f"Expected 'layer_index' in attention.__dict__, "
-        f"got {attention.__dict__}"
+        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
     )
     assert isinstance(attention.layer_index, int), (
-        f"Expected 'layer_index' in attention.__dict__, "
-        f"got {attention.__dict__}"
+        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
     )
     assert attention.layer_index == 0, (
-        f"Expected 'layer_index' in attention.__dict__, "
-        f"got {attention.__dict__}"
+        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
     )
 
     # RotaryEmbedding

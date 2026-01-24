@@ -40,8 +40,7 @@ def test_forward_context(vllm_config, attn_metadata_mock: MagicMock):
     ):
         # assert dp_metadata class name is RBLNDPMetadata
         assert (
-            get_forward_context().dp_metadata.__class__.__name__
-            == "RBLNDPMetadata"
+            get_forward_context().dp_metadata.__class__.__name__ == "RBLNDPMetadata"
         ), (
             f"Expected 'dp_metadata' class name is RBLNDPMetadata, \
                     got {get_forward_context().dp_metadata.__class__.__name__}"

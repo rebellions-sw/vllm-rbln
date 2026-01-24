@@ -66,9 +66,7 @@ if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
         out = torch.zeros_like(hidden_states)
         expert_cnt = gate_proj_weight.shape[0]
         for i in range(expert_cnt):
-            gate = torch.nn.functional.linear(
-                hidden_states, gate_proj_weight[i]
-            )
+            gate = torch.nn.functional.linear(hidden_states, gate_proj_weight[i])
             up = torch.nn.functional.linear(hidden_states, up_proj_weight[i])
             mul = torch.nn.functional.silu(gate) * up
             down = torch.nn.functional.linear(mul, down_proj_weight[i])
@@ -125,9 +123,7 @@ else:
         out = torch.zeros_like(hidden_states)
         expert_cnt = gate_proj_weight.shape[0]
         for i in range(expert_cnt):
-            gate = torch.nn.functional.linear(
-                hidden_states, gate_proj_weight[i]
-            )
+            gate = torch.nn.functional.linear(hidden_states, gate_proj_weight[i])
             up = torch.nn.functional.linear(hidden_states, up_proj_weight[i])
             mul = torch.nn.functional.silu(gate) * up
             down = torch.nn.functional.linear(mul, down_proj_weight[i])
@@ -200,9 +196,7 @@ def unquantized_fused_moe_method_rbln(
     # [1,num_tokens,hidden_size]
     hidden_states = hidden_states.reshape(1, num_tokens, -1)
     # [num_experts,1,1,1]
-    expert_idx_array = torch.arange(0, num_experts).reshape(
-        num_experts, 1, 1, 1
-    )
+    expert_idx_array = torch.arange(0, num_experts).reshape(num_experts, 1, 1, 1)
     # [1,1,num_tokens,topk]
     selected_experts_array = selected_experts.reshape(-1, 1, num_tokens, top_k)
     # [num_experts,1,num_tokens,topk]
@@ -246,9 +240,7 @@ def unquantized_fused_moe_method_rbln(
 
 
 def get_tokens_mask(num_tokens: int, left=1.0, right=float("-inf")):
-    num_tokens_across_dp = (
-        get_forward_context().dp_metadata.num_tokens_across_dp_cpu
-    )
+    num_tokens_across_dp = get_forward_context().dp_metadata.num_tokens_across_dp_cpu
     num_tokens_across_dp = num_tokens_across_dp.unsqueeze(1)
     if num_tokens_across_dp.size(0) == 1:
         max_pad = num_tokens
@@ -268,9 +260,7 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     # selected_experts: (batch * sequence_length, top_k)
     if renormalize:
         router_logits = router_logits.to(torch.float)
-        selected_weights, selected_experts = torch.topk(
-            router_logits, k=top_k, dim=-1
-        )
+        selected_weights, selected_experts = torch.topk(router_logits, k=top_k, dim=-1)
         selected_weights = torch.nn.functional.softmax(selected_weights, dim=1)
     else:
         routing_weights = torch.nn.functional.softmax(router_logits, dim=1)
@@ -294,9 +284,7 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
     # masked_routing_weights=selected_weights w/ non selected indicies zeros
     # selected_weights      = [..., top_k]
     # masked_routing_weights= [..., n_experts], selected_experts has only value
-    masked_routing_weights = torch.zeros_like(
-        router_logits, dtype=torch.float32
-    )
+    masked_routing_weights = torch.zeros_like(router_logits, dtype=torch.float32)
     masked_routing_weights.scatter_(1, selected_experts, selected_weights)
 
     ## count selected tokens for each expert index from selected_experts
@@ -457,12 +445,8 @@ def fused_moe_forward_rbln(
             get_forward_context().dp_metadata.cu_tokens_across_dp_cpu
         )
 
-        hidden_states = self.naive_multicast(
-            hidden_states, cu_tokens_across_dp_cpu
-        )
-        router_logits = self.naive_multicast(
-            router_logits, cu_tokens_across_dp_cpu
-        )
+        hidden_states = self.naive_multicast(hidden_states, cu_tokens_across_dp_cpu)
+        router_logits = self.naive_multicast(router_logits, cu_tokens_across_dp_cpu)
 
     # Matrix multiply.
     final_hidden_states = self.quant_method.apply(
@@ -541,9 +525,7 @@ FusedMoE.forward_oot = fused_moe_forward_rbln
 
 if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
     logger.info("[RBLN] fused moe, RBLN optimize moe custom kernel")
-    UnquantizedFusedMoEMethod.forward_oot = (
-        unquantized_fused_optimize_moe_method_custom
-    )
+    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_optimize_moe_method_custom
 elif envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
     logger.info("[RBLN] fused moe, RBLN moe custom kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_custom

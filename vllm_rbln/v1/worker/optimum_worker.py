@@ -105,9 +105,7 @@ class RBLNOptimumWorker(WorkerBase):
         # Set random seed.
         set_random_seed(self.model_config.seed)
         self.device = self.vllm_config.device_config.device
-        self.model_runner = RBLNOptimumModelRunner(
-            self.vllm_config, self.device
-        )
+        self.model_runner = RBLNOptimumModelRunner(self.vllm_config, self.device)
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
@@ -128,9 +126,7 @@ class RBLNOptimumWorker(WorkerBase):
         intermediate_tensors = None
         # TODO setting intermediate_tensors for PP
 
-        output = self.model_runner.execute_model(
-            scheduler_output, intermediate_tensors
-        )
+        output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)
         assert isinstance(output, ModelRunnerOutput)
         return output if self.is_driver_worker else None
 
@@ -144,9 +140,7 @@ class RBLNOptimumWorker(WorkerBase):
             # only print profiler results on rank 0
             if self.local_rank == 0:
                 print(
-                    self.profiler.key_averages().table(
-                        sort_by="self_cuda_time_total"
-                    )
+                    self.profiler.key_averages().table(sort_by="self_cuda_time_total")
                 )
 
     def load_model(self):
@@ -159,8 +153,7 @@ class RBLNOptimumWorker(WorkerBase):
 
         if not envs.VLLM_RBLN_ENABLE_WARM_UP:
             logger.info(
-                "Warm up is disabled. "
-                "Set VLLM_RBLN_ENABLE_WARM_UP=1 to enable warm up."
+                "Warm up is disabled. Set VLLM_RBLN_ENABLE_WARM_UP=1 to enable warm up."
             )
             return
 
@@ -179,9 +172,7 @@ class RBLNOptimumWorker(WorkerBase):
     def initialize_from_config(self, kv_cache_configs: list[Any]) -> None:
         pass
 
-    def initialize_cache(
-        self, num_gpu_blocks: int, num_cpu_blocks: int
-    ) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         """Initialize the KV cache with the given size in blocks."""
         pass
 

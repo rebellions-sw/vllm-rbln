@@ -22,9 +22,7 @@ INPUT_PROMPT = "UN Chief Says There Is No <mask> in Syria"
 GOLDEN_PROMPT = "UN Chief Says There Is No Security in Syria"
 
 
-async def generate(
-    engine: AsyncLLMEngine, prompt: str, model: str, request_id=0
-):
+async def generate(engine: AsyncLLMEngine, prompt: str, model: str, request_id=0):
     print(f"generate request_id={request_id}, prompt={prompt}")
     example_input = {
         "stream": True,

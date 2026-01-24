@@ -255,29 +255,25 @@ def calculate_metrics(
         std_ttft_ms=np.std(ttfts or 0) * 1000,
         median_ttft_ms=np.median(ttfts or 0) * 1000,
         percentiles_ttft_ms=[
-            (p, np.percentile(ttfts or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(ttfts or 0, p) * 1000) for p in selected_percentiles
         ],
         mean_tpot_ms=np.mean(tpots or 0) * 1000,
         std_tpot_ms=np.std(tpots or 0) * 1000,
         median_tpot_ms=np.median(tpots or 0) * 1000,
         percentiles_tpot_ms=[
-            (p, np.percentile(tpots or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(tpots or 0, p) * 1000) for p in selected_percentiles
         ],
         mean_itl_ms=np.mean(itls or 0) * 1000,
         std_itl_ms=np.std(itls or 0) * 1000,
         median_itl_ms=np.median(itls or 0) * 1000,
         percentiles_itl_ms=[
-            (p, np.percentile(itls or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(itls or 0, p) * 1000) for p in selected_percentiles
         ],
         mean_e2el_ms=np.mean(e2els or 0) * 1000,
         std_e2el_ms=np.std(e2els or 0) * 1000,
         median_e2el_ms=np.median(e2els or 0) * 1000,
         percentiles_e2el_ms=[
-            (p, np.percentile(e2els or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(e2els or 0, p) * 1000) for p in selected_percentiles
         ],
     )
 
@@ -365,9 +361,7 @@ async def benchmark(
         if profile_output.success:
             print("Profiler started")
 
-    distribution = (
-        "Poisson process" if burstiness == 1.0 else "Gamma distribution"
-    )
+    distribution = "Poisson process" if burstiness == 1.0 else "Gamma distribution"
 
     print(f"Traffic request rate: {request_rate}")
     print(f"Burstiness factor: {burstiness} ({distribution})")
@@ -383,13 +377,9 @@ async def benchmark(
 
     async def limited_request_func(request_func_input, pbar):
         if semaphore is None:
-            return await request_func(
-                request_func_input=request_func_input, pbar=pbar
-            )
+            return await request_func(request_func_input=request_func_input, pbar=pbar)
         async with semaphore:
-            return await request_func(
-                request_func_input=request_func_input, pbar=pbar
-            )
+            return await request_func(request_func_input=request_func_input, pbar=pbar)
 
     benchmark_start_time = time.perf_counter()
     tasks: list[asyncio.Task] = []
@@ -419,9 +409,7 @@ async def benchmark(
         )
         tasks.append(
             asyncio.create_task(
-                limited_request_func(
-                    request_func_input=request_func_input, pbar=pbar
-                )
+                limited_request_func(request_func_input=request_func_input, pbar=pbar)
             )
         )
     outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
@@ -457,13 +445,9 @@ async def benchmark(
 
     print("{s:{c}^{n}}".format(s=" Serving Benchmark Result ", n=50, c="="))
     print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
-    print(
-        "{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration)
-    )
+    print("{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
-    print(
-        "{:<40} {:<10}".format("Total generated tokens:", metrics.total_output)
-    )
+    print("{:<40} {:<10}".format("Total generated tokens:", metrics.total_output))
     print(
         "{:<40} {:<10.2f}".format(
             "Request throughput (req/s):", metrics.request_throughput
@@ -492,9 +476,7 @@ async def benchmark(
         "total_input_tokens": metrics.total_input,
         "total_output_tokens": metrics.total_output,
         "request_throughput": metrics.request_throughput,
-        "request_goodput:": metrics.request_goodput
-        if goodput_config_dict
-        else None,
+        "request_goodput:": metrics.request_goodput if goodput_config_dict else None,
         "output_throughput": metrics.output_throughput,
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
@@ -539,21 +521,13 @@ async def benchmark(
         result[f"std_{metric_attribute_name}_ms"] = getattr(
             metrics, f"std_{metric_attribute_name}_ms"
         )
-        for p, value in getattr(
-            metrics, f"percentiles_{metric_attribute_name}_ms"
-        ):
+        for p, value in getattr(metrics, f"percentiles_{metric_attribute_name}_ms"):
             p_word = str(int(p)) if int(p) == p else str(p)
-            print(
-                "{:<40} {:<10.2f}".format(
-                    f"P{p_word} {metric_name} (ms):", value
-                )
-            )
+            print("{:<40} {:<10.2f}".format(f"P{p_word} {metric_name} (ms):", value))
             result[f"p{p_word}_{metric_attribute_name}_ms"] = value
 
     process_one_metric("ttft", "TTFT", "Time to First Token")
-    process_one_metric(
-        "tpot", "TPOT", "Time per Output Token (excl. 1st token)"
-    )
+    process_one_metric("tpot", "TPOT", "Time per Output Token (excl. 1st token)")
     process_one_metric("itl", "ITL", "Inter-token Latency")
     process_one_metric("e2el", "E2EL", "End-to-end Latency")
 
@@ -717,10 +691,7 @@ def main(args: argparse.Namespace):
         elif args.dataset_path in AIMODataset.SUPPORTED_DATASET_PATHS:
             dataset_class = AIMODataset
             args.hf_split = "train"
-        elif (
-            args.dataset_path
-            in NextEditPredictionDataset.SUPPORTED_DATASET_PATHS
-        ):  # noqa: E501
+        elif args.dataset_path in NextEditPredictionDataset.SUPPORTED_DATASET_PATHS:  # noqa: E501
             dataset_class = NextEditPredictionDataset
             args.hf_split = "train"
         elif args.dataset_path in ASRDataset.SUPPORTED_DATASET_PATHS:
@@ -775,9 +746,7 @@ def main(args: argparse.Namespace):
             "burstgpt": lambda: BurstGPTDataset(
                 random_seed=args.seed, dataset_path=args.dataset_path
             ).sample(tokenizer=tokenizer, num_requests=args.num_prompts),
-            "random": lambda: RandomDataset(
-                dataset_path=args.dataset_path
-            ).sample(
+            "random": lambda: RandomDataset(dataset_path=args.dataset_path).sample(
                 tokenizer=tokenizer,
                 num_requests=args.num_prompts,
                 prefix_len=args.random_prefix_len,
@@ -808,8 +777,7 @@ def main(args: argparse.Namespace):
     # Sampling parameters are only supported by openai-compatible backend.
     if sampling_params and args.backend not in OPENAI_COMPATIBLE_BACKENDS:
         raise ValueError(
-            "Sampling parameters are only supported "
-            "by openai-compatible backends."
+            "Sampling parameters are only supported by openai-compatible backends."
         )
 
     if "temperature" not in sampling_params:
@@ -838,9 +806,7 @@ def main(args: argparse.Namespace):
             disable_tqdm=args.disable_tqdm,
             profile=args.profile,
             selected_percentile_metrics=args.percentile_metrics.split(","),
-            selected_percentiles=[
-                float(p) for p in args.metric_percentiles.split(",")
-            ],
+            selected_percentiles=[float(p) for p in args.metric_percentiles.split(",")],
             ignore_eos=args.ignore_eos,
             goodput_config_dict=goodput_config_dict,
             max_concurrency=args.max_concurrency,
@@ -1125,14 +1091,12 @@ if __name__ == "__main__":
         "--custom-output-len",
         type=int,
         default=256,
-        help="Number of output tokens per request, "
-        "used only for custom dataset.",
+        help="Number of output tokens per request, used only for custom dataset.",
     )
     custom_group.add_argument(
         "--custom-skip-chat-template",
         action="store_true",
-        help="Skip applying chat template to prompt, "
-        "used only for custom dataset.",
+        help="Skip applying chat template to prompt, used only for custom dataset.",
     )
 
     sonnet_group = parser.add_argument_group("sonnet dataset options")
@@ -1140,22 +1104,19 @@ if __name__ == "__main__":
         "--sonnet-input-len",
         type=int,
         default=550,
-        help="Number of input tokens per request, "
-        "used only for sonnet dataset.",
+        help="Number of input tokens per request, used only for sonnet dataset.",
     )
     sonnet_group.add_argument(
         "--sonnet-output-len",
         type=int,
         default=150,
-        help="Number of output tokens per request, "
-        "used only for sonnet dataset.",
+        help="Number of output tokens per request, used only for sonnet dataset.",
     )
     sonnet_group.add_argument(
         "--sonnet-prefix-len",
         type=int,
         default=200,
-        help="Number of prefix tokens per request, "
-        "used only for sonnet dataset.",
+        help="Number of prefix tokens per request, used only for sonnet dataset.",
     )
 
     sharegpt_group = parser.add_argument_group("sharegpt dataset options")
@@ -1172,15 +1133,13 @@ if __name__ == "__main__":
         "--random-input-len",
         type=int,
         default=1024,
-        help="Number of input tokens per request, "
-        "used only for random sampling.",
+        help="Number of input tokens per request, used only for random sampling.",
     )
     random_group.add_argument(
         "--random-output-len",
         type=int,
         default=128,
-        help="Number of output tokens per request, "
-        "used only for random sampling.",
+        help="Number of output tokens per request, used only for random sampling.",
     )
     random_group.add_argument(
         "--random-range-ratio",
@@ -1225,22 +1184,19 @@ if __name__ == "__main__":
         "--top-p",
         type=float,
         default=None,
-        help="Top-p sampling parameter."
-        " Only has effect on openai-compatible backends.",
+        help="Top-p sampling parameter. Only has effect on openai-compatible backends.",
     )
     sampling_group.add_argument(
         "--top-k",
         type=int,
         default=None,
-        help="Top-k sampling parameter."
-        " Only has effect on openai-compatible backends.",
+        help="Top-k sampling parameter. Only has effect on openai-compatible backends.",
     )
     sampling_group.add_argument(
         "--min-p",
         type=float,
         default=None,
-        help="Min-p sampling parameter."
-        " Only has effect on openai-compatible backends.",
+        help="Min-p sampling parameter. Only has effect on openai-compatible backends.",
     )
     sampling_group.add_argument(
         "--temperature",

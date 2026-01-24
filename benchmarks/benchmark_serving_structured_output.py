@@ -137,18 +137,13 @@ def sample_requests(
             schema = json.load(f)
 
         if args.dataset == "json-unique":
-            json_schemas = [
-                copy.deepcopy(schema) for _ in range(args.num_prompts)
-            ]
+            json_schemas = [copy.deepcopy(schema) for _ in range(args.num_prompts)]
             for i in range(len(json_schemas)):
                 if "properties" not in json_schemas[i]:
                     json_schemas[i]["properties"] = {}
-                json_schemas[i]["properties"][
-                    f"__optional_field_{uuid.uuid4()}"
-                ] = {
+                json_schemas[i]["properties"][f"__optional_field_{uuid.uuid4()}"] = {
                     "type": "string",
-                    "description": "An unique optional field "
-                    "to avoid cached schemas",
+                    "description": "An unique optional field to avoid cached schemas",
                 }
         else:
             json_schemas = [schema] * args.num_prompts
@@ -239,9 +234,7 @@ def sample_requests(
 
     elif args.dataset == "xgrammar_bench":
         requests: list[SampleRequest] = []
-        dataset = datasets.load_dataset(
-            "NousResearch/json-mode-eval", split="train"
-        )
+        dataset = datasets.load_dataset("NousResearch/json-mode-eval", split="train")
         full_dataset_len = len(dataset)
 
         def _filter_func(item):
@@ -354,9 +347,7 @@ def calculate_metrics(
             # multiple output tokens may be bundled together
             # Note : this may inflate the output token count slightly
             output_len = len(
-                tokenizer(
-                    outputs[i].generated_text, add_special_tokens=False
-                ).input_ids
+                tokenizer(outputs[i].generated_text, add_special_tokens=False).input_ids
             )
             actual_output_lens.append(output_len)
             total_input += input_requests[i].prompt_len
@@ -419,29 +410,25 @@ def calculate_metrics(
         std_ttft_ms=np.std(ttfts or 0) * 1000,
         median_ttft_ms=np.median(ttfts or 0) * 1000,
         percentiles_ttft_ms=[
-            (p, np.percentile(ttfts or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(ttfts or 0, p) * 1000) for p in selected_percentiles
         ],
         mean_tpot_ms=np.mean(tpots or 0) * 1000,
         std_tpot_ms=np.std(tpots or 0) * 1000,
         median_tpot_ms=np.median(tpots or 0) * 1000,
         percentiles_tpot_ms=[
-            (p, np.percentile(tpots or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(tpots or 0, p) * 1000) for p in selected_percentiles
         ],
         mean_itl_ms=np.mean(itls or 0) * 1000,
         std_itl_ms=np.std(itls or 0) * 1000,
         median_itl_ms=np.median(itls or 0) * 1000,
         percentiles_itl_ms=[
-            (p, np.percentile(itls or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(itls or 0, p) * 1000) for p in selected_percentiles
         ],
         mean_e2el_ms=np.mean(e2els or 0) * 1000,
         std_e2el_ms=np.std(e2els or 0) * 1000,
         median_e2el_ms=np.median(e2els or 0) * 1000,
         percentiles_e2el_ms=[
-            (p, np.percentile(e2els or 0, p) * 1000)
-            for p in selected_percentiles
+            (p, np.percentile(e2els or 0, p) * 1000) for p in selected_percentiles
         ],
     )
 
@@ -485,9 +472,7 @@ async def benchmark(
 
     test_request = input_requests[0]
     test_req_extra_body = (
-        prepare_extra_body(test_request)
-        if 0 in structured_output_req_idx
-        else None
+        prepare_extra_body(test_request) if 0 in structured_output_req_idx else None
     )
     test_input = RequestFuncInput(
         model=model_id,
@@ -522,9 +507,7 @@ async def benchmark(
         if profile_output.success:
             print("Profiler started")
 
-    distribution = (
-        "Poisson process" if burstiness == 1.0 else "Gamma distribution"
-    )
+    distribution = "Poisson process" if burstiness == 1.0 else "Gamma distribution"
 
     print(f"Traffic request rate: {request_rate}")
     print(f"Burstiness factor: {burstiness} ({distribution})")
@@ -540,24 +523,16 @@ async def benchmark(
 
     async def limited_request_func(request_func_input, pbar):
         if semaphore is None:
-            return await request_func(
-                request_func_input=request_func_input, pbar=pbar
-            )
+            return await request_func(request_func_input=request_func_input, pbar=pbar)
         async with semaphore:
-            return await request_func(
-                request_func_input=request_func_input, pbar=pbar
-            )
+            return await request_func(request_func_input=request_func_input, pbar=pbar)
 
     benchmark_start_time = time.perf_counter()
     tasks: list[asyncio.Task] = []
     expected: list[str] = []
-    async for i, request in get_request(
-        input_requests, request_rate, burstiness
-    ):
+    async for i, request in get_request(input_requests, request_rate, burstiness):
         extra_body = (
-            prepare_extra_body(request)
-            if i in structured_output_req_idx
-            else None
+            prepare_extra_body(request) if i in structured_output_req_idx else None
         )
         request_func_input = RequestFuncInput(
             model=model_id,
@@ -571,9 +546,7 @@ async def benchmark(
         expected.append(request.completion)
         tasks.append(
             asyncio.create_task(
-                limited_request_func(
-                    request_func_input=request_func_input, pbar=pbar
-                )
+                limited_request_func(request_func_input=request_func_input, pbar=pbar)
             )
         )
     outputs: list[RequestFuncOutput] = await asyncio.gather(*tasks)
@@ -609,13 +582,9 @@ async def benchmark(
 
     print("{s:{c}^{n}}".format(s=" Serving Benchmark Result ", n=50, c="="))
     print("{:<40} {:<10}".format("Successful requests:", metrics.completed))
-    print(
-        "{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration)
-    )
+    print("{:<40} {:<10.2f}".format("Benchmark duration (s):", benchmark_duration))
     print("{:<40} {:<10}".format("Total input tokens:", metrics.total_input))
-    print(
-        "{:<40} {:<10}".format("Total generated tokens:", metrics.total_output)
-    )
+    print("{:<40} {:<10}".format("Total generated tokens:", metrics.total_output))
     print(
         "{:<40} {:<10.2f}".format(
             "Request throughput (req/s):", metrics.request_throughput
@@ -698,21 +667,13 @@ async def benchmark(
         result[f"std_{metric_attribute_name}_ms"] = getattr(
             metrics, f"std_{metric_attribute_name}_ms"
         )
-        for p, value in getattr(
-            metrics, f"percentiles_{metric_attribute_name}_ms"
-        ):
+        for p, value in getattr(metrics, f"percentiles_{metric_attribute_name}_ms"):
             p_word = str(int(p)) if int(p) == p else str(p)
-            print(
-                "{:<40} {:<10.2f}".format(
-                    f"P{p_word} {metric_name} (ms):", value
-                )
-            )
+            print("{:<40} {:<10.2f}".format(f"P{p_word} {metric_name} (ms):", value))
             result[f"p{p_word}_{metric_attribute_name}_ms"] = value
 
     process_one_metric("ttft", "TTFT", "Time to First Token")
-    process_one_metric(
-        "tpot", "TPOT", "Time per Output Token (excl. 1st token)"
-    )
+    process_one_metric("tpot", "TPOT", "Time per Output Token (excl. 1st token)")
     process_one_metric("itl", "ITL", "Inter-token Latency")
     process_one_metric("e2el", "E2EL", "End-to-end Latency")
 
@@ -867,9 +828,7 @@ def main(args: argparse.Namespace):
             disable_tqdm=args.disable_tqdm,
             profile=args.profile,
             selected_percentile_metrics=args.percentile_metrics.split(","),
-            selected_percentiles=[
-                float(p) for p in args.metric_percentiles.split(",")
-            ],
+            selected_percentiles=[float(p) for p in args.metric_percentiles.split(",")],
             ignore_eos=args.ignore_eos,
             max_concurrency=args.max_concurrency,
             structured_output_ratio=args.structured_output_ratio,

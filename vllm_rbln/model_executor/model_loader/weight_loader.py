@@ -44,9 +44,7 @@ Therefore, do not implement any logic here.
 """
 
 
-def load_llama_weights(
-    self, weights: Iterable[Tuple[str, torch.Tensor]]
-) -> Set[str]:
+def load_llama_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         (".qkv_proj", ".q_proj", "q"),
@@ -78,9 +76,7 @@ def load_llama_weights(
         ):
             # Loading kv cache quantization scales
             param = params_dict[scale_name]
-            weight_loader = getattr(
-                param, "weight_loader", default_weight_loader
-            )
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
             loaded_weight = (
                 loaded_weight if loaded_weight.dim() == 0 else loaded_weight[0]
             )
@@ -116,17 +112,13 @@ def load_llama_weights(
                 continue
 
             param = params_dict[name]
-            weight_loader = getattr(
-                param, "weight_loader", default_weight_loader
-            )
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
             weight_loader(param, loaded_weight)
         loaded_params.add(name)
     return loaded_params
 
 
-def load_qwen2_weights(
-    self, weights: Iterable[Tuple[str, torch.Tensor]]
-) -> Set[str]:
+def load_qwen2_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         ("qkv_proj", "q_proj", "q"),
@@ -155,9 +147,7 @@ def load_qwen2_weights(
         ):
             # Loading kv cache quantization scales
             param = params_dict[scale_name]
-            weight_loader = getattr(
-                param, "weight_loader", default_weight_loader
-            )
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
             loaded_weight = (
                 loaded_weight if loaded_weight.dim() == 0 else loaded_weight[0]
             )
@@ -188,9 +178,7 @@ def load_qwen2_weights(
             if utils.is_pp_missing_parameter(name, self):
                 continue
             param = params_dict[name]
-            weight_loader = getattr(
-                param, "weight_loader", default_weight_loader
-            )
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
             weight_loader(param, loaded_weight)
         loaded_params.add(name)
     return loaded_params
@@ -293,9 +281,7 @@ def load_qwen3moe_weights(
                     continue
                 # Remapping the name of FP8 kv-scale.
                 if name.endswith("kv_scale"):
-                    remapped_kv_scale_name = name.replace(
-                        ".kv_scale", ".attn.kv_scale"
-                    )
+                    remapped_kv_scale_name = name.replace(".kv_scale", ".attn.kv_scale")
                     if remapped_kv_scale_name not in params_dict:
                         logger.warning_once(
                             "Found kv scale in the checkpoint "
@@ -308,9 +294,7 @@ def load_qwen3moe_weights(
                     else:
                         name = remapped_kv_scale_name
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
         loaded_params.add(name)
     return loaded_params
@@ -413,9 +397,7 @@ def load_qwen2moe_weights(
                     continue
                 # Remapping the name of FP8 kv-scale.
                 if name.endswith("kv_scale"):
-                    remapped_kv_scale_name = name.replace(
-                        ".kv_scale", ".attn.kv_scale"
-                    )
+                    remapped_kv_scale_name = name.replace(".kv_scale", ".attn.kv_scale")
                     if remapped_kv_scale_name not in params_dict:
                         logger.warning_once(
                             "Found kv scale in the checkpoint "
@@ -428,9 +410,7 @@ def load_qwen2moe_weights(
                     else:
                         name = remapped_kv_scale_name
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
         loaded_params.add(name)
     return loaded_params
@@ -469,9 +449,7 @@ def load_deepseek_v2_weights(
         if "rotary_emb.inv_freq" in name:
             continue
 
-        spec_layer = deepseek_v2.get_spec_layer_idx_from_weight_name(
-            self.config, name
-        )
+        spec_layer = deepseek_v2.get_spec_layer_idx_from_weight_name(self.config, name)
         if spec_layer is not None:
             continue  # skip spec decode layers for main model
 
@@ -533,17 +511,13 @@ def load_deepseek_v2_weights(
                     continue
 
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
         loaded_params.add(name)
     return loaded_params
 
 
-def load_llama4_weights(
-    self, weights: Iterable[Tuple[str, torch.Tensor]]
-) -> Set[str]:
+def load_llama4_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         (".qkv_proj", ".q_proj", "q"),
@@ -586,9 +560,7 @@ def load_llama4_weights(
         ):
             # Loading kv cache quantization scales
             param = params_dict[scale_name]
-            weight_loader = getattr(
-                param, "weight_loader", default_weight_loader
-            )
+            weight_loader = getattr(param, "weight_loader", default_weight_loader)
             loaded_weight = (
                 loaded_weight if loaded_weight.dim() == 0 else loaded_weight[0]
             )
@@ -620,9 +592,7 @@ def load_llama4_weights(
                 if utils.is_pp_missing_parameter(name, self):
                     continue
                 param = params_dict[name]
-                weight_loader = getattr(
-                    param, "weight_loader", default_weight_loader
-                )
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
                 loaded_params.add(name)
     return loaded_params

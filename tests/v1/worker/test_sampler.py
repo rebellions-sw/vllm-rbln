@@ -150,9 +150,7 @@ DEVICE = current_platform.device_type
         ),
     ],
 )
-def test_get_bucket_sizes(
-    monkeypatch, num_seqs: int, expected_bucket_sizes: list[int]
-):
+def test_get_bucket_sizes(monkeypatch, num_seqs: int, expected_bucket_sizes: list[int]):
     monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1")
     runner = create_model_runner(max_num_seqs=num_seqs)
     fake_load_model(runner)
@@ -189,9 +187,7 @@ def test_forward_sampler_mode_and_structured_output(
 @pytest.mark.parametrize("presence_penalty", [0.0, 2.0])
 @pytest.mark.parametrize("frequency_penalty", [0.0, 2.0])
 @pytest.mark.parametrize("repetition_penalty", [1.0, 2.0])
-@pytest.mark.parametrize(
-    "warm_up", [True, False], ids=["warm_upTrue", "warm_upFalse"]
-)
+@pytest.mark.parametrize("warm_up", [True, False], ids=["warm_upTrue", "warm_upFalse"])
 def test_forward_sampling_parameters(
     monkeypatch,
     top_p,
@@ -204,9 +200,7 @@ def test_forward_sampling_parameters(
     warm_up,
 ):
     monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
-    monkeypatch.setenv(
-        "VLLM_RBLN_ENABLE_WARM_UP", "True" if warm_up else "False"
-    )
+    monkeypatch.setenv("VLLM_RBLN_ENABLE_WARM_UP", "True" if warm_up else "False")
     reqs = []
     for i in range(3):
         reqs.append(

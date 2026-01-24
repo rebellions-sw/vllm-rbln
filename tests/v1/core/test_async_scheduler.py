@@ -60,18 +60,12 @@ def test_schedule_alloc_block(
     # Schedule the first request.
     scheduler.add_request(requests[0])
     scheduler_output0 = scheduler.schedule()
-    assert (
-        scheduler_output0.scheduled_new_reqs[0].block_ids[0]
-        == exp_new_req0_blocks
-    )
+    assert scheduler_output0.scheduled_new_reqs[0].block_ids[0] == exp_new_req0_blocks
 
     # Schedule the second request.
     scheduler.add_request(requests[1])
     scheduler_output1 = scheduler.schedule()
-    assert (
-        scheduler_output1.scheduled_new_reqs[0].block_ids[0]
-        == exp_new_req1_blocks
-    )
+    assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == exp_new_req1_blocks
 
     # Model output of the first request.
     model_runner_output = create_model_runner_output(scheduler_output0)

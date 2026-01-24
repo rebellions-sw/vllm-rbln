@@ -66,8 +66,7 @@ class RemoteOpenAIServer:
         if auto_port:
             if "-p" in vllm_serve_args or "--port" in vllm_serve_args:
                 raise ValueError(
-                    "You have manually specified the port "
-                    "when `auto_port=True`."
+                    "You have manually specified the port when `auto_port=True`."
                 )
 
             # No need for a port if using unix sockets
@@ -91,9 +90,7 @@ class RemoteOpenAIServer:
                 json.dumps(override_hf_configs),
             ]
 
-        parser = FlexibleArgumentParser(
-            description="vLLM's remote OpenAI server."
-        )
+        parser = FlexibleArgumentParser(description="vLLM's remote OpenAI server.")
         subparsers = parser.add_subparsers(required=False, dest="subparser")
         parser = ServeSubcommand().subparser_init(subparsers)
         args = parser.parse_args(["--model", model, *vllm_serve_args])
@@ -105,15 +102,11 @@ class RemoteOpenAIServer:
             self.host = str(args.host or "localhost")
             self.port = int(args.port)
 
-        self.show_hidden_metrics = (
-            args.show_hidden_metrics_for_version is not None
-        )
+        self.show_hidden_metrics = args.show_hidden_metrics_for_version is not None
 
         self._start_server(model, vllm_serve_args, env_dict)
         max_wait_seconds = max_wait_seconds or 240
-        self._wait_for_server(
-            url=self.url_for("health"), timeout=max_wait_seconds
-        )
+        self._wait_for_server(url=self.url_for("health"), timeout=max_wait_seconds)
 
     def __enter__(self):
         return self
@@ -153,9 +146,7 @@ class RemoteOpenAIServer:
 
                 time.sleep(0.5)
                 if time.time() - start > timeout:
-                    raise RuntimeError(
-                        "Server failed to start in time."
-                    ) from None
+                    raise RuntimeError("Server failed to start in time.") from None
 
     @property
     def url_root(self) -> str:

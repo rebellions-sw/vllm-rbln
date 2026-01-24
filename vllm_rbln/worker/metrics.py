@@ -92,9 +92,7 @@ class PrefillMetricsByRequestID:
     def __init__(self):
         self.metrics = defaultdict(StepMetrics)
 
-    def add_measurement(
-        self, request_id: str, latency: float, token_count: int
-    ):
+    def add_measurement(self, request_id: str, latency: float, token_count: int):
         """Add a latency and token count measurement."""
         self.metrics[request_id].add_measurement(latency, token_count)
 

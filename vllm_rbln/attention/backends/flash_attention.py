@@ -63,21 +63,15 @@ def flash_attention_naive_prefill_impl(
         # NOTE: this reference impl works only for single partition
         block = block_tables[0].to(torch.int32)
         k_state = (
-            kv_cache[0][block]
-            .unsqueeze(0)
-            .slice_scatter(k, dim=3, start=s, end=e)
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
         )
         v_state = (
-            kv_cache[1][block]
-            .unsqueeze(0)
-            .slice_scatter(v, dim=3, start=s, end=e)
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
         )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-        causal_mask = torch.where(
-            mask[:, :, :, :, :partition] > 0, 0.0, -float("inf")
-        )
+        causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0, -float("inf"))
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -125,21 +119,15 @@ def flash_attention_naive_decode_impl(
         # NOTE: this reference impl works only for single partition
         block = block_tables[0][0].to(torch.int32)
         k_state = (
-            kv_cache[0][block]
-            .unsqueeze(0)
-            .slice_scatter(k, dim=3, start=s, end=e)
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
         )
         v_state = (
-            kv_cache[1][block]
-            .unsqueeze(0)
-            .slice_scatter(v, dim=3, start=s, end=e)
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
         )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
         attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-        causal_mask = torch.where(
-            mask[:, :, :, :, :partition] > 0, 0.0, -float("inf")
-        )
+        causal_mask = torch.where(mask[:, :, :, :, :partition] > 0, 0.0, -float("inf"))
         attn_weights = attn_weights + causal_mask
         attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
         attn_output = torch.matmul(attn_weights, v_state)
@@ -188,14 +176,10 @@ def flash_causal_attention_naive_prefill_impl(
         # NOTE: this reference impl works only for single partition
         block = block_tables[0].to(torch.int32)
         k_state = (
-            kv_cache[0][block]
-            .unsqueeze(0)
-            .slice_scatter(k, dim=3, start=s, end=e)
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
         )
         v_state = (
-            kv_cache[1][block]
-            .unsqueeze(0)
-            .slice_scatter(v, dim=3, start=s, end=e)
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
         )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
@@ -214,9 +198,7 @@ def flash_causal_attention_naive_prefill_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_naive_prefill"
-)
+@torch.library.register_fake("rbln_custom_ops::flash_causal_attention_naive_prefill")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -253,14 +235,10 @@ def flash_causal_attention_naive_decode_impl(
         # NOTE: this reference impl works only for single partition
         block = block_tables[0][0].to(torch.int32)
         k_state = (
-            kv_cache[0][block]
-            .unsqueeze(0)
-            .slice_scatter(k, dim=3, start=s, end=e)
+            kv_cache[0][block].unsqueeze(0).slice_scatter(k, dim=3, start=s, end=e)
         )
         v_state = (
-            kv_cache[1][block]
-            .unsqueeze(0)
-            .slice_scatter(v, dim=3, start=s, end=e)
+            kv_cache[1][block].unsqueeze(0).slice_scatter(v, dim=3, start=s, end=e)
         )
         kv_cache[0][block] = k_state.squeeze(0)
         kv_cache[1][block] = v_state.squeeze(0)
@@ -279,9 +257,7 @@ def flash_causal_attention_naive_decode_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_naive_decode"
-)
+@torch.library.register_fake("rbln_custom_ops::flash_causal_attention_naive_decode")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -388,9 +364,7 @@ class RBLNAttentionMetadata(AttentionMetadata, PagedAttentionMetadata):
     kv_caches: Optional[List[torch.Tensor]]
 
 
-class RBLNAttentionMetadataBuilder(
-    AttentionMetadataBuilder[RBLNAttentionMetadata]
-):
+class RBLNAttentionMetadataBuilder(AttentionMetadataBuilder[RBLNAttentionMetadata]):
     def __init__(self, input_builder: ModelInputForRebelBuilder) -> None:
         self.chunked_prefill = input_builder.chunked_prefill
         self.chunked_prefill_size = input_builder.chunked_prefill_size
@@ -400,9 +374,7 @@ class RBLNAttentionMetadataBuilder(
         self.max_seq_len = input_builder.max_model_len
 
         self.device = get_current_vllm_config().device_config.device
-        self.enforce_eager = (
-            get_current_vllm_config().model_config.enforce_eager
-        )
+        self.enforce_eager = get_current_vllm_config().model_config.enforce_eager
 
     def prepare(self):
         self.input_data = self.input_builder.input_data
@@ -423,10 +395,7 @@ class RBLNAttentionMetadataBuilder(
         # RBLN flash attention based on paging
         # - seq_lens_tensor[1][num_partitions] = dynamic size for partitions
         # - block_tables[num_partitions] = block index for partitions
-        steps = [
-            [input_positions[0]]
-            for input_positions in input_data.input_positions
-        ]
+        steps = [[input_positions[0]] for input_positions in input_data.input_positions]
         seq_idx = torch.tensor(steps, dtype=torch.int32)
         partition_len = self.partition_len
         max_seq_len = self.max_seq_len
@@ -447,9 +416,7 @@ class RBLNAttentionMetadataBuilder(
         # For multi-modal models
         placeholder_index_maps = None
         if len(input_data.multi_modal_inputs_list) != 0:
-            multi_modal_placeholder_maps = (
-                input_data.multi_modal_placeholder_maps
-            )
+            multi_modal_placeholder_maps = input_data.multi_modal_placeholder_maps
             placeholder_index_maps = {
                 modality: placeholder_map.index_map()
                 for modality, placeholder_map in multi_modal_placeholder_maps
@@ -473,9 +440,7 @@ class RBLNAttentionMetadataBuilder(
                     1,
                     prefill_chunk_size,
                     max_seq_len,
-                    dtype=torch.float16
-                    if self.enforce_eager
-                    else torch.float32,
+                    dtype=torch.float16 if self.enforce_eager else torch.float32,
                 )
                 causal_mask = 1 - torch.triu(
                     torch.ones(1, 1, prefill_chunk_size, prefill_chunk_size),
@@ -483,9 +448,9 @@ class RBLNAttentionMetadataBuilder(
                 )
                 if step >= prefill_chunk_size:
                     chunked_attention_mask[:, :, :, :, :step] = 1
-                chunked_attention_mask[
-                    :, :, :, :, step : step + prefill_chunk_size
-                ] = causal_mask
+                chunked_attention_mask[:, :, :, :, step : step + prefill_chunk_size] = (
+                    causal_mask
+                )
                 attn_masks = chunked_attention_mask
             else:
                 decode_attention_mask = torch.zeros(
@@ -494,14 +459,10 @@ class RBLNAttentionMetadataBuilder(
                     1,
                     1,
                     max_seq_len,
-                    dtype=torch.float16
-                    if self.enforce_eager
-                    else torch.float32,
+                    dtype=torch.float16 if self.enforce_eager else torch.float32,
                 )
                 for batch_index, batch_step in enumerate(steps):
-                    decode_attention_mask[
-                        batch_index, :, :, :, : batch_step[0] + 1
-                    ] = 1
+                    decode_attention_mask[batch_index, :, :, :, : batch_step[0] + 1] = 1
                 attn_masks = decode_attention_mask
             attn_masks = attn_masks.to(self.device)
             assert attn_masks.dim() == 5
@@ -540,9 +501,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         kv_sharing_target_layer_name: Optional[str] = None,
         use_irope: bool = False,
     ) -> None:
-        self.enforce_eager = (
-            get_current_vllm_config().model_config.enforce_eager
-        )
+        self.enforce_eager = get_current_vllm_config().model_config.enforce_eager
         self.device = get_current_vllm_config().device_config.device
 
         self.num_heads = num_heads
@@ -625,9 +584,9 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         # 1. query reshape for custom operation
         # query = [b_size(batch), q_len(query len), num_heads * head_size]
         b_size, q_len, _ = query.size()
-        query = query.view(
-            b_size, q_len, self.num_heads, self.head_size
-        ).transpose(1, 2)
+        query = query.view(b_size, q_len, self.num_heads, self.head_size).transpose(
+            1, 2
+        )
         query = query.view(
             b_size,
             self.num_kv_heads,
@@ -635,13 +594,11 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
             q_len,
             self.head_size,
         )
-        key = key.view(
-            b_size, q_len, self.num_kv_heads, self.head_size
-        ).transpose(1, 2)
+        key = key.view(b_size, q_len, self.num_kv_heads, self.head_size).transpose(1, 2)
         key = key.view(b_size, self.num_kv_heads, 1, q_len, self.head_size)
-        value = value.view(
-            b_size, q_len, self.num_kv_heads, self.head_size
-        ).transpose(1, 2)
+        value = value.view(b_size, q_len, self.num_kv_heads, self.head_size).transpose(
+            1, 2
+        )
         value = value.view(b_size, self.num_kv_heads, 1, q_len, self.head_size)
 
         # NOTE - for cache update,
@@ -695,8 +652,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                     )
                 else:
                     raise ValueError(
-                        f"Invalid VLLM_RBLN_KERNEL_MODE: "
-                        f"{envs.VLLM_RBLN_KERNEL_MODE}"
+                        f"Invalid VLLM_RBLN_KERNEL_MODE: {envs.VLLM_RBLN_KERNEL_MODE}"
                     )
             else:
                 flash_causal_attention_naive_prefill = (
@@ -746,13 +702,10 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                     )
                 else:
                     raise ValueError(
-                        f"Invalid VLLM_RBLN_KERNEL_MODE: "
-                        f"{envs.VLLM_RBLN_KERNEL_MODE}"
+                        f"Invalid VLLM_RBLN_KERNEL_MODE: {envs.VLLM_RBLN_KERNEL_MODE}"
                     )
             else:
-                flash_attention_naive_prefill = (
-                    flash_attention_naive_prefill_impl
-                )
+                flash_attention_naive_prefill = flash_attention_naive_prefill_impl
                 flash_attention_naive_decode = flash_attention_naive_decode_impl
 
             if q_len == 1:

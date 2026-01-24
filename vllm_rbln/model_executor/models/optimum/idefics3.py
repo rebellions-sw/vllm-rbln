@@ -73,9 +73,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(
             # Only when image input is given
             if image_input is not None:
                 pixel_values = image_input["pixel_values"].unsqueeze(0)
-                pixel_attention_mask = image_input[
-                    "pixel_attention_mask"
-                ].unsqueeze(0)
+                pixel_attention_mask = image_input["pixel_attention_mask"].unsqueeze(0)
             else:
                 pixel_values = None
                 pixel_attention_mask = None
@@ -95,9 +93,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(
                 block_tables=block_tables,
             ).logits
         else:
-            padded_batch_size = kwargs.pop(
-                "padded_batch_size", self.decoder_batch_size
-            )
+            padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
             self.model.text_model.decoder = self.model.text_model.decoders[
                 padded_batch_size
             ]
@@ -126,9 +122,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(
 
         return data
 
-    def _parse_and_validate_image_input(
-        self, **kwargs: Any
-    ) -> Optional[ImageInputs]:
+    def _parse_and_validate_image_input(self, **kwargs: Any) -> Optional[ImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         config = self.vllm_config.model_config.hf_config
@@ -151,8 +145,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(
         if pixel_values is not None:
             if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError(
-                    "Incorrect type of pixel values. "
-                    f"Got type: {type(pixel_values)}"
+                    f"Incorrect type of pixel values. Got type: {type(pixel_values)}"
                 )
 
             pixel_attention_mask = kwargs.pop("pixel_attention_mask")
@@ -165,17 +158,14 @@ class RBLNOptimumIdefics3ForConditionalGeneration(
             num_patches = kwargs.pop("num_patches")
             if not isinstance(num_patches, (torch.Tensor, list)):
                 raise ValueError(
-                    "Incorrect type of num_patches. "
-                    f"Got type: {type(num_patches)}"
+                    f"Incorrect type of num_patches. Got type: {type(num_patches)}"
                 )
 
             expected_h = expected_w = config.vision_config.image_size
             return Idefics3ImagePixelInputs(
                 type="pixel_values",
                 pixel_values=flatten_bn(pixel_values, concat=True),
-                pixel_attention_mask=flatten_bn(
-                    pixel_attention_mask, concat=True
-                ),
+                pixel_attention_mask=flatten_bn(pixel_attention_mask, concat=True),
                 num_patches=flatten_bn(num_patches, concat=True),
                 resolve_bindings={"h": expected_h, "w": expected_w},
             )

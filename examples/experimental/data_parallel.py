@@ -170,15 +170,9 @@ if __name__ == "__main__":
         default="ibm-research/PowerMoE-3b",
         help="Model name or path",
     )
-    parser.add_argument(
-        "--dp-size", type=int, default=1, help="Data parallel size"
-    )
-    parser.add_argument(
-        "--tp-size", type=int, default=1, help="Tensor parallel size"
-    )
-    parser.add_argument(
-        "--ep", action="store_true", help="vLLM enable_expert_parallel"
-    )
+    parser.add_argument("--dp-size", type=int, default=1, help="Data parallel size")
+    parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
+    parser.add_argument("--ep", action="store_true", help="vLLM enable_expert_parallel")
     parser.add_argument(
         "--node-size", type=int, default=1, help="Total number of nodes"
     )
@@ -188,9 +182,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--master-addr", type=str, default="", help="Master node IP address"
     )
-    parser.add_argument(
-        "--master-port", type=int, default=0, help="Master node port"
-    )
+    parser.add_argument("--master-port", type=int, default=0, help="Master node port")
     args = parser.parse_args()
 
     dp_size = args.dp_size
@@ -258,9 +250,7 @@ if __name__ == "__main__":
         # disable timeout
         proc.join()
         if proc.exitcode is None:
-            print(
-                f"Killing process {proc.pid} that didn't stop within 5 minutes."
-            )
+            print(f"Killing process {proc.pid} that didn't stop within 5 minutes.")
             proc.kill()
             exit_code = 1
         elif proc.exitcode:

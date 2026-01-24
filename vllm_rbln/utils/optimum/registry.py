@@ -123,8 +123,7 @@ def is_arch_supported(
 ) -> bool:
     architectures = getattr(config, "architectures", [])
     return any(
-        arch in _RBLN_SUPPORTED_MODELS and arch in model_set
-        for arch in architectures
+        arch in _RBLN_SUPPORTED_MODELS and arch in model_set for arch in architectures
     )
 
 

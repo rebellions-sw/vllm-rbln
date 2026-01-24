@@ -141,12 +141,10 @@ class RBLNOptimumLlavaNextForConditionalGeneration(
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
         if not is_prompt:
-            padded_batch_size = kwargs.pop(
-                "padded_batch_size", self.decoder_batch_size
-            )
-            self.model.language_model.decoder = (
-                self.model.language_model.decoders[padded_batch_size]
-            )
+            padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
+            self.model.language_model.decoder = self.model.language_model.decoders[
+                padded_batch_size
+            ]
 
         logits = self._forward(
             is_prefill=is_prompt,
@@ -175,14 +173,12 @@ class RBLNOptimumLlavaNextForConditionalGeneration(
         if pixel_values is not None:
             if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError(
-                    "Incorrect type of pixel values. "
-                    f"Got type: {type(pixel_values)}"
+                    f"Incorrect type of pixel values. Got type: {type(pixel_values)}"
                 )
 
             if not isinstance(image_sizes, (torch.Tensor, list)):
                 raise ValueError(
-                    "Incorrect type of image sizes. "
-                    f"Got type: {type(image_sizes)}"
+                    f"Incorrect type of image sizes. Got type: {type(image_sizes)}"
                 )
 
             expected_h = expected_w = config.vision_config.image_size
@@ -199,8 +195,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(
         if image_embeds is not None:
             if not isinstance(image_embeds, torch.Tensor):
                 raise ValueError(
-                    "Incorrect type of image embeds. "
-                    f"Got type: {type(image_embeds)}"
+                    f"Incorrect type of image embeds. Got type: {type(image_embeds)}"
                 )
 
             raise NotImplementedError(

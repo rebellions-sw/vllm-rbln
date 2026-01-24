@@ -160,18 +160,14 @@ def generate_data(
     op_type,
     device,
 ) -> PunicaTensors:
-    seq_len_tensor = torch.randint(seq_length, seq_length + 1, (batches,)).to(
-        device
-    )
+    seq_len_tensor = torch.randint(seq_length, seq_length + 1, (batches,)).to(device)
     b_seq_start_loc = torch.cumsum(
         torch.tensor([0] + seq_len_tensor[:-1].tolist(), dtype=torch.long),
         dim=0,
     ).to(device)
     total_tokens = seq_len_tensor.sum()
     if op_type == "shrink":
-        inputs_tensor = torch.rand((total_tokens, hidden_size), dtype=dtype).to(
-            device
-        )
+        inputs_tensor = torch.rand((total_tokens, hidden_size), dtype=dtype).to(device)
         lora_weights = torch.rand(
             (lora_nums, max_rank, hidden_size),  # col-major
             dtype=dtype,
@@ -181,9 +177,9 @@ def generate_data(
             (total_tokens, max_rank), dtype=dtype, device=inputs_tensor.device
         )
         # NOTE  shrink kernel using torch.float32 as output type
-        our_out_tensor = torch.zeros(
-            (total_tokens, max_rank), dtype=torch.float32
-        ).to(device)
+        our_out_tensor = torch.zeros((total_tokens, max_rank), dtype=torch.float32).to(
+            device
+        )
     else:
         inputs_tensor = torch.rand(
             (total_tokens, max_rank),
@@ -235,9 +231,7 @@ def generate_data_for_expand_nslices(
     nslices,
     device,
 ) -> PunicaTensors:
-    seq_len_tensor = torch.randint(seq_length, seq_length + 1, (batches,)).to(
-        device
-    )
+    seq_len_tensor = torch.randint(seq_length, seq_length + 1, (batches,)).to(device)
     b_seq_start_loc = torch.cumsum(
         torch.tensor([0] + seq_len_tensor[:-1].tolist(), dtype=torch.long),
         dim=0,
@@ -257,9 +251,9 @@ def generate_data_for_expand_nslices(
         )
     # expand op needs to complete y+=a@lora_b, so output is
     # initinized randomly
-    ref_out_tensor = torch.rand(
-        (total_tokens, hidden_size * nslices), dtype=dtype
-    ).to(device)
+    ref_out_tensor = torch.rand((total_tokens, hidden_size * nslices), dtype=dtype).to(
+        device
+    )
     # Ensure the same input.
     our_out_tensor = ref_out_tensor.clone()
     lora_indices_tensor = torch.randint(
@@ -298,9 +292,7 @@ def generate_data_for_nslices(
     op_type,
     device,
 ) -> PunicaTensors:
-    seq_len_tensor = torch.randint(seq_length, seq_length + 1, (batches,)).to(
-        device
-    )
+    seq_len_tensor = torch.randint(seq_length, seq_length + 1, (batches,)).to(device)
     b_seq_start_loc = torch.cumsum(
         torch.tensor([0] + seq_len_tensor[:-1].tolist(), dtype=torch.long),
         dim=0,
@@ -309,9 +301,7 @@ def generate_data_for_nslices(
 
     lora_weights_lst = []
     if op_type == "shrink":
-        inputs_tensor = torch.rand((total_tokens, hidden_size), dtype=dtype).to(
-            device
-        )
+        inputs_tensor = torch.rand((total_tokens, hidden_size), dtype=dtype).to(device)
 
         for _ in range(nslices):
             if op_type == "shrink":
@@ -414,16 +404,12 @@ def create_peft_lora(
             in_features = module.input_size
             out_features = module.output_size
 
-        elif hasattr(module, "embedding_dim") and hasattr(
-            module, "num_embeddings"
-        ):
+        elif hasattr(module, "embedding_dim") and hasattr(module, "num_embeddings"):
             # ParallelLMHead
             in_features = module.embedding_dim
             out_features = module.num_embeddings
         else:
-            raise ValueError(
-                f"Unable to determine dimensions for module {module_name}"
-            )
+            raise ValueError(f"Unable to determine dimensions for module {module_name}")
 
         lora_A = torch.randn(rank, in_features, dtype=lora_dtype)
 

@@ -53,9 +53,7 @@ class RBLNOptimumBlockTable(BlockTable):
         # return len(token_blocks)
 
         num_token_ids = len(token_ids) + num_lookahead_slots
-        first_chunk_size = self._block_size - (
-            self._num_full_slots % self._block_size
-        )
+        first_chunk_size = self._block_size - (self._num_full_slots % self._block_size)
         if first_chunk_size == self._block_size:
             return math.ceil(num_token_ids / self._block_size)
 

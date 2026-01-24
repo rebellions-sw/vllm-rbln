@@ -21,19 +21,11 @@ from vllm.transformers_utils.config import get_hf_text_config
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument(
-    "--model", type=str, default="llama3.2-1b", help="model name"
-)
-parser.add_argument(
-    "--tp", type=int, default=1, help="vLLM tensor_parallel_size"
-)
-parser.add_argument(
-    "--pp", type=int, default=1, help="vLLM pipeline_parallel_size"
-)
+parser.add_argument("--model", type=str, default="llama3.2-1b", help="model name")
+parser.add_argument("--tp", type=int, default=1, help="vLLM tensor_parallel_size")
+parser.add_argument("--pp", type=int, default=1, help="vLLM pipeline_parallel_size")
 parser.add_argument("--dp", type=int, default=1, help="vLLM data_parallel_size")
-parser.add_argument(
-    "--ep", action="store_true", help="vLLM enable_expert_parallel"
-)
+parser.add_argument("--ep", action="store_true", help="vLLM enable_expert_parallel")
 args = parser.parse_args()
 
 # dense model

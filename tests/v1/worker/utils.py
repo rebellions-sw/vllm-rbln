@@ -16,7 +16,7 @@ from collections.abc import Callable
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 import torch.nn as nn
@@ -411,9 +411,7 @@ def forward_steps(reqs: list[Request]):
         if req.use_structured_output:
             vocab_size = runner.model_config.get_vocab_size()
             scheduler_output.structured_output_request_ids = {req_id: 0}
-            scheduler_output.grammar_bitmask = create_grammar_bitmask(
-                1, vocab_size
-            )
+            scheduler_output.grammar_bitmask = create_grammar_bitmask(1, vocab_size)
         runner_output = runner.execute_model(scheduler_output)
         assert runner_output is not None
         assert runner_output.req_ids == [req_id]
@@ -429,16 +427,14 @@ def forward_steps(reqs: list[Request]):
         req.num_computed_tokens = 3
 
     # Decode
-    scheduler_output = _schedule_cached_reqs(
-        reqs, new_block_ids=[None, None, None]
-    )
+    scheduler_output = _schedule_cached_reqs(reqs, new_block_ids=[None, None, None])
     vocab_size = runner.model_config.get_vocab_size()
     req_order = [1, 2, 0]
     for i, req in enumerate(reqs):
         if req.use_structured_output:
-            scheduler_output.structured_output_request_ids[req.request_id] = (
-                req_order[i]
-            )
+            scheduler_output.structured_output_request_ids[req.request_id] = req_order[
+                i
+            ]
             # need to be checked
     scheduler_output.grammar_bitmask = create_grammar_bitmask(
         len(scheduler_output.structured_output_request_ids), vocab_size

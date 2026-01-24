@@ -20,17 +20,13 @@ from vllm.model_executor.models.deepseek_v2 import (
 )
 
 
-def __deepseek_v2_moe_forward_rsd(
-    self, hidden_states: torch.Tensor
-) -> torch.Tensor:
+def __deepseek_v2_moe_forward_rsd(self, hidden_states: torch.Tensor) -> torch.Tensor:
     if self.n_shared_experts is not None:
         shared_output = self.shared_experts(hidden_states)
     router_logits, _ = self.gate(hidden_states)
     if hidden_states.dtype != torch.float16:
         final_hidden_states = (
-            self.experts(
-                hidden_states=hidden_states, router_logits=router_logits
-            )
+            self.experts(hidden_states=hidden_states, router_logits=router_logits)
             * self.routed_scaling_factor
         )
     else:
@@ -49,9 +45,7 @@ def __deepseek_v2_moe_forward_rsd(
                 1.0 / self.routed_scaling_factor
             )
     if self.tp_size > 1:
-        final_hidden_states = tensor_model_parallel_all_reduce(
-            final_hidden_states
-        )
+        final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
 
     return final_hidden_states
 
@@ -70,18 +64,12 @@ def __deepseek_v2_attention_forward(
         q = self.q_proj(hidden_states)[0].view(
             -1, self.num_local_heads, self.qk_head_dim
         )
-    q_nope, q_pe = q.split(
-        [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
-    )
+    q_nope, q_pe = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
     latent_cache = self.kv_a_proj_with_mqa(hidden_states)[0]
-    kv_a, k_pe = latent_cache.split(
-        [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
-    )
+    kv_a, k_pe = latent_cache.split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
     kv_a = self.kv_a_layernorm(kv_a.contiguous())
     kv = self.kv_b_proj(kv_a)[0]
-    kv = kv.view(
-        -1, self.num_local_heads, self.qk_nope_head_dim + self.v_head_dim
-    )
+    kv = kv.view(-1, self.num_local_heads, self.qk_nope_head_dim + self.v_head_dim)
     k_nope, v = kv.split([self.qk_nope_head_dim, self.v_head_dim], dim=-1)
     k_pe = k_pe.view(-1, 1, self.qk_rope_head_dim)
 
@@ -103,11 +91,9 @@ def __deepseek_v2_attention_forward(
     v = v.reshape(batch, -1, self.num_local_heads * self.qk_head_dim)
     attn_output = self.attn(q, k, v)
     if self.qk_head_dim != self.v_head_dim:
-        attn_output = attn_output.view(
-            -1, self.num_local_heads, self.qk_head_dim
-        )[..., : self.v_head_dim].reshape(
-            batch, -1, self.num_local_heads * self.v_head_dim
-        )
+        attn_output = attn_output.view(-1, self.num_local_heads, self.qk_head_dim)[
+            ..., : self.v_head_dim
+        ].reshape(batch, -1, self.num_local_heads * self.v_head_dim)
 
     output, _ = self.o_proj(attn_output)
     return output

@@ -85,7 +85,5 @@ async def test_dummy_resolver_resolve():
     assert result.lora_path == f"/dummy/path/{base_model_name}/{lora_name}"
 
     # Test failed resolution
-    result = await dummy_resolver.resolve_lora(
-        base_model_name, "nonexistent_lora"
-    )
+    result = await dummy_resolver.resolve_lora(base_model_name, "nonexistent_lora")
     assert result is None

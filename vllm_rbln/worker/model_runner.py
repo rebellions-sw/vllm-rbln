@@ -125,9 +125,7 @@ class ModelInputForRebelWithSamplingMetadata(ModelInputForRebel):
             "input_positions": self.input_positions,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
-        _add_sampling_metadata_broadcastable_dict(
-            tensor_dict, self.sampling_metadata
-        )
+        _add_sampling_metadata_broadcastable_dict(tensor_dict, self.sampling_metadata)
         return tensor_dict
 
     @classmethod
@@ -144,9 +142,7 @@ class ModelInputForRebelWithSamplingMetadata(ModelInputForRebel):
         return cls(**tensor_dict)
 
 
-class ModelInputForRebelBuilder(
-    ModelRunnerInputBuilderBase[ModelInputForRebel]
-):
+class ModelInputForRebelBuilder(ModelRunnerInputBuilderBase[ModelInputForRebel]):
     class ModelInputData:
         def __init__(self, use_mrope: bool):
             self.use_mrope = use_mrope
@@ -165,9 +161,9 @@ class ModelInputForRebelBuilder(
             # and [block_number, block_offset]
             self.slot_mapping: List[int] = []
             self.multi_modal_inputs_list: List[MultiModalKwargs] = []
-            self.multi_modal_placeholder_maps: Dict[
-                str, MultiModalPlaceholderMap
-            ] = defaultdict(MultiModalPlaceholderMap)
+            self.multi_modal_placeholder_maps: Dict[str, MultiModalPlaceholderMap] = (
+                defaultdict(MultiModalPlaceholderMap)
+            )
             self.input_mrope_positions: List[List[int]] = [[] for _ in range(3)]
 
     def __init__(
@@ -182,9 +178,7 @@ class ModelInputForRebelBuilder(
             runner.scheduler_config.chunked_prefill_enabled
             or runner.cache_config.enable_prefix_caching
         )
-        self.chunked_prefill_size = (
-            runner.scheduler_config.max_num_batched_tokens
-        )
+        self.chunked_prefill_size = runner.scheduler_config.max_num_batched_tokens
         self.model_input_cls = self.runner._model_input_cls
         self.attn_backend = self.runner.attn_backend
         self.sliding_window = self.runner.sliding_window
@@ -198,9 +192,7 @@ class ModelInputForRebelBuilder(
             attn_backend = self.runner.attn_backend
             self.attn_metadata_builder = attn_backend.get_builder_cls()(self)
 
-    def prepare(
-        self, finished_requests_ids: Optional[List[str]] = None
-    ) -> None:
+    def prepare(self, finished_requests_ids: Optional[List[str]] = None) -> None:
         self.seq_group_metadata_list: List[SequenceGroupMetadata] = []
         self.input_data = ModelInputForRebelBuilder.ModelInputData(
             self.runner.model_config.uses_mrope
@@ -210,9 +202,7 @@ class ModelInputForRebelBuilder(
     def add_seq_group(self, seq_group_metadata: SequenceGroupMetadata):
         self.seq_group_metadata_list.append(seq_group_metadata)
 
-    def set_seq_group_list(
-        self, seq_group_metadata_list: List[SequenceGroupMetadata]
-    ):
+    def set_seq_group_list(self, seq_group_metadata_list: List[SequenceGroupMetadata]):
         self.seq_group_metadata_list = seq_group_metadata_list
 
     def _prepare_prompt(
@@ -251,9 +241,7 @@ class ModelInputForRebelBuilder(
             assert seq_group_metadata.block_tables is not None
             block_table = seq_group_metadata.block_tables[seq_id]
             block_table = list(map(lambda v: v + ve_offset, block_table))
-            assert len(block_table) == math.ceil(
-                seq_data.get_len() / block_size
-            )
+            assert len(block_table) == math.ceil(seq_data.get_len() / block_size)
             list_input_block_ids.append(block_table)
             data.input_tokens.append(tokens)
             data.input_positions.append(list(range(computed_len, seq_len)))
@@ -396,16 +384,12 @@ class ModelInputForRebelBuilder(
         input_data = self.input_data
         # Prepare input tensors.
         if is_prompt:
-            (input_tokens, input_positions, input_block_ids) = (
-                self._prepare_prompt(
-                    input_data, seq_group_metadata_list, virtual_engine
-                )
+            (input_tokens, input_positions, input_block_ids) = self._prepare_prompt(
+                input_data, seq_group_metadata_list, virtual_engine
             )
         else:
-            (input_tokens, input_positions, input_block_ids) = (
-                self._prepare_decode(
-                    input_data, seq_group_metadata_list, virtual_engine
-                )
+            (input_tokens, input_positions, input_block_ids) = self._prepare_decode(
+                input_data, seq_group_metadata_list, virtual_engine
             )
 
         attn_metadata = self.attn_metadata_builder.build(
@@ -453,12 +437,8 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         self.kv_cache_dtype = kv_cache_dtype
         self.sliding_window = model_config.get_sliding_window()
         self.block_size = cache_config.block_size
-        num_attn_heads = self.model_config.get_num_attention_heads(
-            self.parallel_config
-        )
-        needs_attn_backend = (
-            num_attn_heads != 0 or self.model_config.is_attention_free
-        )
+        num_attn_heads = self.model_config.get_num_attention_heads(self.parallel_config)
+        needs_attn_backend = num_attn_heads != 0 or self.model_config.is_attention_free
         self.attn_backend = (
             get_attn_backend(
                 self.model_config.get_head_size(),
@@ -485,9 +465,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
 
         if hasattr(self, "_builder_cls"):
             # multi-step model runner does not have `_builder_cls`
-            self.builder = self._builder_cls(
-                cast(RBLNModelRunner, weakref.proxy(self))
-            )
+            self.builder = self._builder_cls(cast(RBLNModelRunner, weakref.proxy(self)))
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
@@ -513,11 +491,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
             options["cache_dir"] = os.path.join(
                 envs.VLLM_CACHE_ROOT,
-                (
-                    "rsd_cache_dir"
-                    if envs.VLLM_RBLN_TP_SIZE > 1
-                    else "cache_dir"
-                ),
+                ("rsd_cache_dir" if envs.VLLM_RBLN_TP_SIZE > 1 else "cache_dir"),
             )
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
@@ -531,9 +505,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         return compiled_model
 
     # LLM attention block
-    def attention_block(
-        self, decoder_layer, hidden_states, residual, input_positions
-    ):
+    def attention_block(self, decoder_layer, hidden_states, residual, input_positions):
         # attention input_layernorm
         if residual is None:
             residual = hidden_states
@@ -598,9 +570,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                     # aten::index_select --> take -->
                     #     contrib_dynamic_take (tensor -> scalar)
                     model_output = model_output[:, selected_token_indices]
-                logits = self.compute_logits_model.compute_logits(
-                    model_output, None
-                )
+                logits = self.compute_logits_model.compute_logits(model_output, None)
                 return logits.view(-1, logits.size(-1))
 
             # non last rank create intermediate tensors, bypass it
@@ -631,11 +601,9 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
         self,
         tensor_dict: Dict[str, Any],
     ) -> ModelInputForRebelWithSamplingMetadata:
-        return (
-            ModelInputForRebelWithSamplingMetadata.from_broadcasted_tensor_dict(
-                tensor_dict,
-                attn_backend=self.attn_backend,
-            )
+        return ModelInputForRebelWithSamplingMetadata.from_broadcasted_tensor_dict(
+            tensor_dict,
+            attn_backend=self.attn_backend,
         )
 
     @torch.inference_mode()
@@ -665,9 +633,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             sampling_metadata = None
 
         is_prompt = (
-            seq_group_metadata_list[0].is_prompt
-            if seq_group_metadata_list
-            else None
+            seq_group_metadata_list[0].is_prompt if seq_group_metadata_list else None
         )
         return dataclasses.replace(
             model_input,
@@ -687,9 +653,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         assert kv_caches is not None
         if num_steps > 1:
-            raise ValueError(
-                "Rebel worker does not support multi-step execution."
-            )
+            raise ValueError("Rebel worker does not support multi-step execution.")
 
         execute_model_kwargs = {}
         if previous_hidden_states is not None:
@@ -708,9 +672,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             len_token_indices = len(selected_token_indices)
             if num_prefills > 0:
                 assert len_token_indices == 0 or len_token_indices == 1
-                num_prefill_tokens = (
-                    model_input.attn_metadata.num_prefill_tokens
-                )
+                num_prefill_tokens = model_input.attn_metadata.num_prefill_tokens
                 token_indices = torch.tensor(
                     [num_prefill_tokens - 1], dtype=selected_token_indices.dtype
                 )
@@ -740,35 +702,24 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
                 execution_time = end_time - start_time
                 if model_input.is_prompt:
                     total_tokens = (
-                        sum(model_input.query_lens)
-                        if model_input.query_lens
-                        else 0
+                        sum(model_input.query_lens) if model_input.query_lens else 0
                     )
                     self.performance_tracker.record_prefill(
                         execution_time, total_tokens
                     )
                 else:
-                    num_seqs = (
-                        len(model_input.seq_lens) if model_input.seq_lens else 0
-                    )
-                    self.performance_tracker.record_decode(
-                        execution_time, num_seqs
-                    )
-            if (
-                get_pp_group().is_last_rank
-                and not envs.VLLM_RBLN_LOGITS_ALL_GATHER
-            ):
+                    num_seqs = len(model_input.seq_lens) if model_input.seq_lens else 0
+                    self.performance_tracker.record_decode(execution_time, num_seqs)
+            if get_pp_group().is_last_rank and not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
                 # Gather logits for TP
                 logits_processor = self.compute_logits_model.logits_processor
-                logits_or_intermediate_states = (
-                    logits_or_intermediate_states.unsqueeze(0)
+                logits_or_intermediate_states = logits_or_intermediate_states.unsqueeze(
+                    0
                 )
                 logits_or_intermediate_states = logits_processor._gather_logits(
                     logits_or_intermediate_states
                 )
-                logits_or_intermediate_states = (
-                    logits_or_intermediate_states.squeeze(0)
-                )
+                logits_or_intermediate_states = logits_or_intermediate_states.squeeze(0)
 
         if not get_pp_group().is_last_rank:
             intermediate_states = logits_or_intermediate_states
@@ -826,12 +777,10 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             batch_size, seq_len = model_input.input_tokens.shape
             intermediate_tensors = None
             if not get_pp_group().is_first_rank:
-                intermediate_tensors = (
-                    self.model.make_empty_intermediate_tensors(
-                        batch_size=batch_size * seq_len,
-                        dtype=self.model_config.dtype,
-                        device=self.device,
-                    )
+                intermediate_tensors = self.model.make_empty_intermediate_tensors(
+                    batch_size=batch_size * seq_len,
+                    dtype=self.model_config.dtype,
+                    device=self.device,
                 )
                 intermediate_tensors = IntermediateTensors(
                     {

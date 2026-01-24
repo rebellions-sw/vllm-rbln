@@ -163,8 +163,7 @@ class RBLNOptimumScheduler(Scheduler):
             prompt_limit = self._get_prompt_limit(seq_group)
             if num_new_tokens > prompt_limit:
                 logger.warning(
-                    "Input prompt (%d tokens) is too long"
-                    " and exceeds limit of %d",
+                    "Input prompt (%d tokens) is too long and exceeds limit of %d",
                     num_new_tokens,
                     prompt_limit,
                 )
@@ -235,9 +234,7 @@ class RBLNOptimumScheduler(Scheduler):
             self._allocate_and_set_running(seq_group)
 
             if partial_prefill_metadata is not None:
-                partial_prefill_metadata.maybe_increment_partial_prefills(
-                    seq_group
-                )
+                partial_prefill_metadata.maybe_increment_partial_prefills(seq_group)
 
             seq_groups.append(
                 ScheduledSequenceGroup(
@@ -290,9 +287,7 @@ class RBLNOptimumScheduler(Scheduler):
             return False
 
         is_prefill = seq_group.is_prefill()
-        num_lookahead_slots = self._get_num_lookahead_slots(
-            is_prefill, enable_chunking
-        )
+        num_lookahead_slots = self._get_num_lookahead_slots(is_prefill, enable_chunking)
 
         if is_prefill and num_lookahead_slots > 0:
             # Appending prefill slots only happens multi-step and

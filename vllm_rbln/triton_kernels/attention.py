@@ -103,9 +103,7 @@ def flash_attention_naive_prefill(
                 block_shape=(1,),
                 order=(0,),
             )
-            tl.static_assert(
-                len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE
-            )
+            tl.static_assert(len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
             SP_block_ptr = tl.make_block_ptr(
                 base=seq_idx,
                 shape=(NB, NP),
@@ -283,9 +281,7 @@ def flash_attention_naive_decode(
                 block_shape=(1, 1),
                 order=(1, 0),
             )
-            tl.static_assert(
-                len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE
-            )
+            tl.static_assert(len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
             SP_block_ptr = tl.make_block_ptr(
                 base=seq_idx,
                 shape=(NB, NP),

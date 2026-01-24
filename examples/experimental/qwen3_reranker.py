@@ -78,9 +78,7 @@ def main():
     query_template = "{prefix}<Instruct>: {instruction}\n<Query>: {query}\n"
     document_template = "<Document>: {doc}{suffix}"
 
-    instruction = (
-        "Given a query, retrieve relevant passages that answer the query"
-    )
+    instruction = "Given a query, retrieve relevant passages that answer the query"
 
     queries = [
         "What is the capital of China?",
@@ -97,14 +95,10 @@ def main():
     ]
 
     queries = [
-        query_template.format(
-            prefix=prefix, instruction=instruction, query=query
-        )
+        query_template.format(prefix=prefix, instruction=instruction, query=query)
         for query in queries
     ]
-    documents = [
-        document_template.format(doc=doc, suffix=suffix) for doc in documents
-    ]
+    documents = [document_template.format(doc=doc, suffix=suffix) for doc in documents]
 
     llm = get_llm()
     outputs = llm.score(queries, documents)

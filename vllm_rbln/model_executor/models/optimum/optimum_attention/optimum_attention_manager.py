@@ -35,9 +35,7 @@ class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
     def __init__(self, strategy: StrategyT):
         self._s: StrategyT = strategy
 
-    def add(
-        self, running_requests_id: str, local_table_id: int, **kwargs
-    ) -> None:
+    def add(self, running_requests_id: str, local_table_id: int, **kwargs) -> None:
         self._s.add(running_requests_id, local_table_id, **kwargs)
 
     def get(

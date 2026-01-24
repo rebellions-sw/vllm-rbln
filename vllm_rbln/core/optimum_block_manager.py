@@ -35,9 +35,7 @@ class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
             extra_hash = seq.extra_hash()
 
             # Add blocks to the block table only if the sequence is non empty.
-            block_table.allocate(
-                token_ids=seq.get_token_ids(), extra_hash=extra_hash
-            )
+            block_table.allocate(token_ids=seq.get_token_ids(), extra_hash=extra_hash)
 
         return block_table
 
@@ -66,10 +64,7 @@ class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
         )
 
         # Use watermark to avoid frequent cache eviction.
-        if (
-            self.num_total_gpu_blocks - num_required_blocks
-            < self.watermark_blocks
-        ):
+        if self.num_total_gpu_blocks - num_required_blocks < self.watermark_blocks:
             return AllocStatus.NEVER
         if num_free_gpu_blocks - num_required_blocks >= self.watermark_blocks:
             return AllocStatus.OK
@@ -105,9 +100,7 @@ class RBLNOptimumBlockSpaceManager(SelfAttnBlockSpaceManager):
         # encoder prompt.
         request_id = seq_group.request_id
 
-        assert request_id not in self.cross_block_tables, (
-            "block table already exists"
-        )
+        assert request_id not in self.cross_block_tables, "block table already exists"
 
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 

@@ -44,9 +44,7 @@ def get_autobind_cpu_ids(
     Returns:
         Comma-separated string of CPU IDs, or "all" or "nobind".
     """
-    allowed_numa_nodes, logical_cpu_list = (
-        CpuPlatform.get_allowed_cpu_core_node_list()
-    )
+    allowed_numa_nodes, logical_cpu_list = CpuPlatform.get_allowed_cpu_core_node_list()
 
     # Calculate rank_across_dp for CPU binding
     # This ensures different DP groups get different CPU allocations
@@ -68,9 +66,7 @@ def get_autobind_cpu_ids(
         numa_node_to_cpus[numa_node].append(cpu_info)
 
     # Filter to only allowed NUMA nodes
-    available_numa_nodes = [
-        n for n in allowed_numa_nodes if n in numa_node_to_cpus
-    ]
+    available_numa_nodes = [n for n in allowed_numa_nodes if n in numa_node_to_cpus]
 
     if not available_numa_nodes:
         logger.error(
@@ -107,12 +103,8 @@ def get_autobind_cpu_ids(
         remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
 
         rank_position = ranks_in_same_numa.index(rank_across_dp)
-        start_idx = rank_position * cpus_per_rank + min(
-            rank_position, remainder
-        )
-        end_idx = (
-            start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
-        )
+        start_idx = rank_position * cpus_per_rank + min(rank_position, remainder)
+        end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
         logical_cpu_list = selected_cpu_list[start_idx:end_idx]
     else:
         logical_cpu_list = selected_cpu_list
@@ -252,8 +244,7 @@ def set_omp_num_threads(
         )
     else:
         logger.info(
-            "OMP_NUM_THREADS is already defined for rank %d "
-            "(local_rank %d): %s",
+            "OMP_NUM_THREADS is already defined for rank %d (local_rank %d): %s",
             rank,
             local_rank,
             os.environ["OMP_NUM_THREADS"],

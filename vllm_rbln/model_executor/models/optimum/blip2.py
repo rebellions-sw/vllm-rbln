@@ -94,12 +94,10 @@ class RBLNOptimumBlip2ForConditionalGeneration(
                 block_tables=block_tables,
             ).logits
         else:
-            padded_batch_size = kwargs.pop(
-                "padded_batch_size", self.decoder_batch_size
-            )
-            self.model.language_model.decoder = (
-                self.model.language_model.decoders[padded_batch_size]
-            )
+            padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
+            self.model.language_model.decoder = self.model.language_model.decoders[
+                padded_batch_size
+            ]
 
             logits = self.model.language_model.decoder(**kwargs).logits
         if not is_prompt:

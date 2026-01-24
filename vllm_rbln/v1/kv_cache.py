@@ -77,9 +77,7 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
     def cache_blocks(self, request: Request, num_tokens: int) -> None:
         pass
 
-    def remove_skipped_blocks(
-        self, request_id: str, num_computed_tokens: int
-    ) -> None:
+    def remove_skipped_blocks(self, request_id: str, num_computed_tokens: int) -> None:
         pass
 
     def get_num_common_prefix_blocks(

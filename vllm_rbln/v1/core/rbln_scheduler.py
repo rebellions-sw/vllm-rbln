@@ -115,14 +115,8 @@ class RBLNScheduler(Scheduler):
                 + request.num_output_placeholders
                 - request.num_computed_tokens
             )
-            if (
-                0
-                < self.scheduler_config.long_prefill_token_threshold
-                < num_new_tokens
-            ):
-                num_new_tokens = (
-                    self.scheduler_config.long_prefill_token_threshold
-                )
+            if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens:
+                num_new_tokens = self.scheduler_config.long_prefill_token_threshold
             num_new_tokens = min(num_new_tokens, token_budget)
 
             # Make sure the input position does not exceed the max model len.
@@ -216,9 +210,7 @@ class RBLNScheduler(Scheduler):
             # Speculative decode related.
             if request.spec_token_ids:
                 num_scheduled_spec_tokens = (
-                    num_new_tokens
-                    + request.num_computed_tokens
-                    - request.num_tokens
+                    num_new_tokens + request.num_computed_tokens - request.num_tokens
                 )
                 if num_scheduled_spec_tokens > 0:
                     # Trim spec_token_ids list to num_scheduled_spec_tokens.
@@ -298,8 +290,7 @@ class RBLNScheduler(Scheduler):
                     and request.lora_request
                     and (
                         len(scheduled_loras) == self.lora_config.max_loras
-                        and request.lora_request.lora_int_id
-                        not in scheduled_loras
+                        and request.lora_request.lora_int_id not in scheduled_loras
                     )
                 ):
                     # Scheduling would exceed max_loras, skip.
@@ -335,8 +326,7 @@ class RBLNScheduler(Scheduler):
 
                     # Total computed tokens (local + external).
                     num_computed_tokens = (
-                        num_new_local_computed_tokens
-                        + num_external_computed_tokens
+                        num_new_local_computed_tokens + num_external_computed_tokens
                     )
                 # KVTransfer: WAITING reqs have num_computed_tokens > 0
                 # after async KV recvs are completed.
@@ -404,9 +394,7 @@ class RBLNScheduler(Scheduler):
                 # creates a mismatch between the number
                 # of local and remote blocks.
                 effective_lookahead_tokens = (
-                    0
-                    if request.num_computed_tokens == 0
-                    else self.num_lookahead_tokens
+                    0 if request.num_computed_tokens == 0 else self.num_lookahead_tokens
                 )
 
                 # Determine if we need to allocate cross-attention blocks.
@@ -415,13 +403,11 @@ class RBLNScheduler(Scheduler):
                     # always padded to the maximum length. If we support other
                     # encoder-decoder models, this will need to be updated if we
                     # want to only allocate what is needed.
-                    assert (
-                        "whisper" in self.vllm_config.model_config.model.lower()
-                    ), "Whisper is the only supported encoder-decoder model."
-                    num_encoder_tokens = (
-                        MULTIMODAL_REGISTRY.get_encdec_max_encoder_len(
-                            self.vllm_config.model_config
-                        )
+                    assert "whisper" in self.vllm_config.model_config.model.lower(), (
+                        "Whisper is the only supported encoder-decoder model."
+                    )
+                    num_encoder_tokens = MULTIMODAL_REGISTRY.get_encdec_max_encoder_len(
+                        self.vllm_config.model_config
                     )
                 else:
                     num_encoder_tokens = 0
@@ -493,9 +479,7 @@ class RBLNScheduler(Scheduler):
                 elif request.status == RequestStatus.PREEMPTED:
                     scheduled_resumed_reqs.append(request)
                 else:
-                    raise RuntimeError(
-                        f"Invalid request status: {request.status}"
-                    )
+                    raise RuntimeError(f"Invalid request status: {request.status}")
 
                 if self.lora_config and request.lora_request:
                     scheduled_loras.add(request.lora_request.lora_int_id)
@@ -567,9 +551,7 @@ class RBLNScheduler(Scheduler):
 
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
-        num_common_prefix_blocks = [0] * len(
-            self.kv_cache_config.kv_cache_groups
-        )
+        num_common_prefix_blocks = [0] * len(self.kv_cache_config.kv_cache_groups)
         if self.running:
             any_request = self.running[0]
             num_common_prefix_blocks = (
@@ -596,10 +578,8 @@ class RBLNScheduler(Scheduler):
         active_running_reqs = (
             scheduled_running_reqs + scheduled_new_reqs + scheduled_resumed_reqs
         )
-        structured_output_request_ids, grammar_bitmask = (
-            self.get_grammar_bitmask(
-                active_running_reqs, scheduled_spec_decode_tokens
-            )
+        structured_output_request_ids, grammar_bitmask = self.get_grammar_bitmask(
+            active_running_reqs, scheduled_spec_decode_tokens
         )
         scheduler_output = SchedulerOutput(
             scheduled_new_reqs=new_reqs_data,

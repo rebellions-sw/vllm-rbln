@@ -155,9 +155,7 @@ class RBLNOptimumModelBase(nn.Module):
             compiled_path = None
 
         if compiled_path is None or not os.path.exists(compiled_path):
-            raise RuntimeError(
-                f"Compiled model path does not exist: {compiled_path}"
-            )
+            raise RuntimeError(f"Compiled model path does not exist: {compiled_path}")
 
         # huggingface model class name
         logger.info(
@@ -204,9 +202,7 @@ class RBLNOptimumDecoderMixin:
         if self.use_multiple_decoder:
             self.decoder_batch_sizes = tuple(reversed(decoder_batch_sizes))
 
-        self.logits_processor = LogitsProcessor(
-            vocab_size, logits_as_input=True
-        )
+        self.logits_processor = LogitsProcessor(vocab_size, logits_as_input=True)
         self.sampler = Sampler()
         self.available_blocks = torch.arange(
             0,
@@ -238,12 +234,8 @@ class RBLNOptimumDecoderMixin:
 
         original_batch_size = input_ids.shape[0]
 
-        padded_input_ids = torch.zeros(
-            padded_batch_size, 1, dtype=input_ids.dtype
-        )
-        padded_position_ids = torch.zeros(
-            padded_batch_size, 1, dtype=positions.dtype
-        )
+        padded_input_ids = torch.zeros(padded_batch_size, 1, dtype=input_ids.dtype)
+        padded_position_ids = torch.zeros(padded_batch_size, 1, dtype=positions.dtype)
         padded_block_tables = torch.zeros(
             padded_batch_size, block_tables.shape[1], dtype=block_tables.dtype
         ).fill_(-1)
@@ -267,9 +259,7 @@ class RBLNOptimumDecoderMixin:
 
         if torch.any(mask):
             if dummy_block is not None:
-                padding_blocks = torch.tensor(
-                    [dummy_block], dtype=block_tables.dtype
-                )
+                padding_blocks = torch.tensor([dummy_block], dtype=block_tables.dtype)
             else:
                 padding_blocks = self.available_blocks[
                     ~torch.isin(self.available_blocks, block_tables.flatten())
@@ -291,9 +281,7 @@ class RBLNOptimumDecoderMixin:
         # TODO: Does it require changing the dtype dynamically?
         input_ids = input_ids.to(torch.int64) if input_ids is not None else None
         cache_position = (
-            cache_position.to(torch.int32)
-            if cache_position is not None
-            else None
+            cache_position.to(torch.int32) if cache_position is not None else None
         )
         block_tables = block_tables.to(torch.int16)
 
@@ -370,8 +358,7 @@ class RBLNOptimumDecoderMixin:
                 )
             except Exception as e:
                 error_msg = (
-                    "Failed to copy KV cache from block %d to block %d "
-                    "at index %d: %s",
+                    "Failed to copy KV cache from block %d to block %d at index %d: %s",
                     src_block,
                     dst_block,
                     block_idx,

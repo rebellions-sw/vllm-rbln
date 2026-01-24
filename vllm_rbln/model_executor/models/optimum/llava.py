@@ -112,9 +112,7 @@ class RBLNOptimumLlavaForConditionalGeneration(
                     image_sizes = None
                 elif image_input["type"] == "pixel_values_pixtral":
                     pixel_values = image_input["pixel_values"]
-                    image_sizes = torch.tensor(
-                        pixel_values.shape[-2:]
-                    ).unsqueeze(0)
+                    image_sizes = torch.tensor(pixel_values.shape[-2:]).unsqueeze(0)
         else:
             pixel_values = None
             image_sizes = None
@@ -126,12 +124,10 @@ class RBLNOptimumLlavaForConditionalGeneration(
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
         if not is_prompt:
-            padded_batch_size = kwargs.pop(
-                "padded_batch_size", self.decoder_batch_size
-            )
-            self.model.language_model.decoder = (
-                self.model.language_model.decoders[padded_batch_size]
-            )
+            padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
+            self.model.language_model.decoder = self.model.language_model.decoders[
+                padded_batch_size
+            ]
 
         logits = self._forward(
             is_prefill=is_prompt,
@@ -159,8 +155,7 @@ class RBLNOptimumLlavaForConditionalGeneration(
         if pixel_values is not None:
             if not isinstance(pixel_values, (torch.Tensor, list)):
                 raise ValueError(
-                    "Incorrect type of pixel values. "
-                    f"Got type: {type(pixel_values)}"
+                    f"Incorrect type of pixel values. Got type: {type(pixel_values)}"
                 )
 
             if config.vision_config.model_type == "pixtral":
@@ -179,8 +174,7 @@ class RBLNOptimumLlavaForConditionalGeneration(
         if image_embeds is not None:
             if not isinstance(image_embeds, (torch.Tensor, list)):
                 raise ValueError(
-                    "Incorrect type of image embeds. "
-                    f"Got type: {type(image_embeds)}"
+                    f"Incorrect type of image embeds. Got type: {type(image_embeds)}"
                 )
 
             raise NotImplementedError(

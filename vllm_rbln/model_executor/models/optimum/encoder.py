@@ -149,9 +149,7 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
             "attention_mask": attention_mask,
         }
 
-        model_input_names = getattr(
-            self.rbln_model_config, "model_input_names", None
-        )
+        model_input_names = getattr(self.rbln_model_config, "model_input_names", None)
         if model_input_names is not None:
             rbln_model_input_names = self.rbln_model_config.model_input_names
             if "token_type_ids" in rbln_model_input_names:

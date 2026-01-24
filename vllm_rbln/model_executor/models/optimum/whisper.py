@@ -87,9 +87,7 @@ class RBLNOptimumWhisperForConditionalGeneration(
                     **model_input.multi_modal_kwargs
                 )
             if input_features is None:
-                raise ValueError(
-                    "Whisper requires `input_features` as an input."
-                )
+                raise ValueError("Whisper requires `input_features` as an input.")
 
         cache_position = torch.zeros(request_nums, 1, dtype=torch.int32)
 
@@ -122,8 +120,7 @@ class RBLNOptimumWhisperForConditionalGeneration(
 
         else:
             input_ids[
-                input_ids
-                == (self.model.config.vocab_size + self.INVALID_TOKEN - 1)
+                input_ids == (self.model.config.vocab_size + self.INVALID_TOKEN - 1)
             ] = self.model.config.decoder_start_token_id
 
             # FIXME Is it ok generate torch.zero tensor for each forward?
@@ -134,9 +131,7 @@ class RBLNOptimumWhisperForConditionalGeneration(
             # Generate cache_position using dec_lengths
             for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
-                decoder_attention_mask[
-                    batch_idx, : cache_position[batch_idx] + 1
-                ] = 1
+                decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
                 self.dec_lengths[batch_idx] += 1
 
             decoder_output = self.model.decoder(
@@ -150,9 +145,7 @@ class RBLNOptimumWhisperForConditionalGeneration(
             lm_logits = lm_logits[valid_block_ids]
         return lm_logits
 
-    def _parse_and_validate_audio_input(
-        self, **kwargs: Any
-    ) -> Optional[torch.Tensor]:
+    def _parse_and_validate_audio_input(self, **kwargs: Any) -> Optional[torch.Tensor]:
         input_features = kwargs.pop("input_features", None)
         if input_features is not None:
             input_features = input_features.squeeze(0)

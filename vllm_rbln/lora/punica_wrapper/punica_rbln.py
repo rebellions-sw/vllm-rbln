@@ -30,9 +30,7 @@ class PunicaWrapperRBLN(PunicaWrapperBase):
         device: Union[torch.device, str],
         **kwargs,
     ):
-        PunicaWrapperBase.__init__(
-            self, max_num_batched_tokens, max_batches, device
-        )
+        PunicaWrapperBase.__init__(self, max_num_batched_tokens, max_batches, device)
         self._embeddings_indices.fill_(0)
 
     def add_shrink(
@@ -138,15 +136,11 @@ class PunicaWrapperRBLN(PunicaWrapperBase):
                 0, 1
             )  # [h1, max_loras * rank]
             lora_b_w = lora_b_stacked[slice_idx][:, 0, :, :].transpose(1, 2)
-            lora_b_w = lora_b_w.reshape(
-                -1, lora_b_w.shape[2]
-            )  # [max_loras * rank, h1]
+            lora_b_w = lora_b_w.reshape(-1, lora_b_w.shape[2])  # [max_loras * rank, h1]
             out = x @ lora_a_w  # [bs * seq_len, max_loras * rank]
             out = out * LoRAMask.get_lora_mask()
             out = out @ lora_b_w  # [bs * seq_len, h2]
-            y[:, slice_offset : slice_offset + output_slices[slice_idx]] += (
-                out * scale
-            )
+            y[:, slice_offset : slice_offset + output_slices[slice_idx]] += out * scale
             slice_offset += output_slices[slice_idx]
 
         return y

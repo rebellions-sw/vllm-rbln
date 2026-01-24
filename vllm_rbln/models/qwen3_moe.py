@@ -26,9 +26,7 @@ def __qwen3_moe_forward_rsd(self, hidden_states: torch.Tensor) -> torch.Tensor:
     )
     final_hidden_states = final_hidden_states
     if self.tp_size > 1:
-        final_hidden_states = tensor_model_parallel_all_reduce(
-            final_hidden_states
-        )
+        final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
 
     return final_hidden_states
 

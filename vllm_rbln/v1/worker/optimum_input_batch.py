@@ -31,9 +31,7 @@ class RBLNInputBatch(InputBatch):
         super().__init__(*args, **kwargs)
         if use_rbln_sampler:
             # Overwrite sampling_metadata with RBLN sampling metadata
-            self.sampling_metadata = self._make_sampling_metadata_rbln(
-                self.num_reqs
-            )
+            self.sampling_metadata = self._make_sampling_metadata_rbln(self.num_reqs)
             # Add top_k as vocab_size
             # to prevent runtime error while running top_p_top_k_ops
             # https://github.com/vllm-project/vllm/blob/01efc7ef781391e744ed08c3292817a773d654e6/vllm/v1/worker/gpu_input_batch.py#L348
@@ -59,13 +57,9 @@ class RBLNInputBatch(InputBatch):
         for logit_proc in self.logitsprocs.all:
             logit_proc.update_state(batch_update)
         if batch_update:
-            self.sampling_metadata = self._make_sampling_metadata_rbln(
-                bucket_size
-            )
+            self.sampling_metadata = self._make_sampling_metadata_rbln(bucket_size)
 
-    def _make_sampling_metadata_rbln(
-        self, bucket_size: int
-    ) -> SamplingMetadata:
+    def _make_sampling_metadata_rbln(self, bucket_size: int) -> SamplingMetadata:
         # NOTE(eunji.lee):
         # Use bucket_size instead of num_reqs
         # to pad sampling metadata for RBLN sampler.

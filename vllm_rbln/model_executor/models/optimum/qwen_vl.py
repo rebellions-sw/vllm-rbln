@@ -62,9 +62,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         )
         self.rope_deltas: Dict = dict()
 
-    def preprocess_prefill(
-        self, input_ids, attention_mask, image_input, video_input
-    ):
+    def preprocess_prefill(self, input_ids, attention_mask, image_input, video_input):
         """
         Common preprocessing logic for prefill inputs.
         Calls model-specific parameter preparation method.
@@ -139,9 +137,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         pass
 
     @abstractmethod
-    def _create_video_embedding_inputs(
-        self, video_embeds, video_grid_thw
-    ) -> Any:
+    def _create_video_embedding_inputs(self, video_embeds, video_grid_thw) -> Any:
         """Create video embedding inputs based on model type"""
         pass
 
@@ -176,10 +172,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(
             cur_request_id = running_requests_ids[0]
             attention_mask = torch.ones_like(input_ids)
 
-            (inputs_embeds, position_embed, rope_deltas) = (
-                self.preprocess_prefill(
-                    input_ids, attention_mask, image_input, video_input
-                )
+            (inputs_embeds, position_embed, rope_deltas) = self.preprocess_prefill(
+                input_ids, attention_mask, image_input, video_input
             )
 
             if finished_requests_ids:
@@ -201,9 +195,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
                 block_tables=block_tables,
             ).logits
         else:
-            padded_batch_size = kwargs.pop(
-                "padded_batch_size", self.decoder_batch_size
-            )
+            padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
             self.model.decoder = self.model.decoders[padded_batch_size]
             input_ids = kwargs.pop("input_ids")
 
@@ -260,9 +252,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         self, mm_input: object, name: str
     ) -> torch.Tensor:
         if not isinstance(mm_input, (torch.Tensor, list)):
-            raise ValueError(
-                f"Incorrect type of {name}. Got type: {type(mm_input)}"
-            )
+            raise ValueError(f"Incorrect type of {name}. Got type: {type(mm_input)}")
         if isinstance(mm_input, torch.Tensor):
             if mm_input.ndim == 2:
                 return mm_input
@@ -313,9 +303,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         # fallback return if both are None
         return None
 
-    def _parse_and_validate_video_input(
-        self, **kwargs: object
-    ) -> Optional[Any]:
+    def _parse_and_validate_video_input(self, **kwargs: object) -> Optional[Any]:
         pixel_values_videos = kwargs.pop("pixel_values_videos", None)
         video_embeds = kwargs.pop("video_embeds", None)
         video_grid_thw = kwargs.pop("video_grid_thw", None)
@@ -350,9 +338,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
                     f"Got type: {type(video_embeds)}"
                 )
 
-            return self._create_video_embedding_inputs(
-                video_embeds, video_grid_thw
-            )
+            return self._create_video_embedding_inputs(video_embeds, video_grid_thw)
 
         # fallback return if both are None
         return None
@@ -364,9 +350,7 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
     def _add_model_specific_args(self, preprocess_args: dict, video_input: Any):
         """Add second_per_grid_ts for Qwen2.5-VL"""
         if video_input is not None:
-            preprocess_args["second_per_grid_ts"] = video_input[
-                "second_per_grid_ts"
-            ]
+            preprocess_args["second_per_grid_ts"] = video_input["second_per_grid_ts"]
 
     def _create_image_pixel_inputs(self, pixel_values, image_grid_thw):
         return Qwen2_5_VLImagePixelInputs(

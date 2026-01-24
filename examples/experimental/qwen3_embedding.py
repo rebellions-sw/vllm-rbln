@@ -26,9 +26,7 @@ def main():
     queries = [
         get_detailed_instruct(task, "What is the capital of China?"),
         get_detailed_instruct(task, "Explain gravity"),
-        get_detailed_instruct(
-            task, "Who is the president of the United States?"
-        ),
+        get_detailed_instruct(task, "Who is the president of the United States?"),
     ]
     # No need to add instruction for retrieval documents
     documents = [

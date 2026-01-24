@@ -88,9 +88,7 @@ class RBLNScheduler(Scheduler):
         blocks_to_copy: List[Tuple[int, int]] = ret.blocks_to_copy
 
         decode_seq_groups: List[ScheduledSequenceGroup] = ret.decode_seq_groups
-        prefill_seq_groups: List[ScheduledSequenceGroup] = (
-            ret.prefill_seq_groups
-        )
+        prefill_seq_groups: List[ScheduledSequenceGroup] = ret.prefill_seq_groups
         preempted: List[SequenceGroup] = ret.preempted
         swapped_out: List[SequenceGroup] = ret.swapped_out
 
@@ -105,14 +103,12 @@ class RBLNScheduler(Scheduler):
             #   2. If a sequence is running with non-chunked prefill, then
             #      there it's a decoding sequence, and the cached tokens info is
             #      irrelevant.
-            num_uncached_new_tokens, _ = (
-                self._get_num_new_uncached_and_cached_tokens(
-                    seq_group,
-                    SequenceStatus.RUNNING,
-                    enable_chunking,
-                    budget,
-                    partial_prefill_metadata,
-                )
+            num_uncached_new_tokens, _ = self._get_num_new_uncached_and_cached_tokens(
+                seq_group,
+                SequenceStatus.RUNNING,
+                enable_chunking,
+                budget,
+                partial_prefill_metadata,
             )
 
             num_running_tokens = num_uncached_new_tokens
@@ -128,8 +124,7 @@ class RBLNScheduler(Scheduler):
             # a memory overflow.
             if (
                 self.use_async_output_proc
-                and seq_group.seqs[0].get_len()
-                > self.scheduler_config.max_model_len
+                and seq_group.seqs[0].get_len() > self.scheduler_config.max_model_len
             ):
                 self._async_stopped.append(seq_group)
                 continue
@@ -168,9 +163,7 @@ class RBLNScheduler(Scheduler):
                 do_preempt = True
                 if self.use_async_output_proc:
                     assert self.output_proc_callback is not None
-                    self.output_proc_callback(
-                        request_id=victim_seq_group.request_id
-                    )
+                    self.output_proc_callback(request_id=victim_seq_group.request_id)
 
                     # It may be that the async pending "victim_seq_group"
                     # becomes finished, in which case we simply free it.
@@ -180,9 +173,7 @@ class RBLNScheduler(Scheduler):
 
                 # Do preemption
                 if do_preempt:
-                    preempted_mode = self._preempt(
-                        victim_seq_group, blocks_to_swap_out
-                    )
+                    preempted_mode = self._preempt(victim_seq_group, blocks_to_swap_out)
                     if preempted_mode == PreemptionMode.RECOMPUTE:
                         preempted.append(victim_seq_group)
                     else:
@@ -207,9 +198,7 @@ class RBLNScheduler(Scheduler):
                     decode_seq_groups.append(scheduled_seq_group)
                     ret.decode_seq_groups_list.append(seq_group)
 
-                budget.add_num_batched_tokens(
-                    seq_group.request_id, num_running_tokens
-                )
+                budget.add_num_batched_tokens(seq_group.request_id, num_running_tokens)
                 # OPTIMIZATION:  Note that get_max_num_running_seqs is
                 # expensive. For the default scheduling chase where
                 # enable_chunking is False, num_seqs are updated before running
@@ -309,8 +298,7 @@ class RBLNScheduler(Scheduler):
             prompt_limit = self._get_prompt_limit(seq_group)
             if num_new_tokens > prompt_limit:
                 logger.warning(
-                    "Input prompt (%d tokens) is too long"
-                    " and exceeds limit of %d",
+                    "Input prompt (%d tokens) is too long and exceeds limit of %d",
                     num_new_tokens,
                     prompt_limit,
                 )
@@ -411,9 +399,7 @@ class RBLNScheduler(Scheduler):
             self._allocate_and_set_running(seq_group)
 
             if partial_prefill_metadata is not None:
-                partial_prefill_metadata.maybe_increment_partial_prefills(
-                    seq_group
-                )
+                partial_prefill_metadata.maybe_increment_partial_prefills(seq_group)
 
             seq_groups.append(
                 ScheduledSequenceGroup(
@@ -506,10 +492,7 @@ class RBLNScheduler(Scheduler):
                 partial_prefill_metadata=partial_prefill_metadata,
             )
 
-        assert (
-            budget.num_batched_tokens
-            <= self.scheduler_config.max_num_batched_tokens
-        )
+        assert budget.num_batched_tokens <= self.scheduler_config.max_num_batched_tokens
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs, (
             f"{budget.num_curr_seqs} <= {self.scheduler_config.max_num_seqs}"
         )
@@ -545,13 +528,9 @@ class RBLNScheduler(Scheduler):
         )
         self.running.extendleft([s.seq_group for s in prefills.seq_groups])
         self.running.extendleft(not_finishing)
-        self.running.extendleft(
-            [s.seq_group for s in swapped_in.prefill_seq_groups]
-        )
+        self.running.extendleft([s.seq_group for s in swapped_in.prefill_seq_groups])
         self.running.extend([s.seq_group for s in swapped_in.decode_seq_groups])
-        self.running.extend(
-            [s.seq_group for s in running_scheduled.decode_seq_groups]
-        )
+        self.running.extend([s.seq_group for s in running_scheduled.decode_seq_groups])
         self.running.extend(finishing)
 
         # Update swapped requests.
@@ -572,19 +551,16 @@ class RBLNScheduler(Scheduler):
         return SchedulerOutputs(
             scheduled_seq_groups=scheduled_seq_groups,
             num_prefill_groups=num_prefill_groups,
-            num_batched_tokens=budget.num_batched_tokens
-            + budget.num_cached_tokens,
+            num_batched_tokens=budget.num_batched_tokens + budget.num_cached_tokens,
             blocks_to_swap_in=swapped_in.blocks_to_swap_in,
             blocks_to_swap_out=running_scheduled.blocks_to_swap_out,
-            blocks_to_copy=running_scheduled.blocks_to_copy
-            + swapped_in.blocks_to_copy,
+            blocks_to_copy=running_scheduled.blocks_to_copy + swapped_in.blocks_to_copy,
             ignored_seq_groups=prefills.ignored_seq_groups
             + swapped_in.infeasible_seq_groups,
             num_lookahead_slots=0,
             running_queue_size=len(self.running),
             preempted=(
-                len(running_scheduled.preempted)
-                + len(running_scheduled.swapped_out)
+                len(running_scheduled.preempted) + len(running_scheduled.swapped_out)
             ),
         )
 
@@ -632,9 +608,7 @@ class RBLNScheduler(Scheduler):
             return False
 
         is_prefill = seq_group.is_prefill()
-        num_lookahead_slots = self._get_num_lookahead_slots(
-            is_prefill, enable_chunking
-        )
+        num_lookahead_slots = self._get_num_lookahead_slots(is_prefill, enable_chunking)
 
         return self.block_manager.can_append_slots(
             seq_group=seq_group, num_lookahead_slots=num_lookahead_slots

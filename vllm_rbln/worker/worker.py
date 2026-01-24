@@ -129,9 +129,7 @@ class RBLNCacheEngine:
         # Initialize the cache.
         # TODO : cpu_cache will be replaced with dev_cache
         self.cpu_cache = (
-            self._allocate_kv_cache(num_blocks)
-            if cpu_cache is None
-            else cpu_cache
+            self._allocate_kv_cache(num_blocks) if cpu_cache is None else cpu_cache
         )
 
     def _allocate_kv_cache(
@@ -236,9 +234,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             logger.info("distributed executor backend ray enabled")
             self.set_device()
         else:
-            logger.info(
-                "Running on other backend. Skipping device env var setup."
-            )
+            logger.info("Running on other backend. Skipping device env var setup.")
 
         self.distributed_init_method = distributed_init_method
         self.is_driver_worker = is_driver_worker
@@ -301,9 +297,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         distributed_backend = self.parallel_config.distributed_executor_backend
         if env_var not in os.environ or distributed_backend == "ray":
-            dev_begin = (
-                total_device_count * self.parallel_config.data_parallel_rank
-            )
+            dev_begin = total_device_count * self.parallel_config.data_parallel_rank
             dev_end = dev_begin + total_device_count
             device_ids = [str(i) for i in range(dev_begin, dev_end)]
         else:
@@ -314,8 +308,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         #     node#1 : RBLN_DEVICES=2,3
         if distributed_backend == "mp" and len(device_ids) < total_device_count:
             raise RuntimeError(
-                f"{env_var} has devices {device_ids}"
-                f" but required {total_device_count}"
+                f"{env_var} has devices {device_ids} but required {total_device_count}"
             )
 
         start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
@@ -377,9 +370,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                     parallel_config=self.parallel_config,
                     kvcache_block_size=block_size,
                     # quantization : 4 (This is an ad-hoc value. Need to fix it)
-                    nbits_per_param=16
-                    if not self.model_config.quantization
-                    else 4,
+                    nbits_per_param=16 if not self.model_config.quantization else 4,
                     n_model_params=sum(
                         p.numel() for p in self.model_runner.model.parameters()
                     ),
@@ -410,9 +401,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         return num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(
-        self, num_gpu_blocks: int, num_cpu_blocks: int
-    ) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         """Initialize the KV cache."""
 
         # Different values are not tested.
@@ -455,9 +444,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             for ve in range(self.parallel_config.pipeline_parallel_size)
         ]
 
-        bind_kv_cache(
-            self.compilation_config.static_forward_context, self.cpu_cache
-        )
+        bind_kv_cache(self.compilation_config.static_forward_context, self.cpu_cache)
         if not self.model_config.enforce_eager and envs.VLLM_RBLN_COMPILE_MODEL:
             for kv_cache in cpu_cache:
                 self.model_runner.compile_context.mark_static_address(kv_cache)
@@ -503,12 +490,10 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             for group_id in range(max_num_seqs):
                 seq_len = max_num_batched_tokens
 
-                dummy_data = (
-                    self.model_runner.input_registry.dummy_data_for_profiling(
-                        self.model_config,
-                        seq_len,
-                        self.model_runner.mm_registry,
-                    )
+                dummy_data = self.model_runner.input_registry.dummy_data_for_profiling(
+                    self.model_config,
+                    seq_len,
+                    self.model_runner.mm_registry,
                 )
                 prefill_seq_data = dummy_data.seq_data
                 block_tables = {group_id: [num_blocks]}
@@ -542,9 +527,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         if self.parallel_config.data_parallel_size > 1:
             self.dummy_execute_model_req = prefill_req
-            max_num_batched_tokens = (
-                self.scheduler_config.max_num_batched_tokens
-            )
+            max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
             max_num_seqs = self.scheduler_config.max_num_seqs
             if envs.VLLM_RBLN_DP_IMPL == "padded_decode":
                 # TODO: consider relaxing this constraint
@@ -690,9 +673,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             and output is not None
         ):
             for o in output:
-                o.model_execute_time = (
-                    orig_model_execute_time + model_execute_time
-                )
+                o.model_execute_time = orig_model_execute_time + model_execute_time
 
         # output is List[SamplerOutput]
         return output

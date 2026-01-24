@@ -145,11 +145,7 @@ async def test_request_wrong_content_type(server: RemoteOpenAIServer):
 
 @pytest.mark.parametrize(
     "server_args",
-    [
-        pytest.param(
-            ["--enable-server-load-tracking"], id="enable-server-load-tracking"
-        )
-    ],
+    [pytest.param(["--enable-server-load-tracking"], id="enable-server-load-tracking")],
     indirect=True,
 )
 @pytest.mark.asyncio

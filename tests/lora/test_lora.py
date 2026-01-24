@@ -50,12 +50,8 @@ MAX_MODEL_LEN = 128
 MODEL_PATH = "facebook/opt-125m"
 VOCAB_SIZE = 32000
 
-V0_PATH = (
-    "vllm_rbln.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"  # noqa
-)
-V1_PATH = (
-    "vllm_rbln.v1.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"  # noqa
-)
+V0_PATH = "vllm_rbln.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"  # noqa
+V1_PATH = "vllm_rbln.v1.worker.optimum_model_runner.RBLNOptimumModelRunner.load_model"  # noqa
 
 result = []
 golden = []
@@ -109,9 +105,7 @@ def parse_lora_int_ids(running_requests_ids):
 
 async def add_lora_request(llm, lora_int_ids):
     lora_requests = [
-        LoRARequest(
-            str(lora_int_id), lora_int_id, "/path/adapter" + str(lora_int_id)
-        )
+        LoRARequest(str(lora_int_id), lora_int_id, "/path/adapter" + str(lora_int_id))
         for lora_int_id in lora_int_ids
     ]
     sampling_params = SamplingParams(
@@ -123,9 +117,7 @@ async def add_lora_request(llm, lora_int_ids):
     for i, lora_request in enumerate(lora_requests):
         lora_int_id = lora_request.lora_int_id
         generator = llm.generate(
-            prompt=TextPrompt(
-                prompt=f"hello {lora_int_id}", multi_modal_data=None
-            ),
+            prompt=TextPrompt(prompt=f"hello {lora_int_id}", multi_modal_data=None),
             sampling_params=sampling_params,
             lora_request=lora_request,
             request_id=f"REQ{i}:LORA-{lora_int_id}",
@@ -143,9 +135,7 @@ class MockModelWrapper(nn.Module):
             self.rbln_config = SimpleNamespace(
                 lora_config=SimpleNamespace(
                     adapters=[
-                        type(
-                            "RBLNLoRAAdapterConfig", (), {"lora_int_id": i + 1}
-                        )()
+                        type("RBLNLoRAAdapterConfig", (), {"lora_int_id": i + 1})()
                         for i in range(NUM_LORAS)
                     ]
                 )
@@ -157,9 +147,7 @@ class MockModelWrapper(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = self.MockModel()
-        self.logits_processor = LogitsProcessor(
-            VOCAB_SIZE, logits_as_input=True
-        )
+        self.logits_processor = LogitsProcessor(VOCAB_SIZE, logits_as_input=True)
         self.sampler = Sampler()
 
     def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:

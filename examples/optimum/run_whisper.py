@@ -68,9 +68,7 @@ async def main(
     num_input_prompt: int,
     model_id: str,
 ):
-    engine_args = AsyncEngineArgs(
-        model=model_id, limit_mm_per_prompt={"audio": 1}
-    )
+    engine_args = AsyncEngineArgs(model=model_id, limit_mm_per_prompt={"audio": 1})
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -79,22 +77,16 @@ async def main(
     futures = []
     for request_id, request in enumerate(inputs):
         futures.append(
-            asyncio.create_task(
-                generate(engine, tokenizer, request_id, request)
-            )
+            asyncio.create_task(generate(engine, tokenizer, request_id, request))
         )
 
     results = await asyncio.gather(*futures)
 
     for i, result in enumerate(results):
         output = result.outputs[0].text
-        print(
-            f"===================== Output {i} =============================="
-        )
+        print(f"===================== Output {i} ==============================")
         print(output)
-        print(
-            "===============================================================\n"
-        )
+        print("===============================================================\n")
 
 
 def entry_point(

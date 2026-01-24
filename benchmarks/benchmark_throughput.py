@@ -100,9 +100,7 @@ def run_vllm(
             )
         warmup_lora_requests: Optional[list[LoRARequest]] = None
         if engine_args.enable_lora:
-            warmup_lora_requests = [
-                request.lora_request for request in requests
-            ]
+            warmup_lora_requests = [request.lora_request for request in requests]
 
         _ = llm.generate(
             warmup_prompts,
@@ -265,9 +263,7 @@ async def run_vllm_async(
         for i, (prompt, sp, lr) in enumerate(
             zip(prompts, sampling_params, lora_requests)
         ):
-            generator = llm.generate(
-                prompt, sp, lora_request=lr, request_id=f"test{i}"
-            )
+            generator = llm.generate(prompt, sp, lora_request=lr, request_id=f"test{i}")
             generators.append(generator)
         all_gens = merge_async_iterators(*generators)
         async for i, res in all_gens:
@@ -287,8 +283,7 @@ def save_to_pytorch_benchmark_format(
             "output_tokens_per_second": [results["output_tokens_per_second"]],
         },
         extra_info={
-            k: results[k]
-            for k in ["elapsed_time", "num_requests", "total_num_tokens"]
+            k: results[k] for k in ["elapsed_time", "num_requests", "total_num_tokens"]
         },
     )
     if pt_records:
@@ -369,9 +364,7 @@ def main(args: argparse.Namespace):
         args.tokenizer, trust_remote_code=args.trust_remote_code
     )
     requests = get_requests(args, tokenizer)
-    is_multi_modal = any(
-        request.multi_modal_data is not None for request in requests
-    )
+    is_multi_modal = any(request.multi_modal_data is not None for request in requests)
     request_outputs: Optional[list[RequestOutput]] = None
     if args.backend == "vllm":
         if args.async_engine:
@@ -419,20 +412,14 @@ def main(args: argparse.Namespace):
             total_prompt_tokens += (
                 len(ro.prompt_token_ids) if ro.prompt_token_ids else 0
             )
-            total_output_tokens += sum(
-                len(o.token_ids) for o in ro.outputs if o
-            )
+            total_output_tokens += sum(len(o.token_ids) for o in ro.outputs if o)
 
             if ro.metrics is not None:
-                num_output_tokens = sum(
-                    len(o.token_ids) for o in ro.outputs if o
+                num_output_tokens = sum(len(o.token_ids) for o in ro.outputs if o)
+                ttfts.append(ro.metrics.first_token_time - ro.metrics.arrival_time)
+                tpot = (ro.metrics.finished_time - ro.metrics.first_token_time) / (
+                    num_output_tokens - 1
                 )
-                ttfts.append(
-                    ro.metrics.first_token_time - ro.metrics.arrival_time
-                )
-                tpot = (
-                    ro.metrics.finished_time - ro.metrics.first_token_time
-                ) / (num_output_tokens - 1)
                 tpots.append(tpot)
 
         total_num_tokens = total_prompt_tokens + total_output_tokens
@@ -445,9 +432,7 @@ def main(args: argparse.Namespace):
             mean_tpot_ms = np.mean(tpots) * 1000
             max_tpot_ms = np.max(tpots) * 1000
     else:
-        total_num_tokens = sum(
-            r.prompt_len + r.expected_output_len for r in requests
-        )
+        total_num_tokens = sum(r.prompt_len + r.expected_output_len for r in requests)
         total_output_tokens = sum(r.expected_output_len for r in requests)
         total_prompt_tokens = total_num_tokens - total_output_tokens
 
@@ -557,9 +542,7 @@ def validate_args(args):
                 f"{args.dataset_path} needs to use vllm as the backend."
             )  # noqa: E501
         else:
-            raise ValueError(
-                f"{args.dataset_path} is not supported by hf dataset."
-            )
+            raise ValueError(f"{args.dataset_path} is not supported by hf dataset.")
 
     # --random-range-ratio: only used when dataset_name is 'random'
     if args.dataset_name != "random" and args.random_range_ratio is not None:

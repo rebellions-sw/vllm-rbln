@@ -69,14 +69,12 @@ def convert_to_pytorch_benchmark_format(
             },
         }
 
-        tp = record["benchmark"]["extra_info"]["args"].get(
-            "tensor_parallel_size"
-        )
+        tp = record["benchmark"]["extra_info"]["args"].get("tensor_parallel_size")
         # Save tensor_parallel_size parameter if it's part of the metadata
         if not tp and "tensor_parallel_size" in extra_info:
-            record["benchmark"]["extra_info"]["args"][
-                "tensor_parallel_size"
-            ] = extra_info["tensor_parallel_size"]
+            record["benchmark"]["extra_info"]["args"]["tensor_parallel_size"] = (
+                extra_info["tensor_parallel_size"]
+            )
 
         records.append(record)
 
@@ -103,8 +101,7 @@ def write_to_json(filename: str, records: list) -> None:
             records,
             f,
             cls=InfEncoder,
-            default=lambda o: f"<{type(o).__name__} "
-            "object is not JSON serializable>",
+            default=lambda o: f"<{type(o).__name__} object is not JSON serializable>",
         )
 
 
@@ -138,9 +135,7 @@ class TimeCollector:
             self._max = max(self._max, v)
 
     def avg(self) -> Union[float, str]:
-        return (
-            self._sum * 1.0 / self.cnt / self.scale if self.cnt > 0 else "N/A"
-        )
+        return self._sum * 1.0 / self.cnt / self.scale if self.cnt > 0 else "N/A"
 
     def max(self) -> Union[float, str]:
         return self._max / self.scale if self._max else "N/A"

@@ -21,9 +21,7 @@ class LoRAInputs:
     sampler_indices_padded: ClassVar[torch.Tensor]
 
     @classmethod
-    def set_sampler_indices_padded(
-        cls, sampler_indices_padded: torch.Tensor
-    ) -> None:
+    def set_sampler_indices_padded(cls, sampler_indices_padded: torch.Tensor) -> None:
         cls.sampler_indices_padded = sampler_indices_padded
 
     @classmethod

@@ -85,12 +85,10 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(
                 block_tables=block_tables,
             ).logits
         else:
-            padded_batch_size = kwargs.pop(
-                "padded_batch_size", self.decoder_batch_size
-            )
-            self.model.language_model.decoder = (
-                self.model.language_model.decoders[padded_batch_size]
-            )
+            padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
+            self.model.language_model.decoder = self.model.language_model.decoders[
+                padded_batch_size
+            ]
             # NOTE(eunji.lee): attention_mask, position_ids are required
             # to paligemma in optimum-rbln.
             # They depends on the version of gemma in paligemma.
@@ -164,8 +162,6 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(
         """
         max_seq_len = rbln_model_config.max_seq_len
         seq_range = torch.arange(max_seq_len).unsqueeze(0)  # (1, max_seq_len,)
-        attention_mask = (seq_range <= cache_position).to(
-            rbln_model_config.torch_dtype
-        )
+        attention_mask = (seq_range <= cache_position).to(rbln_model_config.torch_dtype)
         position_ids = cache_position.clone()
         return attention_mask, position_ids

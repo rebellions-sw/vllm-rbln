@@ -53,9 +53,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         self.table: Dict[str, EntryT] = {}
 
     @abstractmethod
-    def add(
-        self, running_requests_id: str, local_table_id: int, **kwargs
-    ) -> None: ...
+    def add(self, running_requests_id: str, local_table_id: int, **kwargs) -> None: ...
 
     @abstractmethod
     def get(
@@ -95,16 +93,13 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
             if finished_requests_ids:
                 first_id = finished_requests_ids[0]
                 first_entry = self.table[first_id]
-                table_id = (
-                    get_entry_fn(first_entry) if get_entry_fn else first_entry
-                )
+                table_id = get_entry_fn(first_entry) if get_entry_fn else first_entry
 
                 for request_id in finished_requests_ids:
                     self.table.pop(request_id)
             else:
                 used_ids = {
-                    get_entry_fn(v) if get_entry_fn else v
-                    for v in self.table.values()
+                    get_entry_fn(v) if get_entry_fn else v for v in self.table.values()
                 }
                 available_ids = set(range(decoder_batch_size)) - used_ids
                 assert available_ids, "No available table IDs"
@@ -162,9 +157,9 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
                 dtype = torch.int16 if dtype is None else dtype
                 valid_nums = len(original_values)
                 padded = torch.full((rows, cols), pad_value, dtype=dtype)
-                original_tensor = torch.tensor(
-                    original_values, dtype=dtype
-                ).unsqueeze(1)
+                original_tensor = torch.tensor(original_values, dtype=dtype).unsqueeze(
+                    1
+                )
             elif isinstance(original_value, torch.Tensor):
                 dtype = original_value.dtype if dtype is None else dtype
                 valid_nums = len(original_values)
@@ -189,9 +184,7 @@ InnerR1 = list[int]
 InnerR2 = tuple[torch.Tensor, torch.Tensor]
 
 
-class InnerAttentionStrategy(
-    AttentionStrategy[InnerAttentionEntry, InnerR1, InnerR2]
-):
+class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, InnerR1, InnerR2]):
     def add(
         self,
         running_requests_id: str,
@@ -231,9 +224,7 @@ class InnerAttentionStrategy(
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Determine padding value for local_block_table_id
         used_ids = set(local_block_table_ids)
-        pad_value = next(
-            (i for i in range(decoder_batch_size) if i not in used_ids), 0
-        )
+        pad_value = next((i for i in range(decoder_batch_size) if i not in used_ids), 0)
 
         padded_local_block_table_ids = self.pad_to_2d(
             local_block_table_ids, decoder_batch_size, 1, pad_value, torch.int16
@@ -259,9 +250,7 @@ class HybridAttentionImageStrategy(
         super().__init__()
         self.pad_token_id = pad_token_id
 
-    def add(
-        self, running_requests_id: str, local_table_id: int, **kwargs
-    ) -> None:
+    def add(self, running_requests_id: str, local_table_id: int, **kwargs) -> None:
         pad_len: Optional[int] = kwargs.get("pad_len")
         attention_mask: Optional[torch.Tensor] = kwargs.get("attention_mask")
         assert pad_len is not None
@@ -286,9 +275,7 @@ class HybridAttentionImageStrategy(
         assert input_ids is not None
 
         if is_prompt:
-            attention_mask = (
-                (input_ids != self.pad_token_id).to(torch.int64).squeeze(0)
-            )
+            attention_mask = (input_ids != self.pad_token_id).to(torch.int64).squeeze(0)
         else:
             get_extra_values_fn = lambda entry: (
                 entry.pad_len,
@@ -308,9 +295,7 @@ class HybridAttentionImageStrategy(
             table_ids = cast(list[int], result)
             return table_ids, [], [attention_mask]
         else:
-            result = cast(
-                tuple[list[int], list[int], list[torch.Tensor]], result
-            )
+            result = cast(tuple[list[int], list[int], list[torch.Tensor]], result)
             table_ids, pad_lens, attention_masks = result
             return table_ids, pad_lens, attention_masks
 
@@ -323,17 +308,13 @@ class HybridAttentionImageStrategy(
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         pad_lens: Optional[list[int]] = kwargs.get("pad_lens")
-        attention_masks: Optional[list[torch.Tensor]] = kwargs.get(
-            "attention_masks"
-        )
+        attention_masks: Optional[list[torch.Tensor]] = kwargs.get("attention_masks")
 
         assert pad_lens is not None
         assert attention_masks is not None
 
         used_ids = set(local_block_table_ids)
-        pad_value = next(
-            (i for i in range(decoder_batch_size) if i not in used_ids), 0
-        )
+        pad_value = next((i for i in range(decoder_batch_size) if i not in used_ids), 0)
 
         padded_local_block_table_ids = self.pad_to_2d(
             local_block_table_ids, decoder_batch_size, 1, pad_value, torch.int16
@@ -368,9 +349,7 @@ class HybridAttentionImageStrategy(
         Update the sliding window table with a new attention mask.
         """
         for idx, request_id in enumerate(running_requests_ids):
-            self.table[request_id].attention_mask = attention_mask[
-                idx : idx + 1
-            ]
+            self.table[request_id].attention_mask = attention_mask[idx : idx + 1]
 
     def update_attention_mask(
         self, attention_mask: torch.Tensor, cache_position: torch.Tensor

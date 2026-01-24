@@ -107,9 +107,7 @@ def top_k_top_p_fake(
 
 
 class RBLNSampler(VLLMSampler):
-    def __init__(
-        self, logprobs_mode: LogprobsMode = "raw_logprobs", seed: int = 42
-    ):
+    def __init__(self, logprobs_mode: LogprobsMode = "raw_logprobs", seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
 
@@ -188,9 +186,7 @@ class RBLNSampler(VLLMSampler):
         The various logits processing functions called in this method
         may update the logits tensor in-place.
         """
-        assert not (
-            sampling_metadata.all_greedy and sampling_metadata.all_random
-        )
+        assert not (sampling_metadata.all_greedy and sampling_metadata.all_random)
         if sampling_metadata.all_random:
             greedy_sampled = None
         else:

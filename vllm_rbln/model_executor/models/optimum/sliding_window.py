@@ -67,9 +67,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
         self.attention_manager: AttentionManager[
             InnerAttentionStrategy, InnerAttentionEntry, InnerR1, InnerR2
         ] = AttentionManager(self.strategy)
-        self.is_hybrid = (
-            getattr(self.model.rbln_config, "cache_impl", None) == "hybrid"
-        )
+        self.is_hybrid = getattr(self.model.rbln_config, "cache_impl", None) == "hybrid"
 
     def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
@@ -96,9 +94,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             is_prompt, block_tables, input_ids, cache_position
         )
 
-        padded_batch_size = kwargs.pop(
-            "padded_batch_size", self.decoder_batch_size
-        )
+        padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
 
         # [prefill] the length of the padded cache is calculated
         # during the forward pass and stored in self.sliding_window_table.
@@ -112,9 +108,7 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             if self.model.prefill_decoder is None:
                 raise version_error
             prefill_batch_idx = sliding_window_table_ids[0]
-            local_block_table_id = torch.tensor(
-                [prefill_batch_idx], dtype=torch.int16
-            )
+            local_block_table_id = torch.tensor([prefill_batch_idx], dtype=torch.int16)
             output = self.model.prefill_decoder(
                 input_ids=input_ids,
                 cache_position=cache_position,
@@ -129,13 +123,11 @@ class RBLNOptimumSlidingWindowAttentionForCausalLM(
             )
         else:
             self.model.decoder = self.model.decoders[padded_batch_size]
-            local_block_table_id, cache_position = (
-                self.attention_manager.preprocess(
-                    sliding_window_table_ids,
-                    cache_position,
-                    request_nums,
-                    padded_batch_size,
-                )
+            local_block_table_id, cache_position = self.attention_manager.preprocess(
+                sliding_window_table_ids,
+                cache_position,
+                request_nums,
+                padded_batch_size,
             )
             logits = self.model.decoder(
                 input_ids=input_ids,

@@ -74,9 +74,7 @@ def sliding_window_attention_naive_prefill(
             block_shape=(1,),
             order=(0,),
         )
-        tl.static_assert(
-            len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE
-        )
+        tl.static_assert(len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
 
         block_number = rblib.to_dynamic_index(block_table_ptr)
 
@@ -173,9 +171,7 @@ def sliding_window_attention_naive_prefill(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k = rblib.dynamic_load(k_cache_ptr)
         k_insert = rblib.window_insert(k, k_state, WINDOW_AXIS, cache_start)
-        k_slice = rblib.window_slice(
-            k_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end
-        )
+        k_slice = rblib.window_slice(k_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end)
         rblib.dynamic_store(k_cache_ptr, k_slice)
 
         k_insert = tl.reshape(
@@ -187,17 +183,13 @@ def sliding_window_attention_naive_prefill(
         )
         qk = tl.dot(q, k)
         qk_scaled = qk * qk_scale
-        window_qk_scaled = rblib.window_softmax(
-            qk_scaled, cache_start, WINDOW_SIZE
-        )
+        window_qk_scaled = rblib.window_softmax(qk_scaled, cache_start, WINDOW_SIZE)
 
         v_state = tl.load(v_block_ptr)
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v = rblib.dynamic_load(v_cache_ptr)
         v_insert = rblib.window_insert(v, v_state, WINDOW_AXIS, cache_start)
-        v_slice = rblib.window_slice(
-            v_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end
-        )
+        v_slice = rblib.window_slice(v_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end)
         rblib.dynamic_store(v_cache_ptr, v_slice)
 
         v_insert = tl.reshape(
@@ -250,9 +242,7 @@ def sliding_window_attention_naive_decode(
             block_shape=(1, 1),
             order=(1, 0),
         )
-        tl.static_assert(
-            len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE
-        )
+        tl.static_assert(len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
         cache_seq_len_ptr = tl.make_block_ptr(
             base=cache_seq_len,
             shape=(NUM_BATCH, WINDOW_SIZE // WINDOW_SIZE),
@@ -367,14 +357,10 @@ def sliding_window_attention_naive_decode(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k = rblib.dynamic_load(k_cache_ptr)
         k_insert = rblib.window_insert(k, k_state, WINDOW_AXIS, cache_start)
-        k_slice = rblib.window_slice(
-            k_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end
-        )
+        k_slice = rblib.window_slice(k_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end)
         rblib.dynamic_store(k_cache_ptr, k_slice)
 
-        k_insert = rblib.nn_pad(
-            k_insert, 0.0, WINDOW_AXIS, (0, PAD_SIZE), "constant"
-        )
+        k_insert = rblib.nn_pad(k_insert, 0.0, WINDOW_AXIS, (0, PAD_SIZE), "constant")
         k_insert = tl.reshape(
             k_insert,
             (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN + PAD_SIZE, HEAD_DIM),
@@ -392,17 +378,13 @@ def sliding_window_attention_naive_decode(
         )
         qk = tl.dot(q, k)
         qk_scaled = qk * qk_scale
-        window_qk_scaled = rblib.window_softmax(
-            qk_scaled, cache_start, WINDOW_SIZE
-        )
+        window_qk_scaled = rblib.window_softmax(qk_scaled, cache_start, WINDOW_SIZE)
 
         v_state = tl.load(v_block_ptr)
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v = rblib.dynamic_load(v_cache_ptr)
         v_insert = rblib.window_insert(v, v_state, WINDOW_AXIS, cache_start)
-        v_slice = rblib.window_slice(
-            v_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end
-        )
+        v_slice = rblib.window_slice(v_insert, WINDOW_SIZE, WINDOW_AXIS, cache_end)
         rblib.dynamic_store(v_cache_ptr, v_slice)
 
         v_insert = rblib.nn_pad(
@@ -433,9 +415,7 @@ def warmup(func, *args):
     return kernel
 
 
-@triton_op(
-    "rbln_triton_ops::sliding_window_attention_naive_prefill", mutates_args=()
-)
+@triton_op("rbln_triton_ops::sliding_window_attention_naive_prefill", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -504,9 +484,7 @@ def _(
     return torch.empty_like(query)
 
 
-@triton_op(
-    "rbln_triton_ops::sliding_window_attention_naive_decode", mutates_args=()
-)
+@triton_op("rbln_triton_ops::sliding_window_attention_naive_decode", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,

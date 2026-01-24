@@ -52,15 +52,11 @@ class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
                 kv_cache_group_id=i,
                 dcp_world_size=dcp_world_size,
             )
-            for i, kv_cache_group in enumerate(
-                self.kv_cache_config.kv_cache_groups
-            )
+            for i, kv_cache_group in enumerate(self.kv_cache_config.kv_cache_groups)
         )
 
         # Unitary
-        self.kv_cache_spec = self.kv_cache_config.kv_cache_groups[
-            0
-        ].kv_cache_spec
+        self.kv_cache_spec = self.kv_cache_config.kv_cache_groups[0].kv_cache_spec
         self.block_size = self.kv_cache_spec.block_size
         self.dcp_world_size = dcp_world_size
         if dcp_world_size > 1:

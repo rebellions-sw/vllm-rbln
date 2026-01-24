@@ -62,9 +62,7 @@ def test_finish_request():
         scheduler.add_request(request)
 
     for i, request in enumerate(requests):
-        scheduler.finish_requests(
-            request.request_id, RequestStatus.FINISHED_ABORTED
-        )
+        scheduler.finish_requests(request.request_id, RequestStatus.FINISHED_ABORTED)
         assert request.request_id not in scheduler.requests
         assert len(scheduler.waiting) == 9 - i
 
@@ -76,9 +74,7 @@ def test_get_num_unfinished_requests():
         scheduler.add_request(request)
 
     for i, request in enumerate(requests):
-        scheduler.finish_requests(
-            request.request_id, RequestStatus.FINISHED_STOPPED
-        )
+        scheduler.finish_requests(request.request_id, RequestStatus.FINISHED_STOPPED)
         assert scheduler.get_num_unfinished_requests() == len(requests) - i - 1
 
 
@@ -156,9 +152,7 @@ def test_schedule_partial_requests():
         model="llava-hf/llava-1.5-7b-hf",
         max_num_batched_tokens=1024,
     )
-    mm_positions = [
-        [PlaceholderRange(offset=100, length=600)] for _ in range(3)
-    ]
+    mm_positions = [[PlaceholderRange(offset=100, length=600)] for _ in range(3)]
     requests = create_requests(
         num_requests=3,
         num_tokens=800,
@@ -330,9 +324,7 @@ def test_schedule_concurrent_partial_requests(enable_prefix_caching: bool):
     assert len(output2.finished_req_ids) == 0
     assert output2.num_scheduled_tokens[requests[0].request_id] == 1
     assert output2.num_scheduled_tokens[requests[1].request_id] == 1
-    assert (
-        output2.num_scheduled_tokens[requests[2].request_id] == 800 - 224 - 224
-    )
+    assert output2.num_scheduled_tokens[requests[2].request_id] == 800 - 224 - 224
 
 
 @pytest.mark.skip(reason="Not verified yet")
@@ -392,9 +384,7 @@ def test_stop_via_update_from_output():
 
     # Test case 2: Stop on custom stop token
     scheduler = create_scheduler()
-    requests = create_requests(
-        num_requests=2, max_tokens=10, stop_token_ids=[42, 43]
-    )
+    requests = create_requests(num_requests=2, max_tokens=10, stop_token_ids=[42, 43])
     for req in requests:
         req.num_computed_tokens = req.num_tokens
         scheduler.requests[req.request_id] = req
@@ -512,9 +502,7 @@ def test_stop_via_update_from_output():
         num_scheduled_tokens={requests[0].request_id: 3},
         total_num_scheduled_tokens=3,
         scheduled_encoder_inputs={},
-        scheduled_spec_decode_tokens={
-            requests[0].request_id: [EOS_TOKEN_ID, 10]
-        },
+        scheduled_spec_decode_tokens={requests[0].request_id: [EOS_TOKEN_ID, 10]},
         num_common_prefix_blocks=0,
         finished_req_ids=set(),
         free_encoder_mm_hashes=[],
@@ -715,9 +703,7 @@ def test_schedule_spec_decoding_stats(spec_tokens, output_tokens, expected):
         prompt_logprobs_dict={},
         pooler_output=[],
     )
-    engine_core_outputs = scheduler.update_from_output(
-        output, model_runner_output
-    )
+    engine_core_outputs = scheduler.update_from_output(output, model_runner_output)
     draft_token_ids = DraftTokenIds(req_ids, spec_tokens)
     scheduler.update_draft_token_ids(draft_token_ids)
 
@@ -760,9 +746,7 @@ def test_schedule_spec_decoding_stats(spec_tokens, output_tokens, expected):
         prompt_logprobs_dict={},
         pooler_output=[],
     )
-    engine_core_outputs = scheduler.update_from_output(
-        output, model_runner_output
-    )
+    engine_core_outputs = scheduler.update_from_output(output, model_runner_output)
 
     scheduler_stats = (
         engine_core_outputs[0].scheduler_stats if engine_core_outputs else None
@@ -863,9 +847,7 @@ def test_kv_connector_basic():
     scheduler = create_scheduler(
         enable_prefix_caching=True,
     )
-    NUM_TOTAL_BLOCKS = (
-        scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
-    )
+    NUM_TOTAL_BLOCKS = scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
     BLOCK_SIZE = scheduler.cache_config.block_size
 
     # Mock External Cache Hit.
@@ -927,8 +909,7 @@ def test_kv_connector_basic():
     _ = scheduler.schedule()
     # Confirm we clean up the memory properly.
     assert (
-        scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
-        == NUM_TOTAL_BLOCKS
+        scheduler.kv_cache_manager.block_pool.get_num_free_blocks() == NUM_TOTAL_BLOCKS
     )
 
     ######################################################
@@ -986,8 +967,7 @@ def test_kv_connector_basic():
     _ = scheduler.schedule()
     # Confirm we clean up the memory properly.
     assert (
-        scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
-        == NUM_TOTAL_BLOCKS
+        scheduler.kv_cache_manager.block_pool.get_num_free_blocks() == NUM_TOTAL_BLOCKS
     )
 
 
@@ -1052,10 +1032,7 @@ def test_kv_connector_unable_to_allocate():
 
     # All memory should be freed, with one request waiting.
     _step_until_done(scheduler, output, MODEL_RUNNER_OUTPUT)
-    assert (
-        scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
-        == NUM_BLOCKS - 1
-    )
+    assert scheduler.kv_cache_manager.block_pool.get_num_free_blocks() == NUM_BLOCKS - 1
     assert len(scheduler.running) == 0
     assert len(scheduler.waiting) == 1
 
@@ -1071,10 +1048,7 @@ def test_kv_connector_unable_to_allocate():
 
     # All memory should be freed, with no requests waiting / running.
     _step_until_done(scheduler, output, MODEL_RUNNER_OUTPUT)
-    assert (
-        scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
-        == NUM_BLOCKS - 1
-    )
+    assert scheduler.kv_cache_manager.block_pool.get_num_free_blocks() == NUM_BLOCKS - 1
     assert len(scheduler.running) == 0
     assert len(scheduler.waiting) == 0
 
@@ -1180,10 +1154,7 @@ def test_kv_connector_handles_preemption():
     _ = scheduler.update_from_output(output, MODEL_RUNNER_OUTPUT)
     assert len(scheduler.running) == 0
     # All memory should be freed since nothing is running.
-    assert (
-        scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
-        == NUM_BLOCKS - 1
-    )
+    assert scheduler.kv_cache_manager.block_pool.get_num_free_blocks() == NUM_BLOCKS - 1
 
     # Restarts the preempted request - generate 3rd token.
     # This will have a local and remote cache hit.
@@ -1214,18 +1185,13 @@ def test_kv_connector_handles_preemption():
     _ = scheduler.update_from_output(output, MODEL_RUNNER_OUTPUT)
     assert len(scheduler.running) == 0
     # All memory should be freed since nothing is running.
-    assert (
-        scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
-        == NUM_BLOCKS - 1
-    )
+    assert scheduler.kv_cache_manager.block_pool.get_num_free_blocks() == NUM_BLOCKS - 1
 
 
 def make_output(scheduler: Scheduler):
     return ModelRunnerOutput(
         req_ids=[req.request_id for req in scheduler.running],
-        req_id_to_index={
-            req.request_id: i for i, req in enumerate(scheduler.running)
-        },
+        req_id_to_index={req.request_id: i for i, req in enumerate(scheduler.running)},
         sampled_token_ids=[[1000]] * len(scheduler.running),
         logprobs=None,
         prompt_logprobs_dict={},
@@ -1248,9 +1214,7 @@ def assert_scheduler_empty(scheduler: Scheduler):
     # KVCache Manager.
     assert (
         len(
-            scheduler.kv_cache_manager.coordinator.single_type_managers[
-                0
-            ].req_to_blocks
+            scheduler.kv_cache_manager.coordinator.single_type_managers[0].req_to_blocks
         )
         == 0
     )
@@ -1265,9 +1229,7 @@ def assert_scheduler_empty(scheduler: Scheduler):
     num_free_blocks = (
         scheduler.kv_cache_manager.block_pool.free_block_queue.num_free_blocks
     )
-    assert num_free_blocks == (
-        scheduler.kv_cache_manager.block_pool.num_gpu_blocks - 1
-    )
+    assert num_free_blocks == (scheduler.kv_cache_manager.block_pool.num_gpu_blocks - 1)
 
     # NOTE(rob): just the ref count on blocks will be 0. The hash
     # value, etc will remain since we lazily evict for prefix cache.
@@ -1907,9 +1869,7 @@ def test_priority_scheduling_heap_property():
             scheduler.update_from_output(output, model_output)
 
             # Finish the request to make room for the next one
-            scheduler.finish_requests(
-                req.req_id, RequestStatus.FINISHED_STOPPED
-            )
+            scheduler.finish_requests(req.req_id, RequestStatus.FINISHED_STOPPED)
 
     # Verify requests were scheduled in priority order (lowest value first)
     expected_priorities = sorted(priorities)

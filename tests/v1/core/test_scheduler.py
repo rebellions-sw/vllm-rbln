@@ -36,9 +36,7 @@ def test_finish_request():
         scheduler.add_request(request)
 
     for i, request in enumerate(requests):
-        scheduler.finish_requests(
-            request.request_id, RequestStatus.FINISHED_ABORTED
-        )
+        scheduler.finish_requests(request.request_id, RequestStatus.FINISHED_ABORTED)
         assert request.request_id not in scheduler.requests
         assert len(scheduler.waiting) == 9 - i
 
@@ -50,9 +48,7 @@ def test_get_num_unfinished_requests():
         scheduler.add_request(request)
 
     for i, request in enumerate(requests):
-        scheduler.finish_requests(
-            request.request_id, RequestStatus.FINISHED_STOPPED
-        )
+        scheduler.finish_requests(request.request_id, RequestStatus.FINISHED_STOPPED)
         assert scheduler.get_num_unfinished_requests() == len(requests) - i - 1
 
 
@@ -106,9 +102,7 @@ def test_schedule_multi_seq():
         assert num_tokens == len(requests[int(req_id)].prompt_token_ids)
 
     # Verify requests moved from waiting to running
-    assert (
-        len(scheduler.waiting) == len(requests) - scheduler.max_num_running_reqs
-    )
+    assert len(scheduler.waiting) == len(requests) - scheduler.max_num_running_reqs
     assert len(scheduler.running) == scheduler.max_num_running_reqs
 
     for i, running_request in enumerate(scheduler.running):
@@ -121,12 +115,8 @@ def test_schedule_multi_seq():
     "exp_new_req0_blocks, exp_cached0_new, "
     "exp_new_req1_blocks, exp_cached1_new, ",
     [
-        pytest.param(
-            2, 16, 64, 7, 32, [1, 2], [3], [4, 5], [6], id="kv16-len32-blk7"
-        ),
-        pytest.param(
-            3, 16, 64, 5, 32, [1, 2], [3], [4, 3], [2], id="kv16-len32-blk5"
-        ),
+        pytest.param(2, 16, 64, 7, 32, [1, 2], [3], [4, 5], [6], id="kv16-len32-blk7"),
+        pytest.param(3, 16, 64, 5, 32, [1, 2], [3], [4, 3], [2], id="kv16-len32-blk5"),
     ],
 )
 def test_schedule_alloc_block_policy(
@@ -155,10 +145,7 @@ def test_schedule_alloc_block_policy(
     # [Prefill] Schedule the first request.
     scheduler.add_request(requests[0])
     scheduler_output0 = scheduler.schedule()
-    assert (
-        scheduler_output0.scheduled_new_reqs[0].block_ids[0]
-        == exp_new_req0_blocks
-    )
+    assert scheduler_output0.scheduled_new_reqs[0].block_ids[0] == exp_new_req0_blocks
 
     # Model output of the first request.
     model_runner_output = create_model_runner_output(scheduler_output0)
@@ -171,17 +158,12 @@ def test_schedule_alloc_block_policy(
     assert scheduled_cached_reqs.new_block_ids[0][0] == exp_cached0_new
 
     # finish the first request
-    scheduler.finish_requests(
-        requests[0].request_id, RequestStatus.FINISHED_STOPPED
-    )
+    scheduler.finish_requests(requests[0].request_id, RequestStatus.FINISHED_STOPPED)
 
     # [Prefill] Schedule the second request.
     scheduler.add_request(requests[1])
     scheduler_output2 = scheduler.schedule()
-    assert (
-        scheduler_output2.scheduled_new_reqs[0].block_ids[0]
-        == exp_new_req1_blocks
-    )
+    assert scheduler_output2.scheduled_new_reqs[0].block_ids[0] == exp_new_req1_blocks
 
     # Model output of the second request.
     model_runner_output = create_model_runner_output(scheduler_output2)

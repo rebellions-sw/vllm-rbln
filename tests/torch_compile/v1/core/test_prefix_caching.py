@@ -66,9 +66,7 @@ def test_basic():
         # check if ref count of blocks are properly counted
         assert all(
             block.ref_cnt == 1
-            for block in scheduler.kv_cache_manager.get_blocks(
-                req_ids[0]
-            ).blocks[0]
+            for block in scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0]
         )
 
         model_runner_output = ModelRunnerOutput(

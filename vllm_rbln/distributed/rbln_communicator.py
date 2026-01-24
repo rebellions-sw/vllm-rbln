@@ -32,17 +32,13 @@ class RblnCommunicator(DeviceCommunicatorBase):
             output_size, dtype=input_.dtype, device=input_.device
         )
         # All-gather.
-        dist.all_gather_into_tensor(
-            output_tensor, input_, group=self.device_group
-        )
+        dist.all_gather_into_tensor(output_tensor, input_, group=self.device_group)
         if dim == -1:
             if dim < 0:
                 # Convert negative dim to positive.
                 dim += input_.dim()
 
-            output_tensor = output_tensor.reshape(
-                (self.world_size,) + input_size
-            )
+            output_tensor = output_tensor.reshape((self.world_size,) + input_size)
             if dim == 2:
                 # (0,1,2,3) -> movedim(0, 2) -> (1,2,0,3)
                 output_tensor = output_tensor.permute(1, 2, 0, 3)
@@ -60,9 +56,7 @@ class RblnCommunicator(DeviceCommunicatorBase):
             pass
         else:
             # Reshape
-            output_tensor = output_tensor.reshape(
-                (self.world_size,) + input_size
-            )
+            output_tensor = output_tensor.reshape((self.world_size,) + input_size)
             output_tensor = output_tensor.movedim(0, dim)
             output_tensor = output_tensor.reshape(
                 input_size[:dim]

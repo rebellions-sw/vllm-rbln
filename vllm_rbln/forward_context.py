@@ -53,13 +53,10 @@ class RBLNDPMetadata(DPMetadata):
         scheduler_config = vllm_config.scheduler_config
         max_pad = scheduler_config.max_num_batched_tokens
 
-        if attn_metadata is not None and hasattr(
-            attn_metadata, "num_prefill_tokens"
-        ):
+        if attn_metadata is not None and hasattr(attn_metadata, "num_prefill_tokens"):
             # for v0 attention backends
             batchsize = (
-                attn_metadata.num_prefill_tokens
-                + attn_metadata.num_decode_tokens
+                attn_metadata.num_prefill_tokens + attn_metadata.num_decode_tokens
             )
         else:
             # for v1 attention backends or no attn_metadata
@@ -68,8 +65,7 @@ class RBLNDPMetadata(DPMetadata):
         # If num_tokens_across_dp is None, it will be computed by all_reduce
         # Otherwise, num_tokens_across_dp[dp_rank] should be equal to batchsize
         assert (
-            num_tokens_across_dp is None
-            or num_tokens_across_dp[dp_rank] == batchsize
+            num_tokens_across_dp is None or num_tokens_across_dp[dp_rank] == batchsize
         )
         if num_tokens_across_dp is None:
             num_tokens_across_dp = DPMetadata.num_tokens_across_dp(
@@ -129,8 +125,7 @@ def _set_forward_context(
             if hasattr(attn_metadata, "num_prefill_tokens"):
                 # for v0 attention backends
                 batchsize = (
-                    attn_metadata.num_prefill_tokens
-                    + attn_metadata.num_decode_tokens
+                    attn_metadata.num_prefill_tokens + attn_metadata.num_decode_tokens
                 )
             else:
                 # for v1 attention backends

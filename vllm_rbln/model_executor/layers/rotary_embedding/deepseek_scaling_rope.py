@@ -51,12 +51,8 @@ def deepseek_scaling_rope_forward(
         cos = cos.repeat(1, 2).unsqueeze(-2)
         sin = sin.repeat(1, 2).unsqueeze(-2)
     else:
-        cos = (
-            torch.stack([cos, cos], dim=-1).reshape(cos_sin.shape).unsqueeze(-2)
-        )
-        sin = (
-            torch.stack([sin, sin], dim=-1).reshape(cos_sin.shape).unsqueeze(-2)
-        )
+        cos = torch.stack([cos, cos], dim=-1).reshape(cos_sin.shape).unsqueeze(-2)
+        sin = torch.stack([sin, sin], dim=-1).reshape(cos_sin.shape).unsqueeze(-2)
 
     rotate_fn = rotate_neox if self.is_neox_style else rotate_gptj
     query_rot = query_rot * cos + rotate_fn(query_rot) * sin

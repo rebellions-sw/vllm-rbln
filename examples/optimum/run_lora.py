@@ -78,13 +78,9 @@ async def generate(
 def get_abliterated_requests(
     num_input_prompt: int, lora_path: str, lora_int_id: int
 ) -> tuple[list[str], list[LoRARequest]]:
-    dataset = load_dataset("mlabonne/harmful_behaviors")["train"].shuffle(
-        seed=42
-    )
+    dataset = load_dataset("mlabonne/harmful_behaviors")["train"].shuffle(seed=42)
     prompts = dataset["text"][:num_input_prompt]
-    conversation = [
-        [{"role": "user", "content": f"{prompt}"}] for prompt in prompts
-    ]
+    conversation = [[{"role": "user", "content": f"{prompt}"}] for prompt in prompts]
     lora_requests = [
         LoRARequest("abliterated", lora_int_id, lora_path)
     ] * num_input_prompt
@@ -97,8 +93,7 @@ def get_secalign_requests(
 ) -> tuple[list[str], list[LoRARequest]]:
     # referenced microsoft/llmail-inject-challenge
     prompts = [
-        SEC_ALIGN_DATASET[i % len(SEC_ALIGN_DATASET)]
-        for i in range(num_input_prompt)
+        SEC_ALIGN_DATASET[i % len(SEC_ALIGN_DATASET)] for i in range(num_input_prompt)
     ]
     conversation = [
         [
@@ -131,20 +126,14 @@ async def main(
     )
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
-    assert len(lora_names) == len(lora_paths) and len(lora_paths) == len(
-        lora_int_ids
-    )
+    assert len(lora_names) == len(lora_paths) and len(lora_paths) == len(lora_int_ids)
     conversations = []
     lora_requests = []
 
-    for lora_name, lora_path, lora_int_id in zip(
-        lora_names, lora_paths, lora_int_ids
-    ):
+    for lora_name, lora_path, lora_int_id in zip(lora_names, lora_paths, lora_int_ids):
         if lora_name == "llama-3.1-8b-abliterated-lora":
-            abliterated_prompts, abliterated_requests = (
-                get_abliterated_requests(
-                    num_input_prompt, lora_path, lora_int_id
-                )
+            abliterated_prompts, abliterated_requests = get_abliterated_requests(
+                num_input_prompt, lora_path, lora_int_id
             )
             conversations.extend(abliterated_prompts)
             lora_requests.extend(abliterated_requests)
@@ -173,13 +162,9 @@ async def main(
     results = await asyncio.gather(*futures)
     for i, result in enumerate(results):
         output = result.outputs[0].text
-        print(
-            f"===================== Output {i} =============================="
-        )
+        print(f"===================== Output {i} ==============================")
         print(output)
-        print(
-            "===============================================================\n"
-        )
+        print("===============================================================\n")
 
 
 def entry_point(

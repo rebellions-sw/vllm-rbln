@@ -60,9 +60,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         # This prevents the scheduler from applying text generation settings.
         _, model_cls_name = get_rbln_model_info(vllm_config.model_config)
         if model_cls_name in ["RBLNT5EncoderModel"]:
-            vllm_config.model_config.hf_config.__dict__[
-                "is_encoder_decoder"
-            ] = False
+            vllm_config.model_config.hf_config.__dict__["is_encoder_decoder"] = False
         if (
             model_cls_name in ["RBLNQwen3ForCausalLM"]
             and vllm_config.model_config.task == "embed"
@@ -93,9 +91,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
             self.model = get_optimum_model(vllm_config=self.vllm_config)
-        self.use_optimum_lora = getattr(
-            self.model.rbln_model_config, "use_lora", None
-        )
+        self.use_optimum_lora = getattr(self.model.rbln_model_config, "use_lora", None)
         if self.enable_lora and not self.use_optimum_lora:
             raise RuntimeError(
                 "The compiled model is for LoRA."
@@ -103,8 +99,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             )
         if not self.enable_lora and self.use_optimum_lora:
             raise RuntimeError(
-                "The model is compiled for LoRA."
-                "Please set `enable_lora=True` in vLLM."
+                "The model is compiled for LoRA.Please set `enable_lora=True` in vLLM."
             )
 
         if self.use_optimum_lora:
@@ -202,8 +197,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         block_tables = (
             make_tensor_with_pad(
                 block_tables,
-                max_len=self.model_config.max_model_len
-                // self.cache_config.block_size,
+                max_len=self.model_config.max_model_len // self.cache_config.block_size,
                 pad=-1,
                 dtype=torch.int32,
                 device=self.device,
@@ -278,8 +272,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         block_tables = (
             make_tensor_with_pad(
                 block_tables,
-                max_len=self.model_config.max_model_len
-                // self.cache_config.block_size,
+                max_len=self.model_config.max_model_len // self.cache_config.block_size,
                 pad=-1,
                 dtype=torch.int32,
                 device=self.device,
@@ -388,9 +381,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
-            self.set_active_loras(
-                model_input.lora_requests, model_input.lora_mapping
-            )
+            self.set_active_loras(model_input.lora_requests, model_input.lora_mapping)
 
         hidden_states = self.model(model_input=model_input)
 
@@ -401,9 +392,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
             hidden_states = hidden_states[:, -1, :]
             assert hidden_states.dim() == 2
 
-        logits = self.model.compute_logits(
-            hidden_states, model_input.sampling_metadata
-        )
+        logits = self.model.compute_logits(hidden_states, model_input.sampling_metadata)
 
         # Sample the next token.
         output = self.model.sample(

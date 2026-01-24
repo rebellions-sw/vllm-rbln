@@ -65,9 +65,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             )
             enc_attention_mask[0][: enc_lengths[batch_idx] + 1] = 1
 
-            padding_need = (
-                self.model.rbln_config.enc_max_seq_len - input_ids.shape[-1]
-            )
+            padding_need = self.model.rbln_config.enc_max_seq_len - input_ids.shape[-1]
             input_ids = torch.nn.functional.pad(input_ids, (0, padding_need))
 
             _ = self.model.encoder(
@@ -85,8 +83,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         else:
             # Replace INVALID_TOKEN markers with the decoder start token ID
             input_ids[
-                input_ids
-                == (self.model.config.vocab_size + self.INVALID_TOKEN - 1)
+                input_ids == (self.model.config.vocab_size + self.INVALID_TOKEN - 1)
             ] = self.model.config.decoder_start_token_id
             cache_position[cache_position != 0] = (
                 cache_position[cache_position != 0] - 2
@@ -129,9 +126,7 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
         else:
             is_prompt = model_input.sampling_metadata.num_prompts > 0
 
-        valid_block_ids = [
-            block_table[0].item() for block_table in block_tables
-        ]
+        valid_block_ids = [block_table[0].item() for block_table in block_tables]
         batch_idx = block_tables[0][0] if is_prompt else None
 
         kwargs = self.preprocess_for_decoder(

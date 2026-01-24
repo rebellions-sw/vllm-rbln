@@ -39,9 +39,7 @@ class BlockConfiguration:
     num_ob: int
 
     def __post_init__(self):
-        assert self.ob_size % self.ib_size == 0, (
-            "ob_size must be a multiple of ib_size"
-        )
+        assert self.ob_size % self.ib_size == 0, "ob_size must be a multiple of ib_size"
 
     @property
     def block_ratio(self) -> int:
@@ -98,8 +96,7 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
             del self._allocated_blocks[block.block_id]
         else:
             logger.warning(
-                "[PFX] [DEALLOCATE-WARNING] BLOCK=%d | "
-                "REASON=unallocated_block",
+                "[PFX] [DEALLOCATE-WARNING] BLOCK=%d | REASON=unallocated_block",
                 block.block_id,
             )
 
@@ -200,12 +197,10 @@ class CacheSearchManager:
         cached_obs = []
         cached_lengths = []
         for start_ib_idx in range(0, len(cached_ib), self._config.block_ratio):
-            end_ib_idx = min(
-                start_ib_idx + self._config.block_ratio, len(cached_ib)
-            )
+            end_ib_idx = min(start_ib_idx + self._config.block_ratio, len(cached_ib))
             cur_ib_segment = cached_ib[start_ib_idx:end_ib_idx]
-            cached_ob, num_cached_ibs = (
-                mapping_manager.get_longest_matched_block(cur_ib_segment)
+            cached_ob, num_cached_ibs = mapping_manager.get_longest_matched_block(
+                cur_ib_segment
             )
             # FIXME simple stop condition
             # Upgrade the readability later
@@ -226,9 +221,7 @@ class MemoryPoolManager:
 
     def __init__(self, max_model_len: int, ob_size: int):
         self.dtype = torch.int16
-        self._pooled_tensor = torch.zeros(
-            max_model_len // ob_size, dtype=self.dtype
-        )
+        self._pooled_tensor = torch.zeros(max_model_len // ob_size, dtype=self.dtype)
 
     def get_tensor_for_blocks(self, block_ids: list[int]) -> torch.Tensor:
         self._pooled_tensor.fill_(-1)
@@ -263,9 +256,7 @@ class RBLNPrefixKVCacheManager:
         self._eviction_policy = FIFOEvictionPolicy()
 
     def is_full_block_available(self) -> bool:
-        blocks_per_seq = math.ceil(
-            self._config.max_model_len / self._config.ob_size
-        )
+        blocks_per_seq = math.ceil(self._config.max_model_len / self._config.ob_size)
         ideal_total = self._config.max_num_seqs * blocks_per_seq
         return self._config.num_ob >= ideal_total
 
@@ -308,9 +299,7 @@ class RBLNPrefixKVCacheManager:
             end_idx = min((i + 1) * self._config.block_ratio, len(inner_blocks))
             block_inner_blocks = inner_blocks[start_idx:end_idx]
 
-            self._mapping_manager.create_mapping(
-                block, block_inner_blocks, request_id
-            )
+            self._mapping_manager.create_mapping(block, block_inner_blocks, request_id)
             self._eviction_policy.register_block(block.block_id)
             block_ids.append(block.block_id)
 
@@ -335,14 +324,10 @@ class RBLNPrefixKVCacheManager:
 
         if num_allocated_tokens == 0:
             # PREFILL
-            num_obs_needed = math.ceil(
-                num_inner_blocks / self._config.block_ratio
-            )
+            num_obs_needed = math.ceil(num_inner_blocks / self._config.block_ratio)
         else:
             # DECODE
-            num_already_allocated_ibs = (
-                num_allocated_tokens // self._config.ib_size
-            )
+            num_already_allocated_ibs = num_allocated_tokens // self._config.ib_size
 
             if num_already_allocated_ibs % self._config.block_ratio == 0:
                 num_obs_needed = 1
@@ -397,17 +382,13 @@ class RBLNPrefixKVCacheManager:
         """
         Add inner blocks to an existing outer block.
         """
-        assert len(inner_blocks) == 1, (
-            "Can only append one inner block at a time"
-        )
+        assert len(inner_blocks) == 1, "Can only append one inner block at a time"
         ib_id = inner_blocks[0]
 
         # Update the outer to inner mapping
         mapping = self._mapping_manager.get_mapping(outer_block_id)
         if not mapping:
-            raise RuntimeError(
-                f"Mapping not found for outer block {outer_block_id}"
-            )
+            raise RuntimeError(f"Mapping not found for outer block {outer_block_id}")
 
         mapping.inner_block_ids.append(ib_id)
 
@@ -480,9 +461,7 @@ class RBLNPrefixKVCacheManager:
         """
         return self._mapping_manager.get_request_blocks(request_id)
 
-    def can_allocate(
-        self, num_new_blocks: int, num_computed_tokens: int
-    ) -> bool:
+    def can_allocate(self, num_new_blocks: int, num_computed_tokens: int) -> bool:
         # 1. Check if the enough outer blocks are free
         required_num_ob = self._compute_num_blocks_to_allocate(
             num_new_blocks, num_computed_tokens
@@ -531,9 +510,7 @@ class RBLNPrefixKVCacheManager:
         if self._mapping_manager.is_request_registered(request_id):
             self._handle_decode_allocation(request_id, num_new_ob, inner_blocks)
         else:
-            self._handle_prefill_allocation(
-                request_id, num_new_ob, inner_blocks
-            )
+            self._handle_prefill_allocation(request_id, num_new_ob, inner_blocks)
 
     def get_dummy_block(self) -> int:
         if not self.is_full_block_available():

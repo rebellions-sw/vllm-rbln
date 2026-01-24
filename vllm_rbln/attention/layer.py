@@ -82,8 +82,7 @@ def __custom_init__(
     if num_kv_heads is None:
         num_kv_heads = num_heads
     assert num_heads % num_kv_heads == 0, (
-        f"num_heads ({num_heads}) is not "
-        f"divisible by num_kv_heads ({num_kv_heads})"
+        f"num_heads ({num_heads}) is not divisible by num_kv_heads ({num_kv_heads})"
     )
 
     # The default k/v_scale is set to 1.0. This is ignored
@@ -119,9 +118,7 @@ def __custom_init__(
     self.has_sink = extra_impl_args.get("sinks") is not None
 
     quant_method = (
-        quant_config.get_quant_method(self, prefix=prefix)
-        if quant_config
-        else None
+        quant_config.get_quant_method(self, prefix=prefix) if quant_config else None
     )
     if quant_method is not None and not isinstance(
         quant_method, UnquantizedLinearMethod
@@ -130,9 +127,7 @@ def __custom_init__(
         # TODO (mgoin): kv cache dtype should be specified in the FP8
         # checkpoint config and become the "auto" behavior
         if self.kv_cache_dtype == "fp8_e5m2":
-            raise ValueError(
-                "fp8_e5m2 kv-cache is not supported with fp8 checkpoints."
-            )
+            raise ValueError("fp8_e5m2 kv-cache is not supported with fp8 checkpoints.")
         # If quantization is enabled, we make "k_scale" and "v_scale"
         # parameters so that it can be loaded from the model checkpoint.
         # The k/v_scale will then be converted back to native float32
@@ -200,9 +195,7 @@ def __custom_init__(
     # this variable will not be accessed if use_direct_call is True
     self.kv_cache = [
         torch.tensor([])
-        for _ in range(
-            get_current_vllm_config().parallel_config.pipeline_parallel_size
-        )
+        for _ in range(get_current_vllm_config().parallel_config.pipeline_parallel_size)
     ]
 
     self.q_range = torch.tensor(envs.Q_SCALE_CONSTANT, dtype=torch.float32)
@@ -246,9 +239,7 @@ def custom_attention_forward(
             self.calc_kv_scales(query, key, value)
     if self.use_output:
         output_shape = output_shape if output_shape is not None else query.shape
-        output = torch.zeros(
-            output_shape, dtype=query.dtype, device=query.device
-        )
+        output = torch.zeros(output_shape, dtype=query.dtype, device=query.device)
         hidden_size = output_shape[-1]
         # We skip reshaping query, key and value tensors for the MLA
         # backend since these tensors have different semantics and are
@@ -314,9 +305,7 @@ def custom_attention_forward(
                 self, query, key, value, self_kv_cache, attn_metadata
             )
         else:
-            return torch.ops.vllm.unified_attention(
-                query, key, value, self.layer_name
-            )
+            return torch.ops.vllm.unified_attention(query, key, value, self.layer_name)
 
 
 Attention.__init__ = __custom_init__

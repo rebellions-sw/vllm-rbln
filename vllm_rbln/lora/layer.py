@@ -51,9 +51,7 @@ def base_linear_patched_apply(
 def vocab_parallel_embedding_patched_forward(
     self: VocabParallelEmbeddingWithLoRA, x: torch.Tensor
 ) -> torch.Tensor:
-    added_tokens_mask = torch.where(
-        x > self.base_layer.org_vocab_size - 1, 1, 0
-    )
+    added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1, 1, 0)
     embeddings_indices = torch.narrow(
         self.punica_wrapper._embeddings_indices, 1, 0, x.size(1)
     )
@@ -68,9 +66,7 @@ def vocab_parallel_embedding_patched_forward(
 
     full_output_org = full_output
     if full_output.ndim == 3:
-        full_output = full_output.view(
-            full_output.shape[0] * full_output.shape[1], -1
-        )
+        full_output = full_output.view(full_output.shape[0] * full_output.shape[1], -1)
     if full_lora_a_embeddings.ndim == 3:
         full_lora_a_embeddings = full_lora_a_embeddings.view(
             full_lora_a_embeddings.shape[0] * full_lora_a_embeddings.shape[1],
@@ -85,6 +81,4 @@ def vocab_parallel_embedding_patched_forward(
 
 
 BaseLinearLayerWithLoRA.apply = base_linear_patched_apply
-VocabParallelEmbeddingWithLoRA.forward = (
-    vocab_parallel_embedding_patched_forward
-)
+VocabParallelEmbeddingWithLoRA.forward = vocab_parallel_embedding_patched_forward

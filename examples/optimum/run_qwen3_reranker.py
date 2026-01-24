@@ -43,9 +43,7 @@ def format_instruction(instruction, query, doc):
 
 
 def process_inputs(pairs, instruction, max_length, suffix_tokens, tokenizer):
-    messages = [
-        format_instruction(instruction, query, doc) for query, doc in pairs
-    ]
+    messages = [format_instruction(instruction, query, doc) for query, doc in pairs]
     messages = tokenizer.apply_chat_template(
         messages,
         tokenize=True,
@@ -57,13 +55,8 @@ def process_inputs(pairs, instruction, max_length, suffix_tokens, tokenizer):
     return messages
 
 
-def get_input_prompts(
-    model_id, max_length, suffix_tokens, tokenizer
-) -> list[str]:
-    task = (
-        "Given a web search query, "
-        "retrieve relevant passages that answer the query"
-    )
+def get_input_prompts(model_id, max_length, suffix_tokens, tokenizer) -> list[str]:
+    task = "Given a web search query, retrieve relevant passages that answer the query"
     queries = [
         "What is the capital of China?",
         "Explain gravity",

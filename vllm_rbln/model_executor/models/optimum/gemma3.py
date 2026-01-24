@@ -47,8 +47,7 @@ PAD_TOKEN_ID = 0
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
     def _pad_for_gemma3(self, prompt_ids: list[int], prompt: str):
         token_type_ids = (
-            torch.tensor(prompt_ids)
-            == self.info.get_hf_processor().image_token_id
+            torch.tensor(prompt_ids) == self.info.get_hf_processor().image_token_id
         )
 
         image_prefill_chunk_size = self.info.get_hf_processor().image_seq_length
@@ -175,9 +174,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         if is_prompt:
             inputs_embeds = None
             prefill_batch_idx = sliding_window_table_ids[0]
-            local_block_table_id = torch.tensor(
-                [prefill_batch_idx], dtype=torch.int16
-            )
+            local_block_table_id = torch.tensor([prefill_batch_idx], dtype=torch.int16)
             # token_type_ids model_input != token_type_ids of gemma3
             # https://github.com/huggingface/transformers/blob/d0c9c66d1c09df3cd70bf036e813d88337b20d4c/src/transformers/models/gemma3/processing_gemma3.py#L143
             token_type_ids = torch.zeros_like(input_ids)
@@ -213,12 +210,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         else:
             if self.model.language_model.decoders is None:
                 raise ValueError("Decoders is None")
-            padded_batch_size = kwargs.pop(
-                "padded_batch_size", self.decoder_batch_size
-            )
-            self.model.language_model.decoder = (
-                self.model.language_model.decoders[padded_batch_size]
-            )
+            padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
+            self.model.language_model.decoder = self.model.language_model.decoders[
+                padded_batch_size
+            ]
             (
                 local_block_table_id,
                 cache_position,
@@ -281,8 +276,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
 
         if not isinstance(pixel_values, (torch.Tensor, list)):
             raise ValueError(
-                "Incorrect type of pixel values. "
-                f"Got type: {type(pixel_values)}"
+                f"Incorrect type of pixel values. Got type: {type(pixel_values)}"
             )
 
         if not isinstance(num_crops, (torch.Tensor, list)):

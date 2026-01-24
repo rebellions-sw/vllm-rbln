@@ -25,10 +25,7 @@ def get_input_prompts() -> list[str]:
 
     # Each query must come with a one-sentence instruction
     # that describes the task
-    task = (
-        "Given a web search query, "
-        "retrieve relevant passages that answer the query"
-    )
+    task = "Given a web search query, retrieve relevant passages that answer the query"
 
     queries = [
         get_detailed_instruct(task, "What is the capital of China?"),
@@ -47,9 +44,7 @@ def get_input_prompts() -> list[str]:
     return inputs_texts
 
 
-async def embed(
-    engine: AsyncLLMEngine, prompt: str, model: str, request_id: int
-):
+async def embed(engine: AsyncLLMEngine, prompt: str, model: str, request_id: int):
     print(f"embed request_id={request_id}, prompt={prompt}")
     pooling_params = PoolingParams(task="embed")
     results_generator = engine.encode(

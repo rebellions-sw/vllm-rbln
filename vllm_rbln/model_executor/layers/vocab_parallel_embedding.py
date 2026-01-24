@@ -58,9 +58,7 @@ def __vocab_parallel_embedding__init__(
     self.padding_size = padding_size
     self.org_vocab_size = org_num_embeddings or num_embeddings
     num_added_embeddings = num_embeddings - self.org_vocab_size
-    self.org_vocab_size_padded = pad_vocab_size(
-        self.org_vocab_size, self.padding_size
-    )
+    self.org_vocab_size_padded = pad_vocab_size(self.org_vocab_size, self.padding_size)
     self.num_embeddings_padded = pad_vocab_size(
         self.org_vocab_size_padded + num_added_embeddings, self.padding_size
     )
@@ -101,13 +99,8 @@ def __vocab_parallel_embedding__init__(
         params_dtype = torch.get_default_dtype()
     # Divide the weight matrix along the vocaburaly dimension.
     self.num_added_embeddings = self.num_embeddings - self.org_vocab_size
-    self.num_embeddings_per_partition = divide(
-        self.num_embeddings_padded, self.tp_size
-    )
-    assert (
-        self.shard_indices.num_elements_padded
-        == self.num_embeddings_per_partition
-    )
+    self.num_embeddings_per_partition = divide(self.num_embeddings_padded, self.tp_size)
+    assert self.shard_indices.num_elements_padded == self.num_embeddings_per_partition
     self.num_org_embeddings_per_partition = (
         self.shard_indices.org_vocab_end_index
         - self.shard_indices.org_vocab_start_index

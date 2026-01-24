@@ -75,9 +75,7 @@ class RBLNWorker(WorkerBase):
         self.device = torch.device(current_platform.device_type)
 
         if self.parallel_config.distributed_executor_backend == "ray":
-            logger.info(
-                "Running on Ray backend. Skipping device env var setup."
-            )
+            logger.info("Running on Ray backend. Skipping device env var setup.")
         else:
             self._init_device_env()
 
@@ -131,9 +129,7 @@ class RBLNWorker(WorkerBase):
         logger.warning("sleep mode is not supported on RBLN, ignore it.")
         pass
 
-    def initialize_cache(
-        self, num_gpu_blocks: int, num_cpu_blocks: int
-    ) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
@@ -154,8 +150,7 @@ class RBLNWorker(WorkerBase):
         distributed_backend = self.parallel_config.distributed_executor_backend
         if distributed_backend == "mp" and len(device_ids) < total_device_count:
             raise RuntimeError(
-                f"{env_var} has devices {device_ids}"
-                f" but required {total_device_count}"
+                f"{env_var} has devices {device_ids} but required {total_device_count}"
             )
 
         start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
@@ -221,9 +216,7 @@ class RBLNWorker(WorkerBase):
             kvcache_block_size=block_size,
             # quantization : 4 (This is an ad-hoc value. Need to fix it)
             nbits_per_param=16 if not self.model_config.quantization else 4,
-            n_model_params=sum(
-                p.numel() for p in self.model_runner.model.parameters()
-            ),
+            n_model_params=sum(p.numel() for p in self.model_runner.model.parameters()),
             # 2 : 1 for prefill and decode each
             num_runtimes=2,
         )
@@ -258,9 +251,7 @@ class RBLNWorker(WorkerBase):
     def compile_or_warm_up_model(self) -> None:
         if self.parallel_config.data_parallel_size > 1:
             if envs.VLLM_RBLN_DP_IMPL == "padded_decode":
-                max_num_batched_tokens = (
-                    self.scheduler_config.max_num_batched_tokens
-                )
+                max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
                 max_num_seqs = self.scheduler_config.max_num_seqs
                 # TODO: consider relaxing this constraint
                 assert max_num_batched_tokens % max_num_seqs == 0, (
@@ -301,17 +292,14 @@ class RBLNWorker(WorkerBase):
                 get_pp_group().recv_tensor_dict()
             )
 
-        output = self.model_runner.execute_model(
-            scheduler_output, intermediate_tensors
-        )
+        output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)
         if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
             return output
 
         assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
         assert (
-            parallel_config.distributed_executor_backend
-            != ("external_launcher")
+            parallel_config.distributed_executor_backend != ("external_launcher")
             and not get_pp_group().is_last_rank
         )
 
@@ -346,9 +334,7 @@ class RBLNWorker(WorkerBase):
             # only print profiler results on rank 0
             if self.local_rank == 0:
                 print(
-                    self.profiler.key_averages().table(
-                        sort_by="self_cuda_time_total"
-                    )
+                    self.profiler.key_averages().table(sort_by="self_cuda_time_total")
                 )
 
     def add_lora(self, lora_request: LoRARequest) -> bool:

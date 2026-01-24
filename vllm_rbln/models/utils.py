@@ -117,9 +117,7 @@ def __auto_weights_loader__load_module(
     assert len(embed_tokens) < 2
     if len(embed_tokens) != 0:
         org_skip_prefixes = self.skip_prefixes
-        self.skip_prefixes = [
-            p for p in org_skip_prefixes if not p.startswith(LM_HEAD)
-        ]
+        self.skip_prefixes = [p for p in org_skip_prefixes if not p.startswith(LM_HEAD)]
 
         for child_prefix, child_weights in self._groupby_prefix(embed_tokens):
             assert child_prefix == LM_HEAD

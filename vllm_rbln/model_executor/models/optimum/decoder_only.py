@@ -59,9 +59,7 @@ class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
             cache_position,
             dummy_block=dummy_block,
         )
-        padded_batch_size = kwargs.pop(
-            "padded_batch_size", self.decoder_batch_size
-        )
+        padded_batch_size = kwargs.pop("padded_batch_size", self.decoder_batch_size)
 
         if is_prompt:
             if self.model.prefill_decoder is None:

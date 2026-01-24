@@ -84,9 +84,9 @@ def generate_prompts_video(batch_size: int, model_id: str):
 
 
 def generate_prompts_image(batch_size: int, model_id: str):
-    dataset = load_dataset(
-        "lmms-lab/llava-bench-in-the-wild", split="train"
-    ).shuffle(seed=42)
+    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild", split="train").shuffle(
+        seed=42
+    )
     processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
     messages = [
         [
@@ -150,9 +150,9 @@ def generate_prompts_image(batch_size: int, model_id: str):
 
 
 def generate_prompts_wo_processing(batch_size: int, model_id: str):
-    dataset = load_dataset(
-        "lmms-lab/llava-bench-in-the-wild", split="train"
-    ).shuffle(seed=42)
+    dataset = load_dataset("lmms-lab/llava-bench-in-the-wild", split="train").shuffle(
+        seed=42
+    )
     processor = AutoProcessor.from_pretrained(model_id, padding_side="left")
     messages = [
         [
@@ -231,22 +231,16 @@ async def main(
     futures = []
     for request_id, request in enumerate(inputs):
         futures.append(
-            asyncio.create_task(
-                generate(engine, tokenizer, request_id, request)
-            )
+            asyncio.create_task(generate(engine, tokenizer, request_id, request))
         )
 
     results = await asyncio.gather(*futures)
 
     for i, result in enumerate(results):
         output = result.outputs[0].text
-        print(
-            f"===================== Output {i} =============================="
-        )
+        print(f"===================== Output {i} ==============================")
         print(output)
-        print(
-            "===============================================================\n"
-        )
+        print("===============================================================\n")
 
 
 def entry_point(

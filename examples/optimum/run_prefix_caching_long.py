@@ -78,10 +78,7 @@ def get_wiki_based_questions():
         "Who is the father of AI?",
         "What is the Turing Test?",
     ]
-    return [
-        template.format(document=doc, question=question)
-        for question in questions
-    ]
+    return [template.format(document=doc, question=question) for question in questions]
 
 
 # Create a sampling params object.

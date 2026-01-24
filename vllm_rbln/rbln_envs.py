@@ -48,8 +48,7 @@ def get_dp_impl():
     current_impl = dp_impl.lower()
     if current_impl not in choices:
         raise ValueError(
-            f"Invalid VLLM_RBLN_DP_IMPL: {current_impl}, "
-            f"Valid choices: {choices}"
+            f"Invalid VLLM_RBLN_DP_IMPL: {current_impl}, Valid choices: {choices}"
         )
     return current_impl
 
@@ -72,8 +71,7 @@ environment_variables = {
     "VLLM_RBLN_TP_SIZE": lambda: int(os.environ.get("VLLM_RBLN_TP_SIZE", 1)),
     # Use customized sampler
     "VLLM_RBLN_SAMPLER": (
-        lambda: os.environ.get("VLLM_RBLN_SAMPLER", "True").lower()
-        in ("true", "1")
+        lambda: os.environ.get("VLLM_RBLN_SAMPLER", "True").lower() in ("true", "1")
     ),
     # Enable warm_up
     "VLLM_RBLN_ENABLE_WARM_UP": (
@@ -93,8 +91,7 @@ environment_variables = {
     ),
     # Disable multimodal input
     "VLLM_RBLN_DISABLE_MM": (
-        lambda: os.environ.get("VLLM_RBLN_DISABLE_MM", "False").lower()
-        in ("true", "1")
+        lambda: os.environ.get("VLLM_RBLN_DISABLE_MM", "False").lower() in ("true", "1")
     ),
     # DP implementation, see choices in get_dp_impl
     "VLLM_RBLN_DP_IMPL": get_dp_impl,
@@ -133,13 +130,11 @@ environment_variables = {
         os.environ.get("VLLM_RBLN_NUM_RAY_NODES", 1)
     ),
     "VLLM_RBLN_METRICS": (
-        lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower()
-        in ("true", "1")
+        lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in ("true", "1")
     ),
     # Enable NUMA-based CPU affinity binding for OpenMP threads
     "VLLM_RBLN_NUMA": (
-        lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower()
-        in ("true", "1")
+        lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in ("true", "1")
     ),
     "VLLM_RBLN_KERNEL_MODE": (
         lambda: os.environ.get("RBLN_KERNEL_MODE", "torch_triton").lower()

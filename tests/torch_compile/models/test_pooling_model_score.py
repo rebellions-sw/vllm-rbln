@@ -46,9 +46,7 @@ def run_vllm_score(llm_kwargs: dict) -> None:
     query_template = "{prefix}<Instruct>: {instruction}\n<Query>: {query}\n"
     document_template = "<Document>: {doc}{suffix}"
 
-    instruction = (
-        "Given a query, retrieve relevant passages that answer the query"
-    )
+    instruction = "Given a query, retrieve relevant passages that answer the query"
 
     queries = [
         "What is the capital of China?",
@@ -63,9 +61,7 @@ def run_vllm_score(llm_kwargs: dict) -> None:
     ]
 
     templated_queries = [
-        query_template.format(
-            prefix=prefix, instruction=instruction, query=query
-        )
+        query_template.format(prefix=prefix, instruction=instruction, query=query)
         for query in queries
     ]
     templated_documents = [

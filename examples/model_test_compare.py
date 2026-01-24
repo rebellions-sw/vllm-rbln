@@ -26,12 +26,8 @@ import torch
 
 # ========= Tunables =========
 EPSILON = 1e-1 * 5
-PRINT_VECT_SNIPPET = (
-    True  # show a short head/tail snippet under "just print logits"
-)
-SNIPPET_ELEMS = (
-    6  # how many head/tail elements to show (total = SNIPPET_ELEMS*2)
-)
+PRINT_VECT_SNIPPET = True  # show a short head/tail snippet under "just print logits"
+SNIPPET_ELEMS = 6  # how many head/tail elements to show (total = SNIPPET_ELEMS*2)
 # ============================
 
 DEFAULT_PROMPTS = [
@@ -129,9 +125,7 @@ parser.add_argument(
     default=5,
     help="Top-K for argmax summary when --inspect-logits is on.",
 )
-parser.add_argument(
-    "--no-color", action="store_true", help="Disable ANSI colors."
-)
+parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors.")
 parser.add_argument(
     "--no-snippet",
     action="store_true",
@@ -193,9 +187,7 @@ def resolve_prompts():
             return args.prompts[: args.num_prompts]
         return args.prompts
     target_n = (
-        args.num_prompts
-        if args.num_prompts is not None
-        else len(DEFAULT_PROMPTS)
+        args.num_prompts if args.num_prompts is not None else len(DEFAULT_PROMPTS)
     )
     if target_n <= len(DEFAULT_PROMPTS):
         return DEFAULT_PROMPTS[:target_n]
@@ -452,9 +444,7 @@ def _kv(key: str, val: str, pad=18):
 def _topk_table(r_idx, r_vals, c_idx, c_vals, k):
     print(f"{C.DIM}Top-{k} (logprob) argmax — RBLN vs GOLD{C.RESET}")
     print(f"{C.DIM}{'-' * 56}{C.RESET}")
-    print(
-        f"{'Rank':>4}  {'R.idx':>8} {'R.val':>10}    {'G.idx':>8} {'G.val':>10}"
-    )
+    print(f"{'Rank':>4}  {'R.idx':>8} {'R.val':>10}    {'G.idx':>8} {'G.val':>10}")
     rows = max(len(r_idx), len(c_idx))
     for i in range(rows):
         ri = r_idx[i] if i < len(r_idx) else -1
@@ -487,9 +477,7 @@ def compare_and_print(cpu_packed, rbln_packed):
             except ValueError:
                 continue
             r_val = rbln_lp.get(str(token_id))
-            if r_val is None and isinstance(
-                next(iter(rbln_lp.values()), None), float
-            ):
+            if r_val is None and isinstance(next(iter(rbln_lp.values()), None), float):
                 r_val = rbln_lp.get(token_id)
             if r_val is None:
                 continue
@@ -539,9 +527,7 @@ def compare_and_print(cpu_packed, rbln_packed):
         # Optional vector snippets instead of huge dumps
         if PRINT_VECT_SNIPPET and not args.no_snippet:
             se = max(1, args.snippet_elems)
-            print(
-                f"\n{C.DIM}Logits-like (logprob) snippet — head…tail{C.RESET}"
-            )
+            print(f"\n{C.DIM}Logits-like (logprob) snippet — head…tail{C.RESET}")
             print(f"  rbln  : {_fmt_snippet(r_vec, se)}")
             print(f"  golden: {_fmt_snippet(c_vec, se)}")
 
@@ -583,9 +569,7 @@ def _worker(device: str, q, prompts_local, logprobs_flag, max_tokens_local):
         logprobs=lp_count,
     )
 
-    print(
-        f"[{device}] VLLM_PLUGINS = {os.environ.get('VLLM_PLUGINS', '<unset>')}"
-    )
+    print(f"[{device}] VLLM_PLUGINS = {os.environ.get('VLLM_PLUGINS', '<unset>')}")
     outputs = llm.generate(prompts_local, sampling_params)
     q.put(_pack_outputs(outputs))
 

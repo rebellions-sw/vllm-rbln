@@ -65,9 +65,7 @@ def test_create_sampler_indices_padded(num_loras, stage):
     max_loras = 8
 
     id_to_index = get_random_id_to_index(num_loras, max_loras)
-    lora_ids = torch.randint(
-        0, num_loras + 1, (1 if stage else max_num_seqs,)
-    ).tolist()
+    lora_ids = torch.randint(0, num_loras + 1, (1 if stage else max_num_seqs,)).tolist()
 
     if stage and len(lora_ids) > 1:
         # the case that the number of sequences is greater than 1

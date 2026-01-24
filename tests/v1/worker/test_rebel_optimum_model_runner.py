@@ -99,9 +99,7 @@ def _is_req_added(model_runner, req_id: str) -> bool:
 def _is_sampling_metadata_changed(
     model_runner, sampling_metadata_before: SamplingMetadata
 ):
-    return model_runner.input_batch.sampling_metadata is not (
-        sampling_metadata_before
-    )
+    return model_runner.input_batch.sampling_metadata is not (sampling_metadata_before)
 
 
 def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:

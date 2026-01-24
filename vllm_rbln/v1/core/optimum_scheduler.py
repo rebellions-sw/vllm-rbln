@@ -92,9 +92,7 @@ class RBLNOptimumScheduler(Scheduler):
 
         # Scheduling constraints.
         self.max_num_running_reqs = self.scheduler_config.max_num_seqs
-        self.max_num_scheduled_tokens = (
-            self.scheduler_config.max_num_batched_tokens
-        )
+        self.max_num_scheduled_tokens = self.scheduler_config.max_num_batched_tokens
         self.max_model_len = self.scheduler_config.max_model_len
         # KVConnector and KVEventPublisher is not used in RBLN.
         self.connector = None
@@ -136,9 +134,7 @@ class RBLNOptimumScheduler(Scheduler):
             self.vllm_config.additional_config is not None
             and "attn_block_size" in self.vllm_config.additional_config
         ):
-            attn_block_size = self.vllm_config.additional_config[
-                "attn_block_size"
-            ]
+            attn_block_size = self.vllm_config.additional_config["attn_block_size"]
         else:
             attn_block_size = None
         self.kv_cache_manager = RBLNKVCacheManager(
@@ -239,8 +235,7 @@ class RBLNOptimumScheduler(Scheduler):
                     and request.lora_request
                     and (
                         len(scheduled_loras) == self.lora_config.max_loras
-                        and request.lora_request.lora_int_id
-                        not in scheduled_loras
+                        and request.lora_request.lora_int_id not in scheduled_loras
                     )
                 ):
                     # Scheduling would exceed max_loras, skip.
@@ -310,9 +305,7 @@ class RBLNOptimumScheduler(Scheduler):
                 elif request.status == RequestStatus.PREEMPTED:
                     scheduled_resumed_reqs.append(request)
                 else:
-                    raise RuntimeError(
-                        f"Invalid request status: {request.status}"
-                    )
+                    raise RuntimeError(f"Invalid request status: {request.status}")
 
                 if self.lora_config and request.lora_request:
                     scheduled_loras.add(request.lora_request.lora_int_id)
@@ -383,9 +376,7 @@ class RBLNOptimumScheduler(Scheduler):
                         preempted_blocks = self.kv_cache_manager.get_block_ids(
                             preempted_req.request_id
                         )[0]
-                        self.kv_cache_manager.free(
-                            preempted_req, preemption=True
-                        )
+                        self.kv_cache_manager.free(preempted_req, preemption=True)
                         if not self.cache_config.enable_prefix_caching:
                             preempted_blocks = [
                                 block_idx - 1 for block_idx in preempted_blocks
@@ -443,9 +434,7 @@ class RBLNOptimumScheduler(Scheduler):
 
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
-        num_common_prefix_blocks = [0] * len(
-            self.kv_cache_config.kv_cache_groups
-        )
+        num_common_prefix_blocks = [0] * len(self.kv_cache_config.kv_cache_groups)
         if self.running:
             any_request = self.running[0]
             num_common_prefix_blocks = (
@@ -469,20 +458,15 @@ class RBLNOptimumScheduler(Scheduler):
             scheduled_spec_decode_tokens,
             req_to_new_blocks,
         )
-        structured_output_request_ids, grammar_bitmask = (
-            self.get_grammar_bitmask(
-                scheduled_new_reqs + scheduled_running_reqs,
-                scheduled_spec_decode_tokens,
-            )
+        structured_output_request_ids, grammar_bitmask = self.get_grammar_bitmask(
+            scheduled_new_reqs + scheduled_running_reqs,
+            scheduled_spec_decode_tokens,
         )
 
         # Calculate the dummy block index.
         if self.cache_config.enable_prefix_caching:
             num_decode_reqs = len(scheduled_running_reqs)
-            if (
-                num_decode_reqs > 0
-                and num_decode_reqs < self.max_num_running_reqs
-            ):
+            if num_decode_reqs > 0 and num_decode_reqs < self.max_num_running_reqs:
                 dummy_block = self.kv_cache_manager.get_dummy_block()
 
         scheduler_output = RBLNSchedulerOutput(
