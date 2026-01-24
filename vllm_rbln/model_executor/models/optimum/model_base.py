@@ -18,9 +18,6 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from optimum.rbln.transformers.models.decoderonly import (
-    decoderonly_runtime_utils as runtime_utils,
-)
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor

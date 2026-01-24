@@ -14,7 +14,6 @@
 from typing import Any
 
 import torch
-from transformers import AutoTokenizer
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.gemma3_mm import (

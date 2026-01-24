@@ -14,7 +14,6 @@
 from typing import Any
 
 import torch
-from optimum.rbln.configuration_utils import RBLNModelConfig
 from vllm.config import VllmConfig
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.paligemma import (

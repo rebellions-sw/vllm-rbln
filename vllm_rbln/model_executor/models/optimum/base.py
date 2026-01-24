@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 import torch
 from vllm.multimodal.inputs import BatchedTensorInputs
@@ -29,13 +28,13 @@ class ModelInputForRBLN:
     input_tokens: torch.Tensor
     input_positions: torch.Tensor
     block_tables: torch.Tensor
-    running_requests_ids: List[str]
-    finished_requests_ids: List[str]
+    running_requests_ids: list[str]
+    finished_requests_ids: list[str]
     is_prompt: bool = False
-    cached_block_tables: List[int] = field(default_factory=list)  # for prefix caching
-    cached_lengths: List[int] = field(default_factory=list)  # for prefix caching
-    multi_modal_kwargs: Optional[BatchedTensorInputs] = None
-    dummy_block: Optional[int] = None  # for prefix caching
+    cached_block_tables: list[int] = field(default_factory=list)  # for prefix caching
+    cached_lengths: list[int] = field(default_factory=list)  # for prefix caching
+    multi_modal_kwargs: BatchedTensorInputs | None = None
+    dummy_block: int | None = None  # for prefix caching
 
 
 version_error = RuntimeError(
