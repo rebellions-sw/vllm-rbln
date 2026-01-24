@@ -9,11 +9,11 @@ on:
         type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
-        required: false
+        required: true
         type: string
       optimum_rbln_version:
         description: "Version of optimum-rbln to use (optional)"
-        required: false
+        required: true
         type: string
   workflow_call:
     inputs:
@@ -34,14 +34,8 @@ env:
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
-  get-compiler-version:
-    if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
-    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
-    secrets: inherit
-
   test_vllm_rbln_rsd1:
     name: Optimum Test CI RSD 1
-    needs: [get-compiler-version]
     runs-on: rbln-sw-k8s-ca22-1
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -53,12 +47,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -71,7 +59,7 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
@@ -134,7 +122,6 @@ jobs:
 
   test_vllm_rbln_rsd4:
     name: Optimum Test CI RSD 4
-    needs: [get-compiler-version]
     runs-on: rbln-sw-k8s-ca22-4
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -146,12 +133,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -164,7 +145,7 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
@@ -271,7 +252,6 @@ jobs:
 
   test_vllm_rbln_rsd8:
     name: Optimum Test CI RSD 8
-    needs: [get-compiler-version]
     runs-on: rbln-sw-k8s-ca22-8
     container:
       image: mcr.microsoft.com/devcontainers/python:3.12
@@ -283,12 +263,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -301,7 +275,7 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
