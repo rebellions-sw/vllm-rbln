@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F
@@ -45,10 +45,10 @@ if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
         masked_routing_weight: torch.Tensor,
         topk: int,
         post_norm: bool,
-        expert_map: Optional[torch.Tensor] = None,
-        gate_proj_bias: Optional[torch.Tensor] = None,
-        up_proj_bias: Optional[torch.Tensor] = None,
-        down_proj_bias: Optional[torch.Tensor] = None,
+        expert_map: torch.Tensor | None = None,
+        gate_proj_bias: torch.Tensor | None = None,
+        up_proj_bias: torch.Tensor | None = None,
+        down_proj_bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Customized MoE GLU operation (optimized kernel version).
@@ -82,10 +82,10 @@ if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
         masked_routing_weight: torch.Tensor,
         topk: int,
         post_norm: bool,
-        expert_map: Optional[torch.Tensor] = None,
-        gate_proj_bias: Optional[torch.Tensor] = None,
-        up_proj_bias: Optional[torch.Tensor] = None,
-        down_proj_bias: Optional[torch.Tensor] = None,
+        expert_map: torch.Tensor | None = None,
+        gate_proj_bias: torch.Tensor | None = None,
+        up_proj_bias: torch.Tensor | None = None,
+        down_proj_bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         return torch.empty_like(hidden_states)
 
@@ -102,9 +102,9 @@ else:
         down_proj_weight: torch.Tensor,
         masked_routing_weight: torch.Tensor,
         expert_select_count: torch.Tensor,
-        gate_proj_bias: Optional[torch.Tensor] = None,
-        up_proj_bias: Optional[torch.Tensor] = None,
-        down_proj_bias: Optional[torch.Tensor] = None,
+        gate_proj_bias: torch.Tensor | None = None,
+        up_proj_bias: torch.Tensor | None = None,
+        down_proj_bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Customized MoE GLU operation (custom kernel version).
@@ -138,9 +138,9 @@ else:
         down_proj_weight: torch.Tensor,
         masked_routing_weight: torch.Tensor,
         expert_select_count: torch.Tensor,
-        gate_proj_bias: Optional[torch.Tensor] = None,
-        up_proj_bias: Optional[torch.Tensor] = None,
-        down_proj_bias: Optional[torch.Tensor] = None,
+        gate_proj_bias: torch.Tensor | None = None,
+        up_proj_bias: torch.Tensor | None = None,
+        down_proj_bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         return torch.empty_like(hidden_states)
 
@@ -153,13 +153,13 @@ def unquantized_fused_moe_method_rbln(
     top_k: int,
     router_logits: torch.Tensor,
     renormalize: bool,
-    topk_group: Optional[int] = None,
-    num_expert_group: Optional[int] = None,
+    topk_group: int | None = None,
+    num_expert_group: int | None = None,
     global_num_experts: int = -1,
-    expert_map: Optional[torch.Tensor] = None,
-    custom_routing_function: Optional[Callable] = None,
+    expert_map: torch.Tensor | None = None,
+    custom_routing_function: Callable | None = None,
     scoring_func: str = "softmax",
-    e_score_correction_bias: Optional[torch.Tensor] = None,
+    e_score_correction_bias: torch.Tensor | None = None,
     activation: str = "silu",
     apply_router_weight_on_input: bool = False,
     **kwargs,
@@ -313,13 +313,13 @@ def unquantized_fused_moe_method_custom(
     top_k: int,
     router_logits: torch.Tensor,
     renormalize: bool,
-    topk_group: Optional[int] = None,
-    num_expert_group: Optional[int] = None,
+    topk_group: int | None = None,
+    num_expert_group: int | None = None,
     global_num_experts: int = -1,
-    expert_map: Optional[torch.Tensor] = None,
-    custom_routing_function: Optional[Callable] = None,
+    expert_map: torch.Tensor | None = None,
+    custom_routing_function: Callable | None = None,
     scoring_func: str = "softmax",
-    e_score_correction_bias: Optional[torch.Tensor] = None,
+    e_score_correction_bias: torch.Tensor | None = None,
     activation: str = "silu",
     apply_router_weight_on_input: bool = False,
     **kwargs,
@@ -365,13 +365,13 @@ def unquantized_fused_optimize_moe_method_custom(
     top_k: int,
     router_logits: torch.Tensor,
     renormalize: bool,
-    topk_group: Optional[int] = None,
-    num_expert_group: Optional[int] = None,
+    topk_group: int | None = None,
+    num_expert_group: int | None = None,
     global_num_experts: int = -1,
-    expert_map: Optional[torch.Tensor] = None,
-    custom_routing_function: Optional[Callable] = None,
+    expert_map: torch.Tensor | None = None,
+    custom_routing_function: Callable | None = None,
     scoring_func: str = "softmax",
-    e_score_correction_bias: Optional[torch.Tensor] = None,
+    e_score_correction_bias: torch.Tensor | None = None,
     activation: str = "silu",
     apply_router_weight_on_input: bool = False,
     **kwargs,

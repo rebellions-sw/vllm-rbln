@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, List, Optional, Union
+from typing import Any
 
 import torch
 import vllm.envs as envs
@@ -75,11 +75,10 @@ class RBLNOptimumLlavaNextForConditionalGeneration(
         is_prefill: bool,
         block_tables: torch.Tensor,
         input_ids: torch.LongTensor = None,
-        pixel_values: Optional[torch.FloatTensor] = None,
-        image_sizes: Optional[torch.LongTensor] = None,
-        cache_position: Union[
-            List[torch.Tensor], torch.Tensor
-        ] = None,  # vllm keyword argument
+        pixel_values: torch.FloatTensor | None = None,
+        image_sizes: torch.LongTensor | None = None,
+        cache_position: list[torch.Tensor]
+        | torch.Tensor = None,  # vllm keyword argument
         **kwargs,
     ):
         if is_prefill:
@@ -161,7 +160,7 @@ class RBLNOptimumLlavaNextForConditionalGeneration(
 
     def _parse_and_validate_image_input(
         self, **kwargs: Any
-    ) -> Optional[LlavaNextImageInputs]:
+    ) -> LlavaNextImageInputs | None:
         pixel_values = kwargs.pop("pixel_values", None)
         image_sizes = kwargs.pop("image_sizes", None)
         image_embeds = kwargs.pop("image_embeds", None)

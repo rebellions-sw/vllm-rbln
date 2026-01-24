@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import List, Optional, Union
 
 import torch
 import vllm.envs as envs
@@ -45,10 +44,10 @@ class RBLNOptimumEncoderDecoder(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
 
     def _forward(
         self,
-        enc_lengths: List[int],  # current attention_mask length
+        enc_lengths: list[int],  # current attention_mask length
         input_ids: torch.LongTensor = None,
-        cache_position: Union[List[torch.Tensor], torch.Tensor] = None,
-        batch_idx: Optional[torch.LongTensor] = None,
+        cache_position: list[torch.Tensor] | torch.Tensor = None,
+        batch_idx: torch.LongTensor | None = None,
         block_tables: torch.Tensor = None,
         **kwargs,
     ):

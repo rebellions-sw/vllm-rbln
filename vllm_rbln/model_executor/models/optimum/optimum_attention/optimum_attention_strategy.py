@@ -13,16 +13,12 @@
 # limitations under the License.
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import (
     Any,
-    Callable,
-    Dict,
     Generic,
-    List,
-    Optional,
     TypeVar,
-    Union,
     cast,
 )
 
@@ -50,7 +46,7 @@ Result2T = TypeVar("Result2T")
 
 class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
     def __init__(self):
-        self.table: Dict[str, EntryT] = {}
+        self.table: dict[str, EntryT] = {}
 
     @abstractmethod
     def add(self, running_requests_id: str, local_table_id: int, **kwargs) -> None: ...
@@ -68,7 +64,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
     @abstractmethod
     def preprocess(
         self,
-        local_block_table_ids: List[int],
+        local_block_table_ids: list[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
@@ -84,11 +80,9 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
         is_prompt: bool,
         finished_requests_ids: list[str],
         running_requests_ids: list[str],
-        get_entry_fn: Optional[Callable[[Any], Any]] = None,
-        get_extra_values_fn: Optional[
-            Callable[[Any], Union[Any, tuple[Any, ...]]]
-        ] = None,
-    ) -> Union[list[int], tuple[list[int], ...]]:
+        get_entry_fn: Callable[[Any], Any] | None = None,
+        get_extra_values_fn: Callable[[Any], Any | tuple[Any, ...]] | None = None,
+    ) -> list[int] | tuple[list[int], ...]:
         if is_prompt:
             if finished_requests_ids:
                 first_id = finished_requests_ids[0]
@@ -145,7 +139,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
 
     def pad_to_2d(
         self,
-        original_values: Union[list[int], list[torch.Tensor], torch.Tensor],
+        original_values: list[int] | list[torch.Tensor] | torch.Tensor,
         rows: int,
         cols: int,
         pad_value: int = 0,
@@ -216,7 +210,7 @@ class InnerAttentionStrategy(AttentionStrategy[InnerAttentionEntry, InnerR1, Inn
 
     def preprocess(
         self,
-        local_block_table_ids: List[int],
+        local_block_table_ids: list[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
@@ -251,8 +245,8 @@ class HybridAttentionImageStrategy(
         self.pad_token_id = pad_token_id
 
     def add(self, running_requests_id: str, local_table_id: int, **kwargs) -> None:
-        pad_len: Optional[int] = kwargs.get("pad_len")
-        attention_mask: Optional[torch.Tensor] = kwargs.get("attention_mask")
+        pad_len: int | None = kwargs.get("pad_len")
+        attention_mask: torch.Tensor | None = kwargs.get("attention_mask")
         assert pad_len is not None
         assert attention_mask is not None
 
@@ -271,7 +265,7 @@ class HybridAttentionImageStrategy(
         **kwargs,
     ) -> tuple[list[int], list[int], list[torch.Tensor]]:
         get_extra_values_fn = None
-        input_ids: Optional[torch.Tensor] = kwargs.get("input_ids")
+        input_ids: torch.Tensor | None = kwargs.get("input_ids")
         assert input_ids is not None
 
         if is_prompt:
@@ -307,8 +301,8 @@ class HybridAttentionImageStrategy(
         decoder_batch_size: int,
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        pad_lens: Optional[list[int]] = kwargs.get("pad_lens")
-        attention_masks: Optional[list[torch.Tensor]] = kwargs.get("attention_masks")
+        pad_lens: list[int] | None = kwargs.get("pad_lens")
+        attention_masks: list[torch.Tensor] | None = kwargs.get("attention_masks")
 
         assert pad_lens is not None
         assert attention_masks is not None

@@ -13,8 +13,6 @@
 # limitations under the License.
 """A RBLN worker class."""
 
-from typing import List, Optional, Tuple
-
 import torch
 import torch.distributed
 from vllm.config import VllmConfig
@@ -71,7 +69,7 @@ class RBLNOptimumWorker(LocalOrDistributedWorkerBase):
     def load_model(self):
         self.model_runner.load_model()
 
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(self) -> tuple[int, int]:
         """Determine the number of available KV blocks.
 
         Swapping is not yet supported, so always return num_cpu_blocks=0.
@@ -98,7 +96,7 @@ class RBLNOptimumWorker(LocalOrDistributedWorkerBase):
         return False
 
     @property
-    def kv_cache(self) -> Optional[List[List[torch.Tensor]]]:
+    def kv_cache(self) -> list[list[torch.Tensor]] | None:
         return None
 
     @torch.inference_mode()

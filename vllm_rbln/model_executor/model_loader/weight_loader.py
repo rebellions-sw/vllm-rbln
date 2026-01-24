@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from collections.abc import Iterable
-from typing import Set, Tuple
 
 import torch
 from vllm.logger import init_logger
@@ -44,7 +43,7 @@ Therefore, do not implement any logic here.
 """
 
 
-def load_llama_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
+def load_llama_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         (".qkv_proj", ".q_proj", "q"),
@@ -54,7 +53,7 @@ def load_llama_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set
         (".gate_up_proj", ".up_proj", 1),
     ]
     params_dict = dict(self.named_parameters())
-    loaded_params: Set[str] = set()
+    loaded_params: set[str] = set()
     for name, loaded_weight in weights:
         """
         [RBLN] Skips loading of layers greater than `num_hidden_layers`.
@@ -118,7 +117,7 @@ def load_llama_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set
     return loaded_params
 
 
-def load_qwen2_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
+def load_qwen2_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         ("qkv_proj", "q_proj", "q"),
@@ -128,7 +127,7 @@ def load_qwen2_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set
         ("gate_up_proj", "up_proj", 1),
     ]
     params_dict = dict(self.named_parameters(remove_duplicate=False))
-    loaded_params: Set[str] = set()
+    loaded_params: set[str] = set()
     for name, loaded_weight in weights:
         """
         [RBLN] Skips loading of layers greater than `num_hidden_layers`.
@@ -185,8 +184,8 @@ def load_qwen2_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set
 
 
 def load_qwen3moe_weights(
-    self, weights: Iterable[Tuple[str, torch.Tensor]]
-) -> Set[str]:
+    self, weights: Iterable[tuple[str, torch.Tensor]]
+) -> set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         ("qkv_proj", "q_proj", "q"),
@@ -206,7 +205,7 @@ def load_qwen3moe_weights(
     )
 
     params_dict = dict(self.named_parameters())
-    loaded_params: Set[str] = set()
+    loaded_params: set[str] = set()
     for name, loaded_weight in weights:
         """
         [RBLN] Skips loading of layers greater than `num_hidden_layers`.
@@ -301,8 +300,8 @@ def load_qwen3moe_weights(
 
 
 def load_qwen2moe_weights(
-    self, weights: Iterable[Tuple[str, torch.Tensor]]
-) -> Set[str]:
+    self, weights: Iterable[tuple[str, torch.Tensor]]
+) -> set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         ("qkv_proj", "q_proj", "q"),
@@ -322,7 +321,7 @@ def load_qwen2moe_weights(
     )
 
     params_dict = dict(self.named_parameters())
-    loaded_params: Set[str] = set()
+    loaded_params: set[str] = set()
     for name, loaded_weight in weights:
         """
         [RBLN] Skips loading of layers greater than `num_hidden_layers`.
@@ -417,8 +416,8 @@ def load_qwen2moe_weights(
 
 
 def load_deepseek_v2_weights(
-    self, weights: Iterable[Tuple[str, torch.Tensor]]
-) -> Set[str]:
+    self, weights: Iterable[tuple[str, torch.Tensor]]
+) -> set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         ("gate_up_proj", "gate_proj", 0),
@@ -435,7 +434,7 @@ def load_deepseek_v2_weights(
     )
 
     params_dict = dict(self.named_parameters())
-    loaded_params: Set[str] = set()
+    loaded_params: set[str] = set()
     for name, loaded_weight in weights:
         """
         [RBLN] Skips loading of layers greater than `num_hidden_layers`.
@@ -517,7 +516,7 @@ def load_deepseek_v2_weights(
     return loaded_params
 
 
-def load_llama4_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
+def load_llama4_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
     stacked_params_mapping = [
         # (param_name, shard_name, shard_id)
         (".qkv_proj", ".q_proj", "q"),
@@ -540,7 +539,7 @@ def load_llama4_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Se
         num_experts=1,
     )
     params_dict = dict(self.named_parameters())
-    loaded_params: Set[str] = set()
+    loaded_params: set[str] = set()
     for name, loaded_weight in weights:
         """
         [RBLN] Skips loading of layers greater than `num_hidden_layers`.

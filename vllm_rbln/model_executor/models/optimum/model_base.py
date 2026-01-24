@@ -14,21 +14,21 @@
 import math
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-import optimum.rbln
 import torch
 import torch.nn as nn
 import vllm.envs as envs
-from optimum.rbln.transformers.models.decoderonly import (
-    decoderonly_runtime_utils as runtime_utils,
-)
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 
+import optimum.rbln
+from optimum.rbln.transformers.models.decoderonly import (
+    decoderonly_runtime_utils as runtime_utils,
+)
 from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 
@@ -125,7 +125,7 @@ class RBLNOptimumModelBase(nn.Module):
     def _resolve_kvcache_num_blocks(self) -> int:
         """Prefer model-provided KV-cache block count;
         else fall back to config."""
-        value: Optional[Any] = None
+        value: Any | None = None
 
         getter = getattr(self.model, "get_kvcache_num_blocks", None)
         if callable(getter):
@@ -215,9 +215,9 @@ class RBLNOptimumDecoderMixin:
         input_ids: torch.Tensor,
         positions: torch.Tensor,
         block_tables: torch.Tensor,
-        input_block_ids: Optional[torch.Tensor] = None,
-        padded_batch_size: Optional[int] = None,
-        dummy_block: Optional[int] = None,
+        input_block_ids: torch.Tensor | None = None,
+        padded_batch_size: int | None = None,
+        dummy_block: int | None = None,
     ):
         assert input_ids.shape[1] == 1
         if input_block_ids is None and padded_batch_size is None:
@@ -271,10 +271,10 @@ class RBLNOptimumDecoderMixin:
         self,
         is_prompt: bool,
         block_tables: torch.Tensor,
-        input_ids: Optional[torch.Tensor] = None,
-        cache_position: Optional[torch.Tensor] = None,
-        input_block_ids: Optional[list[int]] = None,
-        dummy_block: Optional[int] = None,
+        input_ids: torch.Tensor | None = None,
+        cache_position: torch.Tensor | None = None,
+        input_block_ids: list[int] | None = None,
+        dummy_block: int | None = None,
     ):
         padded_batch_size = None
         # 1. Set the type
@@ -371,7 +371,7 @@ class RBLNOptimumDecoderMixin:
         self,
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> Optional[SamplerOutput]:
+    ) -> SamplerOutput | None:
         # Only for V0
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens

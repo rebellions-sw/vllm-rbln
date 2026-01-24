@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple
 
 import torch
 from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
@@ -60,8 +59,8 @@ def rope_forward_oot(
     positions: torch.Tensor,
     query: torch.Tensor,
     key: torch.Tensor,
-    offsets: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    offsets: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Args:
         positions: [batch_size, seq_len]

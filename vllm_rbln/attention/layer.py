@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -41,17 +40,17 @@ def __custom_init__(
     num_heads: int,
     head_size: int,
     scale: float,
-    num_kv_heads: Optional[int] = None,
-    alibi_slopes: Optional[List[float]] = None,
-    cache_config: Optional[CacheConfig] = None,
-    quant_config: Optional[QuantizationConfig] = None,
-    logits_soft_cap: Optional[float] = None,
-    per_layer_sliding_window: Optional[int] = None,
+    num_kv_heads: int | None = None,
+    alibi_slopes: list[float] | None = None,
+    cache_config: CacheConfig | None = None,
+    quant_config: QuantizationConfig | None = None,
+    logits_soft_cap: float | None = None,
+    per_layer_sliding_window: int | None = None,
     use_mla: bool = False,
     prefix: str = "",
     attn_type: str = AttentionType.DECODER,
-    kv_sharing_target_layer_name: Optional[str] = None,
-    attn_backend: Optional[type[AttentionBackend]] = None,
+    kv_sharing_target_layer_name: str | None = None,
+    attn_backend: type[AttentionBackend] | None = None,
     **extra_impl_args,
 ) -> None:
     """
@@ -108,7 +107,7 @@ def __custom_init__(
 
     # The output scale on host memory. This should be the input scale of
     # the quant op after this attention layer.
-    self._o_scale_float: Optional[float] = None  # type: ignore[misc]
+    self._o_scale_float: float | None = None  # type: ignore[misc]
 
     self.use_mla = use_mla
     self.num_heads = num_heads
@@ -222,7 +221,7 @@ def custom_attention_forward(
     # For some alternate attention backends like MLA the attention output
     # shape does not match the query shape, so we optionally let the model
     # definition specify the output tensor shape.
-    output_shape: Optional[torch.Size] = None,
+    output_shape: torch.Size | None = None,
 ) -> torch.Tensor:
     """
     The KV cache is stored inside this class and is accessed via

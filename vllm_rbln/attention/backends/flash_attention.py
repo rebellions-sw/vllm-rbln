@@ -14,7 +14,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any
 
 import torch
 from vllm.attention.backends.abstract import (
@@ -290,7 +290,7 @@ def _(
 
 class RBLNAttentionBackend(AttentionBackend):
     @staticmethod
-    def get_supported_head_sizes() -> List[int]:
+    def get_supported_head_sizes() -> list[int]:
         return [32, 64, 80, 96, 128, 160, 192, 224, 256]
 
     @staticmethod
@@ -298,19 +298,19 @@ class RBLNAttentionBackend(AttentionBackend):
         return "RBLN_ATTN"
 
     @staticmethod
-    def get_impl_cls() -> Type["RBLNAttentionImpl"]:
+    def get_impl_cls() -> type["RBLNAttentionImpl"]:
         return RBLNAttentionImpl
 
     @staticmethod
-    def get_metadata_cls() -> Type["AttentionMetadata"]:
+    def get_metadata_cls() -> type["AttentionMetadata"]:
         return RBLNAttentionMetadata
 
     @staticmethod
-    def get_builder_cls() -> Type["RBLNAttentionMetadataBuilder"]:
+    def get_builder_cls() -> type["RBLNAttentionMetadataBuilder"]:
         return RBLNAttentionMetadataBuilder
 
     @staticmethod
-    def get_state_cls() -> Type["CommonAttentionState"]:
+    def get_state_cls() -> type["CommonAttentionState"]:
         return CommonAttentionState
 
     @staticmethod
@@ -319,7 +319,7 @@ class RBLNAttentionBackend(AttentionBackend):
         block_size: int,
         num_kv_heads: int,
         head_size: int,
-    ) -> Tuple[int, ...]:
+    ) -> tuple[int, ...]:
         """kv cache shape
         # B - num_blocks == num_partitions
         # S - block_size == partition_size
@@ -346,22 +346,22 @@ class RBLNAttentionBackend(AttentionBackend):
     def swap_blocks(
         src_kv_cache: torch.Tensor,
         dst_kv_cache: torch.Tensor,
-        src_to_dst: Dict[int, int],
+        src_to_dst: dict[int, int],
     ) -> None:
         raise RuntimeError("swap_blocks is not used for the RBLN backend.")
 
     @staticmethod
     def copy_blocks(
-        kv_caches: List[torch.Tensor],
-        src_to_dists: Dict[int, List[int]],
+        kv_caches: list[torch.Tensor],
+        src_to_dists: dict[int, list[int]],
     ) -> None:
         raise RuntimeError("swap_blocks is not used for the RBLN backend.")
 
 
 @dataclass
 class RBLNAttentionMetadata(AttentionMetadata, PagedAttentionMetadata):
-    attn_masks: Optional[torch.Tensor]
-    kv_caches: Optional[List[torch.Tensor]]
+    attn_masks: torch.Tensor | None
+    kv_caches: list[torch.Tensor] | None
 
 
 class RBLNAttentionMetadataBuilder(AttentionMetadataBuilder[RBLNAttentionMetadata]):
@@ -381,8 +381,8 @@ class RBLNAttentionMetadataBuilder(AttentionMetadataBuilder[RBLNAttentionMetadat
 
     def build(
         self,
-        seq_lens: List[int],
-        query_lens: List[int],
+        seq_lens: list[int],
+        query_lens: list[int],
         input_block_ids: torch.Tensor,
         batch_size: int,
     ) -> RBLNAttentionMetadata:
@@ -492,13 +492,13 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         head_size: int,
         scale: float,
         num_kv_heads: int,
-        alibi_slopes: Optional[List[float]],
-        sliding_window: Optional[int],
+        alibi_slopes: list[float] | None,
+        sliding_window: int | None,
         kv_cache_dtype: str,
-        blocksparse_params: Optional[Dict[str, Any]] = None,
-        logits_soft_cap: Optional[float] = None,
+        blocksparse_params: dict[str, Any] | None = None,
+        logits_soft_cap: float | None = None,
         attn_type: str = AttentionType.DECODER,
-        kv_sharing_target_layer_name: Optional[str] = None,
+        kv_sharing_target_layer_name: str | None = None,
         use_irope: bool = False,
     ) -> None:
         self.enforce_eager = get_current_vllm_config().model_config.enforce_eager
@@ -538,7 +538,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         kv_cache: torch.Tensor,
         num_kv_heads: int,
         head_size: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         key_cache = kv_cache[0]
         value_cache = kv_cache[1]
         return key_cache, value_cache
@@ -551,7 +551,7 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: RBLNAttentionMetadata,
-        output: Optional[torch.Tensor] = None,
+        output: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Forward pass with xFormers and PagedAttention.
 

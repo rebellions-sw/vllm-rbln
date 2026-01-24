@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import torch
 from vllm.distributed import (
@@ -39,10 +38,10 @@ def __vocab_parallel_embedding__init__(
     self,
     num_embeddings: int,
     embedding_dim: int,
-    params_dtype: Optional[torch.dtype] = None,
-    org_num_embeddings: Optional[int] = None,
+    params_dtype: torch.dtype | None = None,
+    org_num_embeddings: int | None = None,
     padding_size: int = DEFAULT_VOCAB_PADDING_SIZE,
-    quant_config: Optional[QuantizationConfig] = None,
+    quant_config: QuantizationConfig | None = None,
     prefix: str = "",
 ):
     torch.nn.Module.__init__(self)

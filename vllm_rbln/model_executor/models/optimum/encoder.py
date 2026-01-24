@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -44,7 +43,7 @@ class RBLNClassifierPooler(Pooler):
 
     @staticmethod
     def _build_output(
-        all_data: Union[torch.Tensor, list[torch.Tensor]],
+        all_data: torch.Tensor | list[torch.Tensor],
     ) -> PoolerOutput:
         """Wrap tensor data into vLLM's PoolerOutput format."""
         all_outputs = [PoolingSequenceGroupOutput(data) for data in all_data]
@@ -52,7 +51,7 @@ class RBLNClassifierPooler(Pooler):
 
     def forward(
         self,
-        hidden_states: Union[torch.Tensor, list[torch.Tensor]],
+        hidden_states: torch.Tensor | list[torch.Tensor],
         pooling_metadata: PoolingMetadata,
     ) -> PoolerOutput:
         # RBLN models return already pooled/processed states for classification
@@ -105,8 +104,8 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         target_batch_size = self.batch_size
 
         def pad_if_needed(
-            tensor: Optional[torch.Tensor],
-        ) -> Optional[torch.Tensor]:
+            tensor: torch.Tensor | None,
+        ) -> torch.Tensor | None:
             if tensor is None:
                 return None
 

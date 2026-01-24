@@ -14,7 +14,6 @@
 """A RBLN util class."""
 
 import math
-from typing import Optional
 
 from vllm.config import ModelConfig, ParallelConfig
 
@@ -25,10 +24,10 @@ def get_maximum_num_blocks(
     model_config: ModelConfig,
     parallel_config: ParallelConfig,
     kvcache_block_size: int,
-    nbits_per_param: Optional[int] = None,
-    n_model_params: Optional[int] = None,
-    kernel_size: Optional[int] = None,
-    buffer: Optional[int] = None,
+    nbits_per_param: int | None = None,
+    n_model_params: int | None = None,
+    kernel_size: int | None = None,
+    buffer: int | None = None,
     num_runtimes: int = 2,
 ) -> int:
     # We are finding max_n_blocks(x) that satisfies the following equation:

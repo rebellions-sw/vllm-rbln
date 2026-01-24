@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -70,7 +70,7 @@ class RblnPlatform(Platform):
         return rebel.get_npu_name(device_id)
 
     @classmethod
-    def is_async_output_supported(cls, enforce_eager: Optional[bool]) -> bool:
+    def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         """
         Check if the current platform supports async output.
         """
@@ -98,7 +98,7 @@ class RblnPlatform(Platform):
 
     @classmethod
     def pre_register_and_update(
-        cls, parser: Optional[FlexibleArgumentParser] = None
+        cls, parser: FlexibleArgumentParser | None = None
     ) -> None:
         if parser is None:
             return
@@ -294,7 +294,7 @@ class RblnPlatform(Platform):
         selected_backend: _Backend,
         head_size: int,
         dtype: torch.dtype,
-        kv_cache_dtype: Optional[str],
+        kv_cache_dtype: str | None,
         block_size: int,
         use_v1: bool,
         use_mla: bool,

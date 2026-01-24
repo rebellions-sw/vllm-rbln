@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import vllm.envs as envs
@@ -145,7 +145,7 @@ class RBLNOptimumWhisperForConditionalGeneration(
             lm_logits = lm_logits[valid_block_ids]
         return lm_logits
 
-    def _parse_and_validate_audio_input(self, **kwargs: Any) -> Optional[torch.Tensor]:
+    def _parse_and_validate_audio_input(self, **kwargs: Any) -> torch.Tensor | None:
         input_features = kwargs.pop("input_features", None)
         if input_features is not None:
             input_features = input_features.squeeze(0)

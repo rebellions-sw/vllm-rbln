@@ -15,7 +15,7 @@
 import random
 import time
 from collections import deque
-from typing import Callable, Deque, List, Optional, Set, Tuple
+from collections.abc import Callable
 
 from vllm.config import CacheConfig, SchedulerConfig
 from vllm.config.lora import LoRAConfig
@@ -42,9 +42,9 @@ class RBLNOptimumScheduler(Scheduler):
         self,
         scheduler_config: SchedulerConfig,
         cache_config: CacheConfig,
-        lora_config: Optional[LoRAConfig],
+        lora_config: LoRAConfig | None,
         pipeline_parallel_size: int = 1,
-        output_proc_callback: Optional[Callable] = None,
+        output_proc_callback: Callable | None = None,
     ) -> None:
         super().__init__(
             scheduler_config,
@@ -87,9 +87,9 @@ class RBLNOptimumScheduler(Scheduler):
     def _schedule_prefills(
         self,
         budget: SchedulingBudget,
-        curr_loras: Optional[Set[int]],
+        curr_loras: set[int] | None,
         enable_chunking: bool = False,
-        partial_prefill_metadata: Optional[PartialPrefillMetadata] = None,
+        partial_prefill_metadata: PartialPrefillMetadata | None = None,
     ) -> SchedulerPrefillOutputs:
         """Schedule sequence groups that are in prefill stage.
 
@@ -125,12 +125,12 @@ class RBLNOptimumScheduler(Scheduler):
                     is_prefill=True, enable_chunking=enable_chunking
                 ),
             )
-        ignored_seq_groups: List[SequenceGroup] = []
-        seq_groups: List[ScheduledSequenceGroup] = []
+        ignored_seq_groups: list[SequenceGroup] = []
+        seq_groups: list[ScheduledSequenceGroup] = []
 
         waiting_queue = self.waiting
 
-        leftover_waiting_sequences: Deque[SequenceGroup] = deque()
+        leftover_waiting_sequences: deque[SequenceGroup] = deque()
         while self._passed_delay(time.time()) and waiting_queue:
             seq_group = waiting_queue[0]
 
@@ -301,7 +301,7 @@ class RBLNOptimumScheduler(Scheduler):
     def _preempt(
         self,
         seq_group: SequenceGroup,
-        blocks_to_swap_out: List[Tuple[int, int]],
+        blocks_to_swap_out: list[tuple[int, int]],
     ) -> PreemptionMode:
         # If preemption mode is not specified, we determine the mode as follows:
         # We use recomputation by default since it incurs lower overhead than

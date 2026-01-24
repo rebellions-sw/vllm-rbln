@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -112,23 +112,23 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
 
     def _prepare_prompt(
         self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-    ) -> Tuple[
+        seq_group_metadata_list: list[SequenceGroupMetadata],
+    ) -> tuple[
         torch.Tensor,
         torch.Tensor,
-        List[int],
+        list[int],
         BatchedTensorInputs,
         torch.Tensor,
-        List[int],
+        list[int],
     ]:
         assert len(seq_group_metadata_list) > 0
-        input_tokens: List[List[int]] = []
-        input_positions: List[List[int]] = []
+        input_tokens: list[list[int]] = []
+        input_positions: list[list[int]] = []
 
-        seq_lens: List[int] = []
-        multi_modal_inputs_list: List[MultiModalKwargs] = []
-        block_tables: List[List[int]] = []
-        running_requests_ids: List[int] = []
+        seq_lens: list[int] = []
+        multi_modal_inputs_list: list[MultiModalKwargs] = []
+        block_tables: list[list[int]] = []
+        running_requests_ids: list[int] = []
 
         for seq_group_metadata in seq_group_metadata_list:
             assert seq_group_metadata.is_prompt
@@ -218,13 +218,13 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
 
     def _prepare_decode(
         self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[int]]:
+        seq_group_metadata_list: list[SequenceGroupMetadata],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int]]:
         assert len(seq_group_metadata_list) > 0
-        input_tokens: List[List[int]] = []
-        input_positions: List[List[int]] = []
-        block_tables: List[List[int]] = []
-        running_requests_ids: List[int] = []
+        input_tokens: list[list[int]] = []
+        input_positions: list[list[int]] = []
+        block_tables: list[list[int]] = []
+        running_requests_ids: list[int] = []
 
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
@@ -283,13 +283,13 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         return input_tokens, input_positions, block_tables, running_requests_ids
 
     def make_model_input_from_broadcasted_tensor_dict(
-        self, tensor_dict: Dict[str, Any]
+        self, tensor_dict: dict[str, Any]
     ) -> ModelInputForRBLN:
         return ModelInputForRBLN.from_broadcasted_tensor_dict(tensor_dict)
 
     def _compute_multi_modal_input(
         self, positions: list[int], seq_group_metadata: SequenceGroupMetadata
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """If multi-modal data is given, add it to the input."""
         mm_kwargs, _ = MultiModalPlaceholderMap.from_seq_group(
             seq_group_metadata,
@@ -301,9 +301,9 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
 
     def prepare_model_input(
         self,
-        seq_group_metadata_list: List[SequenceGroupMetadata],
+        seq_group_metadata_list: list[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None,
+        finished_requests_ids: list[str] | None = None,
     ) -> ModelInputForRBLN:
         multi_modal_kwargs = None
         # NOTE: We assume that all sequences in the group are all prompts or
@@ -374,10 +374,10 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     def execute_model(
         self,
         model_input: ModelInputForRBLN,
-        kv_caches: Optional[List[torch.Tensor]] = None,
-        intermediate_tensors: Optional[IntermediateTensors] = None,
+        kv_caches: list[torch.Tensor] | None = None,
+        intermediate_tensors: IntermediateTensors | None = None,
         num_steps: int = 1,
-    ) -> Optional[SamplerOutput]:
+    ) -> SamplerOutput | None:
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
@@ -406,7 +406,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
         return self.model_config.get_vocab_size()
 
     def set_active_loras(
-        self, lora_requests: List[LoRARequest], lora_mapping: LoRAMapping
+        self, lora_requests: list[LoRARequest], lora_mapping: LoRAMapping
     ) -> None:
         is_prefill = lora_mapping.is_prefill
         max_num_reqs = self.vllm_config.scheduler_config.max_num_seqs
@@ -429,7 +429,7 @@ class RBLNOptimumModelRunner(ModelRunnerBase[ModelInputForRBLN]):
     def pin_lora(self, lora_id: int) -> bool:
         raise RuntimeError("It is not required in vLLM RBLN.")
 
-    def list_loras(self) -> Set[int]:
+    def list_loras(self) -> set[int]:
         rbln_cfg = getattr(self.model, "rbln_model_config", None)
         lora_cfg = getattr(rbln_cfg, "lora_config", None)
         if lora_cfg is None:

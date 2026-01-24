@@ -82,13 +82,6 @@ where = ["."]
 exclude = ["benchmarks", "csrc", "docs", "examples", "tests*"]
 namespaces = false
 
-[tool.ruff.lint.per-file-ignores]
-"vllm_rbln/attention/**/*.py" = ["ALL"]
-"vllm_rbln/core/**/*.py" = ["ALL"]
-"vllm_rbln/model_executor/**/*.py" = ["ALL"]
-"vllm_rbln/worker/**/*.py" = ["ALL"]
-"vllm_rbln/platform.py" = ["ALL"]
-
 [tool.ruff.lint]
 select = [
     # pycodestyle

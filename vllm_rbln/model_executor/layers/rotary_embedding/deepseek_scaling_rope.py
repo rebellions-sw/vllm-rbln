@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple
 
 import torch
 from vllm.model_executor.layers.rotary_embedding.common import (
@@ -29,8 +28,8 @@ def deepseek_scaling_rope_forward(
     positions: torch.Tensor,
     query: torch.Tensor,
     key: torch.Tensor,
-    offsets: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    offsets: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """PyTorch-native implementation equivalent to forward()."""
     if offsets is not None:
         positions = positions + offsets

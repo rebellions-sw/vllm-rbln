@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import vllm.envs as envs
@@ -104,9 +104,7 @@ class RBLNOptimumBlip2ForConditionalGeneration(
             logits = logits[:request_nums]
         return logits
 
-    def _parse_and_validate_image_input(
-        self, **kwargs: Any
-    ) -> Optional[Blip2ImageInputs]:
+    def _parse_and_validate_image_input(self, **kwargs: Any) -> Blip2ImageInputs | None:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         config = self.vllm_config.model_config.hf_config

@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Generic, List, TypeVar
+from typing import Any, Generic, TypeVar
 
 import torch
 from vllm.logger import init_logger
@@ -56,7 +56,7 @@ class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
 
     def preprocess(
         self,
-        local_block_table_ids: List[int],
+        local_block_table_ids: list[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,

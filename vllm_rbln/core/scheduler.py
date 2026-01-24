@@ -16,7 +16,6 @@ import random
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, List, Optional, Set, Tuple
 
 from vllm.config import SchedulerConfig
 from vllm.core.interfaces import AllocStatus
@@ -43,9 +42,9 @@ class RBLNScheduler(Scheduler):
     def _schedule_running(
         self,
         budget: SchedulingBudget,
-        curr_loras: Optional[Set[int]],
+        curr_loras: set[int] | None,
         enable_chunking: bool = False,
-        partial_prefill_metadata: Optional[PartialPrefillMetadata] = None,
+        partial_prefill_metadata: PartialPrefillMetadata | None = None,
     ) -> SchedulerRunningOutputs:
         """Schedule sequence groups that are running.
 
@@ -84,13 +83,13 @@ class RBLNScheduler(Scheduler):
         ret.prefill_seq_groups_list.clear()
 
         # Blocks that need to be swapped or copied before model execution.
-        blocks_to_swap_out: List[Tuple[int, int]] = ret.blocks_to_swap_out
-        blocks_to_copy: List[Tuple[int, int]] = ret.blocks_to_copy
+        blocks_to_swap_out: list[tuple[int, int]] = ret.blocks_to_swap_out
+        blocks_to_copy: list[tuple[int, int]] = ret.blocks_to_copy
 
-        decode_seq_groups: List[ScheduledSequenceGroup] = ret.decode_seq_groups
-        prefill_seq_groups: List[ScheduledSequenceGroup] = ret.prefill_seq_groups
-        preempted: List[SequenceGroup] = ret.preempted
-        swapped_out: List[SequenceGroup] = ret.swapped_out
+        decode_seq_groups: list[ScheduledSequenceGroup] = ret.decode_seq_groups
+        prefill_seq_groups: list[ScheduledSequenceGroup] = ret.prefill_seq_groups
+        preempted: list[SequenceGroup] = ret.preempted
+        swapped_out: list[SequenceGroup] = ret.swapped_out
 
         running_queue = self.running
         assert len(self._async_stopped) == 0
@@ -222,9 +221,9 @@ class RBLNScheduler(Scheduler):
     def _schedule_prefills(
         self,
         budget: SchedulingBudget,
-        curr_loras: Optional[Set[int]],
+        curr_loras: set[int] | None,
         enable_chunking: bool = False,
-        partial_prefill_metadata: Optional[PartialPrefillMetadata] = None,
+        partial_prefill_metadata: PartialPrefillMetadata | None = None,
     ) -> SchedulerPrefillOutputs:
         """Schedule sequence groups that are in prefill stage.
 
@@ -260,12 +259,12 @@ class RBLNScheduler(Scheduler):
                     is_prefill=True, enable_chunking=enable_chunking
                 ),
             )
-        ignored_seq_groups: List[SequenceGroup] = []
-        seq_groups: List[ScheduledSequenceGroup] = []
+        ignored_seq_groups: list[SequenceGroup] = []
+        seq_groups: list[ScheduledSequenceGroup] = []
 
         waiting_queue = self.waiting
 
-        leftover_waiting_sequences: Deque[SequenceGroup] = deque()
+        leftover_waiting_sequences: deque[SequenceGroup] = deque()
         while self._passed_delay(time.time()) and waiting_queue:
             seq_group = waiting_queue[0]
 
@@ -449,7 +448,7 @@ class RBLNScheduler(Scheduler):
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
         )
-        curr_loras: Set[int] = set()
+        curr_loras: set[int] = set()
 
         prefills = SchedulerPrefillOutputs.create_empty()
         running_scheduled = SchedulerRunningOutputs.create_empty()
@@ -565,8 +564,8 @@ class RBLNScheduler(Scheduler):
         )
 
     def _split_prefills(
-        self, scheduled_prefill_seqs: List[ScheduledSequenceGroup]
-    ) -> Tuple[List[SequenceGroup], List[SequenceGroup]]:
+        self, scheduled_prefill_seqs: list[ScheduledSequenceGroup]
+    ) -> tuple[list[SequenceGroup], list[SequenceGroup]]:
         finishing = [
             s.seq_group
             for s in scheduled_prefill_seqs
@@ -620,8 +619,8 @@ class RBLNPartialPrefillMetadata(PartialPrefillMetadata):
     @classmethod
     def from_queues(
         cls,
-        running: Deque[SequenceGroup],
-        waiting: Deque[SequenceGroup],
+        running: deque[SequenceGroup],
+        waiting: deque[SequenceGroup],
         scheduler_config: SchedulerConfig,
     ) -> "RBLNPartialPrefillMetadata":
         """Create a PartialPrefillMetadata object from the current state of

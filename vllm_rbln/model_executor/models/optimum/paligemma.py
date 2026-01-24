@@ -11,11 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import vllm.envs as envs
-from optimum.rbln.configuration_utils import RBLNModelConfig
 from vllm.config import VllmConfig
 from vllm.model_executor.models.paligemma import (
     PaliGemmaImageEmbeddingInputs,
@@ -24,6 +23,7 @@ from vllm.model_executor.models.paligemma import (
 )
 from vllm.model_executor.models.utils import flatten_bn
 
+from optimum.rbln.configuration_utils import RBLNModelConfig
 from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -123,7 +123,7 @@ class RBLNOptimumPaliGemmaForConditionalGeneration(
 
     def _parse_and_validate_image_input(
         self, **kwargs: Any
-    ) -> Optional[PaliGemmaImageInputs]:
+    ) -> PaliGemmaImageInputs | None:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         config = self.vllm_config.model_config.hf_config

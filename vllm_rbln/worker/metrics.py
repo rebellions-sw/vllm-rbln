@@ -15,7 +15,6 @@
 import atexit
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -123,7 +122,7 @@ class PerformanceTracker:
             atexit.register(self.print_final_stats)
             self._registered_cleanup = True
 
-    def check_dummy_request(self, request_ids: Optional[list[str]]) -> bool:
+    def check_dummy_request(self, request_ids: list[str] | None) -> bool:
         if request_ids:
             request_id = request_ids[0]
             if request_id.startswith("dummy_request_"):
@@ -134,7 +133,7 @@ class PerformanceTracker:
         self,
         latency: float,
         token_count: int,
-        request_ids: Optional[list[str]] = None,
+        request_ids: list[str] | None = None,
     ):
         """Record prefill step metrics."""
         if self.check_dummy_request(request_ids):
@@ -156,7 +155,7 @@ class PerformanceTracker:
         self,
         latency: float,
         token_count: int,
-        request_ids: Optional[list[str]] = None,
+        request_ids: list[str] | None = None,
     ):
         """Record decode step metrics."""
         if self.check_dummy_request(request_ids):

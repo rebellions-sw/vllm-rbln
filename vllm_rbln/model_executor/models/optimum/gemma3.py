@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import vllm.envs as envs
@@ -264,7 +264,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
 
     def _parse_and_validate_image_input(
         self, **kwargs: Any
-    ) -> Optional[Gemma3ImageInputs]:
+    ) -> Gemma3ImageInputs | None:
         pixel_values = kwargs.pop("pixel_values", None)
         num_crops = kwargs.pop("num_crops", None)
         image_embeds = kwargs.pop("image_embeds", None)

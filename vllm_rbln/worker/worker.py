@@ -15,7 +15,6 @@
 
 import os
 import time
-from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed
@@ -80,7 +79,7 @@ class RBLNCacheEngine:
         model_config: ModelConfig,
         parallel_config: ParallelConfig,
         device_config: DeviceConfig,
-        cpu_cache: Optional[list[torch.Tensor]] = None,
+        cpu_cache: list[torch.Tensor] | None = None,
     ) -> None:
         assert "rbln" in current_platform.get_device_name().lower()
         self.cache_config = cache_config
@@ -135,12 +134,12 @@ class RBLNCacheEngine:
     def _allocate_kv_cache(
         self,
         num_blocks: int,
-    ) -> List[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         """Allocates KV cache on RBLN."""
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_heads, self.head_size
         )
-        kv_cache: List[torch.Tensor] = []
+        kv_cache: list[torch.Tensor] = []
         logger.info("attention backend get_kv_cache_shape = %s", kv_cache_shape)
         logger.info("allocate kv cache shape = %s", kv_cache_shape)
         kv_cache_size = 1
@@ -162,13 +161,13 @@ class RBLNCacheEngine:
 
         return kv_cache
 
-    def swap_in(self, src_to_dst: Dict[int, int]) -> None:
+    def swap_in(self, src_to_dst: dict[int, int]) -> None:
         raise NotImplementedError("Swap is not supported in RBLNCacheEngine.")
 
-    def swap_out(self, src_to_dst: Dict[int, int]) -> None:
+    def swap_out(self, src_to_dst: dict[int, int]) -> None:
         raise NotImplementedError("Swap is not supported in RBLNCacheEngine.")
 
-    def copy(self, src_to_dsts: Dict[int, List[int]]) -> None:
+    def copy(self, src_to_dsts: dict[int, list[int]]) -> None:
         logger.info("copy kv cache")
         self.attn_backend.copy_blocks(self.cpu_cache, src_to_dsts)
 
@@ -251,10 +250,10 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
-        self.cache_engine: List[RBLNCacheEngine]
+        self.cache_engine: list[RBLNCacheEngine]
 
         # TODO : cpu_cache will be replaced with dev cache
-        self.cpu_cache: Optional[List[List[torch.Tensor]]] = None
+        self.cpu_cache: list[list[torch.Tensor]] | None = None
 
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
@@ -277,7 +276,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             self.profiler = None
 
         self.is_dummy_execute_phase = False
-        self.dummy_execute_model_req: Optional[ExecuteModelRequest] = None
+        self.dummy_execute_model_req: ExecuteModelRequest | None = None
 
     def start_profile(self):
         if self.profiler is None:
@@ -343,7 +342,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         )
 
     @torch.inference_mode()
-    def determine_num_available_blocks(self) -> Tuple[int, int]:
+    def determine_num_available_blocks(self) -> tuple[int, int]:
         """Determine the number of available KV blocks.
 
         Swapping is not yet supported, so always return num_cpu_blocks=0.
@@ -477,15 +476,15 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
     def _prepare_dummy_input(
         self, max_num_batched_tokens: int = 1, max_num_seqs: int = 1
-    ) -> Tuple[BroadcastableModelInput, BroadcastableModelInput]:
+    ) -> tuple[BroadcastableModelInput, BroadcastableModelInput]:
         prefill_req = None
         decode_req = None
         if self.is_driver_worker:
             num_blocks = self.cache_config.num_gpu_blocks
             sampling_params = SamplingParams()
 
-            prefill_seqs: List[SequenceGroupMetadata] = []
-            decode_seqs: List[SequenceGroupMetadata] = []
+            prefill_seqs: list[SequenceGroupMetadata] = []
+            decode_seqs: list[SequenceGroupMetadata] = []
 
             for group_id in range(max_num_seqs):
                 seq_len = max_num_batched_tokens
@@ -581,7 +580,7 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         return self.parallel_config.tensor_parallel_size > 1
 
     @property
-    def kv_cache(self) -> Optional[List[List[torch.Tensor]]]:
+    def kv_cache(self) -> list[list[torch.Tensor]] | None:
         """Get KV cache"""
         # TODO : cpu_cache will be replaced with dev_cache
         return self.cpu_cache
@@ -606,8 +605,8 @@ class RBLNWorker(LoRANotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
     def execute_model(
         self,
-        execute_model_req: Optional[ExecuteModelRequest] = None,
-    ) -> Optional[List[SamplerOutput]]:
+        execute_model_req: ExecuteModelRequest | None = None,
+    ) -> list[SamplerOutput] | None:
         """Executes at least one model step on the given sequences, unless no
         sequences are provided."""
         start_time = time.perf_counter()

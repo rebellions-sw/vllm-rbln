@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import torch
 from vllm.distributed import (
@@ -31,8 +30,8 @@ def logits_processor_get_logits(
     self,
     hidden_states: torch.Tensor,
     lm_head: VocabParallelEmbedding,
-    embedding_bias: Optional[torch.Tensor],
-) -> Optional[torch.Tensor]:
+    embedding_bias: torch.Tensor | None,
+) -> torch.Tensor | None:
     # Get the logits for the next tokens.
     logits = lm_head.quant_method.apply(lm_head, hidden_states, bias=embedding_bias)
     return logits

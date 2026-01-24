@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
 import vllm.envs as envs
@@ -60,7 +60,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
             decoder_batch_sizes=self.model.rbln_config.decoder_batch_sizes,
             num_blocks=self.kv_block_adapter._estimated_num_blocks(),
         )
-        self.rope_deltas: Dict = dict()
+        self.rope_deltas: dict = dict()
 
     def preprocess_prefill(self, input_ids, attention_mask, image_input, video_input):
         """
@@ -131,7 +131,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         self,
         pixel_values_videos: torch.Tensor,
         video_grid_thw: torch.Tensor,
-        second_per_grid_ts: Optional[torch.Tensor],
+        second_per_grid_ts: torch.Tensor | None,
     ) -> Any:
         """Create video pixel inputs based on model type"""
         pass
@@ -268,7 +268,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
 
         raise RuntimeError(f"Unhandled case for input '{name}'")
 
-    def _parse_and_validate_image_input(self, **kwargs: Any) -> Optional[Any]:
+    def _parse_and_validate_image_input(self, **kwargs: Any) -> Any | None:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         image_grid_thw = kwargs.pop("image_grid_thw", None)
@@ -303,7 +303,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         # fallback return if both are None
         return None
 
-    def _parse_and_validate_video_input(self, **kwargs: object) -> Optional[Any]:
+    def _parse_and_validate_video_input(self, **kwargs: object) -> Any | None:
         pixel_values_videos = kwargs.pop("pixel_values_videos", None)
         video_embeds = kwargs.pop("video_embeds", None)
         video_grid_thw = kwargs.pop("video_grid_thw", None)
@@ -370,7 +370,7 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
         self,
         pixel_values_videos: torch.Tensor,
         video_grid_thw: torch.Tensor,
-        second_per_grid_ts=Optional[torch.Tensor],
+        second_per_grid_ts: torch.Tensor | None = None,
     ):
         if second_per_grid_ts is None:
             raise ValueError(
@@ -424,7 +424,7 @@ class RBLNOptimumQwen2VLForConditionalGeneration(
         self,
         pixel_values_videos: torch.Tensor,
         video_grid_thw: torch.Tensor,
-        second_per_grid_ts: Optional[torch.Tensor],
+        second_per_grid_ts: torch.Tensor | None,
     ):
         # NOTE Qwen2-VL doesn't use second_per_grid_ts
         return Qwen2VLVideoPixelInputs(

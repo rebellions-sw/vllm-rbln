@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import os
-from typing import Optional
 
 import torch
 from compressed_tensors.compressors.quantized_compressors import (
@@ -39,7 +38,7 @@ class RBLNInt8UnpackedLinearKernel(MPLinearKernel):
         raise NotImplementedError
 
     @classmethod
-    def can_implement(cls, c: MPLinearLayerConfig) -> tuple[bool, Optional[str]]:
+    def can_implement(cls, c: MPLinearLayerConfig) -> tuple[bool, str | None]:
         if c.weight_type not in (scalar_types.uint4b8, scalar_types.uint8b128):
             return False, f"Weight type {c.weight_type} not supported"
         if c.zero_points:
@@ -83,7 +82,7 @@ class RBLNInt8UnpackedLinearKernel(MPLinearKernel):
         self,
         layer: torch.nn.Module,
         x: torch.Tensor,
-        bias: Optional[torch.Tensor] = None,
+        bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         in_features, out_features = self.config.full_weight_shape
 

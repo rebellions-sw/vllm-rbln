@@ -15,8 +15,6 @@
 # NOTE: This module should be imported before creating model config,
 # because the function we're patching is imported at that moment.
 
-from typing import Optional
-
 import vllm.envs as envs
 import vllm.model_executor.layers.quantization.kernels.mixed_precision as mp
 from vllm.model_executor.layers.quantization.kernels.mixed_precision.MPLinearKernel import (  # noqa: E501
@@ -37,7 +35,7 @@ _POSSIBLE_KERNELS: list[type[MPLinearKernel]] = [
 
 def choose_mp_linear_kernel_rbln(
     config: MPLinearLayerConfig,
-    compute_capability: Optional[int] = None,
+    compute_capability: int | None = None,
 ) -> type[MPLinearKernel]:
     from vllm.platforms import current_platform
 
