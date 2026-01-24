@@ -14,7 +14,7 @@
 
 from contextlib import nullcontext
 from types import NoneType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.distributed
@@ -38,6 +38,10 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
 logger = init_logger(__name__)
+
+
+if TYPE_CHECKING:
+    from vllm.v1.core.sched.output import GrammarOutput
 
 
 class RBLNOptimumWorker(WorkerBase):

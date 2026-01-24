@@ -38,10 +38,10 @@ from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.utils.import_utils import LazyLoader
+from vllm.utils.jsontree import json_map_leaves
 from vllm.utils.torch_utils import kv_cache_dtype_str_to_dtype
 
 # from vllm.utils import LazyLoader, is_pin_memory_available)
-from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.kv_cache_interface import (
     FullAttentionSpec,
     KVCacheConfig,
@@ -80,10 +80,9 @@ from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
     import xgrammar as xgr
-    from vllm.v1.core.sched.output import SchedulerOutput
+    from vllm.v1.core.sched.output import GrammarOutput
 else:
     xgr = LazyLoader("xgr", globals(), "xgrammar")
-
 logger = init_logger(__name__)
 
 
@@ -91,7 +90,7 @@ class ExecuteModelState(NamedTuple):
     """Ephemeral cached state transferred between execute_model() and
     sample_tokens(), after execute_model() returns None."""
 
-    scheduler_output: "SchedulerOutput"
+    scheduler_output: "RBLNSchedulerOutput"
     logits: torch.Tensor
     hidden_states: torch.Tensor
     sample_hidden_states: torch.Tensor
@@ -137,8 +136,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         model_config = self.model_config
         cache_config = self.cache_config
-        scheduler_config = self.scheduler_config
-        parallel_config = self.parallel_config
         self.device = device
         self.pin_memory = False
         self.dtype = self.model_config.dtype
@@ -284,7 +281,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     @torch.inference_mode()
     def execute_model(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
         intermediate_tensors: IntermediateTensors | None = None,
     ) -> ModelRunnerOutput | IntermediateTensors:
         if self.execute_model_state is not None:
@@ -378,7 +375,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def _prepare_inputs(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
     ) -> tuple[ModelInputForRBLN, np.ndarray]:
         """
         :return: ModelInputForRBLN[
@@ -486,7 +483,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def _extract_mm_kwargs(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
     ) -> BatchedTensorInputs:
         if not scheduler_output or not self.is_multimodal_raw_input_only_model:
             return {}
@@ -606,7 +603,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def _prepare_decode(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
@@ -781,7 +778,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_computed_tokens = req_data.num_computed_tokens[i]
             new_block_ids = req_data.new_block_ids[i]
             resumed_from_preemption = req_id in req_data.resumed_req_ids
-            num_output_tokens = req_data.num_output_tokens[i]
             req_index = self.input_batch.req_id_to_index.get(req_id)
 
             # Update the cached states.
@@ -1001,6 +997,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         )
 
         hidden_states = hidden_states[:num_scheduled_tokens]
+        seq_lens_cpu = self.seq_lens[: self.input_batch.num_reqs]
 
         pooling_metadata = self.input_batch.get_pooling_metadata()
         pooling_metadata.build_pooling_cursor(
@@ -1081,7 +1078,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def _bookkeeping_sync(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
         sampler_output: SamplerOutput,
         logits: torch.Tensor | None,
         hidden_states: torch.Tensor,
@@ -1222,7 +1219,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     def apply_grammar_bitmask(
         self,
-        scheduler_output: "SchedulerOutput",
+        scheduler_output: "RBLNSchedulerOutput",
         logits: torch.Tensor,
     ):
         valid_logits = logits[: self.input_batch.num_reqs].clone()
@@ -1353,10 +1350,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         )
         self.sampler = torch.compile(self.sampler, dynamic=False, fullgraph=False)
 
-    # FIXME: this is not implemented yet
-    # def sample_tokens(self, grammar_output: "GrammarOutput | None") -> ModelRunnerOutput | AsyncModelRunnerOutput:
-    #     return self.sampler.sample_tokens(grammar_output)
-
     @torch.inference_mode
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
@@ -1426,28 +1419,28 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         if not self.use_async_scheduling:
             return output
-        with record_function_or_nullcontext(
-            "rbln_model_runner: AsyncGPUModelRunnerOutput"
-        ):
-            async_output = AsyncGPUModelRunnerOutput(
-                model_runner_output=output,
-                sampled_token_ids=sampler_output.sampled_token_ids,
-                logprobs_tensors=sampler_output.logprobs_tensors,
-                invalid_req_indices=invalid_req_indices,
-                async_output_copy_stream=self.async_output_copy_stream,
-                vocab_size=self.input_batch.vocab_size,
-            )
-        with record_function_or_nullcontext(
-            "gpu_model_runner: set_async_sampled_token_ids"
-        ):
-            # Save ref of sampled_token_ids CPU tensor if the batch contains
-            # any requests with sampling params that require output ids.
-            self.input_batch.set_async_sampled_token_ids(
-                async_output.sampled_token_ids_cpu,
-                async_output.async_copy_ready_event,
-            )
+        # with record_function_or_nullcontext(
+        #     "rbln_model_runner: AsyncGPUModelRunnerOutput"
+        # ):
+        #     async_output = AsyncGPUModelRunnerOutput(
+        #         model_runner_output=output,
+        #         sampled_token_ids=sampler_output.sampled_token_ids,
+        #         logprobs_tensors=sampler_output.logprobs_tensors,
+        #         invalid_req_indices=invalid_req_indices,
+        #         async_output_copy_stream=self.async_output_copy_stream,
+        #         vocab_size=self.input_batch.vocab_size,
+        #     )
+        # with record_function_or_nullcontext(
+        #     "gpu_model_runner: set_async_sampled_token_ids"
+        # ):
+        #     # Save ref of sampled_token_ids CPU tensor if the batch contains
+        #     # any requests with sampling params that require output ids.
+        #     self.input_batch.set_async_sampled_token_ids(
+        #         async_output.sampled_token_ids_cpu,
+        #         async_output.async_copy_ready_event,
+        #     )
 
-        return async_output
+        # return async_output
 
     def _sample(
         self,

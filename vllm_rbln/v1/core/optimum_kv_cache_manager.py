@@ -42,7 +42,7 @@ class RBLNKVCacheManager(KVCacheManager):
         dcp_world_size: int = 1,
         pcp_world_size: int = 1,
         metrics_collector: KVCacheMetricsCollector | None = None,
-        attn_block_size: Optional[int] = None,
+        attn_block_size: int | None = None,
         max_num_seqs: int = 1,
     ) -> None:
         """
