@@ -301,7 +301,7 @@ def _schedule_new_request_from_request(
             mm_positions=[],
             sampling_params=req.sampling_params,
             pooling_params=None,
-            block_ids=block_ids,
+            block_ids=(block_ids,),
             num_computed_tokens=new_computed_tokens,
             lora_request=None,
         )
