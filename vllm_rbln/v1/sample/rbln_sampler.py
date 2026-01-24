@@ -141,13 +141,15 @@ class RBLNSampler(VLLMSampler):
         top_p: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         if top_k is not None or top_p is not None:
+            # softmax is applied in the rbln_topk_topp_sampler
             sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
         else:
-            sampled = random_sample(logits, {})
+            probs = logits.softmax(dim=-1, dtype=torch.float32)
+            sampled = random_sample(probs, {})
         logits_to_return = None
-        if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
+        if self.logprobs_mode == "processed_logits":
             logits_to_return = logits
-        elif self.logprobs_mode == LogprobsMode.PROCESSED_LOGPROBS:
+        elif self.logprobs_mode == "processed_logprobs":
             logits_to_return = logits.log_softmax(dim=-1, dtype=torch.float32)
         return sampled, logits_to_return
 

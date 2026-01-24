@@ -834,7 +834,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self.input_batch.condense()
 
         # Refresh batch metadata with any pending updates.
-        if self.use_rbln_sampler:
+        use_padding = self.use_rbln_sampler and self.input_batch.num_reqs > 1
+        if use_padding:
             # To pad sampling metadata for RBLN sampler
             self.bucket_size = select_bucket_size(
                 self.input_batch.num_reqs, self.bucket_sizes
@@ -1073,6 +1074,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         logits: torch.Tensor | None,
         hidden_states: torch.Tensor,
         num_scheduled_tokens: int,
+        use_padding: bool,
         spec_decode_metadata: SpecDecodeMetadata | None,
     ) -> tuple[
             dict[str, int],
@@ -1092,13 +1094,15 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # This is important when using async scheduling.
         req_ids_output_copy = self.input_batch.req_ids.copy()
         req_id_to_index_output_copy = self.input_batch.req_id_to_index.copy()
+        if use_padding:
+            # Remove the padding from sampler_output
+            num_sampled_tokens, sampled_token_ids, logprobs_tensors = \
+                self.postprocess_sampler_output(sampler_output, num_reqs)
+        else:
+            num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
+            sampled_token_ids = sampler_output.sampled_token_ids
+            logprobs_tensors = sampler_output.logprobs_tensors
 
-        # num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
-        # sampled_token_ids = sampler_output.sampled_token_ids
-        # logprobs_tensors = sampler_output.logprobs_tensors
-        # Remove the padding from sampler_output
-        num_sampled_tokens, sampled_token_ids, logprobs_tensors = \
-            self.postprocess_sampler_output(sampler_output, num_reqs)
         invalid_req_indices = []
         cu_num_tokens: list[int] | None = None
         if not self.use_async_scheduling:
@@ -1274,6 +1278,19 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
     @staticmethod
     def get_bucket_sizes(max_num_seqs: int) -> list[int]:
+        """
+        Get bucket sizes for RBLN sampler.
+        NOTE:
+        We don't pad the logits when num_reqs is 1
+        to reduce the overhead of padding and unpadding.
+        But bucket_sizes must contain 1 to warm up the sampler.
+
+        NOTE:
+        When the number of scheduled requests is only one,
+        the input_batch is not refreshed.
+        But if selected bucket_size is greater than 1, there is an misalignment
+        between the logits and the sampling metadata.
+        """
         bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
         if max_num_seqs >= 8:
             # Step size 8 for small batch sizes, up to 256(not included)
@@ -1343,6 +1360,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             sample_hidden_states,
             is_prompt,
         ) = self.execute_model_state
+        use_padding = self.use_rbln_sampler and self.input_batch.num_reqs > 1
         # Clear ephemeral state.
         self.execute_model_state = None
 
@@ -1352,7 +1370,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                        self.input_batch, logits)
 
         with record_function_or_nullcontext("rbln_model_runner: sample"):
-            use_padding = self.use_rbln_sampler and not is_prompt
             if use_padding:
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
@@ -1361,15 +1378,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 padded_logits = logits
             sampler_output = self._sample(padded_logits,
                                           spec_decode_metadata=None)
-            if use_padding:
-                sampler_output.sampled_token_ids = \
-                    sampler_output.sampled_token_ids[:num_reqs]
-                if sampler_output.logprobs_tensors is not None:
-                    sampler_output.logprobs_tensors = \
-                        self.post_process_logprobs_tensors(
-                            sampler_output.logprobs_tensors,
-                            num_reqs
-                        )
         self.input_batch.prev_sampled_token_ids = None
 
         with record_function_or_nullcontext("rbln_model_runner: bookkeep"):
@@ -1387,6 +1395,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 logits,
                 hidden_states,
                 scheduler_output.total_num_scheduled_tokens,
+                use_padding,
                 spec_decode_metadata=None,
             )
 
@@ -1548,14 +1557,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         dict = {}
         num_spec_decode_token = 1
         num_sampled_tokens = num_reqs
-        print("[before] sampler_output.sampled_token_ids",
-              sampler_output.sampled_token_ids.shape)
+        logprobs_tensors = None
         sampled_token_ids = sampler_output.sampled_token_ids[:num_reqs]
-        print("[after] sampler_output.sampled_token_ids",
-              sampler_output.sampled_token_ids.shape)
-        for field_name in sampler_output.logprobs_tensors._fields:
-            tensor = getattr(sampler_output.logprobs_tensors, field_name)
-            dict[field_name] = tensor[:num_reqs * num_spec_decode_token]
-        logprobs_tensors = LogprobsTensors(**dict)
+
+        if sampler_output.logprobs_tensors is not None:
+            for field_name in sampler_output.logprobs_tensors._fields:
+                tensor = getattr(sampler_output.logprobs_tensors, field_name)
+                dict[field_name] = tensor[:num_reqs * num_spec_decode_token]
+            logprobs_tensors = LogprobsTensors(**dict)
 
         return num_sampled_tokens, sampled_token_ids, logprobs_tensors
