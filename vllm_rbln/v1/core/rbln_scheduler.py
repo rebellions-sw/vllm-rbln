@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import time
-from typing import Optional
 
 from vllm.distributed.kv_events import KVEventBatch
 from vllm.multimodal import MULTIMODAL_REGISTRY
@@ -39,7 +38,7 @@ def is_prefill(request: Request) -> bool:
 def undo_uncomputed_block_caching(
     request: Request,
     kv_cache_manager: KVCacheManager,
-    num_computed_tokens: Optional[int] = None,
+    num_computed_tokens: int | None = None,
 ) -> None:
     grouped_blocks = kv_cache_manager.get_blocks(request.request_id).blocks
     num_computed_blocks = [

@@ -16,7 +16,7 @@ from collections.abc import Callable
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
@@ -133,16 +133,16 @@ def make_request(
     top_p: float = 1.0,
     top_k: int = 0,
     temperature: float = 1.0,
-    logprobs: Optional[int] = None,
+    logprobs: int | None = None,
     presence_penalty: float = 0.0,
     frequency_penalty: float = 0.0,
     repetition_penalty: float = 1.0,
     block_size: int = IB_SIZE,
     hash_fn: Callable = sha256,
-    mm_positions: Optional[list[PlaceholderRange]] = None,
-    mm_hashes: Optional[list[str]] = None,
-    prompt_logprobs: Optional[int] = None,
-    cache_salt: Optional[str] = None,
+    mm_positions: list[PlaceholderRange] | None = None,
+    mm_hashes: list[str] | None = None,
+    prompt_logprobs: int | None = None,
+    cache_salt: str | None = None,
 ):
     mm_features = []
     if mm_positions is not None:
@@ -228,10 +228,10 @@ def _schedule_new_request(
     block_ids: tuple[list[int], ...],
     outer_block_ids: list[int],
     new_computed_tokens: int = 0,
-    token_ids: Optional[list[int]] = None,
-    finished_req_ids: Optional[list[str]] = None,
-    new_computed_blocks: Optional[list[int]] = None,
-    preempted_req_ids: Optional[list[str]] = None,
+    token_ids: list[int] | None = None,
+    finished_req_ids: list[str] | None = None,
+    new_computed_blocks: list[int] | None = None,
+    preempted_req_ids: list[str] | None = None,
 ) -> RBLNSchedulerOutput:
     new_reqs = []
     num_scheduled_tokens = {}
@@ -281,10 +281,10 @@ def _schedule_new_request_from_request(
     block_ids: tuple[list[int], ...],
     outer_block_ids: list[int],
     new_computed_tokens: int = 0,
-    token_ids: Optional[list[int]] = None,
-    finished_req_ids: Optional[list[str]] = None,
-    new_computed_blocks: Optional[list[int]] = None,
-    preempted_req_ids: Optional[list[str]] = None,
+    token_ids: list[int] | None = None,
+    finished_req_ids: list[str] | None = None,
+    new_computed_blocks: list[int] | None = None,
+    preempted_req_ids: list[str] | None = None,
 ) -> RBLNSchedulerOutput:
     new_reqs = []
     num_scheduled_tokens = {}
@@ -330,7 +330,7 @@ def _schedule_new_request_from_request(
 def _schedule_cached_reqs(
     reqs: list[Request],
     new_block_ids: list[Any],
-    finished_req_ids: Optional[list[str]] = None,
+    finished_req_ids: list[str] | None = None,
 ) -> RBLNSchedulerOutput:
     req_ids = []
     resumed_from_preemption = []

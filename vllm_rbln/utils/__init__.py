@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Union
-
 import torch
 
 
 def pad(
-    x: torch.Tensor, dim: int, target_len: int, pad_value: Union[int, float] = 0
+    x: torch.Tensor, dim: int, target_len: int, pad_value: int | float = 0
 ) -> torch.Tensor:
     """Pad along the given dimension to target_len using pad_value."""
     current = x.size(dim)

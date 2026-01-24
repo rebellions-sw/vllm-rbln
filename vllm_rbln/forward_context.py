@@ -15,7 +15,7 @@
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import vllm.forward_context as vfc
@@ -37,14 +37,14 @@ logger = init_logger(__name__)
 @dataclass
 class RBLNDPMetadata(DPMetadata):
     max_pads_across_dp: int = 0
-    num_tokens_across_dp_cpu: Optional[torch.Tensor] = None
+    num_tokens_across_dp_cpu: torch.Tensor | None = None
 
     @staticmethod
     def make(
         vllm_config: VllmConfig,
         attn_metadata: Any,
         num_tokens: int,
-        num_tokens_across_dp: Optional[torch.Tensor] = None,
+        num_tokens_across_dp: torch.Tensor | None = None,
     ) -> "RBLNDPMetadata":
         parallel_config = vllm_config.parallel_config
         dp_size = parallel_config.data_parallel_size
@@ -86,10 +86,10 @@ def _set_forward_context(
     attn_metadata: Any,
     vllm_config: VllmConfig,
     virtual_engine: int = 0,
-    num_tokens: Optional[int] = None,
-    num_tokens_across_dp: Optional[torch.Tensor] = None,
+    num_tokens: int | None = None,
+    num_tokens_across_dp: torch.Tensor | None = None,
     cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE,
-    batch_descriptor: Optional[BatchDescriptor] = None,
+    batch_descriptor: BatchDescriptor | None = None,
 ):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
@@ -98,7 +98,7 @@ def _set_forward_context(
     need_to_track_batchsize = track_batchsize and attn_metadata is not None
     if need_to_track_batchsize:
         vfc.forward_start_time = time.perf_counter()
-    dp_metadata: Optional[DPMetadata] = None
+    dp_metadata: DPMetadata | None = None
     enable_dp = vllm_config.parallel_config.data_parallel_size > 1
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if (enable_dp or use_moe_tokens_mask) and (

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Union
 
 import torch
 from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
@@ -50,13 +49,13 @@ def create_scheduler(
     max_num_batched_tokens: int = 128,
     num_blocks: int = 8,
     block_size: int = 16,
-    max_model_len: Optional[int] = None,
+    max_model_len: int | None = None,
     async_scheduling: bool = False,
     is_torch_compile: bool = False,
     outer_block_size: int = 0,
-    enable_prefix_caching: Optional[bool] = None,
-    structured_output_manager: Optional[StructuredOutputManager] = None,
-) -> Union[RBLNOptimumScheduler, RBLNScheduler]:
+    enable_prefix_caching: bool | None = None,
+    structured_output_manager: StructuredOutputManager | None = None,
+) -> RBLNOptimumScheduler | RBLNScheduler:
     """Create RBLNOptimumscheduler under test.
 
     Args:
@@ -125,13 +124,13 @@ def create_scheduler(
 def create_requests(
     num_requests: int,
     num_tokens: int = 10,
-    mm_positions: Optional[list[list[PlaceholderRange]]] = None,
+    mm_positions: list[list[PlaceholderRange]] | None = None,
     max_tokens: int = 16,
-    stop_token_ids: Optional[list[int]] = None,
-    prompt_logprobs: Optional[int] = None,
+    stop_token_ids: list[int] | None = None,
+    prompt_logprobs: int | None = None,
     same_prompt: bool = False,
     block_size: int = 16,
-    sample_json_schema: Optional[str] = None,
+    sample_json_schema: str | None = None,
 ) -> list[Request]:
     global _none_hash_initialized
     if not _none_hash_initialized:

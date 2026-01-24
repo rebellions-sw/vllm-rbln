@@ -13,7 +13,6 @@
 # limitations under the License.
 # isort: off
 import torch
-from typing import Optional
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
@@ -55,8 +54,8 @@ def random_sample(
 
 def apply_top_k_top_p(
     logits: torch.Tensor,
-    k: Optional[torch.Tensor],
-    p: Optional[torch.Tensor],
+    k: torch.Tensor | None,
+    p: torch.Tensor | None,
 ) -> torch.Tensor:
     """
     Mock implementation of `top_k_top_p`
@@ -94,14 +93,14 @@ def apply_top_k_top_p(
 
 @torch.library.custom_op("rbln::top_k_top_p", mutates_args=())
 def top_k_top_p(
-    logits: torch.Tensor, k: Optional[torch.Tensor], p: Optional[torch.Tensor]
+    logits: torch.Tensor, k: torch.Tensor | None, p: torch.Tensor | None
 ) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
 
 @top_k_top_p.register_fake
 def top_k_top_p_fake(
-    logits: torch.Tensor, k: Optional[torch.Tensor], p: Optional[torch.Tensor]
+    logits: torch.Tensor, k: torch.Tensor | None, p: torch.Tensor | None
 ) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
@@ -136,9 +135,9 @@ class RBLNSampler(VLLMSampler):
     def apply_topk_topp_sampler(
         self,
         logits: torch.Tensor,
-        top_k: Optional[torch.Tensor],
-        top_p: Optional[torch.Tensor],
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        top_k: torch.Tensor | None,
+        top_p: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         if top_k is not None or top_p is not None:
             sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
         else:
@@ -180,7 +179,7 @@ class RBLNSampler(VLLMSampler):
         self,
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Sample logits based on sampling metadata.
 
         The various logits processing functions called in this method

@@ -15,7 +15,6 @@
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
 
 import torch
 from vllm.config import VllmConfig
@@ -58,7 +57,7 @@ class RBLNSchedulerOutput(SchedulerOutput):
     block_table_dict: dict[str, torch.Tensor] = None
     cached_block_table: list[int] = field(default_factory=list)
     cached_length: list[int] = field(default_factory=list)
-    dummy_block: Optional[int] = None
+    dummy_block: int | None = None
 
 
 class RBLNOptimumScheduler(Scheduler):
@@ -86,7 +85,7 @@ class RBLNOptimumScheduler(Scheduler):
         # request ids should be included in the EngineCoreOutputs returned
         # by update_from_outputs(). This is currently used in the multi-engine
         # case to track request lifetimes efficiently.
-        self.finished_req_ids_dict: Optional[dict[int, set[str]]] = (
+        self.finished_req_ids_dict: dict[int, set[str]] | None = (
             defaultdict(set) if include_finished_set else None
         )
 

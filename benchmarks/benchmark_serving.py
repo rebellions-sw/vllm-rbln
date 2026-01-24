@@ -44,7 +44,7 @@ import warnings
 from collections.abc import AsyncGenerator, Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 from backend_request_func import (
@@ -288,7 +288,7 @@ async def benchmark(
     model_name: str,
     tokenizer: PreTrainedTokenizerBase,
     input_requests: list[SampleRequest],
-    logprobs: Optional[int],
+    logprobs: int | None,
     request_rate: float,
     burstiness: float,
     disable_tqdm: bool,
@@ -297,9 +297,9 @@ async def benchmark(
     selected_percentiles: list[float],
     ignore_eos: bool,
     goodput_config_dict: dict[str, float],
-    max_concurrency: Optional[int],
-    lora_modules: Optional[Iterable[str]],
-    extra_body: Optional[dict],
+    max_concurrency: int | None,
+    lora_modules: Iterable[str] | None,
+    extra_body: dict | None,
 ):
     if backend in ASYNC_REQUEST_FUNCS:
         request_func = ASYNC_REQUEST_FUNCS[backend]

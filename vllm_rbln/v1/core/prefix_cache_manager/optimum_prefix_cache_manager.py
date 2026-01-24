@@ -17,7 +17,6 @@ import math
 from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 
@@ -103,7 +102,7 @@ class RBLNBlockAllocator(BlockAllocatorInterface):
     def get_free_count(self) -> int:
         return len(self._free_blocks)
 
-    def get_allocated_block(self, block_id: int) -> Optional[RBLNBlock]:
+    def get_allocated_block(self, block_id: int) -> RBLNBlock | None:
         return self._allocated_blocks.get(block_id)
 
     def peek_dummy_block(self) -> int:

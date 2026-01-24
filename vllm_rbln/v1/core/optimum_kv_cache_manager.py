@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
@@ -39,7 +38,7 @@ class RBLNKVCacheManager(KVCacheManager):
         log_stats: bool = False,
         enable_kv_cache_events: bool = False,
         dcp_world_size: int = 1,
-        attn_block_size: Optional[int] = None,
+        attn_block_size: int | None = None,
         max_num_seqs: int = 1,
     ) -> None:
         """
@@ -55,7 +54,7 @@ class RBLNKVCacheManager(KVCacheManager):
         # FIXME: make prefix cache stats conditional on log_stats
         self.prefix_cache_stats = PrefixCacheStats() if log_stats else None
 
-        self.block_size: Optional[int] = None
+        self.block_size: int | None = None
         if self.enable_caching:
             assert (
                 len(
@@ -110,11 +109,11 @@ class RBLNKVCacheManager(KVCacheManager):
         request: Request,
         num_new_tokens: int,
         num_new_computed_tokens: int = 0,
-        new_computed_blocks: Optional[KVCacheBlocks] = None,
+        new_computed_blocks: KVCacheBlocks | None = None,
         num_lookahead_tokens: int = 0,
         delay_cache_blocks: bool = False,
         num_encoder_tokens: int = 0,
-    ) -> Optional[KVCacheBlocks]:
+    ) -> KVCacheBlocks | None:
         assert num_lookahead_tokens == 0
         assert not delay_cache_blocks
         assert num_encoder_tokens == 0

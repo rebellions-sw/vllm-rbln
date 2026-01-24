@@ -20,7 +20,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import copy, deepcopy
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
@@ -269,7 +269,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # Lazy initialization
         self.compute_logits_model: nn.Module
 
-        self.eplb_state: Optional[EplbState] = None
+        self.eplb_state: EplbState | None = None
         """
         State of the expert parallelism load balancer.
 
@@ -385,7 +385,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
 
         # None in the first PP rank. The rest are set after load_model.
-        self.intermediate_tensors: Optional[IntermediateTensors] = None
+        self.intermediate_tensors: IntermediateTensors | None = None
 
         # OPTIMIZATION: Cache the tensors rather than creating them every step.
         # Keep in int64 to avoid overflow with long context
@@ -423,7 +423,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             else None
         )
 
-        self.reorder_batch_threshold: Optional[int] = None
+        self.reorder_batch_threshold: int | None = None
 
         # Attention layers that are only in the KVCacheConfig of the runner
         # (e.g., KV sharing, encoder-only attention), but not in the
@@ -431,7 +431,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.runner_only_attn_layers: set[str] = set()
 
         # Cached outputs.
-        self._draft_token_ids: Optional[Union[list[list[int]], torch.Tensor]] = None
+        self._draft_token_ids: list[list[int]] | torch.Tensor | None = None
         self.sampled_token_ids_pinned_cpu = torch.empty(
             (self.max_model_len, 1),
             dtype=torch.int64,
@@ -451,7 +451,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def _make_buffer(
         self,
-        *size: Union[int, torch.SymInt],
+        *size: int | torch.SymInt,
         dtype: torch.dtype,
         numpy: bool = True,
     ) -> CpuGpuBuffer:
@@ -756,7 +756,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def _get_cumsum_and_arange(
         self,
         num_tokens: np.ndarray,
-        cumsum_dtype: Optional[np.dtype] = None,
+        cumsum_dtype: np.dtype | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Get the cumulative sum and batched arange of the given array.
         # E.g., [2, 5, 3] -> ([2, 7, 10], [0, 1, 0, 1, 2, 3, 4, 0, 1, 2])
@@ -847,7 +847,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         kv_cache_spec: KVCacheSpec,
         num_reqs: int,
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         if not isinstance(kv_cache_spec, CrossAttentionSpec):
             return None
 
@@ -866,9 +866,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     ) -> tuple[
         dict[str, Any],
         torch.Tensor,
-        Optional[SpecDecodeMetadata],
+        SpecDecodeMetadata | None,
         np.ndarray,
-        Optional[CommonAttentionMetadata],
+        CommonAttentionMetadata | None,
         int,
     ]:
         """
@@ -1225,7 +1225,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self,
         batch_size: int,
         seq_len: int,
-        intermediate_tensors: Optional[IntermediateTensors],
+        intermediate_tensors: IntermediateTensors | None,
         sync_self: bool,
     ) -> IntermediateTensors:
         # FIXME - RBLN does not support intermediate tensor slicing
@@ -1259,7 +1259,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             assert sync_self, "RBLN execute = sync self(from input)"
             return IntermediateTensors({k: v for k, v in intermediate_tensors.items()})
 
-    def get_dp_padding(self, num_tokens: int) -> tuple[int, Optional[torch.Tensor]]:
+    def get_dp_padding(self, num_tokens: int) -> tuple[int, torch.Tensor | None]:
         dp_size = self.vllm_config.parallel_config.data_parallel_size
         dp_rank = self.vllm_config.parallel_config.data_parallel_rank
 
@@ -1290,7 +1290,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         hidden_states: torch.Tensor,
         num_scheduled_tokens: int,
         num_scheduled_tokens_np: np.ndarray,
-        kv_connector_output: Optional[KVConnectorOutput],
+        kv_connector_output: KVConnectorOutput | None,
     ) -> ModelRunnerOutput:
         assert self.input_batch.num_reqs == len(self.input_batch.pooling_params), (
             "Either all or none of the requests in a batch must be pooling request"
@@ -1308,7 +1308,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             hidden_states=hidden_states, pooling_metadata=pooling_metadata
         )
 
-        pooler_output: list[Optional[torch.Tensor]] = []
+        pooler_output: list[torch.Tensor | None] = []
         for raw_output, seq_len, prompt_len in zip(
             raw_pooler_output, seq_lens_cpu, pooling_metadata.prompt_lens
         ):
@@ -1328,15 +1328,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def _preprocess(
         self,
         scheduler_output: "SchedulerOutput",
-        intermediate_tensors: Optional[IntermediateTensors] = None,
+        intermediate_tensors: IntermediateTensors | None = None,
     ) -> tuple[
         int,
         int,
-        Optional[torch.Tensor],
-        Optional[torch.Tensor],
-        Optional[torch.Tensor],
+        torch.Tensor | None,
+        torch.Tensor | None,
+        torch.Tensor | None,
         torch.Tensor,
-        Optional[IntermediateTensors],
+        IntermediateTensors | None,
         dict[str, Any],
     ]:
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
@@ -1424,8 +1424,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def _sample(
         self,
-        logits: Optional[torch.Tensor],
-        spec_decode_metadata: Optional[SpecDecodeMetadata],
+        logits: torch.Tensor | None,
+        spec_decode_metadata: SpecDecodeMetadata | None,
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
@@ -1466,7 +1466,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def compute_logits(
         self,
         hidden_states: torch.Tensor,
-        sampling_metadata: Optional[SamplingMetadata] = None,
+        sampling_metadata: SamplingMetadata | None = None,
     ) -> torch.Tensor:
         return self.model.compute_logits(hidden_states, sampling_metadata)
 
@@ -1596,8 +1596,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         total_tokens: int,
         num_computed_tokens: int,
         num_kv_cache_groups: int,
-        sampling_params: Optional[SamplingParams] = None,
-        pooling_params: Optional[PoolingParams] = None,
+        sampling_params: SamplingParams | None = None,
+        pooling_params: PoolingParams | None = None,
     ) -> None:
         num_blocks = (
             round_up(total_tokens, self.cache_config.block_size)
@@ -1684,14 +1684,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self,
         scheduler_output: "SchedulerOutput",
         sampler_output: SamplerOutput,
-        logits: Optional[torch.Tensor],
+        logits: torch.Tensor | None,
         hidden_states: torch.Tensor,
         num_scheduled_tokens: int,
     ) -> tuple[
         dict[str, int],
-        Optional[LogprobsLists],
+        LogprobsLists | None,
         list[list[int]],
-        dict[str, Optional[LogprobsTensors]],
+        dict[str, LogprobsTensors | None],
         list[str],
         dict[str, int],
         list[int],
@@ -1820,8 +1820,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-    ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
+        intermediate_tensors: IntermediateTensors | None = None,
+    ) -> ModelRunnerOutput | AsyncModelRunnerOutput | IntermediateTensors:
         with record_function_or_nullcontext("Preprocess"):
             self._update_states(scheduler_output)
             if not scheduler_output.total_num_scheduled_tokens:
@@ -2164,10 +2164,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         def model_wrapper(
             input_ids: torch.Tensor,
             positions: torch.Tensor,
-            intermediate_tensors: Optional[IntermediateTensors] = None,
-            inputs_embeds: Optional[torch.Tensor] = None,
-            selected_token_indices: Optional[torch.Tensor] = None,
-        ) -> tuple[Union[torch.Tensor, IntermediateTensors], Optional[torch.Tensor]]:
+            intermediate_tensors: IntermediateTensors | None = None,
+            inputs_embeds: torch.Tensor | None = None,
+            selected_token_indices: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor | IntermediateTensors, torch.Tensor | None]:
             """
             This wrapper function is designed to be compiled by torch.compile.
             It handles the forward pass of the underlying model and, computes
@@ -2257,13 +2257,13 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self,
         hidden_states: torch.Tensor,
         num_scheduled_tokens: dict[str, int],
-    ) -> dict[str, Optional[LogprobsTensors]]:
+    ) -> dict[str, LogprobsTensors | None]:
         num_prompt_logprobs_dict = self.input_batch.num_prompt_logprobs
         if not num_prompt_logprobs_dict:
             return {}
 
         in_progress_dict = self.input_batch.in_progress_prompt_logprobs_cpu
-        prompt_logprobs_dict: dict[str, Optional[LogprobsTensors]] = {}
+        prompt_logprobs_dict: dict[str, LogprobsTensors | None] = {}
 
         # Since prompt logprobs are a rare feature, prioritize simple,
         # maintainable loop over optimal performance.

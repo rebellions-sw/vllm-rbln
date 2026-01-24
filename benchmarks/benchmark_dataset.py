@@ -29,12 +29,12 @@ import json
 import logging
 import random
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import cache
 from io import BytesIO
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -60,12 +60,12 @@ class SampleRequest:
     Represents a single inference request for benchmarking.
     """
 
-    prompt: Union[str, Any]
+    prompt: str | Any
     prompt_len: int
     expected_output_len: int
-    multi_modal_data: Optional[Union[MultiModalDataDict, dict, list[dict]]] = None
-    lora_request: Optional[LoRARequest] = None
-    request_id: Optional[str] = None
+    multi_modal_data: MultiModalDataDict | dict | list[dict] | None = None
+    lora_request: LoRARequest | None = None
+    request_id: str | None = None
 
 
 # -----------------------------------------------------------------------------
@@ -79,7 +79,7 @@ class BenchmarkDataset(ABC):
 
     def __init__(
         self,
-        dataset_path: Optional[str] = None,
+        dataset_path: str | None = None,
         random_seed: int = DEFAULT_SEED,
     ) -> None:
         """
@@ -97,7 +97,7 @@ class BenchmarkDataset(ABC):
         self.data = None
 
     def apply_multimodal_chat_transformation(
-        self, prompt: str, mm_content: Optional[MultiModalDataDict] = None
+        self, prompt: str, mm_content: MultiModalDataDict | None = None
     ) -> list[dict]:
         """
         Transform a prompt and optional multimodal content into a chat format.
@@ -125,9 +125,9 @@ class BenchmarkDataset(ABC):
     def get_random_lora_request(
         self,
         tokenizer: PreTrainedTokenizerBase,
-        max_loras: Optional[int] = None,
-        lora_path: Optional[str] = None,
-    ) -> tuple[Optional[LoRARequest], AnyTokenizer]:
+        max_loras: int | None = None,
+        lora_path: str | None = None,
+    ) -> tuple[LoRARequest | None, AnyTokenizer]:
         """
         Optionally select a random LoRA request and return its associated
         tokenizer.
@@ -466,9 +466,9 @@ class ShareGPTDataset(BenchmarkDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        lora_path: Optional[str] = None,
-        max_loras: Optional[int] = None,
-        output_len: Optional[int] = None,
+        lora_path: str | None = None,
+        max_loras: int | None = None,
+        output_len: int | None = None,
         enable_multimodal_chat: bool = False,
         request_id_prefix: str = "",
         **kwargs,
@@ -576,9 +576,9 @@ class CustomDataset(BenchmarkDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        lora_path: Optional[str] = None,
-        max_loras: Optional[int] = None,
-        output_len: Optional[int] = None,
+        lora_path: str | None = None,
+        max_loras: int | None = None,
+        output_len: int | None = None,
         enable_multimodal_chat: bool = False,
         skip_chat_template: bool = False,
         request_id_prefix: str = "",
@@ -748,8 +748,8 @@ class BurstGPTDataset(BenchmarkDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        max_loras: Optional[int] = None,
-        lora_path: Optional[str] = None,
+        max_loras: int | None = None,
+        lora_path: str | None = None,
         request_id_prefix: str = "",
         **kwargs,
     ) -> list[SampleRequest]:
@@ -784,14 +784,14 @@ class BurstGPTDataset(BenchmarkDataset):
 class HuggingFaceDataset(BenchmarkDataset):
     """Base class for datasets hosted on HuggingFace."""
 
-    SUPPORTED_DATASET_PATHS: Union[set[str], dict[str, Callable]] = set()
+    SUPPORTED_DATASET_PATHS: set[str] | dict[str, Callable] = set()
 
     def __init__(
         self,
         dataset_path: str,
         dataset_split: str,
         no_stream: bool = False,
-        dataset_subset: Optional[str] = None,
+        dataset_subset: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(dataset_path=dataset_path, **kwargs)
@@ -830,7 +830,7 @@ class ConversationDataset(HuggingFaceDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        output_len: int | None = None,
         enable_multimodal_chat: bool = False,
         request_id_prefix: str = "",
         **kwargs,
@@ -898,7 +898,7 @@ class VisionArenaDataset(HuggingFaceDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        output_len: int | None = None,
         enable_multimodal_chat: bool = False,
         request_id_prefix: str = "",
         **kwargs,
@@ -958,7 +958,7 @@ class InstructCoderDataset(HuggingFaceDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        output_len: int | None = None,
         enable_multimodal_chat: bool = False,
         request_id_prefix: str = "",
         **kwargs,
@@ -1018,7 +1018,7 @@ class MTBenchDataset(HuggingFaceDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        output_len: int | None = None,
         enable_multimodal_chat: bool = False,
         request_id_prefix: str = "",
         **kwargs,
@@ -1073,7 +1073,7 @@ class AIMODataset(HuggingFaceDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        output_len: int | None = None,
         request_id_prefix: str = "",
         **kwargs,
     ) -> list:
@@ -1255,7 +1255,7 @@ class ASRDataset(HuggingFaceDataset):
         self,
         tokenizer: PreTrainedTokenizerBase,
         num_requests: int,
-        output_len: Optional[int] = None,
+        output_len: int | None = None,
         request_id_prefix: str = "",
         **kwargs,
     ) -> list:

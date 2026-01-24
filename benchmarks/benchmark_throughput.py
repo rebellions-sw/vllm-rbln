@@ -19,7 +19,7 @@ import os
 import random
 import time
 import warnings
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import uvloop
@@ -59,7 +59,7 @@ def run_vllm(
     engine_args: EngineArgs,
     warmup_requests: int,
     disable_detokenize: bool = False,
-) -> tuple[float, Optional[list[RequestOutput]]]:
+) -> tuple[float, list[RequestOutput] | None]:
     llm = get_llm_instance(engine_args)
     assert all(
         llm.llm_engine.model_config.max_model_len
@@ -74,7 +74,7 @@ def run_vllm(
     if warmup_requests > 0:
         print(f"Warming up the model with {warmup_requests} requests")
         assert warmup_requests <= len(requests)
-        warmup_prompts: list[Union[TextPrompt, TokensPrompt]] = []
+        warmup_prompts: list[TextPrompt | TokensPrompt] = []
         warmup_sampling_params: list[SamplingParams] = []
         for request in requests[-warmup_requests:]:
             warmup_prompts.append(
@@ -98,7 +98,7 @@ def run_vllm(
                     detokenize=not disable_detokenize,
                 )
             )
-        warmup_lora_requests: Optional[list[LoRARequest]] = None
+        warmup_lora_requests: list[LoRARequest] | None = None
         if engine_args.enable_lora:
             warmup_lora_requests = [request.lora_request for request in requests]
 
@@ -111,7 +111,7 @@ def run_vllm(
 
     # Add the requests to the engine.
     print(f"Running the model with {len(requests)} requests")
-    prompts: list[Union[TextPrompt, TokensPrompt]] = []
+    prompts: list[TextPrompt | TokensPrompt] = []
     sampling_params: list[SamplingParams] = []
     for request in requests:
         prompts.append(
@@ -134,7 +134,7 @@ def run_vllm(
                 detokenize=not disable_detokenize,
             )
         )
-    lora_requests: Optional[list[LoRARequest]] = None
+    lora_requests: list[LoRARequest] | None = None
     if engine_args.enable_lora:
         lora_requests = [request.lora_request for request in requests]
 
@@ -231,9 +231,9 @@ async def run_vllm_async(
         )
 
         # Add the requests to the engine.
-        prompts: list[Union[TextPrompt, TokensPrompt]] = []
+        prompts: list[TextPrompt | TokensPrompt] = []
         sampling_params: list[SamplingParams] = []
-        lora_requests: list[Optional[LoRARequest]] = []
+        lora_requests: list[LoRARequest | None] = []
         for request in requests:
             prompts.append(
                 TokensPrompt(
@@ -365,7 +365,7 @@ def main(args: argparse.Namespace):
     )
     requests = get_requests(args, tokenizer)
     is_multi_modal = any(request.multi_modal_data is not None for request in requests)
-    request_outputs: Optional[list[RequestOutput]] = None
+    request_outputs: list[RequestOutput] | None = None
     if args.backend == "vllm":
         if args.async_engine:
             elapsed_time = uvloop.run(

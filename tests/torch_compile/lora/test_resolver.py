@@ -15,7 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import pytest
 from vllm.lora.request import LoRARequest
@@ -27,7 +26,7 @@ class DummyLoRAResolver(LoRAResolver):
 
     async def resolve_lora(
         self, base_model_name: str, lora_name: str
-    ) -> Optional[LoRARequest]:
+    ) -> LoRARequest | None:
         if lora_name == "test_lora":
             return LoRARequest(
                 lora_name=lora_name,

@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -32,7 +31,7 @@ class RBLNBlock:
 class BlockMapping:
     outer_block_id: int
     inner_block_ids: list[int]
-    request_id: Optional[str] = None
+    request_id: str | None = None
     is_active: bool = True
 
 
@@ -99,7 +98,7 @@ class BlockMappingManager:
             self._request_to_outer_blocks[request_id] = []
         self._request_to_outer_blocks[request_id].append(outer_block.block_id)
 
-    def remove_mapping(self, outer_block_id: int) -> Optional[BlockMapping]:
+    def remove_mapping(self, outer_block_id: int) -> BlockMapping | None:
         """
         Remove a mapping by outer block ID and return the removed mapping.
         """
@@ -133,13 +132,13 @@ class BlockMappingManager:
         """
         return self._request_to_outer_blocks.pop(request_id, [])
 
-    def get_mapping(self, outer_block_id: int) -> Optional[BlockMapping]:
+    def get_mapping(self, outer_block_id: int) -> BlockMapping | None:
         """
         Return the mapping for a given outer block ID.
         """
         return self._block_mappings.get(outer_block_id)
 
-    def get_outer_block_for_inner(self, inner_block_id: int) -> Optional[int]:
+    def get_outer_block_for_inner(self, inner_block_id: int) -> int | None:
         """
         Return the outer block ID that maps to a given inner block ID.
         """

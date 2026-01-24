@@ -15,7 +15,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import torch
 from vllm.attention.backends.abstract import (
@@ -569,23 +569,23 @@ class RBLNFlashAttentionMetadata:
     slot_mapping: torch.Tensor
 
     # For cascade attention.
-    use_cascade: Optional[bool]
-    common_prefix_len: Optional[int]
-    cu_prefix_query_lens: Optional[torch.Tensor]
-    prefix_kv_lens: Optional[torch.Tensor]
-    suffix_kv_lens: Optional[torch.Tensor]
+    use_cascade: bool | None
+    common_prefix_len: int | None
+    cu_prefix_query_lens: torch.Tensor | None
+    prefix_kv_lens: torch.Tensor | None
+    suffix_kv_lens: torch.Tensor | None
 
     # Optional aot scheduling
-    scheduler_metadata: Optional[torch.Tensor] = None
-    prefix_scheduler_metadata: Optional[torch.Tensor] = None
+    scheduler_metadata: torch.Tensor | None = None
+    prefix_scheduler_metadata: torch.Tensor | None = None
 
     # For RBLN Attention
-    attn_masks: Optional[torch.Tensor] = None
-    kv_caches: Optional[list[torch.Tensor]] = None
+    attn_masks: torch.Tensor | None = None
+    kv_caches: list[torch.Tensor] | None = None
     # for sliding window attention
-    cache_seq_lens: Optional[torch.Tensor] = None
-    cache_offsets: Optional[torch.Tensor] = None
-    local_block_tables: Optional[torch.Tensor] = None
+    cache_seq_lens: torch.Tensor | None = None
+    cache_offsets: torch.Tensor | None = None
+    local_block_tables: torch.Tensor | None = None
 
 
 class RBLNFlashAttentionMetadataBuilder(
@@ -801,14 +801,14 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         head_size: int,
         scale: float,
         num_kv_heads: int,
-        alibi_slopes: Optional[list[float]],
-        sliding_window: Optional[int],
+        alibi_slopes: list[float] | None,
+        sliding_window: int | None,
         kv_cache_dtype: str,
-        blocksparse_params: Optional[dict[str, Any]] = None,
-        logits_soft_cap: Optional[float] = None,
+        blocksparse_params: dict[str, Any] | None = None,
+        logits_soft_cap: float | None = None,
         attn_type: str = AttentionType.DECODER,
-        kv_sharing_target_layer_name: Optional[str] = None,
-        sinks: Optional[torch.Tensor] = None,
+        kv_sharing_target_layer_name: str | None = None,
+        sinks: torch.Tensor | None = None,
     ) -> None:
         self.enforce_eager = get_current_vllm_config().model_config.enforce_eager
         self.device = get_current_vllm_config().device_config.device
@@ -876,7 +876,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: RBLNFlashAttentionMetadata,
-        output: Optional[torch.Tensor] = None,
+        output: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Forward pass with xFormers and PagedAttention.
 

@@ -17,7 +17,6 @@
 # Copied from https://github.com/vllm-project/vllm/blob/v0.10.2/tests/v1/core/utils.py
 # Search for NOTE(RBLN) or TODO(RBLN) for changes
 
-from typing import Optional
 
 import torch
 from vllm.config import (
@@ -49,14 +48,14 @@ def create_scheduler(
     model: str = "facebook/opt-125m",
     max_num_seqs: int = 16,
     max_num_batched_tokens: int = 8192,
-    enable_prefix_caching: Optional[bool] = None,
+    enable_prefix_caching: bool | None = None,
     long_prefill_token_threshold: int = 0,
     disable_chunked_mm_input: bool = False,
     use_kv_connector: bool = False,
     num_blocks: int = 10000,
     block_size: int = 16,
-    max_model_len: Optional[int] = None,
-    num_speculative_tokens: Optional[int] = None,
+    max_model_len: int | None = None,
+    num_speculative_tokens: int | None = None,
     skip_tokenizer_init: bool = False,
     async_scheduling: bool = False,
 ) -> RBLNScheduler:
@@ -120,7 +119,7 @@ def create_scheduler(
     # ) if use_kv_connector else None
     kv_transfer_config = None
 
-    speculative_config: Optional[SpeculativeConfig] = None
+    speculative_config: SpeculativeConfig | None = None
     # TODO(RBLN): support specluative decoding
     # if num_speculative_tokens is not None:
     #     speculative_config = SpeculativeConfig(
@@ -162,10 +161,10 @@ _none_hash_initialized = False
 def create_requests(
     num_requests: int,
     num_tokens: int = 10,
-    mm_positions: Optional[list[list[PlaceholderRange]]] = None,
+    mm_positions: list[list[PlaceholderRange]] | None = None,
     max_tokens: int = 16,
-    stop_token_ids: Optional[list[int]] = None,
-    prompt_logprobs: Optional[int] = None,
+    stop_token_ids: list[int] | None = None,
+    prompt_logprobs: int | None = None,
     same_prompt: bool = False,
     block_size: int = 16,
 ) -> list[Request]:

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 from vllm.v1.core.block_pool import BlockPool
 from vllm.v1.core.kv_cache_utils import (
@@ -29,7 +28,7 @@ logger = init_logger(__name__)
 class RBLNBlockPool(BlockPool):
     def get_cached_block(
         self, block_hash: BlockHash, kv_cache_group_ids: list[int]
-    ) -> Optional[list[KVCacheBlock]]:
+    ) -> list[KVCacheBlock] | None:
         """Get the cached block by the block hash for each group in
         `kv_cache_group_ids`, or None if cache miss for any group.
         If there are duplicated blocks, we return the first block in the cache.

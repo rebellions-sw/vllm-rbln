@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 import openai
@@ -39,7 +39,7 @@ class RemoteOpenAIServer:
         self,
         model: str,
         vllm_serve_args: list[str],
-        env_dict: Optional[dict[str, str]],
+        env_dict: dict[str, str] | None,
     ) -> None:
         """Subclasses override this method to customize server process launch"""
         env = os.environ.copy()
@@ -57,11 +57,11 @@ class RemoteOpenAIServer:
         model: str,
         vllm_serve_args: list[str],
         *,
-        env_dict: Optional[dict[str, str]] = None,
-        seed: Optional[int] = 0,
+        env_dict: dict[str, str] | None = None,
+        seed: int | None = 0,
         auto_port: bool = True,
-        max_wait_seconds: Optional[float] = None,
-        override_hf_configs: Optional[dict[str, Any]] = None,
+        max_wait_seconds: float | None = None,
+        override_hf_configs: dict[str, Any] | None = None,
     ) -> None:
         if auto_port:
             if "-p" in vllm_serve_args or "--port" in vllm_serve_args:
@@ -119,7 +119,7 @@ class RemoteOpenAIServer:
             # force kill if needed
             self.proc.kill()
 
-    def _poll(self) -> Optional[int]:
+    def _poll(self) -> int | None:
         """Subclasses override this method to customize process polling"""
         return self.proc.poll()
 

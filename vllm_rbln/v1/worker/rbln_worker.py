@@ -15,7 +15,7 @@
 
 import copy
 import os
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -125,7 +125,7 @@ class RBLNWorker(WorkerBase):
         logger.warning("sleep mode is not supported on RBLN, ignore it.")
         pass
 
-    def wake_up(self, tags: Optional[list[str]] = None) -> None:
+    def wake_up(self, tags: list[str] | None = None) -> None:
         logger.warning("sleep mode is not supported on RBLN, ignore it.")
         pass
 
@@ -283,7 +283,7 @@ class RBLNWorker(WorkerBase):
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Optional[Union[ModelRunnerOutput, AsyncModelRunnerOutput]]:
+    ) -> ModelRunnerOutput | AsyncModelRunnerOutput | None:
         intermediate_tensors = None
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         if forward_pass and not get_pp_group().is_first_rank:
@@ -363,7 +363,7 @@ class RBLNWorker(WorkerBase):
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
     rank: int,
-    distributed_init_method: Optional[str] = None,
+    distributed_init_method: str | None = None,
     local_rank: int = -1,
     backend: str = "gloo",
 ) -> None:

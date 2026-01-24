@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, cast
+from typing import cast
 
 import torch
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -109,7 +109,7 @@ class RBLNInputBatch(InputBatch):
         else:
             prompt_token_ids = None
 
-        allowed_token_ids_mask: Optional[torch.Tensor] = None
+        allowed_token_ids_mask: torch.Tensor | None = None
         if not self.no_allowed_token_ids:
             assert self.allowed_token_ids_mask is not None
             copy_slice(

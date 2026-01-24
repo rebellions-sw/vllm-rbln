@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed
@@ -122,7 +122,7 @@ class RBLNOptimumWorker(WorkerBase):
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Optional[ModelRunnerOutput]:
+    ) -> ModelRunnerOutput | None:
         intermediate_tensors = None
         # TODO setting intermediate_tensors for PP
 
@@ -213,7 +213,7 @@ class RBLNOptimumWorker(WorkerBase):
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
     rank: int,
-    distributed_init_method: Optional[str] = None,
+    distributed_init_method: str | None = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""

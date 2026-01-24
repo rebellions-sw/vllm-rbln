@@ -13,7 +13,7 @@
 # limitations under the License.
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
@@ -288,8 +288,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
-        intermediate_tensors: Optional[IntermediateTensors] = None,
-    ) -> Union[ModelRunnerOutput, IntermediateTensors]:
+        intermediate_tensors: IntermediateTensors | None = None,
+    ) -> ModelRunnerOutput | IntermediateTensors:
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         with record_function_or_nullcontext("Preprocess"):
             self._update_states(scheduler_output)
@@ -567,13 +567,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         torch.Tensor,
         list[int],
         list[int],
-        Optional[MultiModalKwargs],
+        MultiModalKwargs | None,
         list[str],
     ]:
         input_tokens: list[list[int]] = []
         input_positions: list[list[int]] = []
         running_request_ids = []
-        batched_mm_inputs: Optional[BatchedTensorInputs] = None
+        batched_mm_inputs: BatchedTensorInputs | None = None
 
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0
@@ -1033,7 +1033,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             hidden_states=hidden_states, pooling_metadata=pooling_metadata
         )
 
-        pooler_output: list[Optional[torch.Tensor]] = []
+        pooler_output: list[torch.Tensor | None] = []
         for raw_output, seq_len, prompt_len in zip(
             raw_pooler_output, seq_lens, pooling_metadata.prompt_lens
         ):
@@ -1112,14 +1112,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         self,
         scheduler_output: "SchedulerOutput",
         sampler_output: SamplerOutput,
-        logits: Optional[torch.Tensor],
+        logits: torch.Tensor | None,
         hidden_states: torch.Tensor,
         num_scheduled_tokens: int,
     ) -> tuple[
         dict[str, int],
-        Optional[LogprobsLists],
+        LogprobsLists | None,
         list[list[int]],
-        dict[str, Optional[LogprobsTensors]],
+        dict[str, LogprobsTensors | None],
         list[str],
         dict[str, int],
         list[int],

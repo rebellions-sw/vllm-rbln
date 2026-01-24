@@ -15,7 +15,7 @@
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
@@ -192,7 +192,7 @@ def is_qwen3_pooling(
     )
 
 
-def get_rbln_config(vllm_config: VllmConfig) -> Optional[dict]:
+def get_rbln_config(vllm_config: VllmConfig) -> dict | None:
     rbln_config_path = Path(
         os.path.join(vllm_config.model_config.model, "rbln_config.json")
     )

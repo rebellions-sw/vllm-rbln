@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -23,7 +22,7 @@ from vllm.lora.layers.base_linear import BaseLinearLayerWithLoRA
 def base_linear_patched_apply(
     self: BaseLinearLayerWithLoRA,
     x: torch.Tensor,
-    bias: Optional[torch.Tensor] = None,
+    bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     output = self.base_layer.quant_method.apply(self.base_layer, x, bias)
     output_org_shape = output.shape
