@@ -54,7 +54,7 @@ def create_scheduler(
     async_scheduling: bool = False,
     is_torch_compile: bool = False,
     outer_block_size: int = 0,
-    enable_prefix_caching: bool = False,
+    enable_prefix_caching: Optional[bool] = None,
     structured_output_manager: Optional[StructuredOutputManager] = None,
 ) -> Union[RBLNOptimumScheduler, RBLNScheduler]:
     """Create RBLNOptimumscheduler under test.
@@ -69,6 +69,8 @@ def create_scheduler(
     """
     if max_model_len is None:
         max_model_len = max_num_batched_tokens
+    if block_size is None:
+        block_size = 16
 
     scheduler_config = SchedulerConfig(
         max_num_seqs=max_num_seqs,
@@ -129,7 +131,7 @@ def create_requests(
     prompt_logprobs: Optional[int] = None,
     same_prompt: bool = False,
     block_size: int = 16,
-    sample_json_schema: str = None,
+    sample_json_schema: Optional[str] = None,
 ) -> list[Request]:
     global _none_hash_initialized
     if not _none_hash_initialized:

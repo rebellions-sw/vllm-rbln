@@ -47,7 +47,10 @@ def _is_internal(name: str | None, *, level: int = 0) -> bool:
 
 
 def _fail(violations: Iterable[tuple[int, str]]) -> None:
-    print("ERROR: Disallowed eager imports in vllm_rbln/__init__.py:\n", file=sys.stderr)
+    print(
+        "ERROR: Disallowed eager imports in vllm_rbln/__init__.py:\n",
+        file=sys.stderr,
+    )
     for lineno, msg in violations:
         print(f"  Line {lineno}: {msg}", file=sys.stderr)
     sys.exit(1)
@@ -67,7 +70,9 @@ def main() -> None:
         def visit_If(self, node: ast.If) -> None:
             guard_is_type_checking = False
             test = node.test
-            if isinstance(test, ast.Attribute) and isinstance(test.value, ast.Name):
+            if isinstance(test, ast.Attribute) and isinstance(
+                test.value, ast.Name
+            ):
                 guard_is_type_checking = (
                     test.value.id == "typing" and test.attr == "TYPE_CHECKING"
                 )
@@ -90,7 +95,10 @@ def main() -> None:
                 return
             for alias in node.names:
                 module_name = alias.name
-                if _is_internal(module_name) and module_name not in ALLOWED_IMPORTS:
+                if (
+                    _is_internal(module_name)
+                    and module_name not in ALLOWED_IMPORTS
+                ):
                     violations.append(
                         (
                             node.lineno,

@@ -35,7 +35,8 @@ def format_instruction(instruction, query, doc):
         },
         {
             "role": "user",
-            "content": f"<Instruct>: {instruction}\n\n<Query>: {query}\n\n<Document>: {doc}",
+            "content": f"<Instruct>: {instruction}\n\n"
+            "<Query>: {query}\n\n<Document>: {doc}",
         },
     ]
     return text

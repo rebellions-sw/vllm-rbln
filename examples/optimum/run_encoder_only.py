@@ -37,7 +37,8 @@ def compare_copy_prompt_task_result(scores: list[float], golden_json: str):
         golden_similarity = golden[i]["golden_similarity"]
         diff = abs(similarity - golden_similarity)
         print(
-            "Difference: {:.3f} Similarity : {:.3f}, Golden Similarity: {:.3f}".format(
+            "Difference: {:.3f} Similarity : {:.3f}, "
+            "Golden Similarity: {:.3f}".format(
                 diff, similarity, golden_similarity
             )
         )

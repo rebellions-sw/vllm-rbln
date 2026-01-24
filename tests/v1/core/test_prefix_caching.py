@@ -19,7 +19,7 @@ from vllm.platforms import current_platform
 from vllm.utils import sha256
 from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
 from vllm.v1.request import Request, RequestStatus
-
+from typing import Callable
 from .utils import create_model_runner_output, create_scheduler
 
 MAX_NUM_SEQ = 2
@@ -83,7 +83,7 @@ def create_request(
     request_id: str,
     prompt_token_ids: list[int],
     block_size: int,
-    hash_fn: callable,
+    hash_fn: Callable,
 ) -> Request:
     block_hasher = get_request_block_hasher(block_size, hash_fn)
     request = Request(

@@ -1125,12 +1125,14 @@ if __name__ == "__main__":
         "--custom-output-len",
         type=int,
         default=256,
-        help="Number of output tokens per request, used only for custom dataset.",
+        help="Number of output tokens per request, "
+        "used only for custom dataset.",
     )
     custom_group.add_argument(
         "--custom-skip-chat-template",
         action="store_true",
-        help="Skip applying chat template to prompt, used only for custom dataset.",
+        help="Skip applying chat template to prompt, "
+        "used only for custom dataset.",
     )
 
     sonnet_group = parser.add_argument_group("sonnet dataset options")
@@ -1138,19 +1140,22 @@ if __name__ == "__main__":
         "--sonnet-input-len",
         type=int,
         default=550,
-        help="Number of input tokens per request, used only for sonnet dataset.",
+        help="Number of input tokens per request, "
+        "used only for sonnet dataset.",
     )
     sonnet_group.add_argument(
         "--sonnet-output-len",
         type=int,
         default=150,
-        help="Number of output tokens per request, used only for sonnet dataset.",
+        help="Number of output tokens per request, "
+        "used only for sonnet dataset.",
     )
     sonnet_group.add_argument(
         "--sonnet-prefix-len",
         type=int,
         default=200,
-        help="Number of prefix tokens per request, used only for sonnet dataset.",
+        help="Number of prefix tokens per request, "
+        "used only for sonnet dataset.",
     )
 
     sharegpt_group = parser.add_argument_group("sharegpt dataset options")
@@ -1167,13 +1172,15 @@ if __name__ == "__main__":
         "--random-input-len",
         type=int,
         default=1024,
-        help="Number of input tokens per request, used only for random sampling.",
+        help="Number of input tokens per request, "
+        "used only for random sampling.",
     )
     random_group.add_argument(
         "--random-output-len",
         type=int,
         default=128,
-        help="Number of output tokens per request, used only for random sampling.",
+        help="Number of output tokens per request, "
+        "used only for random sampling.",
     )
     random_group.add_argument(
         "--random-range-ratio",

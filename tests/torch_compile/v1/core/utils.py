@@ -186,28 +186,13 @@ def create_requests(
     )
     requests = []
     for i in range(num_requests):
-        mm_features = []
-        # TODO(RBLN): support multimodal models
-        # if mm_positions is not None:
-        #     mm_position = mm_positions[i]
-        #     for j, position in enumerate(mm_position):
-        #         # Dummy hash for each mm item should be unique
-        #         # since encoder cache tracks entries by hash
-        #         identifier = f"hash{i}_{j}"
-        #         mm_feature = MultiModalFeatureSpec(
-        #             data=MultiModalKwargsItem.dummy("dummy_m"),
-        #             mm_position=position,
-        #             identifier=identifier,
-        #             modality="image")
-        #         mm_features.append(mm_feature)
-
         prompt_token_ids = [0] * num_tokens if same_prompt else [i] * num_tokens
         request = Request(
             request_id=f"{i}",
             prompt_token_ids=prompt_token_ids,
             sampling_params=sampling_params,
             pooling_params=None,
-            mm_features=mm_features if mm_features else None,
+            mm_features=[],
             eos_token_id=EOS_TOKEN_ID,
             block_hasher=block_hasher,
         )

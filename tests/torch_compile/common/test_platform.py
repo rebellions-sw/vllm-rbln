@@ -49,13 +49,16 @@ def test_register_ops(monkeypatch: pytest.MonkeyPatch, vllm_config):
 
     attention = Attention(16, 32, 16, 16, prefix="layer.0")
     assert hasattr(attention, "layer_index"), (
-        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        f"Expected 'layer_index' in attention.__dict__, "
+        f"got {attention.__dict__}"
     )
     assert isinstance(attention.layer_index, int), (
-        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        f"Expected 'layer_index' in attention.__dict__, "
+        f"got {attention.__dict__}"
     )
     assert attention.layer_index == 0, (
-        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        f"Expected 'layer_index' in attention.__dict__, "
+        f"got {attention.__dict__}"
     )
 
     # RotaryEmbedding
@@ -81,9 +84,9 @@ def test_get_attn_backend_cls():
         None, 16, torch.float16, None, 16, False, False, False
     )
     assert (
-        attn_backend_cls
-        == "vllm_rbln.v1.attention.backends.flash_attention.RBLNAttentionBackend"
+        attn_backend_cls == "vllm_rbln.v1.attention.backends."
+        "flash_attention.RBLNAttentionBackend"
     ), (
-        f"Expected 'vllm_rbln.attention.backends.flash_attention.\
-        RBLNAttentionBackend', got {attn_backend_cls}"
+        f"Expected 'vllm_rbln.attention.backends.flash_attention."
+        f"RBLNAttentionBackend', got {attn_backend_cls}"
     )

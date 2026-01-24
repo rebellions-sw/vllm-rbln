@@ -447,9 +447,12 @@ class RBLNAttentionMetadataBuilder(
         # For multi-modal models
         placeholder_index_maps = None
         if len(input_data.multi_modal_inputs_list) != 0:
+            multi_modal_placeholder_maps = (
+                input_data.multi_modal_placeholder_maps
+            )
             placeholder_index_maps = {
                 modality: placeholder_map.index_map()
-                for modality, placeholder_map in input_data.multi_modal_placeholder_maps.items()
+                for modality, placeholder_map in multi_modal_placeholder_maps
             }
 
         # RBLN attention mask
@@ -675,11 +678,21 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
         if envs.VLLM_RBLN_FLASH_CAUSAL_ATTN:
             if envs.VLLM_RBLN_COMPILE_MODEL:
                 if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                    flash_causal_attention_naive_decode = torch.ops.rbln_triton_ops.flash_causal_attention_naive_decode
-                    flash_causal_attention_naive_prefill = torch.ops.rbln_triton_ops.flash_causal_attention_naive_prefill
+                    ops = torch.ops.rbln_triton_ops
+                    flash_causal_attention_naive_decode = (
+                        ops.flash_causal_attention_naive_decode
+                    )
+                    flash_causal_attention_naive_prefill = (
+                        ops.flash_causal_attention_naive_prefill
+                    )
                 elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                    flash_causal_attention_naive_decode = torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode
-                    flash_causal_attention_naive_prefill = torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill
+                    ops = torch.ops.rbln_custom_ops
+                    flash_causal_attention_naive_decode = (
+                        ops.flash_causal_attention_naive_decode
+                    )
+                    flash_causal_attention_naive_prefill = (
+                        ops.flash_causal_attention_naive_prefill
+                    )
                 else:
                     raise ValueError(
                         f"Invalid VLLM_RBLN_KERNEL_MODE: "

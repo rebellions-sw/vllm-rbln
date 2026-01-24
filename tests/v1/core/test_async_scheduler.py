@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import pytest
 from vllm.v1.request import RequestStatus
@@ -34,11 +33,11 @@ from .utils import create_model_runner_output, create_requests, create_scheduler
     ],
 )
 def test_schedule_alloc_block(
-    max_num_seqs: Optional[int],
-    block_size: Optional[int],
-    max_model_len: Optional[int],
-    num_blocks: Optional[int],
-    num_tokens_per_batch: Optional[int],
+    max_num_seqs: int,
+    block_size: int,
+    max_model_len: int,
+    num_blocks: int,
+    num_tokens_per_batch: int,
     exp_new_req0_blocks: list[int],
     exp_new_req1_blocks: list[int],
     exp_cached0_new: list[int],

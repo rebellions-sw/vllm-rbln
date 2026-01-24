@@ -147,7 +147,8 @@ def sample_requests(
                     f"__optional_field_{uuid.uuid4()}"
                 ] = {
                     "type": "string",
-                    "description": "An unique optional field to avoid cached schemas",
+                    "description": "An unique optional field "
+                    "to avoid cached schemas",
                 }
         else:
             json_schemas = [schema] * args.num_prompts

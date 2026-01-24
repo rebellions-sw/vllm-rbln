@@ -190,7 +190,10 @@ class PerformanceTracker:
                 self.prefill_metrics.get_avg_throughput(),
             )
             if self.prefill_metrics_by_request_id.get_num_request_ids() > 0:
-                avg_latency_by_request_id = self.prefill_metrics_by_request_id.get_avg_latency_per_request()
+                metrics_by_req_id = self.prefill_metrics_by_request_id
+                avg_latency_by_request_id = (
+                    metrics_by_req_id.get_avg_latency_per_request()
+                )
                 logger.info("  Average latency per request:")
                 for request_id, latency in avg_latency_by_request_id.items():
                     logger.info("    %s: %.2f ms", request_id, latency)

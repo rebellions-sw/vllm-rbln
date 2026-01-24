@@ -19,7 +19,7 @@ import pytest
 import pytest_asyncio
 from utils import RemoteOpenAIServer
 
-MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
+MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR", ".")
 MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
 MAX_TOKENS = 1
 
@@ -37,8 +37,7 @@ def monkeypatch_module():
 def server(request, monkeypatch_module):
     use_v1 = request.param
     monkeypatch_module.setenv("VLLM_USE_V1", "1" if use_v1 else "0")
-    args = []
-    with RemoteOpenAIServer(MODEL_NAME, args) as remote_server:
+    with RemoteOpenAIServer(MODEL_NAME, []) as remote_server:
         yield remote_server
 
 

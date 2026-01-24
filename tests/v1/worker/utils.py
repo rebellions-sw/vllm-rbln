@@ -16,7 +16,7 @@ from collections.abc import Callable
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Any
 
 import torch
 import torch.nn as nn
@@ -249,7 +249,7 @@ def _schedule_new_request(
                 mm_positions=[],
                 sampling_params=SamplingParams(),
                 pooling_params=None,
-                block_ids=block_ids,
+                block_ids=(block_ids,),
                 num_computed_tokens=new_computed_tokens,
                 lora_request=None,
             )
@@ -329,9 +329,8 @@ def _schedule_new_request_from_request(
 
 def _schedule_cached_reqs(
     reqs: list[Request],
-    new_block_ids: list[tuple[list[int], ...]],
+    new_block_ids: list[Any],
     finished_req_ids: Optional[list[str]] = None,
-    resumed_from_preemption: bool = False,
 ) -> RBLNSchedulerOutput:
     req_ids = []
     resumed_from_preemption = []
@@ -407,7 +406,7 @@ def forward_steps(reqs: list[Request]):
     for i, req in enumerate(reqs):
         req_id = req.request_id
         scheduler_output = _schedule_new_request_from_request(
-            req, block_ids=([i],), outer_block_ids=[i]
+            req, block_ids=[i], outer_block_ids=[i]
         )
         if req.use_structured_output:
             vocab_size = runner.model_config.get_vocab_size()

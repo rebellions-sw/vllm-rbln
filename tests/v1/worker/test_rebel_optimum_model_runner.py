@@ -124,7 +124,7 @@ def test_update_states_new_request(model_runner):
 
     # schedule new request
     scheduler_output = _schedule_new_request(
-        req_id, block_ids=([0],), outer_block_ids=[0]
+        req_id, block_ids=[0], outer_block_ids=[0]
     )
     metadata_before = model_runner.input_batch.sampling_metadata
     model_runner._update_states(scheduler_output)
@@ -139,7 +139,7 @@ def test_update_states_request_finished(model_runner):
 
     # schedule new request
     scheduler_output = _schedule_new_request(
-        req_id, block_ids=([0],), outer_block_ids=[0]
+        req_id, block_ids=[0], outer_block_ids=[0]
     )
 
     model_runner._update_states(scheduler_output)
@@ -173,7 +173,7 @@ def test_update_states_request_resumed(model_runner):
 
     # schedule new request
     scheduler_output = _schedule_new_request(
-        req_id, block_ids=([0],), outer_block_ids=[0]
+        req_id, block_ids=[0], outer_block_ids=[0]
     )
 
     model_runner._update_states(scheduler_output)
@@ -235,7 +235,7 @@ def test_update_states_request_unscheduled(model_runner):
 
     # schedule req0
     scheduler_output = _schedule_new_request(
-        req_id, block_ids=([0],), outer_block_ids=[0]
+        req_id, block_ids=[0], outer_block_ids=[0]
     )
 
     model_runner._update_states(scheduler_output)
@@ -249,7 +249,7 @@ def test_update_states_request_unscheduled(model_runner):
     # scheduling new request(req1)
     # prevent req0 from being scheduled
     scheduler_output = _schedule_new_request(
-        new_req_id, block_ids=([1],), outer_block_ids=torch.tensor([[1]])
+        new_req_id, block_ids=[1], outer_block_ids=torch.tensor([[1]])
     )
 
     metadata_before = model_runner._update_states(scheduler_output)

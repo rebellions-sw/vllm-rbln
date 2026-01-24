@@ -214,7 +214,6 @@ def test_no_mm_input_chunking():
     scheduler = create_scheduler(
         model="llava-hf/llava-1.5-7b-hf",
         max_num_batched_tokens=1024,
-        disable_chunked_mm_input=True,
         max_model_len=2048,
     )
     mm_positions = [[PlaceholderRange(offset=400, length=800)]]
@@ -255,7 +254,6 @@ def test_no_mm_input_chunking():
         _ = create_scheduler(
             model="llava-hf/llava-1.5-7b-hf",
             max_num_batched_tokens=100,
-            disable_chunked_mm_input=True,
         )
 
 
@@ -271,7 +269,6 @@ def test_schedule_concurrent_partial_requests(enable_prefix_caching: bool):
     scheduler = create_scheduler(
         model="facebook/opt-125m",
         max_num_batched_tokens=1024,
-        long_prefill_token_threshold=400,
         enable_prefix_caching=enable_prefix_caching,
     )
     requests = create_requests(
@@ -341,7 +338,7 @@ def test_schedule_concurrent_partial_requests(enable_prefix_caching: bool):
 @pytest.mark.skip(reason="Not verified yet")
 def test_stop_via_update_from_output():
     """Test stopping behavior through update_from_output"""
-    scheduler = create_scheduler(num_speculative_tokens=1)
+    scheduler = create_scheduler()
 
     # Test case 1: Stop on EOS token
     requests = create_requests(num_requests=2, max_tokens=10)
@@ -394,7 +391,7 @@ def test_stop_via_update_from_output():
     assert list(requests[1].output_token_ids) == [10, 11]
 
     # Test case 2: Stop on custom stop token
-    scheduler = create_scheduler(num_speculative_tokens=2)
+    scheduler = create_scheduler()
     requests = create_requests(
         num_requests=2, max_tokens=10, stop_token_ids=[42, 43]
     )
@@ -448,7 +445,7 @@ def test_stop_via_update_from_output():
     assert list(requests[1].output_token_ids) == [13, 14]
 
     # Test case 3: Stop on max tokens
-    scheduler = create_scheduler(num_speculative_tokens=2)
+    scheduler = create_scheduler()
     requests = create_requests(num_requests=2, max_tokens=2)
     for req in requests:
         req.num_computed_tokens = req.num_tokens
@@ -502,7 +499,7 @@ def test_stop_via_update_from_output():
     assert list(requests[1].output_token_ids) == [13]
 
     # Test case 4: Ignore EOS flag
-    scheduler = create_scheduler(num_speculative_tokens=2)
+    scheduler = create_scheduler()
     requests = create_requests(num_requests=1, max_tokens=10)
     requests[0].sampling_params.ignore_eos = True
     requests[0].num_computed_tokens = requests[0].num_tokens
@@ -692,8 +689,7 @@ def test_schedule_spec_decoding_stats(spec_tokens, output_tokens, expected):
     1. Speculated tokens get scheduled correctly
     2. Spec decoding stats properly count number of draft and accepted tokens
     """
-    num_spec_tokens = max(1, max(len(t) for t in spec_tokens))
-    scheduler = create_scheduler(num_speculative_tokens=num_spec_tokens)
+    scheduler = create_scheduler()
     requests = create_requests(num_requests=len(spec_tokens), num_tokens=1)
     req_ids = []
     req_to_index = {}
@@ -866,7 +862,6 @@ def test_kv_connector_basic():
     # Setup Scheduler.
     scheduler = create_scheduler(
         enable_prefix_caching=True,
-        use_kv_connector=True,
     )
     NUM_TOTAL_BLOCKS = (
         scheduler.kv_cache_manager.block_pool.get_num_free_blocks()
@@ -1008,7 +1003,6 @@ def test_kv_connector_unable_to_allocate():
     NUM_BLOCKS = 10
     scheduler = create_scheduler(
         enable_prefix_caching=True,
-        use_kv_connector=True,
         block_size=BLOCK_SIZE,
         num_blocks=NUM_BLOCKS,
     )
@@ -1098,7 +1092,6 @@ def test_kv_connector_handles_preemption():
     NUM_BLOCKS = 7
     scheduler = create_scheduler(
         enable_prefix_caching=True,
-        use_kv_connector=True,
         block_size=BLOCK_SIZE,
         num_blocks=NUM_BLOCKS,
     )
@@ -1925,7 +1918,7 @@ def test_priority_scheduling_heap_property():
 
 @pytest.mark.skip(reason="Not verified yet")
 def test_schedule_skip_tokenizer_init():
-    scheduler = create_scheduler(skip_tokenizer_init=True)
+    scheduler = create_scheduler()
     requests = create_requests(num_requests=5)
     for request in requests:
         scheduler.add_request(request)
@@ -1936,7 +1929,7 @@ def test_schedule_skip_tokenizer_init():
 
 @pytest.mark.skip(reason="Not verified yet")
 def test_schedule_skip_tokenizer_init_structured_output_request():
-    scheduler = create_scheduler(skip_tokenizer_init=True)
+    scheduler = create_scheduler()
     guided_params = GuidedDecodingParams(regex="[0-9]+")
     sampling_params = SamplingParams(
         ignore_eos=False,

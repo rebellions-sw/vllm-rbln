@@ -103,7 +103,8 @@ def write_to_json(filename: str, records: list) -> None:
             records,
             f,
             cls=InfEncoder,
-            default=lambda o: f"<{type(o).__name__} object is not JSON serializable>",
+            default=lambda o: f"<{type(o).__name__} "
+            "object is not JSON serializable>",
         )
 
 
