@@ -142,8 +142,8 @@ class RBLNOptimumModelBase(nn.Module):
         config = self.model_config.hf_config
         model_name, model_cls_name = get_rbln_model_info(config)
 
-        if isinstance(self.model_config.model,
-                      (str, Path)) and os.path.exists(self.model_config.model):
+        if isinstance(self.model_config.model, str | Path) and os.path.exists(
+                self.model_config.model):
             model_path = Path(self.model_config.model)
             if model_path.is_dir() and any(
                     model_path.glob('rbln_config.json')):
@@ -339,7 +339,7 @@ class RBLNOptimumDecoderMixin:
         dst_blocks = block_tables[0].tolist()
 
         for block_idx, (src_block, dst_block) in enumerate(
-                zip(cached_block_tables, dst_blocks)):
+                zip(cached_block_tables, dst_blocks, strict=False)):
             try:
                 prefill_decoder.runtime._copy_kv_cache(
                     src_block, dst_block, cached_lengths[block_idx])

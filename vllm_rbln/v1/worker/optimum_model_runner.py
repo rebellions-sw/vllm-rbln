@@ -759,7 +759,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 if new_block_ids is not None:
                     # Append the new blocks to the existing block IDs.
                     for block_ids, new_ids in zip(req_state.block_ids,
-                                                  new_block_ids):
+                                                  new_block_ids,
+                                                  strict=False):
                         block_ids.extend(new_ids)
             else:
                 assert new_block_ids is not None
@@ -958,7 +959,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         pooler_output: list[Optional[torch.Tensor]] = []
         for raw_output, seq_len, prompt_len in zip(
-                raw_pooler_output, seq_lens, pooling_metadata.prompt_lens):
+                raw_pooler_output,
+                seq_lens,
+                pooling_metadata.prompt_lens,
+                strict=False):
 
             output = raw_output.data if seq_len == prompt_len else None
             pooler_output.append(output)

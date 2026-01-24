@@ -266,11 +266,11 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         if pixel_values is None:
             return None
 
-        if not isinstance(pixel_values, (torch.Tensor, list)):
+        if not isinstance(pixel_values, torch.Tensor | list):
             raise ValueError("Incorrect type of pixel values. "
                              f"Got type: {type(pixel_values)}")
 
-        if not isinstance(num_crops, (torch.Tensor, list)):
+        if not isinstance(num_crops, torch.Tensor | list):
             raise ValueError("Incorrect type of num_crops. "
                              f"Got type: {type(num_crops)}")
 

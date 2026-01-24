@@ -63,7 +63,7 @@ def generate_prompts(batch_size: int, model_id: str):
         "multi_modal_data": {
             "image": image
         }
-    } for text, image in zip(texts, images)]
+    } for text, image in zip(texts, images, strict=False)]
 
 
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):
