@@ -35,8 +35,10 @@ _RBLN_GENERATION_MODELS: dict[str, tuple[str, str]] = {
 }
 
 _RBLN_ENCODER_DECODER_MODELS: dict[str, tuple[str, str]] = {
-    "WhisperForConditionalGeneration":
-    ("whisper", "RBLNWhisperForConditionalGeneration"),
+    "WhisperForConditionalGeneration": (
+        "whisper",
+        "RBLNWhisperForConditionalGeneration",
+    ),
 }
 
 _RBLN_MULTIMODAL_MODELS = {

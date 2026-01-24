@@ -18,8 +18,9 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
 from vllm.config.model import LogprobsMode
-from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
-                                               rbln_apply_all_penalties)
+from vllm_rbln.v1.sample.ops.penalties import (
+    apply_all_penalties as rbln_apply_all_penalties,
+)
 import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
@@ -191,8 +192,7 @@ class RBLNSampler(VLLMSampler):
         may update the logits tensor in-place.
         """
         logprobs_mode = logprobs_mode_override or self.logprobs_mode
-        assert not (sampling_metadata.all_greedy
-                    and sampling_metadata.all_random)
+        assert not (sampling_metadata.all_greedy and sampling_metadata.all_random)
         if sampling_metadata.all_random:
             greedy_sampled = None
         else:
@@ -209,8 +209,9 @@ class RBLNSampler(VLLMSampler):
         assert sampling_metadata.temperature is not None
 
         # Apply temperature.
-        logits = self.apply_temperature(logits, sampling_metadata.temperature,
-                                        sampling_metadata.all_random)
+        logits = self.apply_temperature(
+            logits, sampling_metadata.temperature, sampling_metadata.all_random
+        )
         # Apply logits processors that only apply to random sampling
         # (argmax invariant)
         for processor in sampling_metadata.logitsprocs.argmax_invariant:

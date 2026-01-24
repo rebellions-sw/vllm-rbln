@@ -43,10 +43,13 @@ class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
         self.max_model_len = max_model_len
         self.enable_caching = enable_caching
 
-        self.block_pool = RBLNBlockPool(kv_cache_config.num_blocks,
-                                        enable_caching, hash_block_size,
-                                        enable_kv_cache_events,
-                                        metrics_collector)
+        self.block_pool = RBLNBlockPool(
+            kv_cache_config.num_blocks,
+            enable_caching,
+            hash_block_size,
+            enable_kv_cache_events,
+            metrics_collector,
+        )
 
         # Needs special handling for find_longest_cache_hit if eagle is enabled
         self.use_eagle = use_eagle
@@ -72,7 +75,8 @@ class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
         # For models using only Mamba, block_size is set to max_model_len when
         # prefix caching is disabled, and hash_block_size validation is skipped.
         assert not enable_caching or (hash_block_size == self.block_size), (
-            "UnitaryKVCacheCoordinator assumes hash_block_size == block_size")
+            "UnitaryKVCacheCoordinator assumes hash_block_size == block_size"
+        )
         assert len(self.kv_cache_config.kv_cache_groups) == 1, (
             "UnitaryKVCacheCoordinator assumes only one kv cache group"
         )

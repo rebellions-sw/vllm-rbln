@@ -75,8 +75,7 @@ class RBLNKVCacheManager(KVCacheManager):
         self.num_kv_cache_groups = len(kv_cache_config.kv_cache_groups)
         self.block_pool = self.coordinator.block_pool
         self.kv_cache_config = kv_cache_config
-        block_size = kv_cache_config.kv_cache_groups[
-            0].kv_cache_spec.block_size
+        block_size = kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
         if enable_caching:
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=attn_block_size,
@@ -91,7 +90,8 @@ class RBLNKVCacheManager(KVCacheManager):
         #
         # We use nested tuples to ensure the empty KVCacheBlocks is immutable.
         self.empty_kv_cache_blocks = KVCacheBlocks(
-            tuple(() for _ in range(self.num_kv_cache_groups)))
+            tuple(() for _ in range(self.num_kv_cache_groups))
+        )
 
     def free(self, request: Request, preemption: int = False) -> None:
         """Free the blocks allocated for the request."""

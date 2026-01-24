@@ -20,9 +20,11 @@ import torch
 from vllm.config import VllmConfig
 from vllm.distributed.kv_events import EventPublisherFactory
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
-from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
-                                                EncoderDecoderCacheManager,
-                                                compute_encoder_budget)
+from vllm.v1.core.encoder_cache_manager import (
+    EncoderCacheManager,
+    EncoderDecoderCacheManager,
+    compute_encoder_budget,
+)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.request_queue import (
@@ -87,7 +89,8 @@ class RBLNOptimumScheduler(Scheduler):
         self.kv_metrics_collector: KVCacheMetricsCollector | None = None
         if self.observability_config.kv_cache_metrics:
             self.kv_metrics_collector = KVCacheMetricsCollector(
-                self.observability_config.kv_cache_metrics_sample, )
+                self.observability_config.kv_cache_metrics_sample,
+            )
         self.structured_output_manager = structured_output_manager
         self.is_encoder_decoder = vllm_config.model_config.is_encoder_decoder
 
@@ -96,7 +99,8 @@ class RBLNOptimumScheduler(Scheduler):
         # by update_from_outputs(). This is currently used in the multi-engine
         # case to track request lifetimes efficiently.
         self.finished_req_ids_dict: dict[int, set[str]] | None = (
-            defaultdict(set) if include_finished_set else None)
+            defaultdict(set) if include_finished_set else None
+        )
         self.prev_step_scheduled_req_ids: set[str] = set()
 
         # Scheduling constraints.
@@ -106,7 +110,8 @@ class RBLNOptimumScheduler(Scheduler):
         self.max_model_len = vllm_config.model_config.max_model_len
         self.enable_kv_cache_events = (
             self.kv_events_config is not None
-            and self.kv_events_config.enable_kv_cache_events)
+            and self.kv_events_config.enable_kv_cache_events
+        )
         # Create KVConnector for the Scheduler. Note that each Worker
         # will have a corresponding KVConnector with Role=WORKER.
         # KV Connector pushes/pull of remote KVs for P/D and offloading.
@@ -193,10 +198,11 @@ class RBLNOptimumScheduler(Scheduler):
         # NOTE: For the models without encoder (e.g., text-only models),
         # the encoder cache will not be initialized because cache size is 0
         # for these models.
-        self.encoder_cache_manager = (EncoderDecoderCacheManager(
-            cache_size=encoder_cache_size) if self.is_encoder_decoder else
-                                      EncoderCacheManager(
-                                          cache_size=encoder_cache_size))
+        self.encoder_cache_manager = (
+            EncoderDecoderCacheManager(cache_size=encoder_cache_size)
+            if self.is_encoder_decoder
+            else EncoderCacheManager(cache_size=encoder_cache_size)
+        )
 
         self.use_pp = False
         self.use_v2_model_runner = False
@@ -409,11 +415,11 @@ class RBLNOptimumScheduler(Scheduler):
                     # allow the lower-priority requests to be scheduled.
                     req_index += 1
                     continue
-                with record_function_or_nullcontext(
-                        "schedule: allocate_slots"):
+                with record_function_or_nullcontext("schedule: allocate_slots"):
                     while True:
                         new_blocks = self.kv_cache_manager.allocate_slots(
-                            request, num_new_tokens)
+                            request, num_new_tokens
+                        )
                         if new_blocks is not None:
                             break
 
@@ -429,15 +435,14 @@ class RBLNOptimumScheduler(Scheduler):
                                 scheduled_running_reqs.remove(preempted_req)
                                 ###
                                 token_budget += num_scheduled_tokens[
-                                    preempted_req.request_id]
+                                    preempted_req.request_id
+                                ]
                                 req_to_new_blocks.pop(preempted_req.request_id)
-                                num_scheduled_tokens.pop(
-                                    preempted_req.request_id)
+                                num_scheduled_tokens.pop(preempted_req.request_id)
                                 req_index -= 1
                         else:
                             preempted_req = self.running.pop()
-                        self._preempt_request(preempted_req,
-                                              scheduled_timestamp)
+                        self._preempt_request(preempted_req, scheduled_timestamp)
                         preempted_reqs.append(preempted_req)
                         if preempted_req == request:
                             # No more request to preempt.
@@ -471,15 +476,15 @@ class RBLNOptimumScheduler(Scheduler):
 
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
-        num_common_prefix_blocks = [0] * len(
-            self.kv_cache_config.kv_cache_groups)
-        with record_function_or_nullcontext(
-                "schedule: get_num_common_prefix_blocks"):
+        num_common_prefix_blocks = [0] * len(self.kv_cache_config.kv_cache_groups)
+        with record_function_or_nullcontext("schedule: get_num_common_prefix_blocks"):
             if self.running:
                 any_request = self.running[0]
                 num_common_prefix_blocks = (
                     self.kv_cache_manager.get_num_common_prefix_blocks(
-                        any_request.request_id))
+                        any_request.request_id
+                    )
+                )
 
         # Construct the scheduler output.
         new_reqs_data = [
@@ -488,8 +493,7 @@ class RBLNOptimumScheduler(Scheduler):
             )
             for req in scheduled_new_reqs
         ]
-        with record_function_or_nullcontext(
-                "schedule: make_cached_request_data"):
+        with record_function_or_nullcontext("schedule: make_cached_request_data"):
             cached_reqs_data = self._make_cached_request_data(
                 scheduled_running_reqs,
                 scheduled_resumed_reqs,
@@ -516,8 +520,7 @@ class RBLNOptimumScheduler(Scheduler):
             scheduled_spec_decode_tokens=scheduled_spec_decode_tokens,
             scheduled_encoder_inputs=None,
             num_common_prefix_blocks=num_common_prefix_blocks,
-            preempted_req_ids={req.request_id
-                               for req in preempted_reqs},
+            preempted_req_ids={req.request_id for req in preempted_reqs},
             # finished_req_ids is an existing state in the scheduler,
             # instead of being newly scheduled in this step.
             # It contains the request IDs that are finished in between
@@ -546,23 +549,21 @@ class RBLNOptimumScheduler(Scheduler):
         request: Request,
         timestamp: float,
     ) -> None:
-        preempted_blocks = self.kv_cache_manager.get_block_ids(
-            request.request_id)[0]
+        preempted_blocks = self.kv_cache_manager.get_block_ids(request.request_id)[0]
         self.kv_cache_manager.free(request, preemption=True)
         if not self.cache_config.enable_prefix_caching:
-            preempted_blocks = [
-                block_idx - 1 for block_idx in preempted_blocks
-            ]
+            preempted_blocks = [block_idx - 1 for block_idx in preempted_blocks]
         logger.warning(
-            "Request %s is preempted. Freed block(s): %s "
-            "Already generated tokens: %d", request.request_id,
-            preempted_blocks, len(request.output_token_ids))
+            "Request %s is preempted. Freed block(s): %s Already generated tokens: %d",
+            request.request_id,
+            preempted_blocks,
+            len(request.output_token_ids),
+        )
         request.status = RequestStatus.PREEMPTED
         request.num_computed_tokens = 0
         request.num_preemptions += 1
         if self.log_stats:
-            request.record_event(EngineCoreEventType.PREEMPTED,
-                                 scheduled_timestamp)
+            request.record_event(EngineCoreEventType.PREEMPTED, scheduled_timestamp)
 
         # Put the request back to the waiting queue.
         self.waiting.prepend_request(preempted_req)

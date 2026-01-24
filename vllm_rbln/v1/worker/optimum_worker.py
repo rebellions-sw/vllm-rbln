@@ -14,7 +14,7 @@
 
 from contextlib import nullcontext
 from types import NoneType
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed
@@ -133,7 +133,8 @@ class RBLNOptimumWorker(WorkerBase):
         num_cached = len(scheduler_output.scheduled_cached_reqs.req_ids)
 
         return self.profiler.annotate_context_manager(
-            f"execute_new_{num_new}_cached_{num_cached}")
+            f"execute_new_{num_new}_cached_{num_cached}"
+        )
 
     @torch.inference_mode()
     def sample_tokens(
@@ -149,8 +150,9 @@ class RBLNOptimumWorker(WorkerBase):
         # TODO setting intermediate_tensors for PP
 
         with self.annotate_profile(scheduler_output):
-            output = self.model_runner.execute_model(scheduler_output,
-                                                     intermediate_tensors)
+            output = self.model_runner.execute_model(
+                scheduler_output, intermediate_tensors
+            )
             if isinstance(output, (ModelRunnerOutput, NoneType)):
                 return output
         return None

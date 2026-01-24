@@ -32,11 +32,8 @@ class ModelInputForRBLN:
     running_requests_ids: List[str]
     finished_requests_ids: List[str]
     is_prompt: bool = False
-    cached_block_tables: List[int] = field(
-        default_factory=list
-    )  # for prefix caching
-    cached_lengths: List[int] = field(
-        default_factory=list)  # for prefix caching
+    cached_block_tables: List[int] = field(default_factory=list)  # for prefix caching
+    cached_lengths: List[int] = field(default_factory=list)  # for prefix caching
     multi_modal_kwargs: Optional[BatchedTensorInputs] = None
     dummy_block: Optional[int] = None  # for prefix caching
 

@@ -16,9 +16,11 @@ from typing import Any
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.idefics3 import (Idefics3ImageEmbeddingInputs,
-                                                 Idefics3ImagePixelInputs,
-                                                 ImageInputs)
+from vllm.model_executor.models.idefics3 import (
+    Idefics3ImageEmbeddingInputs,
+    Idefics3ImagePixelInputs,
+    ImageInputs,
+)
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.utils import flatten_bn
 
@@ -28,10 +30,9 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
-                                                  RBLNOptimumDecoderMixin,
-                                                  SupportsMultiModal):
-
+class RBLNOptimumIdefics3ForConditionalGeneration(
+    RBLNOptimumModelBase, RBLNOptimumDecoderMixin, SupportsMultiModal
+):
     def __init__(
         self,
         vllm_config: VllmConfig,

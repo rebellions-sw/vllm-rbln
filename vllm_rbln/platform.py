@@ -188,10 +188,12 @@ class RblnPlatform(Platform):
             assert model_config.dtype == torch.float
 
             if parallel_config.worker_cls == "auto":
-                parallel_config.worker_cls = \
+                parallel_config.worker_cls = (
                     "vllm_rbln.v1.worker.optimum_worker.RBLNOptimumWorker"
-            scheduler_config.scheduler_cls = \
-                    "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler"
+                )
+            scheduler_config.scheduler_cls = (
+                "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler"
+            )
 
             assert vllm_config.parallel_config.tensor_parallel_size == 1, (
                 "Tensor parallelism is set when compiled in optimum-rbln."
@@ -217,8 +219,9 @@ class RblnPlatform(Platform):
                 parallel_config.distributed_executor_backend,
             )
 
-        assert (not vllm_config.speculative_config
-                ), "Speculative decoding not yet supported for RBLN backend."
+        assert not vllm_config.speculative_config, (
+            "Speculative decoding not yet supported for RBLN backend."
+        )
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel

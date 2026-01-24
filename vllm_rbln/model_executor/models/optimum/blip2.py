@@ -16,9 +16,11 @@ from typing import Any
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.blip2 import (Blip2ImageEmbeddingInputs,
-                                              Blip2ImageInputs,
-                                              Blip2ImagePixelInputs)
+from vllm.model_executor.models.blip2 import (
+    Blip2ImageEmbeddingInputs,
+    Blip2ImageInputs,
+    Blip2ImagePixelInputs,
+)
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.utils import flatten_bn
 
@@ -28,10 +30,9 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
-                                               RBLNOptimumDecoderMixin,
-                                               SupportsMultiModal):
-
+class RBLNOptimumBlip2ForConditionalGeneration(
+    RBLNOptimumModelBase, RBLNOptimumDecoderMixin, SupportsMultiModal
+):
     def __init__(
         self,
         vllm_config: VllmConfig,

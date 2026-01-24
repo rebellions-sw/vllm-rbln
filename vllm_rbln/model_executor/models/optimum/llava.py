@@ -16,9 +16,11 @@ import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.model_executor.models.llava import (LlavaImageInputs,
-                                              LlavaImagePixelInputs,
-                                              PixtralHFImagePixelInputs)
+from vllm.model_executor.models.llava import (
+    LlavaImageInputs,
+    LlavaImagePixelInputs,
+    PixtralHFImagePixelInputs,
+)
 from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN, version_error
@@ -27,10 +29,9 @@ from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
 logger = init_logger(__name__)
 
 
-class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
-                                               RBLNOptimumDecoderMixin,
-                                               SupportsMultiModal):
-
+class RBLNOptimumLlavaForConditionalGeneration(
+    RBLNOptimumModelBase, RBLNOptimumDecoderMixin, SupportsMultiModal
+):
     def __init__(
         self,
         vllm_config: VllmConfig,

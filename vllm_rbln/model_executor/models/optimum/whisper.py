@@ -16,8 +16,10 @@ from typing import Any
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.interfaces import (SupportsMultiModal,
-                                                   SupportsTranscription)
+from vllm.model_executor.models.interfaces import (
+    SupportsMultiModal,
+    SupportsTranscription,
+)
 from vllm.model_executor.models.whisper import ISO639_1_SUPPORTED_LANGS
 
 from .base import ModelInputForRBLN
@@ -33,10 +35,12 @@ from .optimum_attention import (
 logger = init_logger(__name__)
 
 
-class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
-                                                 RBLNOptimumDecoderMixin,
-                                                 SupportsTranscription,
-                                                 SupportsMultiModal):
+class RBLNOptimumWhisperForConditionalGeneration(
+    RBLNOptimumModelBase,
+    RBLNOptimumDecoderMixin,
+    SupportsTranscription,
+    SupportsMultiModal,
+):
     INVALID_TOKEN = 100
     # Whisper only supports audio-conditioned generation.
     supports_transcription_only = True
@@ -52,7 +56,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             logger.warning(
                 "Defaulting to language='en'. If you wish to transcribe "
                 "audio in a different language, pass the `language` field "
-                "in the TranscriptionRequest.")
+                "in the TranscriptionRequest."
+            )
             language = "en"
         return super().validate_language(language)
 
