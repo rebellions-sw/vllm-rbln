@@ -235,7 +235,7 @@ class RBLNOptimumQwenVLForConditionalGeneration(RBLNOptimumModelBase,
 
     def _validate_and_reshape_mm_tensor(self, mm_input: object,
                                         name: str) -> torch.Tensor:
-        if not isinstance(mm_input, (torch.Tensor, list)):
+        if not isinstance(mm_input, torch.Tensor | list):
             raise ValueError(f"Incorrect type of {name}. "
                              f"Got type: {type(mm_input)}")
         if isinstance(mm_input, torch.Tensor):

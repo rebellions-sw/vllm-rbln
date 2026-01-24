@@ -280,7 +280,7 @@ class RBLNWorker(WorkerBase):
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
-        if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
+        if isinstance(output, ModelRunnerOutput | AsyncModelRunnerOutput):
             return output
 
         assert isinstance(output, IntermediateTensors)

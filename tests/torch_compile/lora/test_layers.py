@@ -207,7 +207,7 @@ def set_lora_mask(inputs: list[torch.Tensor], prompt_mapping: list[int],
                   id_to_index: list[int | None], max_loras: int,
                   max_lora_rank: int, lora_dtype: torch.dtype) -> None:
     masks = []
-    for input, lora_id in zip(inputs, prompt_mapping):
+    for input, lora_id in zip(inputs, prompt_mapping, strict=False):
         input_len = input.size(0)
         mask = torch.zeros(input_len,
                            max_loras * max_lora_rank,
@@ -281,7 +281,7 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
         lora_result = lora_embedding(torch.cat(inputs))
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping):
+        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
             lora = lora_dict[lora_id]
             result = embedding(input_)
             after_a = F.embedding(input_, lora.lora_a)
@@ -393,8 +393,10 @@ def test_embeddings_with_new_embeddings(dist_init, num_loras, device,
 
         # Force some of the inputs to be in the extended embeddings range
         # to guarantee that their behavior is tested.
-        for input_, original_input_, lora_id in zip(inputs, original_inputs,
-                                                    prompt_mapping):
+        for input_, original_input_, lora_id in zip(inputs,
+                                                    original_inputs,
+                                                    prompt_mapping,
+                                                    strict=False):
             embedding_id = lora_id - 1
             input_[-1] = vocab_size + (embedding_id * embeddings_tensor_len)
             original_input_[-1] = vocab_size
@@ -411,8 +413,10 @@ def test_embeddings_with_new_embeddings(dist_init, num_loras, device,
         lora_result = lora_embedding(torch.cat(original_inputs))
 
         expected_results: list[torch.Tensor] = []
-        for input_, original_input_, lora_id in zip(inputs, original_inputs,
-                                                    prompt_mapping):
+        for input_, original_input_, lora_id in zip(inputs,
+                                                    original_inputs,
+                                                    prompt_mapping,
+                                                    strict=False):
             lora = lora_dict[lora_id]
             result = expanded_embedding(input_)
             after_a = F.embedding(
@@ -534,7 +538,7 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
         original_lm_head = deepcopy(linear)
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping):
+        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
             lora = lora_dict[lora_id]
             embeddings_tensor = lora.embeddings_tensor
             embeddings_tensor_len = embeddings_tensor.shape[0]
@@ -662,7 +666,7 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
         lora_result = lora_linear(torch.cat(inputs))[0]
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping):
+        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
             lora = lora_dict[lora_id]
             result = linear(input_)[0]
             result += input_ @ lora.lora_a @ lora.lora_b * lora.scaling
@@ -784,7 +788,7 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
         lora_result = lora_linear(torch.cat(inputs))[0]
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping):
+        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
             lora = lora_dict[lora_id]
             result = linear(input_)[0]
             result += input_ @ lora.lora_a @ lora.lora_b * lora.scaling
@@ -930,7 +934,7 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
         lora_result = lora_linear(torch.cat(inputs))[0]
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping):
+        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
             result = linear(input_)[0]
             subloras = sublora_dict[lora_id]
             for i, sublora in enumerate(subloras):

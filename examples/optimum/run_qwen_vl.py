@@ -76,7 +76,11 @@ def generate_prompts_video(batch_size: int, model_id: str):
             **video_kwargs,
         },
     } for text, image_inputs, video_inputs, video_kwargs in zip(
-        texts, arr_image_inputs, arr_video_inputs, arr_video_kwargs)]
+        texts,
+        arr_image_inputs,
+        arr_video_inputs,
+        arr_video_kwargs,
+        strict=False)]
 
 
 def generate_prompts_image(batch_size: int, model_id: str):
@@ -142,7 +146,11 @@ def generate_prompts_image(batch_size: int, model_id: str):
                 **video_kwargs,
             },
         } for text, image_inputs, video_inputs, video_kwargs in zip(
-            texts, arr_image_inputs, arr_video_inputs, arr_video_kwargs)
+            texts,
+            arr_image_inputs,
+            arr_video_inputs,
+            arr_video_kwargs,
+            strict=False)
     ]
 
 
@@ -194,7 +202,7 @@ def generate_prompts_wo_processing(batch_size: int, model_id: str):
             "min_pixels": 1024 * 14 * 14,
             "max_pixels": 5120 * 14 * 14,
         }
-    } for text, image in zip(texts, images)]
+    } for text, image in zip(texts, images, strict=False)]
 
 
 async def generate(engine: AsyncLLMEngine, tokenizer, request_id, request):

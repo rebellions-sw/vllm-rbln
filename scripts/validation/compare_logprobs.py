@@ -84,7 +84,8 @@ if __name__ == "__main__":
     if p1.exitcode != 0 or p2.exitcode != 0:
         raise SystemExit("One of the processes worked incorrectly.")
 
-    for cpu_output, rbln_output in zip(cpu_outputs, rbln_outputs):
+    for cpu_output, rbln_output in zip(cpu_outputs, rbln_outputs,
+                                       strict=False):
         print("=========" * 10)
         cpu_logprobs = cpu_output.outputs[0].logprobs
         rbln_logprobs = rbln_output.outputs[0].logprobs

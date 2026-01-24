@@ -129,7 +129,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
             return None
 
         if image_embeds is not None:
-            if not isinstance(image_embeds, (torch.Tensor, list)):
+            if not isinstance(image_embeds, torch.Tensor | list):
                 raise ValueError("Incorrect type of image embeddings. "
                                  f"Got type: {type(image_embeds)}")
 
@@ -139,17 +139,17 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
             )
 
         if pixel_values is not None:
-            if not isinstance(pixel_values, (torch.Tensor, list)):
+            if not isinstance(pixel_values, torch.Tensor | list):
                 raise ValueError("Incorrect type of pixel values. "
                                  f"Got type: {type(pixel_values)}")
 
             pixel_attention_mask = kwargs.pop("pixel_attention_mask")
-            if not isinstance(pixel_attention_mask, (torch.Tensor, list)):
+            if not isinstance(pixel_attention_mask, torch.Tensor | list):
                 raise ValueError("Incorrect type of pixel_attention_mask. "
                                  f"Got type: {type(pixel_attention_mask)}")
 
             num_patches = kwargs.pop("num_patches")
-            if not isinstance(num_patches, (torch.Tensor, list)):
+            if not isinstance(num_patches, torch.Tensor | list):
                 raise ValueError("Incorrect type of num_patches. "
                                  f"Got type: {type(num_patches)}")
 
