@@ -9,11 +9,11 @@ on:
         type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
-        required: true
+        required: false
         type: string
       optimum_rbln_version:
         description: "Version of optimum-rbln to use (optional)"
-        required: true
+        required: false
         type: string
   workflow_call:
     inputs:
@@ -35,7 +35,7 @@ env:
 
 jobs:
   get-compiler-version:
-    if: ${{ !inputs.rebel_compiler_version }}
+    if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
     uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
     secrets: inherit
 
@@ -54,7 +54,7 @@ jobs:
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
       - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
+        if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
         id: get_latest_rebel_compiler
         run: |
           echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
@@ -147,7 +147,7 @@ jobs:
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
       - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
+        if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
         id: get_latest_rebel_compiler
         run: |
           echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
@@ -284,7 +284,7 @@ jobs:
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
       - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
+        if: ${{ !inputs.rebel_compiler_version || inputs.rebel_compiler_version == '' }}
         id: get_latest_rebel_compiler
         run: |
           echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
