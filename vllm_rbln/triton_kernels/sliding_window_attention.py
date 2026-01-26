@@ -172,8 +172,10 @@ def sliding_window_attention_naive_prefill(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k = rblib.dynamic_load(k_cache_ptr)
         k_insert = rblib.window_insert(k, k_state, WINDOW_AXIS, cache_start)
-        k_slice = rblib.window_slice(k_insert, WINDOW_SIZE, WINDOW_AXIS,
-                                     cache_end)
+        k_slice = rblib.window_slice(k_insert,
+                                     cache_end,
+                                     WINDOW_AXIS,
+                                     window_size=WINDOW_SIZE)
         rblib.dynamic_store(k_cache_ptr, k_slice)
 
         k_insert = tl.reshape(
@@ -183,15 +185,18 @@ def sliding_window_attention_naive_prefill(
             k_tmp, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, WINDOW_SIZE + QUERY_LEN))
         qk = tl.dot(q, k)
         qk_scaled = qk * qk_scale
-        window_qk_scaled = rblib.window_softmax(qk_scaled, cache_start,
-                                                WINDOW_SIZE)
+        window_qk_scaled = rblib.window_softmax(qk_scaled,
+                                                cache_start,
+                                                window_size=WINDOW_SIZE)
 
         v_state = tl.load(v_block_ptr)
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v = rblib.dynamic_load(v_cache_ptr)
         v_insert = rblib.window_insert(v, v_state, WINDOW_AXIS, cache_start)
-        v_slice = rblib.window_slice(v_insert, WINDOW_SIZE, WINDOW_AXIS,
-                                     cache_end)
+        v_slice = rblib.window_slice(v_insert,
+                                     cache_end,
+                                     WINDOW_AXIS,
+                                     window_size=WINDOW_SIZE)
         rblib.dynamic_store(v_cache_ptr, v_slice)
 
         v_insert = tl.reshape(
@@ -358,8 +363,10 @@ def sliding_window_attention_naive_decode(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k = rblib.dynamic_load(k_cache_ptr)
         k_insert = rblib.window_insert(k, k_state, WINDOW_AXIS, cache_start)
-        k_slice = rblib.window_slice(k_insert, WINDOW_SIZE, WINDOW_AXIS,
-                                     cache_end)
+        k_slice = rblib.window_slice(k_insert,
+                                     cache_end,
+                                     WINDOW_AXIS,
+                                     window_size=WINDOW_SIZE)
         rblib.dynamic_store(k_cache_ptr, k_slice)
 
         k_insert = rblib.nn_pad(k_insert, 0.0, WINDOW_AXIS, (0, PAD_SIZE),
@@ -372,15 +379,18 @@ def sliding_window_attention_naive_decode(
                                        WINDOW_SIZE + QUERY_LEN + PAD_SIZE))
         qk = tl.dot(q, k)
         qk_scaled = qk * qk_scale
-        window_qk_scaled = rblib.window_softmax(qk_scaled, cache_start,
-                                                WINDOW_SIZE)
+        window_qk_scaled = rblib.window_softmax(qk_scaled,
+                                                cache_start,
+                                                window_size=WINDOW_SIZE)
 
         v_state = tl.load(v_block_ptr)
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v = rblib.dynamic_load(v_cache_ptr)
         v_insert = rblib.window_insert(v, v_state, WINDOW_AXIS, cache_start)
-        v_slice = rblib.window_slice(v_insert, WINDOW_SIZE, WINDOW_AXIS,
-                                     cache_end)
+        v_slice = rblib.window_slice(v_insert,
+                                     cache_end,
+                                     WINDOW_AXIS,
+                                     window_size=WINDOW_SIZE)
         rblib.dynamic_store(v_cache_ptr, v_slice)
 
         v_insert = rblib.nn_pad(v_insert, 0.0, (WINDOW_AXIS), ((0, PAD_SIZE)),
