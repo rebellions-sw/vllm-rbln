@@ -203,7 +203,7 @@ def set_lora_mask(inputs: list[torch.Tensor], prompt_mapping: list[int],
                   id_to_index: list[int | None], max_loras: int,
                   max_lora_rank: int, lora_dtype: torch.dtype) -> None:
     masks = []
-    for input, lora_id in zip(inputs, prompt_mapping, strict=False):
+    for input, lora_id in zip(inputs, prompt_mapping):
         input_len = input.size(0)
         mask = torch.zeros(input_len,
                            max_loras * max_lora_rank,
@@ -288,7 +288,7 @@ def test_embeddings(dist_init, num_loras, device, vocab_size, stage) -> None:
         lora_result = rbln_compile(lora_embedding)(torch.cat(inputs))
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
+        for input_, lora_id in zip(inputs, prompt_mapping):
             lora = lora_dict[lora_id]
             result = rbln_compile(lora_embedding_ref)(input_, embedding,
                                                       lora.lora_a, lora.lora_b)
@@ -409,7 +409,7 @@ def test_lm_head_logits_processor(dist_init, num_loras, device, vocab_size,
         original_lm_head = deepcopy(linear)
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
+        for input_, lora_id in zip(inputs, prompt_mapping):
             lora = lora_dict[lora_id]
             result = rbln_compile(lm_head_logits_processor_ref)(
                 logits_processor, input_, linear, lora)
@@ -527,7 +527,7 @@ def test_linear_replicated(dist_init, num_loras, device, stage) -> None:
         lora_result = rbln_compile(lora_linear)(torch.cat(inputs))[0]
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
+        for input_, lora_id in zip(inputs, prompt_mapping):
             lora = lora_dict[lora_id]
             result = rbln_compile(lora_linear_replicated_ref)(input_, linear,
                                                               lora.lora_a.T,
@@ -661,7 +661,7 @@ def test_linear_parallel(dist_init, num_loras, orientation, fully_shard,
         lora_result = rbln_compile(lora_linear)(torch.cat(inputs))[0]
 
         expected_results: list[torch.Tensor] = []
-        for input_, lora_id in zip(inputs, prompt_mapping, strict=False):
+        for input_, lora_id in zip(inputs, prompt_mapping):
             lora = lora_dict[lora_id]
             result = rbln_compile(lora_linear_parallel_ref)(input_, linear,
                                                             lora.lora_a.T,
@@ -830,7 +830,7 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
             expected_results.append(result)
         expected_result = torch.cat(expected_results)
 
-        rtol, atol = TOLERANCES[lora_result.dtype]
+        rtol, atol = TOLERANCESa[lora_result.dtype]
         torch.testing.assert_close(lora_result,
                                    expected_result,
                                    rtol=rtol,

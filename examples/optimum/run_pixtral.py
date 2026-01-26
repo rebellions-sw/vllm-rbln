@@ -51,7 +51,7 @@ def generate_prompts(batch_size: int, model_id: str):
         "multi_modal_data": {
             "image": image
         }
-    } for text, image in zip(texts, images, strict=False)]
+    } for text, image in zip(texts, images)]
     labels = [dataset[i]["label"] for i in range(batch_size)]
     return inputs, labels
 
@@ -90,7 +90,7 @@ async def main(
                 generate(engine, tokenizer, request_id, request)))
 
     results = await asyncio.gather(*futures)
-    for i, (result, label) in enumerate(zip(results, labels, strict=False)):
+    for i, (result, label) in enumerate(zip(results, labels)):
         label_str = str(label)
         output = result.outputs[0].text
 
