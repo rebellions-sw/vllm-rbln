@@ -80,7 +80,7 @@ def generate_prompts_video(batch_size: int, model_id: str):
         arr_image_inputs,
         arr_video_inputs,
         arr_video_kwargs,
-        strict=False)]
+        )]
 
 
 def generate_prompts_image(batch_size: int, model_id: str):
@@ -150,7 +150,7 @@ def generate_prompts_image(batch_size: int, model_id: str):
             arr_image_inputs,
             arr_video_inputs,
             arr_video_kwargs,
-            strict=False)
+            )
     ]
 
 
