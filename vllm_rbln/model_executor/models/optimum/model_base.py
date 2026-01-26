@@ -330,7 +330,7 @@ class RBLNOptimumDecoderMixin:
         dst_blocks = block_tables[0].tolist()
 
         for block_idx, (src_block, dst_block) in enumerate(
-                zip(cached_block_tables, dst_blocks, strict=False)):
+                zip(cached_block_tables, dst_blocks)):
             try:
                 prefill_decoder.runtime._copy_kv_cache(
                     src_block, dst_block, cached_lengths[block_idx])
