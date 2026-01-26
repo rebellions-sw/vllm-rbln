@@ -83,7 +83,7 @@ async def main(model_id: str, num_input_prompt: int, q_prompt_txt: str,
 
     scores = []
 
-    for idx, (q, p) in enumerate(zip(q_result, p_result, strict=False)):
+    for idx, (q, p) in enumerate(zip(q_result, p_result)):
         q_embedding = q.outputs.data
         p_embedding = p.outputs.data
 

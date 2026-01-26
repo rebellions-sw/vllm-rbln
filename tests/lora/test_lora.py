@@ -186,7 +186,7 @@ def clear_global_vars():
 
 
 def validate_vars():
-    for r, g in zip(result, golden, strict=False):
+    for r, g in zip(result, golden):
         for i in range(len(r)):
             assert g[i] == r[i]
 
