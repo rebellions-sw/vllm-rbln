@@ -13,14 +13,16 @@
 # limitations under the License.
 
 # isort: off
-from optimum.rbln import (RBLNT5ForConditionalGeneration as
-                          _RBLNT5ForConditionalGeneration)
+from optimum.rbln import (
+    RBLNT5ForConditionalGeneration as _RBLNT5ForConditionalGeneration,
+)
+
 # isort: on
 from vllm.model_executor.models import VllmModelForTextGeneration
 
 
-class RBLNT5ForConditionalGeneration(_RBLNT5ForConditionalGeneration,
-                                     VllmModelForTextGeneration):
-
+class RBLNT5ForConditionalGeneration(
+    _RBLNT5ForConditionalGeneration, VllmModelForTextGeneration
+):
     def is_text_generation_model(self):
         return True

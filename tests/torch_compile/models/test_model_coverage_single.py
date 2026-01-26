@@ -64,7 +64,7 @@ targets = [
         "enable_chunked_prefill": True,
         "max_num_batched_tokens": 128,
         "max_num_seqs": 8,
-        "trust_remote_code": True
+        "trust_remote_code": True,
     },
     # Qwen2ForCausalLM
     {

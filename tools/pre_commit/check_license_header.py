@@ -18,7 +18,7 @@ LICENSE_HEADER_PREFIX = "# Copyright 2025 Rebellions Inc."
 
 
 def check_license_header(file_path):
-    with open(file_path, encoding='UTF-8') as file:
+    with open(file_path, encoding="UTF-8") as file:
         lines = file.readlines()
         if not lines:
             # Empty file like __init__.py

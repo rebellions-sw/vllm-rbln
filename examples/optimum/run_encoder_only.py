@@ -37,8 +37,10 @@ def compare_copy_prompt_task_result(scores: list[float], golden_json: str):
         golden_similarity = golden[i]["golden_similarity"]
         diff = abs(similarity - golden_similarity)
         print(
-            "Difference: {:.3f} Similarity : {:.3f}, Golden Similarity: {:.3f}"
-            .format(diff, similarity, golden_similarity))
+            "Difference: {:.3f} Similarity : {:.3f}, Golden Similarity: {:.3f}".format(
+                diff, similarity, golden_similarity
+            )
+        )
         if abs(similarity - golden_similarity) > THRESHOLD:
             print(f"The Error is higher than the threshold ({THRESHOLD})")
             exit(1)
@@ -46,9 +48,9 @@ def compare_copy_prompt_task_result(scores: list[float], golden_json: str):
 
 async def encode(engine, prompt, request_id):
     pooling_params = PoolingParams(task="embed")
-    results_generator = engine.encode(prompt=prompt,
-                                      pooling_params=pooling_params,
-                                      request_id=str(request_id))
+    results_generator = engine.encode(
+        prompt=prompt, pooling_params=pooling_params, request_id=str(request_id)
+    )
     # get the results
     final_output = None
     async for request_output in results_generator:
@@ -69,8 +71,13 @@ async def get_result(engine, model_id, prompt, num_input_prompt):
     return results
 
 
-async def main(model_id: str, num_input_prompt: int, q_prompt_txt: str,
-               p_prompt_txt: str, golden_json: str):
+async def main(
+    model_id: str,
+    num_input_prompt: int,
+    q_prompt_txt: str,
+    p_prompt_txt: str,
+    golden_json: str,
+):
     engine_args = AsyncEngineArgs(model=model_id)
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -112,7 +119,8 @@ def entry_point(
             q_prompt_txt=q_prompt_txt,
             p_prompt_txt=p_prompt_txt,
             golden_json=golden_json,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":

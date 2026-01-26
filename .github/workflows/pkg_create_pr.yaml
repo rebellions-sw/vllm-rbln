@@ -61,4 +61,4 @@ jobs:
             rebel-seinpark
             rebel-sunwook
     outputs:
-      success: ${{ steps.create-pr-step.outputs.success }}
+      success: ${{ steps.create-pr-step.outputs.pull-request-operation != 'none' }}

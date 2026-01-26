@@ -31,10 +31,12 @@ def __qwen3_for_causal_lm__init__(
     quant_config = self.quant_config
 
     if get_pp_group().is_last_rank:
-        self.lm_head = ParallelLMHead(config.vocab_size,
-                                      config.hidden_size,
-                                      quant_config=quant_config,
-                                      prefix=maybe_prefix(prefix, "lm_head"))
+        self.lm_head = ParallelLMHead(
+            config.vocab_size,
+            config.hidden_size,
+            quant_config=quant_config,
+            prefix=maybe_prefix(prefix, "lm_head"),
+        )
 
         if config.tie_word_embeddings:
             self.lm_head = self.lm_head.tie_weights(self.model.embed_tokens)

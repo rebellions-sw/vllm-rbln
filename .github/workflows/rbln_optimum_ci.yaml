@@ -47,12 +47,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -65,13 +59,13 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 
@@ -139,12 +133,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -157,13 +145,13 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 
@@ -275,12 +263,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -293,13 +275,13 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 

@@ -19,7 +19,7 @@ import math
 import os
 import time
 from types import TracebackType
-from typing import Any, Optional, Union
+from typing import Any
 
 from vllm import LLM, EngineArgs
 
@@ -31,14 +31,17 @@ def get_llm_instance(engine_args: EngineArgs) -> LLM:
         compiled_model_path = engine_args.model
         if not os.path.exists(compiled_model_path):
             raise ValueError(
-                f"Compiled model path does not exist: {compiled_model_path}")
+                f"Compiled model path does not exist: {compiled_model_path}"
+            )
 
     return LLM(**dataclasses.asdict(engine_args))
 
 
-def convert_to_pytorch_benchmark_format(args: argparse.Namespace,
-                                        metrics: dict[str, list],
-                                        extra_info: dict[str, Any]) -> list:
+def convert_to_pytorch_benchmark_format(
+    args: argparse.Namespace,
+    metrics: dict[str, list],
+    extra_info: dict[str, Any],
+) -> list:
     """
     Save the benchmark results in the format used by PyTorch OSS benchmark with
     on metric per record
@@ -66,12 +69,12 @@ def convert_to_pytorch_benchmark_format(args: argparse.Namespace,
             },
         }
 
-        tp = record["benchmark"]["extra_info"]["args"].get(
-            "tensor_parallel_size")
+        tp = record["benchmark"]["extra_info"]["args"].get("tensor_parallel_size")
         # Save tensor_parallel_size parameter if it's part of the metadata
         if not tp and "tensor_parallel_size" in extra_info:
-            record["benchmark"]["extra_info"]["args"][
-                "tensor_parallel_size"] = (extra_info["tensor_parallel_size"])
+            record["benchmark"]["extra_info"]["args"]["tensor_parallel_size"] = (
+                extra_info["tensor_parallel_size"]
+            )
 
         records.append(record)
 
@@ -79,7 +82,6 @@ def convert_to_pytorch_benchmark_format(args: argparse.Namespace,
 
 
 class InfEncoder(json.JSONEncoder):
-
     def clear_inf(self, o: Any):
         if isinstance(o, dict):
             return {k: self.clear_inf(v) for k, v in o.items()}
@@ -99,8 +101,7 @@ def write_to_json(filename: str, records: list) -> None:
             records,
             f,
             cls=InfEncoder,
-            default=lambda o:
-            f"<{type(o).__name__} object is not JSON serializable>",
+            default=lambda o: f"<{type(o).__name__} object is not JSON serializable>",
         )
 
 
@@ -121,7 +122,7 @@ class TimeCollector:
     def __init__(self, scale: int) -> None:
         self.cnt: int = 0
         self._sum: int = 0
-        self._max: Optional[int] = None
+        self._max: int | None = None
         self.scale = scale
         self.start_time: int = time.monotonic_ns()
 
@@ -133,14 +134,13 @@ class TimeCollector:
         else:
             self._max = max(self._max, v)
 
-    def avg(self) -> Union[float, str]:
-        return (self._sum * 1.0 / self.cnt /
-                self.scale if self.cnt > 0 else "N/A")
+    def avg(self) -> float | str:
+        return self._sum * 1.0 / self.cnt / self.scale if self.cnt > 0 else "N/A"
 
-    def max(self) -> Union[float, str]:
+    def max(self) -> float | str:
         return self._max / self.scale if self._max else "N/A"
 
-    def dump_avg_max(self) -> list[Union[float, str]]:
+    def dump_avg_max(self) -> list[float | str]:
         return [self.avg(), self.max()]
 
     def __enter__(self) -> None:
@@ -148,8 +148,8 @@ class TimeCollector:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        exc_traceback: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        exc_traceback: TracebackType | None,
     ) -> None:
         self.collect(time.monotonic_ns() - self.start_time)

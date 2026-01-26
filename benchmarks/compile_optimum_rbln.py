@@ -26,16 +26,17 @@ def parse_args():
     parser.add_argument("--block-size", type=int, required=True)
     parser.add_argument("--enable-chunked-prefill", action="store_true")
     parser.add_argument("--max-num-batched-tokens", type=int, default=None)
-    parser.add_argument("--attn-impl",
-                        choices=["flash_attn", "eager"],
-                        default="flash_attn")
+    parser.add_argument(
+        "--attn-impl", choices=["flash_attn", "eager"], default="flash_attn"
+    )
 
     args = parser.parse_args()
 
     # verifications
     if args.enable_chunked_prefill:
-        assert (args.max_num_batched_tokens
-                is not None), "max-num-batched-tokens is required "
+        assert args.max_num_batched_tokens is not None, (
+            "max-num-batched-tokens is required "
+        )
         "when enable-chunked-prefill is true"
 
     return args
@@ -60,11 +61,14 @@ def compile_optimum_rbln_model(args: argparse.Namespace) -> None:
         rbln_tensor_parallel_size=args.tensor_parallel_size,
         rbln_max_seq_len=args.max_model_len,
         rbln_kvcache_partition_len=args.block_size
-        if args.attn_impl == "flash_attn" else None,
+        if args.attn_impl == "flash_attn"
+        else None,
         rbln_kvcache_block_size=args.block_size,
         rbln_prefill_chunk_size=args.max_num_batched_tokens
-        if args.enable_chunked_prefill else None,
-        rbln_attn_impl=args.attn_impl)
+        if args.enable_chunked_prefill
+        else None,
+        rbln_attn_impl=args.attn_impl,
+    )
 
     model.save_pretrained(args.output_dir)
     print(f"Compiled model saved to {args.output_dir}")
