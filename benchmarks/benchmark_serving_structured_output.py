@@ -373,10 +373,8 @@ def calculate_metrics(
             valid_metrics.append(e2els)
             slo_values.append(goodput_config_dict["e2el"] /
                               MILLISECONDS_TO_SECONDS_CONVERSION)
-
-        for req_metric in zip(*valid_metrics, strict=False):
-            is_good_req = all(
-                [s >= r for s, r in zip(slo_values, req_metric, strict=False)])
+        for req_metric in zip(*valid_metrics):
+            is_good_req = all([s >= r for s, r in zip(slo_values, req_metric)])
             if is_good_req:
                 good_completed += 1
 
@@ -611,7 +609,7 @@ async def benchmark(
     ret = [{
         "generated": output.generated_text,
         "expected": gt
-    } for output, gt in zip(outputs, expected, strict=False)]
+    } for output, gt in zip(outputs, expected)]
 
     def process_one_metric(
         # E.g., "ttft"
