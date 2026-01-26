@@ -120,7 +120,7 @@ class AttentionStrategy(ABC, Generic[EntryT, Result1T, Result2T]):
 
         if get_extra_values_fn:
             extra_values_lists: list[list[Any]] = [
-                list(col) for col in zip(*extra_values, strict=False)
+                list(col) for col in zip(*extra_values)
             ]
             return (table_ids, *extra_values_lists)
         return table_ids
