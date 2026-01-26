@@ -123,7 +123,7 @@ def test_running_queue(
 
     assert len(scheduler.running) == 0
 
-    for _, sz in zip(requests, exp_running_sz, strict=False):
+    for _, sz in zip(requests, exp_running_sz):
         sched_output = scheduler.schedule()
         model_runner_output = create_model_runner_output(sched_output)
         scheduler.update_from_output(sched_output, model_runner_output)
