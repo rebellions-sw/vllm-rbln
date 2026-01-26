@@ -196,6 +196,11 @@ class RBLNOptimumDecoderMixin:
 
         self.logits_processor = LogitsProcessor(vocab_size,
                                                 logits_as_input=True)
+        self.available_blocks = torch.arange(
+            0,
+            num_blocks,
+            dtype=torch.int16,
+        )
 
     def pad_decoder_items(
         self,
