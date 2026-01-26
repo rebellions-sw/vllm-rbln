@@ -77,7 +77,6 @@ jobs:
           echo "sync_branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
   check_code_quaility:
-    if: false  # Pre-commit check disabled
     needs: sync-and-call
     uses: ./.github/workflows/pre-commit.yml
     
