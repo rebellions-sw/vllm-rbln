@@ -102,8 +102,10 @@ class RBLNOptimumScheduler(Scheduler):
 
         # Scheduling constraints.
         # Scheduling constraints.
-        self.max_num_running_reqs = self.scheduler_config.max_num_seqs
-        self.max_num_scheduled_tokens = self.scheduler_config.max_num_batched_tokens
+        self.max_num_running_reqs = \
+            self.scheduler_config.max_num_seqs
+        self.max_num_scheduled_tokens = \
+            self.scheduler_config.max_num_batched_tokens
         self.max_model_len = vllm_config.model_config.max_model_len
         self.enable_kv_cache_events = (
             self.kv_events_config is not None
@@ -123,14 +125,6 @@ class RBLNOptimumScheduler(Scheduler):
         assert num_gpu_blocks is not None and num_gpu_blocks > 0
 
         self.block_size = self.cache_config.block_size
-        # NOTE the parameter block_size is not used in RBLN.
-        # block_size = (
-        #     vllm_config.cache_config.block_size
-        #     * vllm_config.parallel_config.decode_context_parallel_size
-        #     * vllm_config.parallel_config.prefill_context_parallel_size
-        # )
-        # self.dcp_world_size = vllm_config.parallel_config.decode_context_parallel_size
-        # self.pcp_world_size = vllm_config.parallel_config.prefill_context_parallel_size
         # req_id -> Request
         self.requests: dict[str, Request] = {}
         # Scheduling policy
@@ -551,8 +545,7 @@ class RBLNOptimumScheduler(Scheduler):
         request.num_computed_tokens = 0
         request.num_preemptions += 1
         if self.log_stats:
-            request.record_event(EngineCoreEventType.PREEMPTED,
-                                 scheduled_timestamp)
+            request.record_event(EngineCoreEventType.PREEMPTED, timestamp)
 
         # Put the request back to the waiting queue.
-        self.waiting.prepend_request(preempted_req)
+        self.waiting.prepend_request(request)
