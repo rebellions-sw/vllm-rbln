@@ -202,7 +202,8 @@ class RblnPlatform(Platform):
 
         assert (not vllm_config.speculative_config
                 ), "Speculative decoding not yet supported for RBLN backend."
-        assert not envs.VLLM_USE_V2_MODEL_RUNNER, "v2 model runner is not supported for RBLN backend."
+        assert not envs.VLLM_USE_V2_MODEL_RUNNER, \
+            "v2 model runner is not supported for RBLN backend."
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationLevel
