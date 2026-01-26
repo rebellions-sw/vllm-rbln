@@ -25,17 +25,18 @@ from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
                                                 EncoderDecoderCacheManager,
                                                 compute_encoder_budget)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
+from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 from vllm.v1.core.sched.request_queue import (SchedulingPolicy,
                                               create_request_queue)
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.v1.engine import EngineCoreEventType
 from vllm.v1.kv_cache_interface import KVCacheConfig
+from vllm.v1.metrics.stats import PrefixCacheStats
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.structured_output import StructuredOutputManager
 from vllm.v1.utils import record_function_or_nullcontext
-from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
-from vllm.v1.metrics.stats import PrefixCacheStats
+
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.core.optimum_kv_cache_manager import RBLNKVCacheManager
 
