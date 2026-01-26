@@ -18,6 +18,7 @@ license = { "file"= "LICENSE" }
 readme = "README.md"
 description = "vLLM plugin for RBLN NPU"
 classifiers = [
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -30,7 +31,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dynamic = ["version"]
 dependencies = [
     "setuptools>=64",
@@ -135,7 +136,6 @@ follow_imports = "silent"
 # move the directory here and remove it from tools/mypy.sh
 files = [
     "vllm_rbln/*.py",
-    "vllm_rbln/core",
 ]
 
 [tool.codespell]
