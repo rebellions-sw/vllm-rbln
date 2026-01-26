@@ -830,7 +830,7 @@ def test_column_parallel_packed(dist_init, num_loras, repeats, fully_shard,
             expected_results.append(result)
         expected_result = torch.cat(expected_results)
 
-        rtol, atol = TOLERANCESa[lora_result.dtype]
+        rtol, atol = TOLERANCES[lora_result.dtype]
         torch.testing.assert_close(lora_result,
                                    expected_result,
                                    rtol=rtol,
