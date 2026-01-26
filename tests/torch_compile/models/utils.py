@@ -13,9 +13,7 @@
 # limitations under the License.
 
 import multiprocessing
-from collections.abc import Callable
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
