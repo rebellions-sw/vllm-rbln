@@ -120,10 +120,8 @@ async def main(num_input_prompt: int, model_id: str, lora_paths: list[str],
     conversations = []
     lora_requests = []
 
-    for lora_name, lora_path, lora_int_id in zip(lora_names,
-                                                 lora_paths,
-                                                 lora_int_ids,
-                                                 ):
+    for lora_name, lora_path, lora_int_id in zip(lora_names, lora_paths,
+                                                 lora_int_ids):
         if lora_name == "llama-3.1-8b-abliterated-lora":
             abliterated_prompts, abliterated_requests = \
                 get_abliterated_requests(
@@ -137,8 +135,8 @@ async def main(num_input_prompt: int, model_id: str, lora_paths: list[str],
             lora_requests.extend(secaligned_requests)
 
     futures = []
-    for i, (conv, lora_request) in enumerate(
-            zip(conversations, lora_requests)):
+    for i, (conv, lora_request) in enumerate(zip(conversations,
+                                                 lora_requests)):
         futures.append(
             asyncio.create_task(
                 generate(engine,

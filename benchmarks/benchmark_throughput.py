@@ -229,8 +229,8 @@ async def run_vllm_async(
 
         generators = []
         start = time.perf_counter()
-        for i, (prompt, sp, lr) in enumerate(
-                zip(prompts, sampling_params, lora_requests)):
+        for i, (prompt, sp,
+                lr) in enumerate(zip(prompts, sampling_params, lora_requests)):
             generator = llm.generate(prompt,
                                      sp,
                                      lora_request=lr,
