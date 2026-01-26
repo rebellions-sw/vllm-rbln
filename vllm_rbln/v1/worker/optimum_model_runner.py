@@ -32,6 +32,7 @@ from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
 from vllm.utils.import_utils import LazyLoader
+from vllm.utils.jsontree import json_map_leaves
 from vllm.utils.torch_utils import kv_cache_dtype_str_to_dtype
 # from vllm.utils import LazyLoader, is_pin_memory_available)
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -62,7 +63,7 @@ from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
 
 if TYPE_CHECKING:
     import xgrammar as xgr
-    from vllm.v1.core.sched.output import SchedulerOutput
+    from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 else:
     xgr = LazyLoader("xgr", globals(), "xgrammar")
 
@@ -116,8 +117,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         model_config = self.model_config
         cache_config = self.cache_config
-        scheduler_config = self.scheduler_config
-        parallel_config = self.parallel_config
         self.device = device
         self.pin_memory = False
         self.dtype = self.model_config.dtype
@@ -222,7 +221,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
 
-        # Ephemeral state transferred between execute_model() and sample_tokens().
+        # Ephemeral state transferred
+        # between execute_model() and sample_tokens().
         self.execute_model_state: ExecuteModelState | None = None
 
         # FIXME async_scheduling?
@@ -624,11 +624,11 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         scheduled_req_ids = scheduler_output.num_scheduled_tokens.keys()
         cached_req_ids = self.input_batch.req_id_to_index.keys()
         resumed_req_ids = scheduler_output.scheduled_cached_reqs.resumed_req_ids
-        # NOTE(zhuohan): cached_req_ids and resumed_req_ids are usually disjoint,
+        # NOTE(zhuohan): cached_req_ids and resumed_req_ids are usually disjoint, # noqa: E501
         # so `(scheduled_req_ids - resumed_req_ids) == scheduled_req_ids` holds
         # apart from the forced-preemption case in reset_prefix_cache. And in
         # that case we include the resumed_req_ids in the unscheduled set so
-        # that they get cleared from the persistent batch before being re-scheduled
+        # that they get cleared from the persistent batch before being re-scheduled # noqa: E501
         # in the normal resumed request path.
         unscheduled_req_ids = cached_req_ids - (scheduled_req_ids -
                                                 resumed_req_ids)
@@ -715,7 +715,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             num_computed_tokens = req_data.num_computed_tokens[i]
             new_block_ids = req_data.new_block_ids[i]
             resumed_from_preemption = req_id in req_data.resumed_req_ids
-            num_output_tokens = req_data.num_output_tokens[i]
             req_index = self.input_batch.req_id_to_index.get(req_id)
 
             # Update the cached states.
@@ -927,12 +926,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         num_scheduled_tokens: int,
         num_scheduled_tokens_np: np.ndarray,
     ) -> ModelRunnerOutput:
-        assert self.input_batch.num_reqs ==\
+        num_reqs = self.input_batch.num_reqs
+        assert num_reqs == \
             len(self.input_batch.pooling_params), \
         "Either all or none of the requests in" \
         " a batch must be pooling request"
 
         hidden_states = hidden_states[:num_scheduled_tokens]
+        seq_lens_cpu = self.seq_lens[:num_reqs]
 
         pooling_metadata = self.input_batch.get_pooling_metadata()
         pooling_metadata.build_pooling_cursor(num_scheduled_tokens_np.tolist(),
@@ -1054,7 +1055,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
             max_gen_len = sampled_token_ids.shape[-1]
-            assert max_gen_len == 1, "No spec decode tokens. Max generation length must be 1."
+            assert max_gen_len == 1, \
+                "No spec decode tokens. Max generation length must be 1."
             # No spec decode tokens.
             valid_sampled_token_ids = self._to_list(sampled_token_ids)
             # Mask out the sampled tokens that should not be sampled.
@@ -1062,7 +1064,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             #     valid_sampled_token_ids[int(i)].clear()
         else:
             valid_sampled_token_ids = []
-            # FIXME: we need disacrd_sampled_tokens_req_indices for async scheduling
+            # FIXME: we need disacrd_sampled_tokens_req_indices for async scheduling # noqa: E501
             # invalid_req_indices = discard_sampled_tokens_req_indices.tolist()
             invalid_req_indices = []
             invalid_req_indices_set = set(invalid_req_indices)
@@ -1280,10 +1282,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                                      dynamic=False,
                                      fullgraph=False)
 
-    # FIXME: this is not implemented yet
-    # def sample_tokens(self, grammar_output: "GrammarOutput | None") -> ModelRunnerOutput | AsyncModelRunnerOutput:
-    #     return self.sampler.sample_tokens(grammar_output)
-
     @torch.inference_mode
     def sample_tokens(
         self, grammar_output: "GrammarOutput | None"
@@ -1354,26 +1352,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
 
         if not self.use_async_scheduling:
             return output
-        with record_function_or_nullcontext(
-                "rbln_model_runner: AsyncGPUModelRunnerOutput"):
-            async_output = AsyncGPUModelRunnerOutput(
-                model_runner_output=output,
-                sampled_token_ids=sampler_output.sampled_token_ids,
-                logprobs_tensors=sampler_output.logprobs_tensors,
-                invalid_req_indices=invalid_req_indices,
-                async_output_copy_stream=self.async_output_copy_stream,
-                vocab_size=self.input_batch.vocab_size,
-            )
-        with record_function_or_nullcontext(
-                "gpu_model_runner: set_async_sampled_token_ids"):
-            # Save ref of sampled_token_ids CPU tensor if the batch contains
-            # any requests with sampling params that require output ids.
-            self.input_batch.set_async_sampled_token_ids(
-                async_output.sampled_token_ids_cpu,
-                async_output.async_copy_ready_event,
-            )
-
-        return async_output
+        # else: # FIXME
+        # return
 
     def _sample(
         self,
