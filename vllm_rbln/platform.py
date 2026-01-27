@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -74,6 +73,14 @@ class RblnPlatform(Platform):
     @staticmethod
     def inference_mode():
         return torch.no_grad()
+
+    @classmethod
+    def set_device(cls, device: torch.device) -> None:
+        """
+        Set the device for the current platform.
+        """
+        logger.warning("set_device is not supported on RBLN.")
+        pass
 
     @classmethod
     def is_pin_memory_available(cls):
@@ -271,26 +278,3 @@ class RblnPlatform(Platform):
     @classmethod
     def can_update_inplace(cls) -> bool:
         return False
-
-    @classmethod
-    def device_id_to_physical_device_id(cls, device_id: int):
-        # overrides for RSD (rbln scalable devices)
-        # dp device ids for RBLN SHOULD consider rsd size
-        rsd_size = envs.VLLM_RBLN_TP_SIZE
-        assert rsd_size >= 1
-        if cls.device_control_env_var in os.environ and os.environ[
-                cls.device_control_env_var] != "":
-            device_ids = os.environ[cls.device_control_env_var].split(",")
-            physical_device_ids = ""
-            start_device_id = device_id * rsd_size
-            for rsd_id in range(rsd_size - 1):
-                physical_device_ids += str(device_ids[start_device_id +
-                                                      rsd_id])
-                physical_device_ids += ","
-            physical_device_ids += str(device_ids[start_device_id + rsd_size -
-                                                  1])
-            logger.info("RBLN DP physical_device_ids = %s",
-                        physical_device_ids)
-            return physical_device_ids
-        else:
-            return device_id

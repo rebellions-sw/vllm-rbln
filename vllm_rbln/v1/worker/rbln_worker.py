@@ -31,7 +31,7 @@ from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec, FullAttentionSpec
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              DraftTokenIds, ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
@@ -69,11 +69,10 @@ class RBLNWorker(WorkerBase):
         )
         self.device = torch.device(current_platform.device_type)
 
-        if self.parallel_config.distributed_executor_backend == "ray":
-            logger.info(
-                "Running on Ray backend. Skipping device env var setup.")
-        else:
-            self._init_device_env()
+        self.local_world_size = (self.parallel_config.world_size //
+                                 envs.VLLM_RBLN_NUM_RAY_NODES)
+
+        self._init_device_env()
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
@@ -130,28 +129,34 @@ class RBLNWorker(WorkerBase):
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
     def _init_device_env(self) -> None:
-        world_size = self.parallel_config.world_size
+        world_size = self.local_world_size
         env_var = current_platform.device_control_env_var
 
         total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
         if env_var not in os.environ:
-            device_ids = [str(i) for i in range(total_device_count)]
+            dev_begin = total_device_count * \
+                self.parallel_config.data_parallel_rank
+            dev_end = dev_begin + total_device_count
+            device_ids = [str(i) for i in range(dev_begin, dev_end)]
+            start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
+            end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
+            selected_devices = ",".join(device_ids[start_idx:end_idx])
         else:
             device_ids = os.environ[env_var].split(",")
-
-        # This check is only valid for single node mp backends, invalid for ray
-        # ex) node#0 : RBLN_DEVICES=0,1
-        #     node#1 : RBLN_DEVICES=2,3
-        distributed_backend = self.parallel_config.distributed_executor_backend
-        if distributed_backend == "mp" and len(
-                device_ids) < total_device_count:
-            raise RuntimeError(f"{env_var} has devices {device_ids}"
-                               f" but required {total_device_count}")
-
-        start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
-        end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
-        selected_devices = ",".join(device_ids[start_idx:end_idx])
+            assert len(device_ids) == world_size, \
+                f"device_ids: {device_ids} " \
+                f"should have device count: {world_size}"
+            try:
+                device_id = int(device_ids[self.local_rank])
+                start_idx = device_id * envs.VLLM_RBLN_TP_SIZE
+                end_idx = start_idx + envs.VLLM_RBLN_TP_SIZE
+                device_ids = [str(i) for i in range(start_idx, end_idx)]
+                selected_devices = ",".join(device_ids)
+            except ValueError as e:
+                raise ValueError(
+                    f"device_ids: {device_ids} should be a list of integers") \
+                        from e
 
         os.environ[env_var] = selected_devices
         logger.info(
@@ -199,6 +204,52 @@ class RBLNWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
+        params_dict = dict(self.model_runner.model.named_parameters())
+        n_model_attentions = 0
+        n_model_experts = 0
+        device_name = current_platform.get_device_name().lower()
+        assert "rbln" in device_name
+        if "ca" in device_name:
+            # consider RSD size for ATOM
+            num_runtimes = 2 * envs.VLLM_RBLN_TP_SIZE
+        elif "cr" in device_name:
+            # single device == Quad chiplet
+            num_runtimes = 2 * 4
+        else:
+            assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+
+        if self.model_config.quantization is not None:
+            # FIXME(RBLN) - for now, mxfp4 quantization is only supported
+            assert self.model_config.quantization == "mxfp4"
+            if "ca" in device_name:
+                # ATOM DOES NOT support mxfp4 quantization, handled by bf16
+                nbits_per_param = 16
+                # mlp weight scale is merged into params
+                # FIXME(RBLN) - expert scale merged into expert weight param
+                # ratio scale vs weight = 1 : 16
+                ratio = 16 / 17
+            elif "cr" in device_name:
+                # REBEL can support mxfp4 quantization
+                nbits_per_param = 4
+                ratio = 1
+            else:
+                assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+
+            # pack 2 mxfp4 elems into single uint8 elem
+            packed_num_elems = 8 // 4
+        else:
+            nbits_per_param = 16
+            packed_num_elems = 1
+            ratio = 1
+        for key, value in params_dict.items():
+            if value.dtype == torch.bfloat16:
+                n_model_attentions += value.numel()
+            else:
+                # quantized params is handled
+                n_model_experts += value.numel() * packed_num_elems * ratio
+
+        # NOTE - model parallel(tp, dp, ep, pp) already applied into model params
+        n_model_params = n_model_attentions + n_model_experts
         block_size = self.cache_config.block_size
 
         # This function comes from optimum-rbln.
@@ -208,12 +259,22 @@ class RBLNWorker(WorkerBase):
             parallel_config=self.parallel_config,
             kvcache_block_size=block_size,
             # quantization : 4 (This is an ad-hoc value. Need to fix it)
-            nbits_per_param=16 if not self.model_config.quantization else 4,
-            n_model_params=sum(p.numel()
-                               for p in self.model_runner.model.parameters()),
-            # 2 : 1 for prefill and decode each
-            num_runtimes=2,
+            nbits_per_param=nbits_per_param,
+            n_model_params=n_model_params,
+            num_runtimes=num_runtimes,
         )
+
+        # NOTE -  adjust max_num_blocks considering swa block sharing
+        # max_num_blocks - based on FullAttentionSpec for model
+        # SHOULD adjust num blocks considering non full attent
+        kv_cache_spec = self.model_runner.get_kv_cache_spec()
+        page_size = max(spec.page_size_bytes
+                        for spec in kv_cache_spec.values())
+        num_layers = len(kv_cache_spec)
+        num_attn_layers = 0
+        for spec in kv_cache_spec.values():
+            num_attn_layers += int(isinstance(spec, FullAttentionSpec))
+        max_num_blocks = max_num_blocks * num_layers / num_attn_layers
 
         # for partition skip, we need dummy block slot.
         no_dummy_slots = 1
@@ -224,17 +285,16 @@ class RBLNWorker(WorkerBase):
             int(max_num_blocks * self.cache_config.gpu_memory_utilization),
             max_required_num_blocks,
         )
+        logger.info("max_num_blocks(%s), required_num_blocks(%s), num_blocks(%s)",
+            max_num_blocks, max_required_num_blocks, num_gpu_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
             num_gpu_blocks = int(npu_num_blocks)
 
-        kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        num_layers = len(kv_cache_spec)
-        # TODO: Consider SWA hybrid models.
-        # Sync get_maximum_num_blocks with latest optimum-rbln.
-        page_size = max(spec.page_size_bytes
-                        for spec in kv_cache_spec.values())
-        return num_gpu_blocks * page_size * num_layers
+        # NOTE - consider SWA hybrid models
+        # SWA shares blocks with Full Attention, DO NOT count SWA layers
+        available_memory = num_gpu_blocks * page_size * num_attn_layers
+        return available_memory
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
@@ -255,6 +315,7 @@ class RBLNWorker(WorkerBase):
             elif envs.VLLM_RBLN_DP_IMPL == "dummy_prefill":
                 raise ValueError("dummy_prefill is not supported in v1 worker" \
                                  "and will be deprecated in the future")
+            self.model_runner.prepare_dummy_run()
 
         if (self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL
                 or not envs.VLLM_RBLN_ENABLE_WARM_UP):
@@ -262,6 +323,8 @@ class RBLNWorker(WorkerBase):
             return
 
         self.model_runner.warm_up_model()
+        # after completing model warm up, enable RBLN performance tracker
+        self.model_runner._enable_performance_tracker()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()
@@ -329,7 +392,7 @@ class RBLNWorker(WorkerBase):
                     sort_by="self_cuda_time_total"))
 
     def execute_dummy_batch(self) -> None:
-        return
+        self.model_runner.dummy_run()
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
         return self.model_runner.add_lora(lora_request)
@@ -366,7 +429,7 @@ def init_worker_distributed_environment(
     world_size = parallel_config.world_size
 
     # Set envs for RCCL
-    os.environ["LOCAL_RANK"] = str(local_rank)
+    os.environ["LOCAL_RANK"] = str(rank)
     os.environ["WORLD_SIZE"] = str(world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
@@ -375,7 +438,7 @@ def init_worker_distributed_environment(
         world_size_across_dp = parallel_config.world_size_across_dp
         dp_rank = parallel_config.data_parallel_rank
         rank_across_dp = dp_rank * world_size
-        rank_across_dp += local_rank
+        rank_across_dp += rank
         logger.info(
             "world_size_across_dp = %s, rank_across_dp = %s",
             world_size_across_dp,
