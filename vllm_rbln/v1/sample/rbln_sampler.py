@@ -166,7 +166,7 @@ class RBLNSampler(VLLMSampler):
         if sampling_metadata.all_random:
             greedy_sampled = None
         else:
-            greedy_sampled = self.greedy_sample(logits)
+            greedy_sampled = self.rbln_topk_topp_sampler(logits, None, None)
             if sampling_metadata.all_greedy:
                 processed_logprobs = None
                 if sampling_metadata.max_num_logprobs is not None:
