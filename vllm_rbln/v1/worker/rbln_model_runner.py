@@ -468,11 +468,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         self.performance_tracker = None
 
+        self.dummy_run_state: DummyRunState | None = None
+
     def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
-        self.dummy_run_state: DummyRunState | None = None
 
     def _get_positions(self, num_tokens: Any):
         if isinstance(num_tokens, int):
