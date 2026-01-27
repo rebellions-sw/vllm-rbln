@@ -24,10 +24,12 @@ if TYPE_CHECKING:
     VLLM_RBLN_SAMPLER: bool = True
     VLLM_RBLN_ENABLE_WARM_UP: bool = True
     VLLM_RBLN_USE_VLLM_MODEL: bool = False
+    VLLM_RBLN_SPECIALIZE_MOE_DECODE: bool = True
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
+    VLLM_RBLN_BATCH_ATTN_OPT: bool = False
     VLLM_RBLN_DISABLE_MM: bool = False
-    VLLM_RBLN_DP_IMPL: str = "dummy_prefill"
-    VLLM_RBLN_USE_MOE_TOKENS_MASK: bool = False
+    VLLM_RBLN_DP_IMPL: str = "padded_decode"
+    VLLM_RBLN_USE_MOE_TOKENS_MASK: bool = True
     VLLM_RBLN_ENFORCE_MODEL_FP32: bool = False
     VLLM_RBLN_MOE_CUSTOM_KERNEL: bool = True
     VLLM_RBLN_MOE_USE_OPT_KERNEL: bool = False
@@ -45,8 +47,9 @@ if TYPE_CHECKING:
 def get_dp_impl():
     dp_impl = os.environ.get("VLLM_RBLN_DP_IMPL")
     if dp_impl is None:
-        return "dummy_prefill"
-    # default is dummy_prefill
+        return "padded_decode"
+    # default is padded_decode
+    # dummy_prefill will be deprecated in the future
     choices = set(["padded_decode", "dummy_prefill"])
     current_impl = dp_impl.lower()
     if current_impl not in choices:
@@ -86,6 +89,10 @@ environment_variables = {
     "VLLM_RBLN_FLASH_CAUSAL_ATTN":
     (lambda: os.environ.get("VLLM_RBLN_FLASH_CAUSAL_ATTN", "True").lower() in
      ("true", "1")),
+    # Use batch attention optimization for paged attention
+    "VLLM_RBLN_BATCH_ATTN_OPT":
+    (lambda: os.environ.get("VLLM_RBLN_BATCH_ATTN_OPT", "False").lower() in
+     ("true", "1")),
     # Disable multimodal input
     "VLLM_RBLN_DISABLE_MM":
     (lambda: os.environ.get("VLLM_RBLN_DISABLE_MM", "False").lower() in
@@ -94,8 +101,12 @@ environment_variables = {
     "VLLM_RBLN_DP_IMPL":
     get_dp_impl,
     # If true, it uses the tokens mask applied to moe expert kernel
-    "VLLM_RBLN_USE_MOE_TOKENS_MASK": (lambda: os.environ.get(
-        "VLLM_RBLN_USE_MOE_TOKENS_MASK", "False").lower() in ("true", "1")),
+    "VLLM_RBLN_USE_MOE_TOKENS_MASK":
+    (lambda: os.environ.get("VLLM_RBLN_USE_MOE_TOKENS_MASK", "True").lower() in
+     ("true", "1")),
+    # If true, it specializes the cases where all instances are at decode stage
+    "VLLM_RBLN_SPECIALIZE_MOE_DECODE": (lambda: os.environ.get(
+        "VLLM_RBLN_SPECIALIZE_MOE_DECODE", "True").lower() in ("true", "1")),
     # enforce model data type into fp32 not model_config.dtype
     "VLLM_RBLN_ENFORCE_MODEL_FP32":
     (lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower() in
@@ -138,7 +149,7 @@ environment_variables = {
     lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_STEP", 2)),
     # Decode batch bucket limit
     "VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT":
-    lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 32)),
+    lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 1)),
 }
 
 

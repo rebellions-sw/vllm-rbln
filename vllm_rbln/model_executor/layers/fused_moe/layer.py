@@ -238,13 +238,17 @@ def unquantized_fused_moe_method_rbln(
     return final_hidden_states.reshape(orig_shape)
 
 
-def _get_tokens_mask():
-    num_tokens = \
+def get_tokens_mask(num_tokens: int, left=1.0, right=float('-inf')):
+    num_tokens_across_dp = \
         get_forward_context().dp_metadata.num_tokens_across_dp_cpu
-    num_tokens = num_tokens.unsqueeze(1)
-    max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+    num_tokens_across_dp = num_tokens_across_dp.unsqueeze(1)
+    if num_tokens_across_dp.size(0) == 1:
+        max_pad = num_tokens
+    else:
+        max_pad = get_forward_context().dp_metadata.max_pads_across_dp.shape[0]
     pos = torch.arange(max_pad, dtype=torch.int32).unsqueeze(0)  # [1, max_pad]
-    tokens_mask = torch.where(pos < num_tokens, 1.0, 0.0)  # [dp_size, max_pad]
+    tokens_mask = torch.where(pos < num_tokens_across_dp, left,
+                              right)  # [dp_size, max_pad]
     tokens_mask = tokens_mask.reshape(-1, 1)  #[dp_size * max_pad, 1]
     return tokens_mask
 
@@ -268,7 +272,7 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
 
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if use_moe_tokens_mask:
-        tokens_mask = _get_tokens_mask()
+        tokens_mask = get_tokens_mask(router_logits.shape[0], 1.0, 0.0)
         selected_weights = selected_weights * tokens_mask
 
     n_expert = router_logits.shape[1]
@@ -393,6 +397,11 @@ def unquantized_fused_optimize_moe_method_custom(
         expert_map_list = expert_map.tolist()
         expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
 
+    use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
+    if use_moe_tokens_mask:
+        tokens_mask = get_tokens_mask(num_tokens)
+        router_logits = router_logits * tokens_mask
+
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/
     # qwen3_moe_architecture.py
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
@@ -455,7 +464,7 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
         hidden_shape_dp = (-1, 1, org_hidden_shape[-1])
         final_hidden_states = all_hidden_states.reshape(hidden_shape_dp)
 
-        max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+        max_pad = get_forward_context().dp_metadata.max_pads_across_dp.shape[0]
         num_tokens = org_hidden_shape[:-1].numel()  # noqa: F841
         start = self.dp_rank * max_pad
         end = start + num_tokens
@@ -474,7 +483,7 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor):
     # assert len(x.shape) == 3
 
     x = x.reshape(1, -1, x.size(-1))
-    max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+    max_pad = get_forward_context().dp_metadata.max_pads_across_dp.shape[0]
     num_tokens = x.size(1)
     num_repeat = max_pad // num_tokens
     # TODO: evaluate various padding approaches
