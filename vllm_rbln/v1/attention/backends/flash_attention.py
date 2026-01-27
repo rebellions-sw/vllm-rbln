@@ -51,6 +51,28 @@ def flash_attention_naive_prefill_impl(
     slot_mapping: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
+    """
+    Expected tensor shapes:
+    - q: [batch, n_kv_heads, n_groups, seq_len, head_dim]
+      Query states for multiple tokens
+    - k: [batch, n_kv_heads, 1, seq_len, head_dim]
+      Key states for current input
+    - v: [batch, n_kv_heads, 1, seq_len, head_dim]
+      Value states for current input
+    - kv_cache: [2, num_blocks, n_kv_heads, 1, partition_size, head_dim]
+      Key and value cache
+    - mask: [batch, 1, 1, seq_len, max_seq_len]
+    - seq_idx: [batch, num_partitions]
+      number of already cached tokens in each partition
+    - block_tables: [num_partitions,] for prefill,
+                    [batch, num_partitions] for decode
+    - sinks: [n_heads, sink_len] (optional)
+
+    Returns:
+        Tensor: attn_output: [batch, n_kv_heads, n_groups, seq_len, head_dim]
+
+    batch size is assumed to be 1 for prefill.
+    """
     if not envs.VLLM_RBLN_COMPILE_MODEL:
         # attn_weights = MM(q,kt) * scale
         # attn_weights = add(attn_weights + mask)
@@ -174,38 +196,154 @@ def flash_causal_attention_naive_prefill_impl(
     slot_mapping: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    if not envs.VLLM_RBLN_COMPILE_MODEL:
-        # attn_weights = MM(q,kt) * scale
-        # attn_weights = causal masked softmax(attn_weights)
-        # MM(attn_weights, v)
-        seq_len = q.size(-2)
-        s = seq_idx[0][0]
-        e = s + seq_len
-        # NOTE: this reference impl works only for single partition
-        block = block_tables[0].to(torch.int32)
-        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        kv_cache[0][block] = k_state.squeeze(0)
-        kv_cache[1][block] = v_state.squeeze(0)
-        attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-        block_size = kv_cache.size(-2)
-        causal_mask = torch.triu(torch.ones(1, 1, 1, block_size, block_size),
-                                 diagonal=1)
-        causal_mask = causal_mask[:, :, :, s:e, :]
-        causal_mask = torch.where(causal_mask > 0, float('-inf'),
-                                  0.0).to(attn_weights.dtype)
-        attn_weights = attn_weights + causal_mask
-        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
-        attn_output = torch.matmul(attn_weights, v_state)
-        return attn_output
-    else:
+    """
+    Expected tensor shapes:
+    - q: [batch, n_kv_heads, n_groups, seq_len, head_dim]
+      Query states for multiple tokens
+    - k: [batch, n_kv_heads, 1, seq_len, head_dim]
+      Key states for current input
+    - v: [batch, n_kv_heads, 1, seq_len, head_dim]
+      Value states for current input
+    - kv_cache: [2, num_blocks, n_kv_heads, 1, partition_size, head_dim]
+      Key and value cache
+    - seq_idx: [batch, num_partitions]
+      number of already cached tokens in each partition
+    - block_tables: [num_partitions,] for prefill,
+                    [batch, num_partitions] for decode
+    - sinks: [n_heads, sink_len] (optional)
+
+    Returns:
+        Tensor: attn_output: [batch, n_kv_heads, n_groups, seq_len, head_dim]
+
+    batch size is assumed to be 1 for prefill.
+    """
+    if envs.VLLM_RBLN_COMPILE_MODEL:
         return torch.empty_like(q)
+
+    # This is just reference to test vllm-rbln independently of the actual RBLN
+    # custom op implementation, so it implements simple non-flash attention.
+
+    batch_size, n_kv_heads, n_groups, seq_len, head_dim = q.shape
+    partition_size = kv_cache.size(-2)
+    num_partitions = block_tables.shape[0]
+
+    # Calculate the starting position (number of tokens already in cache)
+    # seq_idx contains tokens per partition that are already cached
+    cache_start_pos = int(seq_idx[0].sum().item())
+    total_seq_len = cache_start_pos + seq_len
+
+    # Step 1: Write KV cache
+    # We need to write seq_len new tokens starting at cache_start_pos
+    for p in range(num_partitions):
+        block_idx = block_tables[p].to(torch.int32)
+
+        # Calculate how many tokens to write to this partition
+        partition_start = p * partition_size
+        partition_end = (p + 1) * partition_size
+
+        # Tokens we're writing go from cache_start_pos to
+        # cache_start_pos + seq_len
+        write_start = max(cache_start_pos, partition_start)
+        write_end = min(cache_start_pos + seq_len, partition_end)
+
+        if write_start >= write_end:
+            continue
+
+        num_tokens_to_write = write_end - write_start
+        offset_in_partition = write_start - partition_start
+        offset_in_input = write_start - cache_start_pos
+
+        k_slice = k[:, :, :,
+                    offset_in_input:offset_in_input + num_tokens_to_write, :]
+        v_slice = v[:, :, :,
+                    offset_in_input:offset_in_input + num_tokens_to_write, :]
+
+        kv_cache[0, block_idx, :, :, offset_in_partition:offset_in_partition +
+                 num_tokens_to_write, :] = k_slice.squeeze(0)
+        kv_cache[1, block_idx, :, :, offset_in_partition:offset_in_partition +
+                 num_tokens_to_write, :] = v_slice.squeeze(0)
+
+    # Step 2: Gather KV cache for the entire sequence
+    k_gathered = torch.zeros(batch_size,
+                             n_kv_heads,
+                             1,
+                             total_seq_len,
+                             head_dim,
+                             dtype=k.dtype,
+                             device=k.device)
+    v_gathered = torch.zeros(batch_size,
+                             n_kv_heads,
+                             1,
+                             total_seq_len,
+                             head_dim,
+                             dtype=v.dtype,
+                             device=v.device)
+
+    gathered_pos = 0
+    for p in range(num_partitions):
+        block_idx = block_tables[p].to(torch.int32)
+
+        # Calculate how many tokens are in this partition after writing
+        partition_start = p * partition_size
+        tokens_in_partition = min(total_seq_len - partition_start,
+                                  partition_size)
+
+        if tokens_in_partition <= 0:
+            break
+
+        k_gathered[:, :, :, gathered_pos:gathered_pos +
+                   tokens_in_partition, :] = kv_cache[
+                       0, block_idx, :, :, :tokens_in_partition, :]
+        v_gathered[:, :, :, gathered_pos:gathered_pos +
+                   tokens_in_partition, :] = kv_cache[
+                       1, block_idx, :, :, :tokens_in_partition, :]
+        gathered_pos += tokens_in_partition
+
+    # Step 3: Compute causal attention (with sinks, if any)
+    # attn_weights: [batch, n_kv_heads, n_groups, seq_len, total_seq_len]
+    attn_weights = torch.matmul(q, k_gathered.transpose(3, 4)) * scale
+
+    # Create causal mask
+    # Query positions are from cache_start_pos to cache_start_pos + seq_len
+    query_positions = torch.arange(cache_start_pos,
+                                   cache_start_pos + seq_len,
+                                   device=q.device)
+    key_positions = torch.arange(total_seq_len, device=q.device)
+
+    # Causal mask: query can only attend to keys at positions <= query position
+    causal_mask = query_positions.unsqueeze(1) >= key_positions.unsqueeze(0)
+
+    # Convert to attention mask format
+    causal_mask = torch.where(causal_mask, 0.0,
+                              float('-inf')).to(attn_weights.dtype)
+    causal_mask = causal_mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+
+    attn_weights = attn_weights + causal_mask
+
+    # Apply attention sinks if provided
+    # sinks shape: [n_heads, sink_len] ->
+    # expand to [batch, n_kv_heads, n_groups, seq_len, sink_len]
+    if sinks is not None:
+        # sinks: [n_heads, sink_len] where n_heads = n_kv_heads * n_groups
+        sink_len = sinks.size(-1)
+        # Reshape sinks to match attention weight dimensions
+        sinks_expanded = sinks.view(n_kv_heads, n_groups, 1, sink_len)
+        sinks_expanded = sinks_expanded.expand(batch_size, n_kv_heads,
+                                               n_groups, seq_len, sink_len)
+        # Concatenate sink logits to attention weights
+        combined_logits = torch.cat([attn_weights, sinks_expanded], dim=-1)
+        # Stabilize softmax by subtracting max
+        combined_logits = combined_logits - combined_logits.max(
+            dim=-1, keepdim=True).values
+        probs = torch.nn.functional.softmax(combined_logits, dim=-1)
+        # Drop the sink probabilities before matmul with values
+        attn_weights = probs[..., :-sink_len]
+    else:
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+
+    attn_output = torch.matmul(attn_weights, v_gathered)
+
+    return attn_output
 
 
 @torch.library.register_fake(
@@ -238,37 +376,123 @@ def flash_causal_attention_naive_decode_impl(
     slot_mapping: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    if not envs.VLLM_RBLN_COMPILE_MODEL:
-        # NOTE: this reference impl works only for batch_size=1
-        assert q.size(0) == 1
-        seq_len = q.size(-2)
-        s = seq_idx[0][0]
-        e = s + seq_len
-        # NOTE: this reference impl works only for single partition
-        block = block_tables[0][0].to(torch.int32)
-        k_state = kv_cache[0][block].unsqueeze(0).slice_scatter(k,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        v_state = kv_cache[1][block].unsqueeze(0).slice_scatter(v,
-                                                                dim=3,
-                                                                start=s,
-                                                                end=e)
-        kv_cache[0][block] = k_state.squeeze(0)
-        kv_cache[1][block] = v_state.squeeze(0)
-        attn_weights = torch.matmul(q, k_state.transpose(3, 4)) * scale
-        block_size = kv_cache.size(-2)
-        causal_mask = torch.triu(torch.ones(1, 1, 1, block_size, block_size),
-                                 diagonal=1)
-        causal_mask = causal_mask[:, :, :, s:e, :]
-        causal_mask = torch.where(causal_mask > 0, float('-inf'),
-                                  0.0).to(attn_weights.dtype)
-        attn_weights = attn_weights + causal_mask
-        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
-        attn_output = torch.matmul(attn_weights, v_state)
-        return attn_output
-    else:
+    if envs.VLLM_RBLN_COMPILE_MODEL:
         return torch.empty_like(q)
+
+    # This is just reference to test vllm-rbln independently of the actual RBLN
+    # custom op implementation, so it implements simple non-flash attention.
+
+    batch_size, n_kv_heads, n_groups, seq_len, head_dim = q.shape
+    partition_size = kv_cache.size(-2)
+    num_partitions = block_tables.shape[1]
+
+    outputs = []
+    for b in range(batch_size):
+        # Calculate the starting position (number of tokens already in cache)
+        cache_start_pos = int(seq_idx[b].sum().item())
+        total_seq_len = cache_start_pos + seq_len  # seq_len is 1 for decode
+
+        if total_seq_len == 0:
+            outputs.append(torch.zeros_like(q[b:b + 1]))
+            continue
+
+        # Step 1: Write KV cache
+        # Find which partition to write to
+        for p in range(num_partitions):
+            block_idx = block_tables[b, p].to(torch.int32)
+
+            partition_start = p * partition_size
+            partition_end = (p + 1) * partition_size
+
+            write_start = max(cache_start_pos, partition_start)
+            write_end = min(cache_start_pos + seq_len, partition_end)
+
+            if write_start >= write_end:
+                continue
+
+            num_tokens_to_write = write_end - write_start
+            offset_in_partition = write_start - partition_start
+            offset_in_input = write_start - cache_start_pos
+
+            k_slice = k[b:b + 1, :, :, offset_in_input:offset_in_input +
+                        num_tokens_to_write, :]
+            v_slice = v[b:b + 1, :, :, offset_in_input:offset_in_input +
+                        num_tokens_to_write, :]
+
+            kv_cache[0, block_idx, :, :,
+                     offset_in_partition:offset_in_partition +
+                     num_tokens_to_write, :] = k_slice.squeeze(0)
+            kv_cache[1, block_idx, :, :,
+                     offset_in_partition:offset_in_partition +
+                     num_tokens_to_write, :] = v_slice.squeeze(0)
+
+        # Step 2: Gather KV cache for the entire sequence
+        k_gathered = torch.zeros(1,
+                                 n_kv_heads,
+                                 1,
+                                 total_seq_len,
+                                 head_dim,
+                                 dtype=k.dtype,
+                                 device=k.device)
+        v_gathered = torch.zeros(1,
+                                 n_kv_heads,
+                                 1,
+                                 total_seq_len,
+                                 head_dim,
+                                 dtype=v.dtype,
+                                 device=v.device)
+
+        gathered_pos = 0
+        for p in range(num_partitions):
+            block_idx = block_tables[b, p].to(torch.int32)
+
+            partition_start = p * partition_size
+            tokens_in_partition = min(total_seq_len - partition_start,
+                                      partition_size)
+
+            if tokens_in_partition <= 0:
+                break
+
+            k_gathered[:, :, :, gathered_pos:gathered_pos +
+                       tokens_in_partition, :] = kv_cache[
+                           0, block_idx, :, :, :tokens_in_partition, :]
+            v_gathered[:, :, :, gathered_pos:gathered_pos +
+                       tokens_in_partition, :] = kv_cache[
+                           1, block_idx, :, :, :tokens_in_partition, :]
+            gathered_pos += tokens_in_partition
+
+        # Step 3: Compute causal attention (with sinks, if any)
+        q_b = q[b:b + 1]
+        attn_weights = torch.matmul(q_b, k_gathered.transpose(3, 4)) * scale
+
+        # For decode, query is at position total_seq_len - 1
+        # It can attend to all previous positions (0 to total_seq_len - 1)
+        # So no causal masking needed for decode
+
+        # Apply attention sinks if provided
+        # sinks shape: [n_heads, sink_len] ->
+        # expand to [1, n_kv_heads, n_groups, seq_len, sink_len]
+        if sinks is not None:
+            sink_len = sinks.size(-1)
+            # Reshape sinks to match attention weight dimensions
+            sinks_expanded = sinks.view(n_kv_heads, n_groups, 1, sink_len)
+            sinks_expanded = sinks_expanded.expand(1, n_kv_heads, n_groups,
+                                                   seq_len, sink_len)
+            # Concatenate sink logits to attention weights
+            combined_logits = torch.cat([attn_weights, sinks_expanded], dim=-1)
+            # Stabilize softmax by subtracting max
+            combined_logits = combined_logits - combined_logits.max(
+                dim=-1, keepdim=True).values
+            probs = torch.nn.functional.softmax(combined_logits, dim=-1)
+            # Drop the sink probabilities before matmul with values
+            attn_weights = probs[..., :-sink_len]
+        else:
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+
+        attn_output = torch.matmul(attn_weights, v_gathered)
+        outputs.append(attn_output)
+
+    return torch.cat(outputs, dim=0)
 
 
 @torch.library.register_fake(
@@ -304,13 +528,13 @@ def sliding_window_attention_naive_prefill_impl(
 ) -> torch.Tensor:
     """
     Expected tensor shapes:
-    - q: [batch, n_heads, n_groups, seq_len, head_dim]
+    - q: [batch, n_kv_heads, n_groups, seq_len, head_dim]
       Query states for multiple tokens
-    - k: [batch, n_heads, 1, seq_len, head_dim]
+    - k: [batch, n_kv_heads, 1, seq_len, head_dim]
       Key states for current input
-    - v: [batch, n_heads, 1, seq_len, head_dim]
+    - v: [batch, n_kv_heads, 1, seq_len, head_dim]
       Value states for current input
-    - kv_cache: [2, num_blocks, n_heads, 1, window_size, head_dim]
+    - kv_cache: [2, num_blocks, n_kv_heads, 1, window_size, head_dim]
       Key and value cache
     - cache_seq_len: [batch, 1]
       number of tokens already cached
@@ -318,9 +542,10 @@ def sliding_window_attention_naive_prefill_impl(
       ending position after insertion (cache_seq_len + query_len)
     - scale: []. Attention scale factor
     - block_tables: [batch] for prefill, [batch, 1] for decode
+    - sinks: [n_heads, sink_len] (optional)
 
     Returns:
-        Tensor: attn_output: [batch, n_heads, n_groups, seq_len, head_dim]
+        Tensor: attn_output: [batch, n_kv_heads, n_groups, seq_len, head_dim]
 
     batch size is assumed to be 1 for prefill.
     """
@@ -373,7 +598,21 @@ def sliding_window_attention_naive_prefill_impl(
     mask = torch.where(mask > 0, 0.0, float('-inf')).to(attn_weights.dtype)
 
     attn_weights = attn_weights + mask
-    attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+
+    if sinks is not None:
+        sink_len = sinks.size(-1)
+        n_kv_heads = q.size(1)
+        n_groups = q.size(2)
+        sinks_expanded = sinks.view(n_kv_heads, n_groups, 1, sink_len)
+        sinks_expanded = sinks_expanded.expand(1, n_kv_heads, n_groups,
+                                               seq_len, sink_len)
+        combined_logits = torch.cat([attn_weights, sinks_expanded], dim=-1)
+        combined_logits = combined_logits - combined_logits.max(
+            dim=-1, keepdim=True).values
+        probs = torch.nn.functional.softmax(combined_logits, dim=-1)
+        attn_weights = probs[..., :-sink_len]
+    else:
+        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
 
     attn_output = torch.matmul(attn_weights, v_cache_curr)
 
@@ -475,9 +714,25 @@ def sliding_window_attention_naive_decode_impl(
         mask = torch.where(mask > 0, 0.0, float('-inf')).to(attn_weights.dtype)
 
         attn_weights = attn_weights + mask
-        attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+
+        if sinks is not None:
+            sink_len = sinks.size(-1)
+            n_kv_heads = q.size(1)
+            n_groups = q.size(2)
+            sinks_expanded = sinks.view(n_kv_heads, n_groups, 1, sink_len)
+            sinks_expanded = sinks_expanded.expand(1, n_kv_heads, n_groups, 1,
+                                                   sink_len)
+            combined_logits = torch.cat([attn_weights, sinks_expanded], dim=-1)
+            combined_logits = combined_logits - combined_logits.max(
+                dim=-1, keepdim=True).values
+            probs = torch.nn.functional.softmax(combined_logits, dim=-1)
+            attn_weights = probs[..., :-sink_len]
+        else:
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+
         attn_output = torch.matmul(attn_weights, v_cache_curr)
         outputs.append(attn_output)
+
     return torch.cat(outputs, dim=0)
 
 
@@ -633,6 +888,7 @@ class RBLNFlashAttentionMetadataBuilder(
             get_current_vllm_config().model_config.enforce_eager)
 
         self.is_causal = envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
+        self.is_batch_attention_opt = envs.VLLM_RBLN_BATCH_ATTN_OPT
 
     def reorder_batch(self, input_batch: "InputBatch",
                       scheduler_output: "SchedulerOutput") -> bool:
@@ -645,6 +901,7 @@ class RBLNFlashAttentionMetadataBuilder(
         fast_build: bool = False,
         num_tokens=None,
         positions=None,
+        batch_pad=None,
     ) -> RBLNFlashAttentionMetadata:
         num_reqs = common_attn_metadata.num_reqs
         num_actual_tokens = common_attn_metadata.num_actual_tokens
@@ -680,6 +937,8 @@ class RBLNFlashAttentionMetadataBuilder(
 
         assert num_tokens is not None, (
             "num_tokens is required for RBLN Attention Backend")
+        assert batch_pad is not None, (
+            "batch_pad is required for RBLN Attention Backend")
         is_prefills = (
             common_attn_metadata.num_computed_tokens_cpu[:num_reqs].numpy()
             < num_tokens[:num_reqs] - 1)
@@ -718,13 +977,13 @@ class RBLNFlashAttentionMetadataBuilder(
                 attn_masks = attn_masks.to(self.device)
         else:
             # batch padding
-            seq_lens_tensor = rbln_utils.pad(
-                seq_lens_tensor, 0, self.scheduler_config.max_num_seqs)
-            block_tables_tensor = rbln_utils.pad(
-                block_tables_tensor, 0, self.scheduler_config.max_num_seqs)
+            seq_idx = rbln_utils.pad(seq_idx, 0, batch_pad)
+            seq_lens_tensor = rbln_utils.pad(seq_lens_tensor, 0, batch_pad)
+            block_tables_tensor = rbln_utils.pad(block_tables_tensor, 0,
+                                                 batch_pad)
             if not self.is_causal:
                 decode_attention_mask = torch.zeros(
-                    self.scheduler_config.max_num_seqs,
+                    batch_pad,
                     1,
                     1,
                     1,
@@ -751,18 +1010,22 @@ class RBLNFlashAttentionMetadataBuilder(
                                          max=sliding_window)
             cache_offsets = cache_seq_lens + query_lens
             if not is_prefills[0]:
-                cache_seq_lens = rbln_utils.pad(
-                    cache_seq_lens, 0, self.scheduler_config.max_num_seqs)
-                cache_offsets = rbln_utils.pad(
-                    cache_offsets, 0, self.scheduler_config.max_num_seqs)
+                cache_seq_lens = rbln_utils.pad(cache_seq_lens, 0, batch_pad)
+                cache_offsets = rbln_utils.pad(cache_offsets, 0, batch_pad)
             local_block_tables = block_tables_tensor[..., :1]
 
+        # * seq_idx(batch attention opt decode) - [B, 1],
+        #   for each batch, have sequence offset
+        # * seq_lens_tensor(otherwise)      - [B, P],
+        #   have dynamic size for each partition
         attn_metadata = RBLNFlashAttentionMetadata(
             num_actual_tokens=num_actual_tokens,
             max_query_len=max_query_len,
             query_start_loc=query_start_loc,
             max_seq_len=query_max_seq_len,
-            seq_lens=seq_lens_tensor.to(self.device),
+            seq_lens=seq_lens_tensor.to(self.device)
+            if not self.is_batch_attention_opt or is_prefills[0] else
+            seq_idx.to(self.device),
             block_tables=block_tables_tensor.to(self.device),
             slot_mapping=slot_mapping,
             use_cascade=False,
@@ -854,6 +1117,9 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 "heads in the layer")
             if len(self.sinks.size()) == 1:
                 self.sinks = self.sinks[:, None]
+
+        self.is_causal = envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
+        self.is_batch_attention_opt = envs.VLLM_RBLN_BATCH_ATTN_OPT
 
     def forward(
         self,
@@ -993,7 +1259,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.sinks,
                 )
         # actually non-flash paged attention DOES NOT use slot_mapping
-        elif envs.VLLM_RBLN_FLASH_CAUSAL_ATTN:
+        elif self.is_causal:
             if envs.VLLM_RBLN_COMPILE_MODEL:
                 if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
                     flash_causal_attention_naive_prefill = (
@@ -1018,6 +1284,10 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 flash_causal_attention_naive_decode = (
                     flash_causal_attention_naive_decode_impl)
 
+            # * batched attention - seq_lens[B, 1] == seq_idx,
+            #   original sequence index
+            # * otherwise         - seq_lens[B, P] == dyn_size_for_partitions,
+            #   dynamic size for each partition
             if q_len == 1:
                 attn_output = flash_causal_attention_naive_decode(  # noqa: E501
                     query,

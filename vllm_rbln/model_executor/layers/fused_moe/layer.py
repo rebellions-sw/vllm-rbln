@@ -245,7 +245,7 @@ def get_tokens_mask(num_tokens: int, left=1.0, right=float('-inf')):
     if num_tokens_across_dp.size(0) == 1:
         max_pad = num_tokens
     else:
-        max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+        max_pad = get_forward_context().dp_metadata.max_pads_across_dp.shape[0]
     pos = torch.arange(max_pad, dtype=torch.int32).unsqueeze(0)  # [1, max_pad]
     tokens_mask = torch.where(pos < num_tokens_across_dp, left,
                               right)  # [dp_size, max_pad]
@@ -464,7 +464,7 @@ def fused_moe_forward_rbln(self, hidden_states: torch.Tensor,
         hidden_shape_dp = (-1, 1, org_hidden_shape[-1])
         final_hidden_states = all_hidden_states.reshape(hidden_shape_dp)
 
-        max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+        max_pad = get_forward_context().dp_metadata.max_pads_across_dp.shape[0]
         num_tokens = org_hidden_shape[:-1].numel()  # noqa: F841
         start = self.dp_rank * max_pad
         end = start + num_tokens
@@ -483,7 +483,7 @@ def fused_moe_naive_multicast_rbln(self, x: torch.Tensor):
     # assert len(x.shape) == 3
 
     x = x.reshape(1, -1, x.size(-1))
-    max_pad = get_forward_context().dp_metadata.max_pads_across_dp
+    max_pad = get_forward_context().dp_metadata.max_pads_across_dp.shape[0]
     num_tokens = x.size(1)
     num_repeat = max_pad // num_tokens
     # TODO: evaluate various padding approaches
