@@ -38,6 +38,7 @@ def sliding_window_attention_naive_prefill(
     QUERY_LEN: tl.constexpr,  # 256(prefill)
     WINDOW_SIZE: tl.constexpr,
     NUM_BATCH: tl.constexpr,
+    NUM_BLOCK: tl.constexpr,
     DIM_BLOCK_TABLE: tl.constexpr,
 ):
     tl.static_assert(NUM_BATCH == 1)
@@ -109,9 +110,9 @@ def sliding_window_attention_naive_prefill(
         )
         k_cache_base_ptr = tl.make_block_ptr(
             base=kv_cache_base,
-            shape=(2, NUM_BATCH, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
+            shape=(2, NUM_BLOCK, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
             strides=(
-                NUM_BATCH * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
+                NUM_BLOCK * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
@@ -124,9 +125,9 @@ def sliding_window_attention_naive_prefill(
         )
         v_cache_base_ptr = tl.make_block_ptr(
             base=kv_cache_base,
-            shape=(2, NUM_BATCH, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
+            shape=(2, NUM_BLOCK, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
             strides=(
-                NUM_BATCH * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
+                NUM_BLOCK * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
@@ -232,6 +233,7 @@ def sliding_window_attention_naive_decode(
     QUERY_LEN: tl.constexpr,  # 1(decode)
     WINDOW_SIZE: tl.constexpr,
     NUM_BATCH: tl.constexpr,
+    NUM_BLOCK: tl.constexpr,
     DIM_BLOCK_TABLE: tl.constexpr,
 ):
     tl.static_assert(QUERY_LEN == 1)
@@ -306,9 +308,9 @@ def sliding_window_attention_naive_decode(
         )
         k_cache_base_ptr = tl.make_block_ptr(
             base=kv_cache_base,
-            shape=(2, NUM_BATCH, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
+            shape=(2, NUM_BLOCK, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
             strides=(
-                NUM_BATCH * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
+                NUM_BLOCK * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
@@ -321,9 +323,9 @@ def sliding_window_attention_naive_decode(
         )
         v_cache_base_ptr = tl.make_block_ptr(
             base=kv_cache_base,
-            shape=(2, NUM_BATCH, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
+            shape=(2, NUM_BLOCK, NUM_HEAD, 1, WINDOW_SIZE, HEAD_DIM),
             strides=(
-                NUM_BATCH * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
+                NUM_BLOCK * NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 NUM_HEAD * WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
                 WINDOW_SIZE * HEAD_DIM,
@@ -457,6 +459,7 @@ def _(
     QUERY_LEN = query.shape[-2]
     WINDOW_SIZE = kv_cache.shape[-2]
     NUM_BATCH = query.shape[0]
+    NUM_BLOCK = kv_cache.shape[1]
     DIM_BLOCK_TABLE = block_table.dim()
 
     params = [
@@ -476,6 +479,7 @@ def _(
         QUERY_LEN,
         WINDOW_SIZE,
         NUM_BATCH,
+        NUM_BLOCK,
         DIM_BLOCK_TABLE,
     ]
 
@@ -527,6 +531,7 @@ def _(
     QUERY_LEN = query.shape[-2]
     WINDOW_SIZE = kv_cache.shape[-2]
     NUM_BATCH = query.shape[0]
+    NUM_BLOCK = kv_cache.shape[1]
     DIM_BLOCK_TABLE = block_table.dim()
 
     params = [
@@ -546,6 +551,7 @@ def _(
         QUERY_LEN,
         WINDOW_SIZE,
         NUM_BATCH,
+        NUM_BLOCK,
         DIM_BLOCK_TABLE,
     ]
 
