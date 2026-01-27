@@ -299,6 +299,8 @@ class RBLNWorker(WorkerBase):
             return
 
         self.model_runner.warm_up_model()
+        # after completing model warm up, enable RBLN performance tracker
+        self.model_runner._enable_performance_tracker()
 
     def get_model(self) -> nn.Module:
         return self.model_runner.get_model()

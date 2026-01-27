@@ -467,6 +467,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.bucketing_manager.decode_batch_buckets)
 
         self.performance_tracker = None
+
+    def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker()
             self.performance_tracker.register_cleanup()
@@ -1598,8 +1600,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # compile decode graph
         for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
-            logger.info("Warm up decode graph with batch_size: %d",
-                        batch_bucket_size)
             decode_max_seq_len = self.max_model_len
 
             dummy_decode_requests = []
@@ -2291,6 +2291,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 batch_bucket_size = \
                     self.bucketing_manager.find_decode_batch_bucket(
                         self.input_batch.num_reqs)
+                logger.info("execute_model decode, batch_bucket_size = %s", batch_bucket_size)
                 # decode batch padding
                 input_ids = rbln_utils.pad(input_ids, 0, batch_bucket_size)
                 positions = rbln_utils.pad(positions, -2, batch_bucket_size)
