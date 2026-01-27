@@ -18,7 +18,7 @@ from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
-from vllm.config import LogprobsMode
+from vllm.config.model import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
 import vllm_rbln.rbln_envs as envs
@@ -103,16 +103,18 @@ class RBLNSampler(VLLMSampler):
             backend="rbln",
             options=options,
         )
-        self.logprobs_mode = logprobs_mode
 
     def apply_temperature(
         self,
         logits: torch.Tensor,
         temp: torch.Tensor,
+        all_random: bool,
     ) -> torch.Tensor:
         # NOTE:
         # in-place division triggers buffer key error
         # in torchinductor
+        if not all_random:
+            temp = torch.where(temp < _SAMPLING_EPS, 1.0, temp)
         return logits.div(temp.unsqueeze(dim=1))
 
     def apply_topk_topp_sampler(
@@ -121,9 +123,9 @@ class RBLNSampler(VLLMSampler):
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
         logits_to_return = None
-        if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
+        if self.logprobs_mode == "processed_logits":
             logits_to_return = logits
-        elif self.logprobs_mode == LogprobsMode.PROCESSED_LOGPROBS:
+        elif self.logprobs_mode == "processed_logprobs":
             logits_to_return = logits.log_softmax(dim=-1, dtype=torch.float32)
         return sampled, logits_to_return
 
@@ -155,12 +157,14 @@ class RBLNSampler(VLLMSampler):
         self,
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
+        logprobs_mode_override: LogprobsMode | None = None,
     ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Sample logits based on sampling metadata.
 
         The various logits processing functions called in this method
         may update the logits tensor in-place.
         """
+        logprobs_mode = logprobs_mode_override or self.logprobs_mode
         assert not (sampling_metadata.all_greedy
                     and sampling_metadata.all_random)
         if sampling_metadata.all_random:
@@ -170,17 +174,17 @@ class RBLNSampler(VLLMSampler):
             if sampling_metadata.all_greedy:
                 processed_logprobs = None
                 if sampling_metadata.max_num_logprobs is not None:
-                    if self.logprobs_mode == LogprobsMode.PROCESSED_LOGITS:
+                    if logprobs_mode == "processed_logits":
                         processed_logprobs = logits
-                    elif self.logprobs_mode == LogprobsMode.PROCESSED_LOGPROBS:
+                    elif logprobs_mode == "processed_logprobs":
                         processed_logprobs = self.compute_logprobs(logits)
                 return greedy_sampled, processed_logprobs
 
         assert sampling_metadata.temperature is not None
 
         # Apply temperature.
-        logits = self.apply_temperature(logits, sampling_metadata.temperature)
-
+        logits = self.apply_temperature(logits, sampling_metadata.temperature,
+                                        sampling_metadata.all_random)
         # Apply logits processors that only apply to random sampling
         # (argmax invariant)
         for processor in sampling_metadata.logitsprocs.argmax_invariant:
@@ -200,43 +204,25 @@ class RBLNSampler(VLLMSampler):
         )
         return sampled, processed_logprobs
 
+    @staticmethod
     def apply_penalties(
-        self,
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
+        output_token_ids: list[list[int]],
     ) -> torch.Tensor:
-        if not sampling_metadata.no_penalties:
-            assert sampling_metadata.prompt_token_ids is not None
-            logits = rbln_apply_all_penalties(
-                logits,
-                sampling_metadata.prompt_token_ids,
-                sampling_metadata.presence_penalties,
-                sampling_metadata.frequency_penalties,
-                sampling_metadata.repetition_penalties,
-                sampling_metadata.output_token_ids,
-            )
-        return logits
+        if sampling_metadata.no_penalties:
+            return logits
+        assert sampling_metadata.prompt_token_ids is not None
 
-    @staticmethod
-    def get_bucket_sizes(max_num_seqs: int) -> list[int]:
-        """Get the bucket sizes for the sampler.
-        Args:
-            max_num_seqs (int): The maximum number of sequences.
-        Returns:
-            list[int]: The bucket sizes.
-        [1, 2, 4] + list(range(8, 256, 8)) + list(
-            range(256, max_num_seqs + 1, 16))
-        """
-        # FIXME(eunji.lee)
-        # Not used. To be removed.
-        bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
-        if max_num_seqs >= 8:
-            # Step size 8 for small batch sizes, up to 256(not included)
-            bucket_sizes += list(range(8, min(max_num_seqs + 1, 256), 8))
-        if max_num_seqs >= 256:
-            # Step size 16 for larger batch sizes
-            bucket_sizes += list(range(256, max_num_seqs + 1, 16))
-        return bucket_sizes
+        logits = rbln_apply_all_penalties(
+            logits,
+            sampling_metadata.prompt_token_ids,
+            sampling_metadata.presence_penalties,
+            sampling_metadata.frequency_penalties,
+            sampling_metadata.repetition_penalties,
+            output_token_ids,
+        )
+        return logits
 
 
 WARM_UP_CONFIGS = [
