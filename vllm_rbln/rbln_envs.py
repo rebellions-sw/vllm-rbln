@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_SAMPLER: bool = True
     VLLM_RBLN_ENABLE_WARM_UP: bool = True
     VLLM_RBLN_USE_VLLM_MODEL: bool = False
+    VLLM_RBLN_SPECIALIZE_MOE_DECODE: bool = True
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
     VLLM_RBLN_BATCH_ATTN_OPT: bool = False
     VLLM_RBLN_DISABLE_MM: bool = False
@@ -102,6 +103,9 @@ environment_variables = {
     "VLLM_RBLN_USE_MOE_TOKENS_MASK":
     (lambda: os.environ.get("VLLM_RBLN_USE_MOE_TOKENS_MASK", "True").lower() in
      ("true", "1")),
+    # If true, it specializes the cases where all instances are at decode stage
+    "VLLM_RBLN_SPECIALIZE_MOE_DECODE": (lambda: os.environ.get(
+        "VLLM_RBLN_SPECIALIZE_MOE_DECODE", "True").lower() in ("true", "1")),
     # enforce model data type into fp32 not model_config.dtype
     "VLLM_RBLN_ENFORCE_MODEL_FP32":
     (lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower() in

@@ -90,6 +90,7 @@ from vllm.v1.worker.utils import (AttentionGroup, MultiModalBudget,
 
 import vllm_rbln.rbln_envs as envs
 import vllm_rbln.utils as rbln_utils
+from vllm_rbln.forward_context import RBLNDPMetadata
 from vllm_rbln.logger import init_logger
 from vllm_rbln.lora.inputs import LoRAInputs
 from vllm_rbln.lora.mask import LoRAMask
@@ -170,10 +171,10 @@ class ExecuteModelState(NamedTuple):
 class DummyRunState(NamedTuple):
     """Input state for dummy run."""
 
-    attn_metadata: dict[str, Any]
+    attn_metadata: dict[int, dict[str, Any]]
     num_input_tokens: int
-    input_ids: torch.Tensor
-    positions: torch.Tensor
+    input_ids: dict[int, torch.Tensor]
+    positions: dict[int, torch.Tensor]
 
 
 class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
@@ -393,7 +394,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # None in the first PP rank. The rest are set after load_model.
         self.prefill_intermediate_tensors: Optional[IntermediateTensors] = None
-        self.decode_intermediate_tensors: Optional[IntermediateTensors] = None
+        self.decode_intermediate_tensors: dict[int, IntermediateTensors] = {}
 
         # OPTIMIZATION: Cache the tensors rather than creating them every step.
         # Keep in int64 to avoid overflow with long context
@@ -469,6 +470,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self.performance_tracker = None
 
         self.dummy_run_state: DummyRunState | None = None
+
+        self.specialized_moe_decode = parallel_config.data_parallel_size > 1 \
+            and envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE
 
     def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
@@ -945,6 +949,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self,
         scheduler_output: SchedulerOutput,
         num_scheduled_tokens: np.ndarray,
+        num_padded_tokens: int | None = None,
     ) -> tuple[dict[str, Any], torch.Tensor, Optional[SpecDecodeMetadata],
                np.ndarray, Optional[CommonAttentionMetadata], int]:
         """
@@ -1092,7 +1097,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         max_num_scheduled_tokens = int(num_scheduled_tokens.max())
         batch_bucket_size = \
-            self.bucketing_manager.find_decode_batch_bucket(self.input_batch.num_reqs)
+            self.bucketing_manager.find_decode_batch_bucket(num_reqs)
+
+        (batch_bucket_size, num_padded_tokens, num_tokens_across_dp) = \
+            self.get_dp_padding(total_num_scheduled_tokens, batch_bucket_size,
+                                num_padded_tokens, bool(self.is_prefills()[0]))
         # Prepare the attention metadata for each KV cache group and make layers
         # in the same group share the same metadata.
         for kv_cache_group_id, kv_cache_group_spec in enumerate(
@@ -1193,7 +1202,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         return (attn_metadata, logits_indices, spec_decode_metadata,
                 num_scheduled_tokens, spec_decode_common_attn_metadata,
-                max_num_scheduled_tokens)
+                max_num_scheduled_tokens, batch_bucket_size, num_padded_tokens,
+                num_tokens_across_dp)
 
     def _compile_model(self, model):
         TP = get_tp_group()
@@ -1402,28 +1412,47 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 for k, v in intermediate_tensors.items()
             })
 
-    def get_dp_padding(self,
-                       num_tokens: int) -> tuple[int, Optional[torch.Tensor]]:
+    def get_dp_padding(
+        self,
+        num_tokens: int,
+        batch_bucket_size: int,
+        num_padded_tokens: int | None = None,
+        is_prefill: bool = False
+    ) -> tuple[int, Optional[int], Optional[torch.Tensor]]:
         dp_size = self.vllm_config.parallel_config.data_parallel_size
-        # dp_rank = self.vllm_config.parallel_config.data_parallel_rank
+        dp_rank = self.vllm_config.parallel_config.data_parallel_rank
 
-        # For DP: Don't pad when setting enforce_eager.
-        # This lets us set enforce_eager on the prefiller in a P/D setup and
-        # still use CUDA graphs (enabled by this padding) on the decoder.
-        #
-        # TODO(tms) : There are many cases where padding is enabled for
-        # prefills, causing unnecessary and excessive padding of activations.
+        if dp_size == 1:
+            assert num_padded_tokens is None, \
+                "num_padded_tokens should not be applied for non-DP case"
+            return batch_bucket_size, num_padded_tokens, None
 
-        if dp_size == 1 or self.vllm_config.model_config.enforce_eager:
-            # Early exit.
-            return 0, None
+        if num_padded_tokens is not None:
+            assert self.specialized_moe_decode, \
+                "num_padded_tokens is only supported when " \
+                "specialized MOE decode is enabled"
+            assert num_padded_tokens == self.max_num_batched_tokens, \
+                "num_padded_tokens should be equal to max_num_batched_tokens"
+            assert not is_prefill, \
+                "num_padded_tokens is only supported for decode stage"
+            num_tokens_across_dp_cpu = RBLNDPMetadata.num_tokens_across_dp(
+                num_tokens, dp_size, dp_rank)
+            return (batch_bucket_size, num_padded_tokens,
+                    num_tokens_across_dp_cpu)
 
-        max_tokens_across_dp_cpu = num_tokens
-        num_tokens_after_padding = torch.tensor([max_tokens_across_dp_cpu] *
-                                                dp_size,
-                                                device="cpu",
-                                                dtype=torch.int32)
-        return max_tokens_across_dp_cpu - num_tokens, num_tokens_after_padding
+        num_tokens_across_dp_cpu, max_decode_tokens = \
+            RBLNDPMetadata.num_tokens_across_dp_with_max_decode_tokens(
+            num_tokens, dp_size, dp_rank, is_prefill)
+
+        any_prefill = max_decode_tokens is None
+        if any_prefill or not self.specialized_moe_decode:
+            num_padded_tokens = self.max_num_batched_tokens
+        else:
+            batch_bucket_size = self.bucketing_manager.find_decode_batch_bucket(
+                max_decode_tokens)
+            num_padded_tokens = batch_bucket_size
+
+        return batch_bucket_size, num_padded_tokens, num_tokens_across_dp_cpu
 
     def _pool(
         self,
@@ -1486,8 +1515,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_input_tokens = num_scheduled_tokens
 
         # Padding for DP
-        # NOTE(RBLN): RBLN does not support DP padding
-        num_tokens_across_dp = None
+        # NOTE(RBLN): RBLN handles DP padding in _prepare_inputs
 
         # _prepare_inputs may reorder the batch, so we must gather multi
         # modal outputs after that to ensure the correct order
@@ -1535,7 +1563,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         return (
             num_input_tokens,
-            num_tokens_across_dp,
             input_ids,
             inputs_embeds,
             positions,
@@ -1627,8 +1654,18 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             so, cso = self._make_dummy_scheduler_outputs(
                 dummy_decode_requests, dummy_decode_num_scheduled_tokens,
                 num_kv_cache_groups)
-            self._prepare_decode_intermediate_tensors(batch_bucket_size)
-            self._execute_dummy_requests(so, cso, self.decode_intermediate_tensors)
+            current_intermediate_tensors = \
+                self.decode_intermediate_tensors.get(batch_bucket_size)
+            assert current_intermediate_tensors is not None
+
+            if self.specialized_moe_decode:
+                self._execute_dummy_requests(
+                    so,
+                    cso,
+                    current_intermediate_tensors,
+                    num_padded_tokens=self.max_num_batched_tokens)
+
+            self._execute_dummy_requests(so, cso, current_intermediate_tensors)
 
     def _add_dummy_requests(
         self,
@@ -1698,14 +1735,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         sched_output: SchedulerOutput,
         cleanup_sched_output: SchedulerOutput,
         intermediate_tensors: IntermediateTensors,
+        num_padded_tokens: int | None = None,
     ) -> None:
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
 
-        output = self.execute_model(sched_output, intermediate_tensors)
+        output = self.execute_model(sched_output, intermediate_tensors,
+                                    num_padded_tokens)
         if output is None:
             self.sample_tokens(None)
-        output = self.execute_model(cleanup_sched_output, intermediate_tensors)
+        output = self.execute_model(cleanup_sched_output, intermediate_tensors,
+                                    num_padded_tokens)
         if output is None:
             self.sample_tokens(None)
 
@@ -1827,96 +1867,107 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         logits_indices_padded = None
 
-        attn_metadata: dict[str, Any] = {}
-
         # Used in the below loop.
         query_start_loc_cpu = query_start_loc
         seq_lens_cpu = seq_lens
         num_computed_tokens_cpu = (
             input_batch.num_computed_tokens_cpu_tensor[:num_reqs])
 
-        batch_bucket_size = \
-            self.bucketing_manager.find_decode_batch_bucket(input_batch.num_reqs)
-        # Prepare the attention metadata for each KV cache group and make layers
-        # in the same group share the same metadata.
-        for kv_cache_group_id, kv_cache_group_spec in enumerate(
-                self.kv_cache_config.kv_cache_groups):
-            encoder_seq_lens = None
+        attn_metadata_bucket: dict[int, dict[str, Any]] = {}
+        input_ids_bucket: dict[int, torch.Tensor] = {}
+        positions_bucket: dict[int, torch.Tensor] = {}
 
-            if isinstance(kv_cache_group_spec.kv_cache_spec,
-                          EncoderOnlyAttentionSpec):
-                raise NotImplementedError(
-                    "Encoder-only attention is not supported for DP dummy run")
-            else:
-                blk_table = input_batch.block_table[kv_cache_group_id]
-                blk_table_tensor = blk_table.get_device_tensor(num_reqs)
-                slot_mapping = blk_table.slot_mapping.gpu[:
-                                                          total_num_scheduled_tokens]
+        for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
+            attn_metadata: dict[str, Any] = {}
+            # Prepare the attention metadata for each KV cache group and
+            # make layers in the same group share the same metadata.
+            for kv_cache_group_id, kv_cache_group_spec in enumerate(
+                    self.kv_cache_config.kv_cache_groups):
+                encoder_seq_lens = None
 
-                # Fill unused with -1. Needed for reshape_and_cache in full cuda
-                # graph mode. `blk_table_tensor` -1 to match mamba PAD_SLOT_ID
-                slot_mapping[total_num_scheduled_tokens:
-                             total_num_scheduled_tokens].fill_(-1)
-                blk_table_tensor[num_reqs:total_num_scheduled_tokens].fill_(-1)
-
-            common_attn_metadata = CommonAttentionMetadata(
-                query_start_loc=query_start_loc,
-                query_start_loc_cpu=query_start_loc_cpu,
-                seq_lens=seq_lens,
-                seq_lens_cpu=seq_lens_cpu,
-                num_computed_tokens_cpu=num_computed_tokens_cpu,
-                num_reqs=num_reqs,
-                num_actual_tokens=total_num_scheduled_tokens,
-                max_query_len=max_num_scheduled_tokens,
-                max_seq_len=max_seq_len,
-                block_table_tensor=blk_table_tensor,
-                slot_mapping=slot_mapping,
-                logits_indices_padded=logits_indices_padded,
-                num_logits_indices=logits_indices.size(0),
-                causal=True,
-                encoder_seq_lens=encoder_seq_lens,
-            )
-
-            for attn_group in self.attn_groups[kv_cache_group_id]:
-                # Prepare for cascade attention if enabled & beneficial.
-                common_prefix_len = 0
-                builder = attn_group.get_metadata_builder()
-                if self.cascade_attn_enabled:
+                if isinstance(kv_cache_group_spec.kv_cache_spec,
+                              EncoderOnlyAttentionSpec):
                     raise NotImplementedError(
-                        "Cascade attention is not supported for DP dummy run")
+                        "Encoder-only attention is not supported for "
+                        "DP dummy run")
+                else:
+                    blk_table = input_batch.block_table[kv_cache_group_id]
+                    blk_table_tensor = blk_table.get_device_tensor(num_reqs)
+                    slot_mapping = \
+                        blk_table.slot_mapping.gpu[:total_num_scheduled_tokens]
 
-                extra_attn_metadata_args = {}
+                    # Fill unused with -1.
+                    # Needed for reshape_and_cache in full cuda graph mode.
+                    # `blk_table_tensor` -1 to match mamba PAD_SLOT_ID
+                    slot_mapping[total_num_scheduled_tokens:
+                                 total_num_scheduled_tokens].fill_(-1)
+                    blk_table_tensor[
+                        num_reqs:total_num_scheduled_tokens].fill_(-1)
 
-                if isinstance(builder, RBLNFlashAttentionMetadataBuilder):
-                    extra_attn_metadata_args["num_tokens"] = \
-                        input_batch.num_tokens
-                    extra_attn_metadata_args["positions"] = positions
-                    extra_attn_metadata_args["batch_pad"] = batch_bucket_size
-                attn_metadata_i = builder.build(
-                    common_prefix_len=common_prefix_len,
-                    common_attn_metadata=common_attn_metadata,
-                    **extra_attn_metadata_args)
+                common_attn_metadata = CommonAttentionMetadata(
+                    query_start_loc=query_start_loc,
+                    query_start_loc_cpu=query_start_loc_cpu,
+                    seq_lens=seq_lens,
+                    seq_lens_cpu=seq_lens_cpu,
+                    num_computed_tokens_cpu=num_computed_tokens_cpu,
+                    num_reqs=num_reqs,
+                    num_actual_tokens=total_num_scheduled_tokens,
+                    max_query_len=max_num_scheduled_tokens,
+                    max_seq_len=max_seq_len,
+                    block_table_tensor=blk_table_tensor,
+                    slot_mapping=slot_mapping,
+                    logits_indices_padded=logits_indices_padded,
+                    num_logits_indices=logits_indices.size(0),
+                    causal=True,
+                    encoder_seq_lens=encoder_seq_lens,
+                )
 
-                for layer_name in attn_group.layer_names:
-                    attn_metadata[layer_name] = attn_metadata_i
+                for attn_group in self.attn_groups[kv_cache_group_id]:
+                    # Prepare for cascade attention if enabled & beneficial.
+                    common_prefix_len = 0
+                    builder = attn_group.get_metadata_builder()
+                    if self.cascade_attn_enabled:
+                        raise NotImplementedError(
+                            "Cascade attention is not supported "
+                            "for DP dummy run")
 
-        for attn_metadatum in attn_metadata.values():
-            attn_metadatum.kv_caches = self.kv_caches
-        num_input_tokens = total_num_scheduled_tokens
-        input_ids = input_ids[:num_input_tokens]
-        positions = positions[:num_input_tokens]
+                    extra_attn_metadata_args = {}
 
-        input_ids = input_ids.view(num_reqs, -1).to(torch.long)
-        positions = positions.view(num_reqs, -1)
+                    if isinstance(builder, RBLNFlashAttentionMetadataBuilder):
+                        extra_attn_metadata_args["num_tokens"] = \
+                            input_batch.num_tokens
+                        extra_attn_metadata_args["positions"] = positions
+                        extra_attn_metadata_args[
+                            "batch_pad"] = batch_bucket_size
+                    attn_metadata_i = builder.build(
+                        common_prefix_len=common_prefix_len,
+                        common_attn_metadata=common_attn_metadata,
+                        **extra_attn_metadata_args)
 
-        # decode batch padding
-        input_ids = rbln_utils.pad(input_ids, 0, batch_bucket_size)
-        positions = rbln_utils.pad(positions, -2, batch_bucket_size)
+                    for layer_name in attn_group.layer_names:
+                        attn_metadata[layer_name] = attn_metadata_i
 
-        return DummyRunState(attn_metadata=attn_metadata,
+            for attn_metadatum in attn_metadata.values():
+                attn_metadatum.kv_caches = self.kv_caches
+            num_input_tokens = total_num_scheduled_tokens
+            input_ids = input_ids[:num_input_tokens]
+            positions = positions[:num_input_tokens]
+
+            input_ids = input_ids.view(num_reqs, -1).to(torch.long)
+            positions = positions.view(num_reqs, -1)
+
+            # decode batch padding
+            input_ids = rbln_utils.pad(input_ids, 0, batch_bucket_size)
+            positions = rbln_utils.pad(positions, -2, batch_bucket_size)
+
+            attn_metadata_bucket[batch_bucket_size] = attn_metadata
+            input_ids_bucket[batch_bucket_size] = input_ids
+            positions_bucket[batch_bucket_size] = positions
+
+        return DummyRunState(attn_metadata=attn_metadata_bucket,
                              num_input_tokens=num_input_tokens,
-                             input_ids=input_ids,
-                             positions=positions)
+                             input_ids=input_ids_bucket,
+                             positions=positions_bucket)
 
     def _prepare_dummy_input_batch(self) -> InputBatch:
         logits_processors = self.model_config.logits_processors
@@ -2027,18 +2078,32 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         (attn_metadata, num_input_tokens, input_ids,
          positions) = self.dummy_run_state
 
-        num_tokens_across_dp = None
+        (batch_bucket_size, num_padded_tokens,
+         num_tokens_across_dp) = self.get_dp_padding(
+             num_input_tokens, self.bucketing_manager.decode_batch_buckets[0])
+
+        attn_metadata = attn_metadata.get(batch_bucket_size)
+        input_ids = input_ids.get(batch_bucket_size)
+        positions = positions.get(batch_bucket_size)
+        assert attn_metadata is not None \
+            and input_ids is not None \
+            and positions is not None, \
+            "attn_metadata, input_ids, and positions should be defined" \
+            f" for batch_bucket_size: {batch_bucket_size}"
 
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
         else:
-            intermediate_tensors = self.decode_intermediate_tensors
+            intermediate_tensors = \
+                self.decode_intermediate_tensors.get(batch_bucket_size)
+            assert intermediate_tensors is not None
 
         with set_forward_context(
                 attn_metadata,
                 self.vllm_config,
                 num_tokens=num_input_tokens,
                 num_tokens_across_dp=num_tokens_across_dp,
+                num_padded_tokens=num_padded_tokens,
         ):
             token_indices = None
             inputs_embeds = None
@@ -2191,6 +2256,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self,
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        num_padded_tokens: int | None = None,
     ) -> Union[ModelRunnerOutput, IntermediateTensors, None]:
         if self.execute_model_state is not None:
             raise RuntimeError("State error: sample_tokens() must be called "
@@ -2222,12 +2288,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # Prepare the decoder inputs.
             (attn_metadata, logits_indices, spec_decode_metadata,
              num_scheduled_tokens_np, spec_decode_common_attn_metadata,
-             max_query_len) = self._prepare_inputs(scheduler_output,
-                                                   num_scheduled_tokens_np)
+             max_query_len, batch_bucket_size, num_padded_tokens,
+             num_tokens_across_dp) = self._prepare_inputs(
+                 scheduler_output, num_scheduled_tokens_np, num_padded_tokens)
 
             (
                 num_input_tokens,
-                num_tokens_across_dp,
                 input_ids,
                 inputs_embeds,
                 positions,
@@ -2258,6 +2324,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self.vllm_config,
                 num_tokens=num_input_tokens,
                 num_tokens_across_dp=num_tokens_across_dp,
+                num_padded_tokens=num_padded_tokens,
         ), record_function_or_nullcontext("Forward"),
               self.maybe_get_kv_connector_output(scheduler_output) as
               kv_connector_output):
@@ -2269,6 +2336,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # we must resolve the batch dimension.
             input_ids = input_ids.view(num_reqs, -1).to(torch.long)
             positions = positions.view(num_reqs, -1)
+
             is_prefills = self.is_prefills()
 
             token_indices = None
@@ -2289,10 +2357,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 input_ids = rbln_utils.pad(input_ids, -1, prefill_size)
                 positions = rbln_utils.pad(positions, -1, prefill_size)
             else:
-                batch_bucket_size = \
-                    self.bucketing_manager.find_decode_batch_bucket(
-                        self.input_batch.num_reqs)
-                logger.info("execute_model decode, batch_bucket_size = %s", batch_bucket_size)
                 # decode batch padding
                 input_ids = rbln_utils.pad(input_ids, 0, batch_bucket_size)
                 positions = rbln_utils.pad(positions, -2, batch_bucket_size)
@@ -2873,9 +2937,16 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.vllm_config.parallel_config.distributed_executor_backend
         if distributed_executor_backend == "ray":
             self._prepare_prefill_intermediate_tensors()
+            for batch_bucket_size \
+                in self.bucketing_manager.decode_batch_buckets:
+                self._prepare_decode_intermediate_tensors(batch_bucket_size)
         else:
             with torch.inference_mode():
                 self._prepare_prefill_intermediate_tensors()
+                for batch_bucket_size \
+                    in self.bucketing_manager.decode_batch_buckets:
+                    self._prepare_decode_intermediate_tensors(
+                        batch_bucket_size)
 
     def _prepare_prefill_intermediate_tensors(self) -> None:
 
@@ -2910,13 +2981,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         batch_size = batch_bucket_size
         seq_len = 1
-        self.decode_intermediate_tensors = _reshape(
+        self.decode_intermediate_tensors[batch_bucket_size] = _reshape(
             batch_size, seq_len,
             self.model.make_empty_intermediate_tensors(
                 batch_size=batch_size * seq_len,
                 dtype=self.model_config.dtype,
                 device=self.device))
-
 
     def save_tensorized_model(
         self,

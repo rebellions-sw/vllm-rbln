@@ -20,7 +20,7 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import vllm.forward_context as vfc
-from vllm.config import CUDAGraphMode, VllmConfig
+from vllm.config import CUDAGraphMode, ParallelConfig, VllmConfig
 from vllm.forward_context import (BatchDescriptor, DPMetadata,
                                   batchsize_logging_interval,
                                   create_forward_context,
@@ -35,7 +35,7 @@ logger = init_logger(__name__)
 
 @dataclass
 class RBLNDPMetadata(DPMetadata):
-    max_pads_across_dp: int = 0
+    max_pads_across_dp: torch.Tensor | None = None
 
     @staticmethod
     def num_tokens_across_dp(num_tokens: int, dp_size: int,
@@ -54,25 +54,65 @@ class RBLNDPMetadata(DPMetadata):
         return num_tokens_tensor
 
     @staticmethod
+    def num_tokens_across_dp_with_max_decode_tokens(
+            num_tokens: int, dp_size: int, dp_rank: int,
+            is_prefill: bool) -> tuple[torch.Tensor, int | None]:
+        pad_flag = 1 << 16
+        pad_mask = pad_flag - 1
+        assert num_tokens < pad_flag, \
+            "num_tokens should be less than pad_flag"
+
+        if is_prefill:
+            num_tokens |= pad_flag
+
+        tokens_across_dp_cpu = RBLNDPMetadata.num_tokens_across_dp(
+            num_tokens, dp_size, dp_rank)
+        max_across_dp = torch.max(tokens_across_dp_cpu).item()
+
+        if is_prefill or max_across_dp > pad_flag:
+            mask_tensor = torch.tensor([pad_mask] * dp_size,
+                                       device="cpu",
+                                       dtype=torch.int32)
+            num_tokens_across_dp_cpu = tokens_across_dp_cpu & mask_tensor
+            max_across_dp = None
+        else:
+            num_tokens_across_dp_cpu = tokens_across_dp_cpu
+
+        return num_tokens_across_dp_cpu, max_across_dp
+
+    @staticmethod
     def make(
-        vllm_config: VllmConfig,
+        parallel_config: ParallelConfig,
         num_tokens: int,
+        num_tokens_across_dp: torch.Tensor | None = None,
+        num_padded_tokens: int | None = None,
     ) -> "RBLNDPMetadata":
-        parallel_config = vllm_config.parallel_config
         dp_size = parallel_config.data_parallel_size
-        dp_rank = parallel_config.data_parallel_rank
 
-        scheduler_config = vllm_config.scheduler_config
-        max_pad = scheduler_config.max_num_batched_tokens
-        batchsize = num_tokens
+        if dp_size > 1:
+            assert num_tokens_across_dp is not None, \
+                "num_tokens_across_dp should be applied for DP case"
+            assert num_padded_tokens is not None, \
+                "num_padded_tokens should be applied for DP case"
+            num_tokens_across_dp_cpu = num_tokens_across_dp
+            max_pad = num_padded_tokens
 
-        num_tokens_across_dp_cpu = RBLNDPMetadata.num_tokens_across_dp(
-            batchsize, dp_size, dp_rank)
-        max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp_cpu)
+            max_tokens_across_dp_cpu = torch.max(num_tokens_across_dp_cpu)
+            max_pads_across_dp = torch.empty(max_pad, device="cpu")
+        else:
+            assert num_tokens_across_dp is None, \
+                "num_tokens_across_dp should not be applied for non-DP case"
+            assert num_padded_tokens is None, \
+                "num_padded_tokens should not be applied for non-DP case"
+            num_tokens_across_dp_cpu = torch.tensor([num_tokens],
+                                                    device="cpu",
+                                                    dtype=torch.int32)
+            max_tokens_across_dp_cpu = num_tokens
+            max_pads_across_dp = None
 
         return RBLNDPMetadata(max_tokens_across_dp_cpu,
                               num_tokens_across_dp_cpu,
-                              max_pads_across_dp=max_pad)
+                              max_pads_across_dp=max_pads_across_dp)
 
 
 @contextmanager
@@ -85,6 +125,7 @@ def _set_forward_context(
     cudagraph_runtime_mode: CUDAGraphMode = CUDAGraphMode.NONE,
     batch_descriptor: BatchDescriptor | None = None,
     ubatch_slices: UBatchSlices | None = None,
+    num_padded_tokens: int | None = None,
 ):
     """A context manager that stores the current forward context,
     can be attention metadata, etc.
@@ -99,7 +140,10 @@ def _set_forward_context(
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if (enable_dp or use_moe_tokens_mask) and (attn_metadata is not None
                                                or num_tokens is not None):
-        dp_metadata = RBLNDPMetadata.make(vllm_config, num_tokens or 0)
+        dp_metadata = RBLNDPMetadata.make(vllm_config.parallel_config,
+                                          num_tokens or 0,
+                                          num_tokens_across_dp,
+                                          num_padded_tokens)
 
     forward_context = create_forward_context(
         attn_metadata,
