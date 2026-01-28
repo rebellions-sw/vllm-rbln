@@ -26,17 +26,12 @@ repos:
     exclude: 'csrc/(moe/topk_softmax_kernels.cu|quantization/gguf/(ggml-common.h|dequantize.cuh|vecdotq.cuh|mmq.cuh|mmvq.cuh))|vllm/third_party/.*'
     types_or: [c++, cuda]
     args: [--style=file, --verbose]
-# - repo: https://github.com/igorshubovych/markdownlint-cli
-#   rev: v0.45.0
-#   hooks:
-#   - id: markdownlint
-#     exclude: '.*\.inc\.md'
-#     stages: [manual] # Only run in CI
-- repo: https://github.com/jackdewinter/pymarkdown
-  rev: v0.9.27
+- repo: https://github.com/igorshubovych/markdownlint-cli
+  rev: v0.45.0
   hooks:
-  - id: pymarkdown
-    args: [fix]
+  - id: markdownlint
+    exclude: '.*\.inc\.md'
+    stages: [manual] # Only run in CI
 - repo: https://github.com/astral-sh/uv-pre-commit
   rev: 0.9.1
   hooks:
@@ -91,17 +86,6 @@ repos:
     entry: python tools/pre_commit/check_license_header.py
     language: python
     types: [python]
-    language: python
-    types: [python]
-  - id: check-filenames
-    name: Check for spaces in all filenames
-    entry: bash
-    args:
-      - -c
-      - 'git ls-files | grep " " && echo "Filenames should not contain spaces!" && exit 1 || exit 0'
-    language: system
-    always_run: true
-    pass_filenames: false
   - id: check-filenames
     name: Check for spaces in all filenames
     entry: bash
