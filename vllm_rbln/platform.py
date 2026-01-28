@@ -19,7 +19,6 @@ from vllm.attention.backends.registry import AttentionBackendEnum
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
-    from vllm.config.cache import CacheDType
     from vllm.utils.argparse_utils import FlexibleArgumentParser
 else:
     VllmConfig = None
@@ -211,14 +210,7 @@ class RblnPlatform(Platform):
     def get_attn_backend_cls(
         cls,
         selected_backend: "AttentionBackendEnum",
-        head_size: int,
-        dtype: torch.dtype,
-        kv_cache_dtype: "Optional[CacheDType]",
-        block_size: int,
-        use_mla: bool,
-        has_sink: bool,
-        use_sparse: bool,
-        attn_type: Optional[str] = None,
+        attn_selector_config: "AttentionSelectorConfig",
     ) -> str:
         attn_backend_cls = ("vllm_rbln.v1.attention.backends."
                             "flash_attention.RBLNAttentionBackend")
