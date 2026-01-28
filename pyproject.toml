@@ -77,6 +77,7 @@ rbln_custom_ops = "vllm_rbln:register_ops"
 
 [tool.setuptools_scm]
 version_file = "vllm_rbln/_version.py"
+local_scheme = "node-and-timestamp"
 
 [tool.setuptools.packages.find]
 where = ["."]
