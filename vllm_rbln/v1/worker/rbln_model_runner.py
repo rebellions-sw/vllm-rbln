@@ -571,7 +571,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         src_indices = orig_indices[sorted_order]
         src_dest_map = {
             int(src): int(dst)
-            for src, dst in zip(src_indices, orig_indices)
+            for src, dst in zip(src_indices, orig_indices, strict=False)
         }
 
         for src in src_dest_map:
@@ -1165,8 +1165,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 query_start_loc=query_start_loc,
                 query_start_loc_cpu=query_start_loc_cpu,
                 seq_lens=seq_lens,
-                seq_lens_cpu=seq_lens_cpu,
-                num_computed_tokens_cpu=num_computed_tokens_cpu,
                 num_reqs=num_reqs,
                 num_actual_tokens=total_num_scheduled_tokens,
                 max_query_len=max_num_scheduled_tokens,
@@ -1530,14 +1528,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
 
+        # TODO(RBLN): Support SP
         # Pad tokens to multiple of tensor_parallel_size when
         # enabled collective fusion for SP
         tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-        if self.compilation_config.pass_config. \
-            enable_sequence_parallelism and tp_size > 1:
-            num_input_tokens = round_up(num_scheduled_tokens, tp_size)
-        else:
-            num_input_tokens = num_scheduled_tokens
+        num_input_tokens = num_scheduled_tokens
 
         # Padding for DP
         # NOTE(RBLN): RBLN handles DP padding in _prepare_inputs
@@ -1933,8 +1928,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     query_start_loc=query_start_loc,
                     query_start_loc_cpu=query_start_loc_cpu,
                     seq_lens=seq_lens,
-                    seq_lens_cpu=seq_lens_cpu,
-                    num_computed_tokens_cpu=num_computed_tokens_cpu,
+                    # seq_lens_cpu=seq_lens_cpu,
+                    # num_computed_tokens_cpu=num_computed_tokens_cpu,
                     num_reqs=num_reqs,
                     num_actual_tokens=total_num_scheduled_tokens,
                     max_query_len=max_num_scheduled_tokens,
