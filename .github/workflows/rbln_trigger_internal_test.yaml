@@ -7,6 +7,10 @@ on:
         description: "ref to checkout"
         required: false
         type: string
+      pr_number:
+        description: "PR number to checkout (optional)"
+        required: false
+        type: string
       rebel_compiler_version:
         description: "Version of rebel-compiler to use (optional)"
         required: false
@@ -60,18 +64,20 @@ jobs:
 
   vllm-rbln-pytest:
     needs: [get-compiler-version, build-vllm-rbln]
+    if: ${{ always() && !cancelled() && needs.build-vllm-rbln.result == 'success' }}
     uses: ./.github/workflows/rbln_vllm-rbln_pytest.yaml
     secrets: inherit
     with:
       ref: ${{ inputs.ref }}
-      rebel_compiler_version: ${{ needs.get-compiler-version.outputs.compiler_version }}
+      rebel_compiler_version: ${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
       optimum_rbln_version: ${{ inputs.optimum_rbln_version }}
 
   vllm-rbln-optimum-ci:
     needs: [get-compiler-version, build-vllm-rbln]
+    if: ${{ always() && !cancelled() && needs.build-vllm-rbln.result == 'success' }}
     uses: ./.github/workflows/rbln_optimum_ci.yaml
     secrets: inherit
     with:
       ref: ${{ inputs.ref }}
-      rebel_compiler_version: ${{ needs.get-compiler-version.outputs.compiler_version }}
+      rebel_compiler_version: ${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
       optimum_rbln_version: ${{ inputs.optimum_rbln_version }}
