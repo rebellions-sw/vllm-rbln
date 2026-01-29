@@ -43,6 +43,7 @@ def main():
     # Create an LLM.
     llm = LLM(
         model=args.model,
+        dtype="float16",
         max_model_len=args.max_model_len,
         max_num_seqs=args.max_num_seqs,
         tensor_parallel_size=args.tensor_parallel_size,
@@ -54,7 +55,7 @@ def main():
 
     # Generate texts from the prompts. The output is a list of RequestOutput
     # objects that contain the prompt, generated text, and other information.
-    outputs = llm.generate(prompts, SamplingParams(temperature=0.0))
+    outputs = llm.generate(prompts, SamplingParams(temperature=0.7, top_p=0.95))
     # Print the outputs.
     for output in outputs:
         prompt = output.prompt

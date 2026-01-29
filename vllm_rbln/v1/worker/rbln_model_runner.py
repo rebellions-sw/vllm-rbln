@@ -249,6 +249,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Sampler
         self.use_rbln_sampler = envs.VLLM_RBLN_SAMPLER
+
         if self.use_rbln_sampler:
             logger.info("Using RBLN sampler: %s", self.use_rbln_sampler)
             sampler = RBLNSampler(
