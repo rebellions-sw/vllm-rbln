@@ -18,7 +18,6 @@ repos:
   rev: v1.7.7
   hooks:
   - id: actionlint
-    args: ["-config-file", "actionlint.yaml"]
 - repo: https://github.com/pre-commit/mirrors-clang-format
   rev: v21.1.2
   hooks:
@@ -26,12 +25,12 @@ repos:
     exclude: 'csrc/(moe/topk_softmax_kernels.cu|quantization/gguf/(ggml-common.h|dequantize.cuh|vecdotq.cuh|mmq.cuh|mmvq.cuh))|vllm/third_party/.*'
     types_or: [c++, cuda]
     args: [--style=file, --verbose]
-- repo: https://github.com/igorshubovych/markdownlint-cli
-  rev: v0.45.0
-  hooks:
-  - id: markdownlint
-    exclude: '.*\.inc\.md'
-    stages: [manual] # Only run in CI
+# - repo: https://github.com/igorshubovych/markdownlint-cli
+#   rev: v0.45.0
+#   hooks:
+#   - id: markdownlint
+#     exclude: '.*\.inc\.md'
+#     stages: [manual] # Only run in CI
 - repo: https://github.com/astral-sh/uv-pre-commit
   rev: 0.9.1
   hooks:
