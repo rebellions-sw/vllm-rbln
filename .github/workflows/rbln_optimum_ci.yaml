@@ -106,7 +106,7 @@ jobs:
             git clone https://github.com/RBLN-SW/optimum-rbln.git
             cd optimum-rbln
             git checkout update_torch_version
-            ./scripts/uv-sync.sh
+            bash ./scripts/uv-sync.sh
             cd ..
 
       - name: Run gemma2 model (hybrid attention) (V1)
@@ -201,7 +201,7 @@ jobs:
             git clone https://github.com/RBLN-SW/optimum-rbln.git
             cd optimum-rbln
             git checkout update_torch_version
-            ./scripts/uv-sync.sh
+            bash ./scripts/uv-sync.sh
             cd ..
 
       - name: Run decoder-only test (eager attn) (V1)
@@ -329,7 +329,7 @@ jobs:
             git clone https://github.com/RBLN-SW/optimum-rbln.git
             cd optimum-rbln
             git checkout update_torch_version
-            ./scripts/uv-sync.sh
+            bash ./scripts/uv-sync.sh
             cd ..
 
       - name : Run Qwen2.5_VL (V1)
