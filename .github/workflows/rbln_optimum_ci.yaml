@@ -103,7 +103,7 @@ jobs:
             else
               uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
             fi
-            git clone git@github.com:RBLN-SW/optimum-rbln.git
+            git clone https://github.com/RBLN-SW/optimum-rbln.git
             cd optimum-rbln
             git checkout update_torch_version
             ./scripts/uv-sync.sh
@@ -198,7 +198,7 @@ jobs:
             else
               uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
             fi
-            git clone git@github.com:RBLN-SW/optimum-rbln.git
+            git clone https://github.com/RBLN-SW/optimum-rbln.git
             cd optimum-rbln
             git checkout update_torch_version
             ./scripts/uv-sync.sh
@@ -326,7 +326,7 @@ jobs:
             else
               uv pip install --system --force-reinstall --no-cache-dir dist/vllm_rbln*.whl --index-url http://pypi-cache.devpi.svc.cluster.local/root/pypi/+simple/ --extra-index-url https://pypi.org/simple
             fi
-            git clone git@github.com:RBLN-SW/optimum-rbln.git
+            git clone https://github.com/RBLN-SW/optimum-rbln.git
             cd optimum-rbln
             git checkout update_torch_version
             ./scripts/uv-sync.sh
