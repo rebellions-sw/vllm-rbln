@@ -105,7 +105,6 @@ def test_schedule(enable_prefix_caching: Optional[bool],
 
 
 @pytest.mark.skip(reason="Not supported yet")
-@pytest.mark.skip(reason="Not supported yet")
 def test_schedule_multimodal_requests():
     scheduler = create_scheduler(model="llava-hf/llava-1.5-7b-hf")
     mm_positions = [[PlaceholderRange(offset=i, length=100)]
