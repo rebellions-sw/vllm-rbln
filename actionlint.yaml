@@ -1,8 +1,0 @@
-self-hosted-runner:
-  labels:
-    - rbln-sw-k8s-general
-    - rbln-sw-k8s-ca22-1
-    - rbln-sw-k8s-ca22-4
-    - rbln-sw-k8s-ca22-8
-    - fsw-r18s-atom-ext-rbln-sw-general-c1m12
-    - fsw-r18s-atom-ext-rbln-sw-general-c3m48a1
