@@ -31,7 +31,7 @@ from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec, FullAttentionSpec
+from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              DraftTokenIds, ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
@@ -41,7 +41,7 @@ import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
 from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
-from vllm_rbln.worker.utils import get_maximum_num_blocks
+from vllm_rbln.worker.utils import estimate_available_memory
 
 logger = init_logger(__name__)
 
@@ -250,51 +250,21 @@ class RBLNWorker(WorkerBase):
 
         # NOTE - model parallel(tp, dp, ep, pp) already applied into model params
         n_model_params = n_model_attentions + n_model_experts
-        block_size = self.cache_config.block_size
 
-        # This function comes from optimum-rbln.
-        # We must keep it updated as optimum is upgraded.
-        max_num_blocks = get_maximum_num_blocks(
+        available_memory_estimate = estimate_available_memory(
             model_config=self.model_config,
             parallel_config=self.parallel_config,
-            kvcache_block_size=block_size,
             # quantization : 4 (This is an ad-hoc value. Need to fix it)
             nbits_per_param=nbits_per_param,
             n_model_params=n_model_params,
             num_runtimes=num_runtimes,
+            gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
         )
 
-        # NOTE -  adjust max_num_blocks considering swa block sharing
-        # max_num_blocks - based on FullAttentionSpec for model
-        # SHOULD adjust num blocks considering non full attent
-        kv_cache_spec = self.model_runner.get_kv_cache_spec()
-        page_size = max(spec.page_size_bytes
-                        for spec in kv_cache_spec.values())
-        num_layers = len(kv_cache_spec)
-        num_attn_layers = 0
-        for spec in kv_cache_spec.values():
-            num_attn_layers += int(isinstance(spec, FullAttentionSpec))
-        max_num_blocks = max_num_blocks * num_layers / num_attn_layers
+        logger.info("available_memory_estimate = %.2f GB",
+                    available_memory_estimate / 10**9)
 
-        # for partition skip, we need dummy block slot.
-        no_dummy_slots = 1
-        max_required_num_blocks = (self.model_config.max_model_len *
-                                   self.scheduler_config.max_num_seqs //
-                                   block_size) + no_dummy_slots
-        num_gpu_blocks = min(
-            int(max_num_blocks * self.cache_config.gpu_memory_utilization),
-            max_required_num_blocks,
-        )
-        logger.info("max_num_blocks(%s), required_num_blocks(%s), num_blocks(%s)",
-            max_num_blocks, max_required_num_blocks, num_gpu_blocks)
-
-        if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
-            num_gpu_blocks = int(npu_num_blocks)
-
-        # NOTE - consider SWA hybrid models
-        # SWA shares blocks with Full Attention, DO NOT count SWA layers
-        available_memory = num_gpu_blocks * page_size * num_attn_layers
-        return available_memory
+        return available_memory_estimate
 
     def get_kv_cache_spec(self) -> dict[str, KVCacheSpec]:
         return self.model_runner.get_kv_cache_spec()
