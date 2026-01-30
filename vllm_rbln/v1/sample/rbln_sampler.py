@@ -224,28 +224,6 @@ class RBLNSampler(VLLMSampler):
         )
         return logits
 
-    @staticmethod
-    def get_bucket_sizes(max_num_seqs: int) -> list[int]:
-        """Get the bucket sizes for the sampler.
-        Args:
-            max_num_seqs (int): The maximum number of sequences.
-        Returns:
-            list[int]: The bucket sizes.
-        [1, 2, 4] + list(range(8, 256, 8)) + list(
-            range(256, max_num_seqs + 1, 16))
-        """
-        # FIXME(eunji.lee)
-        # Not used. To be removed.
-        bucket_sizes = [i for i in [1, 2, 4] if i <= max_num_seqs]
-        if max_num_seqs >= 8:
-            # Step size 8 for small batch sizes, up to 256(not included)
-            bucket_sizes += list(range(8, min(max_num_seqs + 1, 256), 8))
-        if max_num_seqs >= 256:
-            # Step size 16 for larger batch sizes
-            bucket_sizes += list(range(256, max_num_seqs + 1, 16))
-        return bucket_sizes
-
-
 WARM_UP_CONFIGS = [
     {
         "name": "no_penalty_greedy",
