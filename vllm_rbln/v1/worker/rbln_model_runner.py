@@ -2459,12 +2459,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         device_time=device_time,
                         ccl_time=ccl_time)
                 else:
+                    padded_decode = num_padded_tokens and \
+                        num_padded_tokens != batch_bucket_size
                     self.performance_tracker.record_decode(
                         execution_time,
                         num_scheduled_tokens,
                         host_time=host_time,
                         device_time=device_time,
-                        ccl_time=ccl_time)
+                        ccl_time=ccl_time,
+                        padded_decode=padded_decode)
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
