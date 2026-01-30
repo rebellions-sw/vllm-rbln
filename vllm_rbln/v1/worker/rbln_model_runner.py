@@ -571,7 +571,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         src_indices = orig_indices[sorted_order]
         src_dest_map = {
             int(src): int(dst)
-            for src, dst in zip(src_indices, orig_indices)
+            for src, dst in zip(src_indices, orig_indices, strict=False)
         }
 
         for src in src_dest_map:

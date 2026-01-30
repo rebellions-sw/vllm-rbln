@@ -10,20 +10,10 @@ on:
         description: "Optimum version to update"
         required: true
         type: string
-    secrets:
-      REBEL_PYPI_USERNAME:
-        required: true
-      REBEL_PYPI_PASSWORD:
-        required: true
-      REBEL_SW_DEVELOP_USERNAME:
-        required: true
-      REBEL_SW_DEVELOP_PASSWORD:
-        required: true
-      GIT_PAT:
-        required: true
+
 jobs:
   create-pr:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,32 +41,15 @@ jobs:
           done
           echo "All retries with --cache-dir failed."
           exit 1
-        env:
-          UV_INDEX_REBELLIONS_USERNAME: ${{ secrets.REBEL_PYPI_USERNAME }}
-          UV_INDEX_REBELLIONS_PASSWORD: ${{ secrets.REBEL_PYPI_PASSWORD }}
-
-      - name: Update Optimum Version in requirements.txt
-        id: update-requirements-txt
-        run: |
-          if [ ! -f requirements.txt ]; then
-            echo "Error: requirements.txt not found"
-            exit 1
-          fi
-          VERSION="${{ inputs.optimum-version }}"
-          VERSION="${VERSION#v}"
-          sed -i "s/optimum-rbln>=.*/optimum-rbln>=${VERSION}/" requirements.txt
-          echo "Updated requirements.txt:"
-          cat requirements.txt
 
       - name: Create PR for updated files
         id: create-pr-step
-        if: ${{ steps.uv-update-optimum-rbln.outcome == 'success' && steps.update-requirements-txt.outcome == 'success' }}
+        if: ${{ steps.uv-update-optimum-rbln.outcome == 'success' }}
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GIT_PAT }}
           add-paths: |
             pyproject.toml
-            requirements.txt
           commit-message: "Update optimum-rbln to ${{ inputs.optimum-version }}"
           title: "Auto-update optimum-rbln to ${{ inputs.optimum-version }}"
           body: "Updated optimum-rbln to ${{ inputs.optimum-version }}."

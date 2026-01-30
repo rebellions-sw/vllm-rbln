@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import atexit
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -112,12 +113,36 @@ class StepMetrics:
         return len(self.latencies)
 
 
+class PrefillMetricsByRequestID:
+    """Metrics for prefill step by request id."""
+
+    def __init__(self):
+        self.metrics = defaultdict(StepMetrics)
+
+    def add_measurement(self, request_id: str, latency: float,
+                        token_count: int):
+        """Add a latency and token count measurement."""
+        self.metrics[request_id].add_measurement(latency, token_count)
+
+    def get_avg_latency_per_request(self) -> dict[str, float]:
+        """Get average latency per request."""
+        return {
+            request_id: metric.get_avg_latency()
+            for request_id, metric in self.metrics.items()
+        }
+
+    def get_num_request_ids(self) -> int:
+        """Get total number of request ids processed."""
+        return len(self.metrics)
+
+
 class PerformanceTracker:
     """Tracks performance metrics for prefill and decode steps."""
 
     def __init__(self):
         self.prefill_metrics = StepMetrics()
         self.decode_metrics = StepMetrics()
+        self.prefill_metrics_by_request_id = PrefillMetricsByRequestID()
         self._registered_cleanup = False
 
     def register_cleanup(self):

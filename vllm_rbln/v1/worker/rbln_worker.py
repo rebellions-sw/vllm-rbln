@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A RBLN worker class."""
+
 import copy
 import os
 from types import NoneType
@@ -30,7 +31,8 @@ from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec, FullAttentionSpec
+from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
+                                        KVCacheSpec)
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              DraftTokenIds, ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
@@ -39,6 +41,7 @@ from vllm.v1.worker.worker_base import WorkerBase
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
+from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
 from vllm_rbln.worker.utils import get_maximum_num_blocks
 
 logger = init_logger(__name__)
@@ -85,8 +88,10 @@ class RBLNWorker(WorkerBase):
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: %s",
-                        torch_profiler_trace_dir)
+            logger.info(
+                "Profiling enabled. Traces will be saved to: %s",
+                torch_profiler_trace_dir,
+            )
             logger.debug(
                 "Profiler config: record_shapes=%s,"
                 "profile_memory=%s,with_stack=%s,with_flops=%s",
@@ -104,7 +109,8 @@ class RBLNWorker(WorkerBase):
                 with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
                 with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                    torch_profiler_trace_dir, use_gzip=True),
+            )
         else:
             self.profiler = None
 
@@ -161,11 +167,28 @@ class RBLNWorker(WorkerBase):
         )
 
     def init_device(self) -> None:
+        set_cpu_affinity(
+            self.rank,
+            self.local_rank,
+            self.parallel_config,
+        )
+
+        # Only set OMP_NUM_THREADS when TP > 1 or DP > 1
+        if (self.parallel_config.tensor_parallel_size > 1
+                or self.parallel_config.data_parallel_size > 1):
+            set_omp_num_threads(
+                self.rank,
+                self.local_rank,
+            )
+
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.vllm_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank,
-                                            current_platform.dist_backend)
+        init_worker_distributed_environment(
+            self.vllm_config,
+            self.rank,
+            self.distributed_init_method,
+            self.local_rank,
+            current_platform.dist_backend,
+        )
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -187,14 +210,14 @@ class RBLNWorker(WorkerBase):
         n_model_experts = 0
         device_name = current_platform.get_device_name().lower()
         assert "rbln" in device_name
+        assert "ca" in device_name or "cr" in device_name, (
+            "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]")
         if "ca" in device_name:
             # consider RSD size for ATOM
             num_runtimes = 2 * envs.VLLM_RBLN_TP_SIZE
         elif "cr" in device_name:
             # single device == Quad chiplet
             num_runtimes = 2 * 4
-        else:
-            assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
         if self.model_config.quantization is not None:
             # FIXME(RBLN) - for now, mxfp4 quantization is only supported
@@ -210,8 +233,6 @@ class RBLNWorker(WorkerBase):
                 # REBEL can support mxfp4 quantization
                 nbits_per_param = 4
                 ratio = 1
-            else:
-                assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
             # pack 2 mxfp4 elems into single uint8 elem
             packed_num_elems = 8 // 4
@@ -226,7 +247,7 @@ class RBLNWorker(WorkerBase):
                 # quantized params is handled
                 n_model_experts += value.numel() * packed_num_elems * ratio
 
-        # NOTE - model parallel(tp, dp, ep, pp) already applied into model params
+        # NOTE: model parallel(tp, dp, ep, pp) already applied into model params
         n_model_params = n_model_attentions + n_model_experts
         block_size = self.cache_config.block_size
 
@@ -241,7 +262,7 @@ class RBLNWorker(WorkerBase):
             n_model_params=n_model_params,
             num_runtimes=num_runtimes)
 
-        # NOTE -  adjust max_num_blocks considering swa block sharing
+        # NOTE:  adjust max_num_blocks considering swa block sharing
         # max_num_blocks - based on FullAttentionSpec for model
         # SHOULD adjust num blocks considering non full attent
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
@@ -261,7 +282,8 @@ class RBLNWorker(WorkerBase):
         num_gpu_blocks = min(
             int(max_num_blocks * self.cache_config.gpu_memory_utilization),
             max_required_num_blocks)
-        logger.info("max_num_blocks(%s), required_num_blocks(%s), num_blocks(%s)",
+        logger.info(
+            "max_num_blocks(%s), required_num_blocks(%s), num_blocks(%s)",
             max_num_blocks, max_required_num_blocks, num_gpu_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
@@ -328,13 +350,13 @@ class RBLNWorker(WorkerBase):
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
-        if isinstance(output, (ModelRunnerOutput, NoneType)):
+        if isinstance(output, (ModelRunnerOutput | NoneType)):
             return output
 
         assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
-        assert parallel_config.distributed_executor_backend != (
-            "external_launcher") and not get_pp_group().is_last_rank
+        assert (parallel_config.distributed_executor_backend
+                != ("external_launcher") and not get_pp_group().is_last_rank)
 
         # NOTE - DO NOT all_gather_group for RBLN pp
         get_pp_group().send_tensor_dict(output.tensors)
@@ -418,8 +440,8 @@ def init_worker_distributed_environment(
         logger.info("world_size_across_dp = %s, rank_across_dp = %s",
                     world_size_across_dp, rank_across_dp)
         # consider across_dp
-        os.environ['LOCAL_RANK'] = str(rank_across_dp)
-        os.environ['WORLD_SIZE'] = str(world_size_across_dp)
+        os.environ["LOCAL_RANK"] = str(rank_across_dp)
+        os.environ["WORLD_SIZE"] = str(world_size_across_dp)
 
     init_distributed_environment(
         world_size,

@@ -9,13 +9,13 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-20.04-rbln
+    runs-on: rbln-sw-k8s-general
     continue-on-error: true
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v4
         with:
-          repository: rebellions-sw/vllm-rbln
+          repository: rbln-sw/vllm-rbln
           fetch-depth: 0
           ref: ${{ inputs.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -25,14 +25,14 @@ jobs:
           python-version: "3.13"
       - name: Install build dependencies
         run: |
-          pip3 install packaging setuptools wheel setuptools_scm
+          pip3 install packaging setuptools wheel setuptools_scm build
       - name: Build package
         run: |
-          python3 setup.py bdist_wheel
+          python3 -m build --wheel
       - name: Publish package
         run: |
           pip3 install twine
           TWINE_USERNAME=__token__ \
-          TWINE_PASSWORD=${{ secrets.PYPI_ORG_PASSWORD }} \
+          TWINE_PASSWORD=${{ secrets.PKG_ORG_GATE }} \
           TWINE_NON_INTERACTIVE=1 \
           twine upload --skip-existing dist/vllm_rbln*.whl

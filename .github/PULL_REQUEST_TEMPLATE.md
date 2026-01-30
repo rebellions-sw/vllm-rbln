@@ -2,7 +2,7 @@
 Thank you for contributing to vllm-rbln! 🚀
 This template will help us understand and review your pull request efficiently.
 Please fill out all required sections. You may delete optional ones if not applicable.
-see: https://github.com/rebellions-sw/vllm-rbln/blob/main/CONTRIBUTING.md
+see: https://github.com/rbln-sw/vllm-rbln/blob/main/CONTRIBUTING.md
 -->
 
 ### 🚀 Summary of Changes
