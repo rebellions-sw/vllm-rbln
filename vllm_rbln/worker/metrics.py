@@ -118,6 +118,7 @@ class PerformanceTracker:
     def __init__(self):
         self.prefill_metrics = StepMetrics()
         self.decode_metrics = StepMetrics()
+        self.padded_decode_metrics = StepMetrics()
         self._registered_cleanup = False
 
     def register_cleanup(self):
@@ -145,10 +146,13 @@ class PerformanceTracker:
         host_time: Optional[int] = None,
         device_time: Optional[int] = None,
         ccl_time: Optional[int] = None,
+        padded_decode: bool = False,
     ):
         """Record decode step metrics."""
-        self.decode_metrics.add_measurement(latency, token_count, host_time,
-                                            device_time, ccl_time)
+        metrics = self.padded_decode_metrics if padded_decode \
+            else self.decode_metrics
+        metrics.add_measurement(latency, token_count, host_time, device_time,
+                                ccl_time)
 
     def print_final_stats(self):
         logger.info("=" * 80)
@@ -204,5 +208,31 @@ class PerformanceTracker:
 
         else:
             logger.info("DECODE METRICS: No data recorded")
+
+        logger.info("-" * 40)
+
+        # Padded decode stats
+        if self.padded_decode_metrics.get_call_counts() > 0:
+            logger.info("PADDED DECODE METRICS:")
+            logger.info("  Total call counts: %d",
+                        self.padded_decode_metrics.get_call_counts())
+            logger.info("  Total tokens processed: %d",
+                        sum(self.padded_decode_metrics.token_counts))
+            logger.info("  Average latency: %.2f ms",
+                        self.padded_decode_metrics.get_avg_latency())
+            logger.info("  Average throughput: %.2f tokens/sec",
+                        self.padded_decode_metrics.get_avg_throughput())
+            if self.padded_decode_metrics.host_times:
+                logger.info("  Average host time: %.2f us",
+                            self.padded_decode_metrics.get_avg_host_time())
+            if self.padded_decode_metrics.device_times:
+                logger.info("  Average device time: %.2f us",
+                            self.padded_decode_metrics.get_avg_device_time())
+            if self.padded_decode_metrics.ccl_times:
+                logger.info("  Average ccl time: %.2f us",
+                            self.padded_decode_metrics.get_avg_ccl_time())
+
+        else:
+            logger.info("PADDED DECODE METRICS: No data recorded")
 
         logger.info("=" * 80)
