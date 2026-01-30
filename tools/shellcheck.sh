@@ -14,7 +14,21 @@ if ! [ -x "$(command -v shellcheck)" ]; then
     fi
 
     # automatic local install if linux x86_64
-    wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
+    mkdir -p "shellcheck-${scversion}"
+    curl -sL "https://github.com/koalaman/shellcheck/releases/download/${scversion}/shellcheck-${scversion}.linux.x86_64.tar.xz" -o shellcheck.tar.xz
+    
+    # Try xz first, fall back to unxz or python
+    if command -v xz &> /dev/null; then
+        xz -d shellcheck.tar.xz && tar -xf shellcheck.tar
+    elif command -v unxz &> /dev/null; then
+        unxz shellcheck.tar.xz && tar -xf shellcheck.tar
+    elif command -v python3 &> /dev/null; then
+        python3 -c "import lzma, tarfile; tarfile.open(fileobj=lzma.open('shellcheck.tar.xz')).extractall()"
+    else
+        echo "Error: No xz decompressor found. Please install xz-utils or shellcheck directly."
+        exit 1
+    fi
+    rm -f shellcheck.tar shellcheck.tar.xz
     export PATH="$PATH:$(pwd)/shellcheck-${scversion}"
 fi
 

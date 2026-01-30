@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     VLLM_RBLN_USE_VLLM_MODEL: bool = False
     VLLM_RBLN_FLASH_CAUSAL_ATTN: bool = True
     VLLM_RBLN_DISABLE_MM: bool = False
-    VLLM_RBLN_DP_IMPL: str = "dummy_prefill"
-    VLLM_RBLN_USE_MOE_TOKENS_MASK: bool = False
+    VLLM_RBLN_DP_IMPL: str = "padded_decode"
+    VLLM_RBLN_USE_MOE_TOKENS_MASK: bool = True
     VLLM_RBLN_ENFORCE_MODEL_FP32: bool = False
     VLLM_RBLN_MOE_CUSTOM_KERNEL: bool = True
     VLLM_RBLN_MOE_USE_OPT_KERNEL: bool = False
@@ -35,13 +35,15 @@ if TYPE_CHECKING:
     VLLM_RBLN_LOGITS_ALL_GATHER: bool = True
     VLLM_RBLN_NUM_RAY_NODES: int = 1
     VLLM_RBLN_METRICS: bool = False
+    VLLM_RBLN_NUMA: bool = True
 
 
 def get_dp_impl():
     dp_impl = os.environ.get("VLLM_RBLN_DP_IMPL")
     if dp_impl is None:
-        return "dummy_prefill"
-    # default is dummy_prefill
+        return "padded_decode"
+    # default is padded_decode
+    # dummy_prefill will be deprecated in the future
     choices = set(["padded_decode", "dummy_prefill"])
     current_impl = dp_impl.lower()
     if current_impl not in choices:
@@ -89,8 +91,9 @@ environment_variables = {
     "VLLM_RBLN_DP_IMPL":
     get_dp_impl,
     # If true, it uses the tokens mask applied to moe expert kernel
-    "VLLM_RBLN_USE_MOE_TOKENS_MASK": (lambda: os.environ.get(
-        "VLLM_RBLN_USE_MOE_TOKENS_MASK", "False").lower() in ("true", "1")),
+    "VLLM_RBLN_USE_MOE_TOKENS_MASK":
+    (lambda: os.environ.get("VLLM_RBLN_USE_MOE_TOKENS_MASK", "True").lower() in
+     ("true", "1")),
     # enforce model data type into fp32 not model_config.dtype
     "VLLM_RBLN_ENFORCE_MODEL_FP32":
     (lambda: os.environ.get("VLLM_RBLN_ENFORCE_MODEL_FP32", "False").lower() in
@@ -118,6 +121,12 @@ environment_variables = {
     "VLLM_RBLN_METRICS":
     (lambda: os.environ.get("VLLM_RBLN_METRICS", "False").lower() in
      ("true", "1")),
+    # Enable NUMA-based CPU affinity binding for OpenMP threads
+    "VLLM_RBLN_NUMA":
+    (lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in
+     ("true", "1")),
+    "VLLM_RBLN_KERNEL_MODE":
+    (lambda: os.environ.get("RBLN_KERNEL_MODE", "torch_triton").lower()),
 }
 
 

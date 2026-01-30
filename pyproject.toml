@@ -40,8 +40,8 @@ dependencies = [
     "datasets",
     "qwen_vl_utils",
     "vllm==0.10.2",
-    "optimum-rbln>=0.9.4rc0",
-    "torch==2.8.0"
+    "optimum-rbln>=0.10.0.post1",
+    "torch==2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -66,7 +66,7 @@ dev = [
 [project.urls]
 Homepage="https://rebellions.ai"
 Documentation="https://docs.rbln.ai"
-Repository="https://github.com/rebellions-sw/vllm-rbln"
+Repository="https://github.com/rbln-sw/vllm-rbln"
 
 [project.entry-points."vllm.platform_plugins"]
 rbln = "vllm_rbln:register"
