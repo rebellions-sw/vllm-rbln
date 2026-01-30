@@ -22,15 +22,16 @@ from vllm.platforms import current_platform
 import vllm_rbln.rbln_envs as envs
 
 
-def get_maximum_num_blocks(
+# NOTE: This function comes from optimum-rbln. Keep in sync.
+def estimate_available_memory(
     model_config: ModelConfig,
     parallel_config: ParallelConfig,
-    kvcache_block_size: int,
     nbits_per_param: Optional[int] = None,
     n_model_params: Optional[int] = None,
     kernel_size: Optional[int] = None,
     buffer: Optional[int] = None,
     num_runtimes: int = 2,
+    gpu_memory_utilization: float = 0.9,
 ) -> int:
     # We are finding max_num_blocks(x) that satisfies the following equation:
 
@@ -104,9 +105,12 @@ def get_maximum_num_blocks(
     else:
         assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
+    available_dram_bytes = int(available_dram_bytes * gpu_memory_utilization)
+
     def check_oom(available_dram_bytes: int) -> None:
         if available_dram_bytes <= 0:
-            raise MemoryError("Insufficient DRAM during block calculation.")
+            raise MemoryError("Insufficient DRAM during block calculation. "
+                              "Try reducing gpu_memory_utilization.")
 
     if kernel_size is None:
         if n_model_params is None:
@@ -140,12 +144,4 @@ def get_maximum_num_blocks(
 
     check_oom(available_dram_bytes)
 
-    kv = 2
-    kv_bytes = 2
-    num_kv_heads = math.ceil(num_key_value_heads / rsd_size) * rsd_size
-    head_dim = align(head_dim, 64)
-    # [2(=kv), H(=num_kv_heads), 1, B(=block_size), D(=head_dim)]
-    kv_cache_block_bytes = kv * kvcache_block_size * head_dim * num_kv_heads * kv_bytes * num_layers
-    # for each k, v, max_num_blocks calculation is done
-    max_num_blocks = available_dram_bytes / kv_cache_block_bytes
-    return max_num_blocks
+    return available_dram_bytes
