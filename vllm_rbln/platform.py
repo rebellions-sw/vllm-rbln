@@ -130,11 +130,13 @@ class RblnPlatform(Platform):
             else:
                 dtype = model_config.dtype
                 logger.info("original model_config.dtype = %s", dtype)
-                if dtype != torch.bfloat16 and dtype != torch.float16 \
-                            and dtype != torch.float:
+                if (dtype != torch.bfloat16 and dtype != torch.float16
+                        and dtype != torch.float):
                     logger.warning(
                         "%s not supported on RBLN, "
-                        "only fp32,fp16,bf16 supported", dtype)
+                        "only fp32,fp16,bf16 supported",
+                        dtype,
+                    )
                     model_config.dtype = torch.float
                 logger.info("RBLN use model_config.dtype = %s",
                             model_config.dtype)
@@ -148,13 +150,13 @@ class RblnPlatform(Platform):
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
                 hf_config = vllm_config.model_config.hf_config
-                assert not hasattr(hf_config, "sliding_window") \
-                    or not getattr(hf_config, "use_sliding_window", True)
+                assert not hasattr(hf_config, "sliding_window") or not getattr(
+                    hf_config, "use_sliding_window", True)
 
                 RblnPlatform.device_type = "rbln"
                 vllm_config.device_config.device_type = RblnPlatform.device_type
-                vllm_config.device_config.device = (torch.device(
-                    RblnPlatform.device_type))
+                vllm_config.device_config.device = torch.device(
+                    RblnPlatform.device_type)
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
 
@@ -169,10 +171,10 @@ class RblnPlatform(Platform):
             assert model_config.dtype == torch.float
 
             if parallel_config.worker_cls == "auto":
-                parallel_config.worker_cls = \
-                    "vllm_rbln.v1.worker.optimum_worker.RBLNOptimumWorker"
-            scheduler_config.scheduler_cls = \
-                "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler"
+                parallel_config.worker_cls = (
+                    "vllm_rbln.v1.worker.optimum_worker.RBLNOptimumWorker")
+            scheduler_config.scheduler_cls = (
+                "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler")
 
             assert vllm_config.parallel_config.tensor_parallel_size == 1, (
                 "Tensor parallelism is set when compiled in optimum-rbln.")
@@ -180,6 +182,9 @@ class RblnPlatform(Platform):
                 "Pipeline parallelism is not supported in optimum-rbln.")
             assert vllm_config.speculative_config is None, (
                 "Speculative decoding is not supported in vLLM RBLN.")
+            assert vllm_config.kv_transfer_config is None, (
+                "PD disaggregation is only supported on the "
+                "torch.compile path (VLLM_RBLN_USE_VLLM_MODEL=True).")
             cls.disable_unsupported_prefix_caching(vllm_config)
             sync_with_rbln_config(vllm_config)
 
@@ -232,7 +237,9 @@ class RblnPlatform(Platform):
         """Disable prefix caching with warning message."""
         logger.warning(
             "Prefix caching is not available for %s. "
-            "It has been automatically disabled.", reason)
+            "It has been automatically disabled.",
+            reason,
+        )
         vllm_config.cache_config.enable_prefix_caching = False
 
     @classmethod
@@ -244,8 +251,9 @@ class RblnPlatform(Platform):
         hf_config = vllm_config.model_config.hf_config
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
-            if getattr(hf_config, "sliding_window", None) is not None \
-                   and getattr(hf_config, "use_sliding_window", True):
+            if getattr(hf_config,
+                       "sliding_window", None) is not None and getattr(
+                           hf_config, "use_sliding_window", True):
                 cls._disable_prefix_caching(vllm_config,
                                             "sliding window models")
 
@@ -262,8 +270,9 @@ class RblnPlatform(Platform):
                 cls._disable_prefix_caching(vllm_config, "multimodal models")
             elif is_pooling_arch(hf_config):
                 cls._disable_prefix_caching(vllm_config, "pooling models")
-            elif getattr(hf_config, "sliding_window", None) is not None \
-                    and getattr(hf_config, "use_sliding_window", True):
+            elif getattr(hf_config,
+                         "sliding_window", None) is not None and getattr(
+                             hf_config, "use_sliding_window", True):
                 cls._disable_prefix_caching(vllm_config,
                                             "sliding window models")
 
