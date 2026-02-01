@@ -519,6 +519,10 @@ def _(
 
     output = torch.empty_like(query)
 
+    query = rblib.align_tensor_last_dim_to_64(query)
+    key = rblib.align_tensor_last_dim_to_64(key)
+    value = rblib.align_tensor_last_dim_to_64(value)
+
     NUM_HEAD = query.shape[1]
     NUM_GROUP = query.shape[2]
     HEAD_DIM = query.shape[-1]
@@ -590,6 +594,10 @@ def _(
     qk_scale = qk_scale.to(torch.float32)
 
     output = torch.empty_like(query)
+
+    query = rblib.align_tensor_last_dim_to_64(query)
+    key = rblib.align_tensor_last_dim_to_64(key)
+    value = rblib.align_tensor_last_dim_to_64(value)
 
     NUM_HEAD = query.shape[1]
     NUM_GROUP = query.shape[2]
