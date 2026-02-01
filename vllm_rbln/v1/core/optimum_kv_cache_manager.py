@@ -121,12 +121,7 @@ class RBLNKVCacheManager(KVCacheManager):
         if num_new_tokens == 0:
             raise ValueError("num_new_tokens must be greater than 0")
 
-        # NOTE `new_computed_block_list` is used only for touch
-        # When allocating new blocks, we do not reuse the provided
-        # `new_computed_blocks` and we need to allocate new blocks.
-        empty_computed_block_list = tuple(
-            [] for _ in range(len(self.kv_cache_config.kv_cache_groups)))
-
+=
         # In prefill,
         # `num_computed_tokens` = 0,
         # `num_new_tokens` = the length of the input prompt.
@@ -138,7 +133,7 @@ class RBLNKVCacheManager(KVCacheManager):
         num_blocks_to_allocate = self.coordinator.get_num_blocks_to_allocate(
             request_id=request.request_id,
             num_tokens=num_tokens_need_slot,
-            new_computed_blocks=empty_computed_block_list,
+            new_computed_blocks=self.empty_kv_cache_blocks.blocks,
             num_encoder_tokens=0,
         )
 
@@ -160,7 +155,7 @@ class RBLNKVCacheManager(KVCacheManager):
         # saving the computed blocks to the request state
         self.coordinator.save_new_computed_blocks(
             request.request_id,
-            empty_computed_block_list,
+            self.empty_kv_cache_blocks.blocks,
         )
 
         new_blocks = self.coordinator.allocate_new_blocks(
