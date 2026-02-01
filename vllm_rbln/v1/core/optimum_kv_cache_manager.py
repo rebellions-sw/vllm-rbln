@@ -121,7 +121,6 @@ class RBLNKVCacheManager(KVCacheManager):
         if num_new_tokens == 0:
             raise ValueError("num_new_tokens must be greater than 0")
 
-=
         # In prefill,
         # `num_computed_tokens` = 0,
         # `num_new_tokens` = the length of the input prompt.
