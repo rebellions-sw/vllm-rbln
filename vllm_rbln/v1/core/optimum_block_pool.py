@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 from vllm.distributed.kv_events import KVCacheEvent
 from vllm.logger import init_logger
 from vllm.v1.core.block_pool import BlockHashToBlockMap, BlockPool
@@ -71,8 +70,8 @@ class RBLNBlockPool(BlockPool):
         self.free_block_queue = FreeKVCacheBlockQueue(self.blocks)
 
         # Cache for block lookup
-        self.cached_block_hash_to_block: RBLNBlockHashToBlockMap = RBLNBlockHashToBlockMap(
-        )
+        self.cached_block_hash_to_block: RBLNBlockHashToBlockMap \
+            = RBLNBlockHashToBlockMap()
 
         # To represent a placeholder block with block_id=0.
         # The ref_cnt of null_block is not maintained, needs special care to
