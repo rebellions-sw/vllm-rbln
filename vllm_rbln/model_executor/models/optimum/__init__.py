@@ -76,8 +76,8 @@ def load_model(vllm_config: VllmConfig) -> nn.Module:
                 vllm_config)
         else:
             raise NotImplementedError(
-                "Encoder-decoder models are not supported since vLLM RBLN v0.10.1"
-            )
+                "Encoder-decoder models are not supported"
+                "since vLLM RBLN v0.10.1")
     elif is_pooling_arch(model_config.hf_config):
         assert vllm_config.cache_config.enable_prefix_caching in (
             False, None
