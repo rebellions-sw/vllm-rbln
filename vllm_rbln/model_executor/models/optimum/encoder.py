@@ -62,7 +62,6 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
     ) -> None:
         super().__init__(vllm_config=vllm_config)
         pooler_config = vllm_config.model_config.pooler_config
-        hf_config = vllm_config.model_config.hf_config
         assert pooler_config is not None
         # https://github.com/vllm-project/vllm/blob/72506c98349d6bcd32b4e33eec7b5513453c1502/docs/models/pooling_models.md?plain=1#L312
         # encode task is split into `token_embed` and `token_classify` tasks
