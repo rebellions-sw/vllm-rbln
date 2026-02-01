@@ -12,36 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Iterable, Sequence
-from typing import Any
 
-from vllm.distributed.kv_events import (
-    MEDIUM_GPU,
-    AllBlocksCleared,
-    BlockRemoved,
-    BlockStored,
-    KVCacheEvent,
-)
+from vllm.distributed.kv_events import KVCacheEvent
 from vllm.logger import init_logger
-from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
-from vllm.v1.core.kv_cache_utils import (
-    BlockHash,
-    BlockHashList,
-    BlockHashListWithBlockSize,
-    BlockHashWithGroupId,
-    ExternalBlockHash,
-    FreeKVCacheBlockQueue,
-    KVCacheBlock,
-    get_block_hash,
-    make_block_hash_with_group_id,
-    maybe_convert_block_hash,
-)
-from vllm.v1.request import Request
 from vllm.v1.core.block_pool import BlockHashToBlockMap, BlockPool
+from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
+from vllm.v1.core.kv_cache_utils import (BlockHashWithGroupId,
+                                         FreeKVCacheBlockQueue, KVCacheBlock)
+
 logger = init_logger(__name__)
 
 
 class RBLNBlockHashToBlockMap(BlockHashToBlockMap):
+
     def get_one_block(self, key: BlockHashWithGroupId) -> KVCacheBlock | None:
         """
         Gets any block with the given block hash key.
@@ -63,7 +46,9 @@ class RBLNBlockHashToBlockMap(BlockHashToBlockMap):
             self._unexpected_blocks_type(blocks)
         return None
 
+
 class RBLNBlockPool(BlockPool):
+
     def __init__(
         self,
         num_gpu_blocks: int,
@@ -86,7 +71,8 @@ class RBLNBlockPool(BlockPool):
         self.free_block_queue = FreeKVCacheBlockQueue(self.blocks)
 
         # Cache for block lookup
-        self.cached_block_hash_to_block: RBLNBlockHashToBlockMap = RBLNBlockHashToBlockMap()
+        self.cached_block_hash_to_block: RBLNBlockHashToBlockMap = RBLNBlockHashToBlockMap(
+        )
 
         # To represent a placeholder block with block_id=0.
         # The ref_cnt of null_block is not maintained, needs special care to
