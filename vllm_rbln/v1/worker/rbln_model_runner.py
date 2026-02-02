@@ -2086,7 +2086,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pooling_params=PoolingParams(
                 task=self.get_supported_pooling_tasks()[0])
             if self.is_pooling_model else None,
-            block_id=self.cache_config.num_gpu_blocks - 1,
         )
         dummy_run_scheduler_output, _ = self._make_dummy_scheduler_outputs(
             dummy_run_requests, dummy_run_num_scheduled_tokens,
