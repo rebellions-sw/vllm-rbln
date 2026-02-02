@@ -346,7 +346,6 @@ class RBLNOptimumScheduler(Scheduler):
 
                 if self.lora_config and request.lora_request:
                     scheduled_loras.add(request.lora_request.lora_int_id)
-                # print("@@ get_blocks",  self.kv_cache_manager.get_blocks(request.request_id))
                 req_to_new_blocks[request.request_id] = (
                     self.kv_cache_manager.get_blocks(request.request_id))
                 num_scheduled_tokens[request.request_id] = num_new_tokens
@@ -376,8 +375,8 @@ class RBLNOptimumScheduler(Scheduler):
                 # does not exceed the max model len.
                 # This is necessary when using spec decoding.
                 num_new_tokens = min(
-                    num_new_tokens,
-                    self.max_num_scheduled_tokens - 1 - request.num_computed_tokens)
+                    num_new_tokens, self.max_num_scheduled_tokens - 1 -
+                    request.num_computed_tokens)
 
                 if num_new_tokens == 0:
                     # The request cannot be scheduled
