@@ -57,22 +57,18 @@ class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
                 image_prefill_chunk_size -
                 (image_start + padded_seq_len) % image_prefill_chunk_size)
             padded_seq_len += pad_needed
-
-        pad_token = self.info.get_hf_processor().tokenizer.pad_token
         # To pad the image token
         # not using pad_token_id
         # NOTE: Left padding for Gemma3
         prompt_ids = [IMG_PAD_TOKEN_ID] * padded_seq_len + prompt_ids
-        prompt = pad_token * padded_seq_len + prompt
-        return prompt_ids, prompt
+        return prompt_ids
 
     def apply(self, *args, **kwargs):
+        # NOTE: Check if padding works correctly
         output = super().apply(*args, **kwargs)
-        prompt_ids, prompt = self._pad_for_gemma3(output["prompt_token_ids"],
-                                                  output["prompt"])
+        prompt_ids = self._pad_for_gemma3(output["prompt_token_ids"])
 
         output["prompt_token_ids"] = prompt_ids
-        output["prompt"] = prompt
 
         return output
 
@@ -248,6 +244,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 pixel_values = image_input["pixel_values"]
         else:
             pixel_values = None
+
         return pixel_values
 
     def _parse_and_validate_image_input(
