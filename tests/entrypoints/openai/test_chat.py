@@ -19,8 +19,9 @@ import pytest
 import pytest_asyncio
 from utils import RemoteOpenAIServer
 
-MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
-MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
+# MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
+# MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
+MODEL_NAME = "/home/eunji.lee/nas_data/0202_models/gemma3_4b_b4_com_old"
 MAX_TOKENS = 1
 
 
@@ -44,7 +45,6 @@ def server(request, monkeypatch_module):
 
 @pytest.fixture
 def is_v1_server(server):
-    import os
     assert os.environ['VLLM_USE_V1'] in ['0', '1']
     return os.environ['VLLM_USE_V1'] == '1'
 
