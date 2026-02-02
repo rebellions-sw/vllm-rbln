@@ -3618,10 +3618,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.kv_caches,
             num_attn_module,
         )
-
         if not self.model_config.enforce_eager and envs.VLLM_RBLN_COMPILE_MODEL:
-            for kv_cache in self.kv_caches:
-                self.compile_context.mark_static_address(kv_cache)
+            for layer_name, kv_cache in kv_caches.items():
+                self.compile_context.mark_static_address(kv_cache, layer_name)
 
         return kv_caches
 
