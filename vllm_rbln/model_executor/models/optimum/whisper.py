@@ -17,7 +17,8 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import (SupportsMultiModal,
                                                    SupportsTranscription)
-from vllm.model_executor.models.whisper import ISO639_1_SUPPORTED_LANGS, WhisperAudioInputs
+from vllm.model_executor.models.whisper import (ISO639_1_SUPPORTED_LANGS,
+                                                WhisperAudioInputs)
 from vllm.utils.jsontree import json_map_leaves
 
 from .base import ModelInputForRBLN
