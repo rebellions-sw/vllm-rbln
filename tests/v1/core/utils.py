@@ -15,7 +15,8 @@
 from typing import Optional
 
 import torch
-from vllm.config import CacheConfig, ModelConfig, SchedulerConfig, VllmConfig
+from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig,
+                         StructuredOutputsConfig, VllmConfig)
 from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.sampling_params import SamplingParams, StructuredOutputsParams
@@ -79,11 +80,12 @@ def create_scheduler(
         cache_dtype="auto",
         enable_prefix_caching=enable_prefix_caching,
     )
-
+    decoding_config = StructuredOutputsConfig(backend="guidance", )
     vllm_config = VllmConfig(
         scheduler_config=scheduler_config,
         model_config=model_config,
         cache_config=cache_config,
+        decoding_config=decoding_config,
         additional_config={
             "attn_block_size": outer_block_size,
         },
@@ -146,6 +148,7 @@ def create_requests(
 
     if sample_json_schema:
         structured_outputs = StructuredOutputsParams(json=sample_json_schema)
+        structured_outputs._backend = "guidance"
     else:
         structured_outputs = None
     sampling_params = SamplingParams(ignore_eos=False,
