@@ -80,12 +80,12 @@ def create_scheduler(
         cache_dtype="auto",
         enable_prefix_caching=enable_prefix_caching,
     )
-    decoding_config = StructuredOutputsConfig(backend="guidance", )
+    structured_outputs_config = StructuredOutputsConfig(backend="guidance", )
     vllm_config = VllmConfig(
         scheduler_config=scheduler_config,
         model_config=model_config,
         cache_config=cache_config,
-        decoding_config=decoding_config,
+        structured_outputs_config=structured_outputs_config,
         additional_config={
             "attn_block_size": outer_block_size,
         },
