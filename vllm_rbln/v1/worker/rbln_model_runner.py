@@ -3619,7 +3619,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_attn_module,
         )
         if not self.model_config.enforce_eager and envs.VLLM_RBLN_COMPILE_MODEL:
+            seen = set()
             for layer_name, kv_cache in kv_caches.items():
+                if kv_cache.device.type == "meta":
+                    ptr = kv_cache  
+                else:
+                    ptr = kv_cache.data_ptr()
+
+                if ptr in seen:
+                    continue
+                
+                seen.add(ptr)
                 self.compile_context.mark_static_address(kv_cache, layer_name)
 
         return kv_caches
