@@ -20,7 +20,6 @@ from vllm.model_executor.models.blip2 import (Blip2ImageEmbeddingInputs,
                                               Blip2ImageInputs,
                                               Blip2ImagePixelInputs)
 from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -108,18 +107,19 @@ class RBLNOptimumBlip2ForConditionalGeneration(RBLNOptimumModelBase,
 
         if pixel_values is not None:
             expected_h = expected_w = config.vision_config.image_size
-            return Blip2ImagePixelInputs(type="pixel_values",
-                                         data=flatten_bn(pixel_values,
-                                                         concat=True),
-                                         resolve_bindings={
-                                             "h": expected_h,
-                                             "w": expected_w
-                                         })
+            return Blip2ImagePixelInputs(
+                type="pixel_values",
+                data=pixel_values,
+                resolve_bindings={
+                    "h": expected_h,
+                    "w": expected_w
+                },
+            )
 
         if image_embeds is not None:
             return Blip2ImageEmbeddingInputs(
                 type="image_embeds",
-                data=flatten_bn(image_embeds, concat=True),
+                data=image_embeds,
             )
 
         raise AssertionError("This line should be unreachable.")

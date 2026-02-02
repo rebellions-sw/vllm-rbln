@@ -20,7 +20,6 @@ from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.llava import (LlavaImageInputs,
                                               LlavaImagePixelInputs,
                                               PixtralHFImagePixelInputs)
-from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -152,13 +151,13 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             if config.vision_config.model_type == "pixtral":
                 return PixtralHFImagePixelInputs(
                     type="pixel_values_pixtral",
-                    pixel_values=flatten_bn(pixel_values),
+                    pixel_values=pixel_values,
                 )
 
             expected_h = expected_w = config.vision_config.image_size
             return LlavaImagePixelInputs(
                 type="pixel_values",
-                pixel_values=flatten_bn(pixel_values, concat=True),
+                pixel_values=pixel_values,
                 resolve_bindings={
                     "h": expected_h,
                     "w": expected_w
@@ -166,10 +165,6 @@ class RBLNOptimumLlavaForConditionalGeneration(RBLNOptimumModelBase,
             )
 
         if image_embeds is not None:
-            if not isinstance(image_embeds, torch.Tensor | list):
-                raise ValueError("Incorrect type of image embeds. "
-                                 f"Got type: {type(image_embeds)}")
-
             raise NotImplementedError(
                 "Image embeds are not supported in this version for RBLN")
         raise AssertionError("This line should be unreachable.")
