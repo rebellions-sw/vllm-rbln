@@ -157,7 +157,7 @@ class RBLNOptimumScheduler(Scheduler):
             attn_block_size = None
         self.kv_cache_manager = RBLNKVCacheManager(
             kv_cache_config=kv_cache_config,
-            max_model_len=self.max_model_len,
+            max_model_len=self.max_num_scheduled_tokens,
             enable_caching=self.cache_config.enable_prefix_caching,
             use_eagle=False,
             log_stats=self.log_stats,
@@ -346,6 +346,7 @@ class RBLNOptimumScheduler(Scheduler):
 
                 if self.lora_config and request.lora_request:
                     scheduled_loras.add(request.lora_request.lora_int_id)
+                # print("@@ get_blocks",  self.kv_cache_manager.get_blocks(request.request_id))
                 req_to_new_blocks[request.request_id] = (
                     self.kv_cache_manager.get_blocks(request.request_id))
                 num_scheduled_tokens[request.request_id] = num_new_tokens
@@ -376,7 +377,7 @@ class RBLNOptimumScheduler(Scheduler):
                 # This is necessary when using spec decoding.
                 num_new_tokens = min(
                     num_new_tokens,
-                    self.max_model_len - 1 - request.num_computed_tokens)
+                    self.max_num_scheduled_tokens - 1 - request.num_computed_tokens)
 
                 if num_new_tokens == 0:
                     # The request cannot be scheduled
@@ -523,6 +524,7 @@ class RBLNOptimumScheduler(Scheduler):
             block_table_dict: dict[str, torch.Tensor]) -> None:
         request_id = request.request_id
         block_table = self.kv_cache_manager.get_block_table(request_id)
+        print("@@ block_table", block_table.shape, block_table)
         block_table_dict[request_id] = block_table
 
     def _preempt_request(
