@@ -19,7 +19,6 @@ from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.llava_next import (LlavaNextImageInputs,
                                                    LlavaNextImagePixelInputs)
-from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -161,29 +160,18 @@ class RBLNOptimumLlavaNextForConditionalGeneration(RBLNOptimumModelBase,
             return None
 
         if pixel_values is not None:
-            if not isinstance(pixel_values, torch.Tensor | list):
-                raise ValueError("Incorrect type of pixel values. "
-                                 f"Got type: {type(pixel_values)}")
-
-            if not isinstance(image_sizes, torch.Tensor | list):
-                raise ValueError("Incorrect type of image sizes. "
-                                 f"Got type: {type(image_sizes)}")
-
             expected_h = expected_w = config.vision_config.image_size
             return LlavaNextImagePixelInputs(
                 type="pixel_values",
-                pixel_values=flatten_bn(pixel_values),
-                image_sizes=flatten_bn(image_sizes, concat=True),
+                pixel_values=pixel_values,
+                image_sizes=image_sizes,
                 resolve_bindings={
                     "h": expected_h,
                     "w": expected_w,
-                })
+                },
+            )
 
         if image_embeds is not None:
-            if not isinstance(image_embeds, torch.Tensor):
-                raise ValueError("Incorrect type of image embeds. "
-                                 f"Got type: {type(image_embeds)}")
-
             raise NotImplementedError(
                 "Image embeds are not supported in this version for RBLN")
 

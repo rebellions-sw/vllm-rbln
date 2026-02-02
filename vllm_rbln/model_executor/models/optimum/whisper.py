@@ -11,14 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
 
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import (SupportsMultiModal,
                                                    SupportsTranscription)
+from vllm.model_executor.models.optimum.whisper import WhisperAudioInputs
 from vllm.model_executor.models.whisper import ISO639_1_SUPPORTED_LANGS
+from vllm.utils.jsontree import json_map_leaves
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -101,6 +102,7 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             if input_features is None:
                 raise ValueError(
                     "Whisper requires `input_features` as an input.")
+            # FIXME I think encoder should be called here
 
         cache_position = torch.zeros(request_nums, 1, dtype=torch.int32)
 
@@ -156,8 +158,11 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         return lm_logits
 
     def _parse_and_validate_audio_input(
-            self, **kwargs: Any) -> Optional[torch.Tensor]:
+            self, **kwargs: object) -> WhisperAudioInputs:
         input_features = kwargs.pop("input_features", None)
+
         if input_features is not None:
-            input_features = input_features.squeeze(0)
-        return input_features
+            input_features = json_map_leaves(lambda x: x.to(self.dtype),
+                                             input_features)
+
+        return WhisperAudioInputs(input_features=input_features)
