@@ -40,7 +40,7 @@ PAD_TOKEN_ID = 0
 
 class RBLNGemma3MultiModalProcessor(Gemma3MultiModalProcessor):
 
-    def _pad_for_gemma3(self, prompt_ids: list[int], prompt: str):
+    def _pad_for_gemma3(self, prompt_ids: list[int]):
         token_type_ids = (torch.tensor(prompt_ids) ==
                           self.info.get_hf_processor().image_token_id)
 
