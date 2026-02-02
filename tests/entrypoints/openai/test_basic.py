@@ -162,7 +162,7 @@ async def test_server_load(server: RemoteOpenAIServer):
             headers={"Content-Type": "application/json"},
             json={
                 "prompt": "Give me a long story",
-                "max_tokens": MAX_TOKENS,
+                "max_tokens": 20,
                 "temperature": 0,
             },
         )
