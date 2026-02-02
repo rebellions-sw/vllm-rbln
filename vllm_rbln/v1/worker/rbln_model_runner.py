@@ -2461,12 +2461,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         request_ids=self.input_batch.req_ids,
                     )
                 else:
+                    padded_decode = num_padded_tokens and \
+                        num_padded_tokens != batch_bucket_size
                     self.performance_tracker.record_decode(
                         execution_time,
                         num_scheduled_tokens,
                         host_time=host_time,
                         device_time=device_time,
                         ccl_time=ccl_time,
+                        padded_decode=padded_decode,
                         request_ids=self.input_batch.req_ids,
                     )
 
