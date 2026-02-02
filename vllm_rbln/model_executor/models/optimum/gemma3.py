@@ -248,7 +248,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(
                 pixel_values = image_input["pixel_values"]
         else:
             pixel_values = None
-
         return pixel_values
 
     def _parse_and_validate_image_input(

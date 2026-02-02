@@ -20,7 +20,6 @@ from vllm.model_executor.models.idefics3 import (Idefics3ImageEmbeddingInputs,
                                                  Idefics3ImagePixelInputs,
                                                  ImageInputs)
 from vllm.model_executor.models.interfaces import SupportsMultiModal
-from vllm.model_executor.models.utils import flatten_bn
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
@@ -133,7 +132,7 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
 
             return Idefics3ImageEmbeddingInputs(
                 type="image_embeds",
-                data=flatten_bn(image_embeds, concat=True),
+                data=image_embeds,
             )
 
         if pixel_values is not None:
@@ -154,10 +153,9 @@ class RBLNOptimumIdefics3ForConditionalGeneration(RBLNOptimumModelBase,
             expected_h = expected_w = config.vision_config.image_size
             return Idefics3ImagePixelInputs(
                 type="pixel_values",
-                pixel_values=flatten_bn(pixel_values, concat=True),
-                pixel_attention_mask=flatten_bn(pixel_attention_mask,
-                                                concat=True),
-                num_patches=flatten_bn(num_patches, concat=True),
+                pixel_values=pixel_values,
+                pixel_attention_mask=pixel_attention_mask,
+                num_patches=num_patches,
                 resolve_bindings={
                     "h": expected_h,
                     "w": expected_w
