@@ -1702,12 +1702,13 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         sampling_params: Optional[SamplingParams] = None,
         pooling_params: Optional[PoolingParams] = None,
         num_speculative_tokens: int = 0,
-        block_id: int = 0,
     ) -> None:
         num_blocks = round_up(
             total_tokens,
             self.cache_config.block_size) // self.cache_config.block_size
         prompt_token_ids = list(range(total_tokens))
+        # the dummy block maintained by BlockPool (null_block)
+        null_block_id = 0
 
         req = NewRequestData(
             req_id=f"dummy_request_{len(requests)}",
@@ -1715,7 +1716,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             mm_features=[],
             sampling_params=sampling_params,
             pooling_params=pooling_params,
-            block_ids=([block_id] * num_blocks, ) * num_kv_cache_groups,
+            block_ids=([null_block_id] * num_blocks, ) * num_kv_cache_groups,
             num_computed_tokens=num_computed_tokens,
             lora_request=None,
         )
