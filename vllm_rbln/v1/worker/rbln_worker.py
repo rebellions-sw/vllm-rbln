@@ -208,8 +208,8 @@ class RBLNWorker(WorkerBase):
         n_model_attentions = 0
         n_model_experts = 0
         device_name = current_platform.get_device_name().lower()
-        assert "rbln" in device_name
-        if "ca" in device_name:
+        # assert "rbln" in device_name
+        if "ca" in device_name or "cu" in device_name:
             # consider RSD size for ATOM
             num_runtimes = 2 * envs.VLLM_RBLN_TP_SIZE
         elif "cr" in device_name:

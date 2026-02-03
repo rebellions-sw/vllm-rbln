@@ -17,7 +17,7 @@ from typing import Optional
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
-import rebel
+# import rebel
 from vllm.config.model import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
@@ -91,9 +91,9 @@ class RBLNSampler(VLLMSampler):
                  logprobs_mode: LogprobsMode = "raw_logprobs",
                  seed: int = 42):
         super().__init__()
-        rebel.manual_seed(seed)
+        # rebel.manual_seed(seed)
 
-        options = {"compile_context": rebel.CompileContext()}
+        options = {}# {"compile_context": rebel.CompileContext()}
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
         self._compiled_rbln_topk_topp_sampler = torch.compile(

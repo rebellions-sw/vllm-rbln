@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 else:
     VllmConfig = None
 
-import rebel
+# import rebel
 from torch._dynamo import register_backend
 from vllm.platforms import Platform, PlatformEnum
 from vllm.utils.torch_utils import _StreamPlaceholder
@@ -54,9 +54,9 @@ class RblnPlatform(Platform):
     # But we don't support the 'rbln'' device yet.
     # To support this, we must use PyTorch-RBLN
     plugin_name: str = "rbln"
-    device_name: str = "cpu"
-    device_type: str = "cpu"
-    dispatch_key: str = "CPU"
+    device_name: str = "cuda"
+    device_type: str = "cuda"
+    dispatch_key: str = "CUDA"
     ray_device_key: str = "RBLN"
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
@@ -68,8 +68,7 @@ class RblnPlatform(Platform):
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
-        assert (device_name := rebel.get_npu_name(device_id))
-        return device_name
+        return RblnPlatform.device_name
 
     @staticmethod
     def inference_mode():
