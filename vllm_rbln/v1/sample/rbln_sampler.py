@@ -18,7 +18,7 @@ from typing import Optional
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
-import rebel
+# import rebel
 from vllm.config.model import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
                                                rbln_apply_all_penalties)
@@ -133,15 +133,16 @@ class RBLNTopKTopPSampler(nn.Module):
             "processed_logits", "processed_logprobs"), (
                 "RBLN Sampling does not support returning logits/logprobs")
 
-        rebel.manual_seed(seed)
-        options = {"compile_context": rebel.CompileContext()}
-        self._compiled_rbln_topk_topp_sampler = torch.compile(
-            rbln_top_k_top_p_sample,
-            dynamic=False,
-            fullgraph=True,
-            backend="rbln",
-            options=options,
-        )
+        # rebel.manual_seed(seed)
+        # options = {"compile_context": rebel.CompileContext()}
+        # self._compiled_rbln_topk_topp_sampler = torch.compile(
+        #     rbln_top_k_top_p_sample,
+        #     dynamic=False,
+        #     fullgraph=True,
+        #     backend="rbln",
+        #     options=options,
+        # )
+        self._compiled_rbln_topk_topp_sampler = rbln_top_k_top_p_sample
         self.forward = self.forward_rbln
 
     @torch.compiler.disable

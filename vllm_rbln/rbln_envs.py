@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from vllm.envs import environment_variables as vllm_envs
 
 if TYPE_CHECKING:
-    VLLM_RBLN_COMPILE_MODEL: bool = True
+    VLLM_RBLN_COMPILE_MODEL: bool = False
     VLLM_RBLN_COMPILE_STRICT_MODE: bool = False
     VLLM_RBLN_TP_SIZE: int = 1
     VLLM_RBLN_SAMPLER: bool = True
@@ -64,7 +64,7 @@ environment_variables = {
     # If true, will compile models using torch.compile.
     # Otherwise, run the CPU eager mode, if possible.
     "VLLM_RBLN_COMPILE_MODEL":
-    (lambda: os.environ.get("VLLM_RBLN_COMPILE_MODEL", "True").lower() in
+    (lambda: os.environ.get("VLLM_RBLN_COMPILE_MODEL", "False").lower() in
      ("true", "1")),
     # If true, will compile models using strict mode.
     "VLLM_RBLN_COMPILE_STRICT_MODE": (lambda: os.environ.get(

@@ -30,7 +30,8 @@ from vllm.model_executor import set_random_seed
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
-from vllm.v1.kv_cache_interface import KVCacheConfig, KVCacheSpec, FullAttentionSpec
+from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
+                                        KVCacheSpec)
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, AsyncModelRunnerOutput,
                              DraftTokenIds, ModelRunnerOutput)
 from vllm.v1.utils import report_usage_stats
@@ -186,8 +187,8 @@ class RBLNWorker(WorkerBase):
         n_model_attentions = 0
         n_model_experts = 0
         device_name = current_platform.get_device_name().lower()
-        assert "rbln" in device_name
-        if "ca" in device_name:
+        # assert "rbln" in device_name
+        if "ca" in device_name or "cu" in device_name:
             # consider RSD size for ATOM
             num_runtimes = 2 * envs.VLLM_RBLN_TP_SIZE
         elif "cr" in device_name:
@@ -261,7 +262,8 @@ class RBLNWorker(WorkerBase):
         num_gpu_blocks = min(
             int(max_num_blocks * self.cache_config.gpu_memory_utilization),
             max_required_num_blocks)
-        logger.info("max_num_blocks(%s), required_num_blocks(%s), num_blocks(%s)",
+        logger.info(
+            "max_num_blocks(%s), required_num_blocks(%s), num_blocks(%s)",
             max_num_blocks, max_required_num_blocks, num_gpu_blocks)
 
         if npu_num_blocks := os.environ.get("VLLM_RBLN_NPU_NUM_BLOCKS"):
