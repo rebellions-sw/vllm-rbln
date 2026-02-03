@@ -23,8 +23,7 @@ import requests
 from utils import RemoteOpenAIServer
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
-# MODEL_NAME = MODEL_DIR + "/opt_125m_batch2"
-MODEL_NAME="/mnt/shared_data/users/ci_vllm/opt_125m_batch2"
+MODEL_NAME = MODEL_DIR + "/opt_125m_batch2"
 MAX_TOKENS = 1
 
 
