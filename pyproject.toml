@@ -40,7 +40,7 @@ dependencies = [
     "datasets",
     "qwen_vl_utils",
     "vllm==0.10.2",
-    "optimum-rbln>=0.10.0.post1",
+    "optimum-rbln==0.10.0.post2",
     "torch==2.8.0",
 ]
 
