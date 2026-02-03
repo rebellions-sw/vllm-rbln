@@ -14,12 +14,10 @@
 
 import asyncio
 import os
-from http import HTTPStatus
 
 import openai
 import pytest
 import pytest_asyncio
-import requests
 from utils import RemoteOpenAIServer
 
 MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
