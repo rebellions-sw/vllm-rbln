@@ -42,6 +42,7 @@ dependencies = [
     "vllm==0.10.2",
     "optimum-rbln>=0.10.0.post1",
     "torch==2.8.0",
+    "torchcodec==0.7.0",
 ]
 
 [project.optional-dependencies]
