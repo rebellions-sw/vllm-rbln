@@ -480,7 +480,7 @@ def fused_moe_forward_rbln(
     return final_hidden_states
 
 
-def fused_moe_naive_multicast_rbln(self, x: torch.Tensor):
+def fused_moe_multicast_rbln(self, x: torch.Tensor):
     # as-is : [num_tokens, hidden_size]
     # to-be : buffer = [data_parallel_size*batch, seq, hidden_size], broadcast
     #         hidden = [batch, seq, hidden_size]
@@ -526,4 +526,4 @@ elif envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
 else:
     logger.info("[RBLN] fused moe, pytorch native kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_rbln
-FusedMoE.naive_multicast = fused_moe_naive_multicast_rbln
+FusedMoE.naive_multicast = fused_moe_multicast_rbln
