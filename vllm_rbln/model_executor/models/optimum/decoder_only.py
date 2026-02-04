@@ -18,12 +18,12 @@ from vllm_rbln.logger import init_logger
 
 from .base import ModelInputForRBLN, version_error
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-
+from vllm.model_executor.models.interfaces import SupportsLoRA
 logger = init_logger(__name__)
 
 
 # FIXME SupportsLoRA?
-class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin):
+class RBLNOptimumForCausalLM(RBLNOptimumModelBase, RBLNOptimumDecoderMixin, SupportsLoRA):
 
     def __init__(
         self,
