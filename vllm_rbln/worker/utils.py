@@ -70,13 +70,9 @@ def estimate_available_memory(
         return align(x, 2**21)
 
     num_layers = model_config.get_num_layers(parallel_config)
-    head_dim = model_config.get_head_size()
     vocab_size = model_config.get_vocab_size()
     hidden_size = model_config.get_hidden_size()
-    num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
     tp_size = parallel_config.tensor_parallel_size
-    dp_size = parallel_config.data_parallel_size
-    ep = parallel_config.enable_expert_parallel
     rsd_size = envs.VLLM_RBLN_TP_SIZE
 
     # TODO(jongho): Update if target npu is REBEL.
@@ -92,6 +88,8 @@ def estimate_available_memory(
                                            ATOM_SYS_DRAM_NBYTES)
         # ATOM - basic data type fp16
         default_bits_per_param = 16
+        # consider RSD size for ATOM
+        num_runtimes = num_runtimes * rsd_size
     elif "cr" in device_name:
         assert rsd_size == 1
         # REBEL - RBLN-CR[xxx]
@@ -99,11 +97,15 @@ def estimate_available_memory(
         REBEL_DRAM_NBYTES = 144 * 2**30
         REBEL_SYS_DRAM_NBYTES = 4 * 2**30
         REBEL_DRAM_NBYTES -= REBEL_SYS_DRAM_NBYTES
+        REBEL_CHIPLET_SIZE = 4
         available_dram_bytes = REBEL_DRAM_NBYTES
         # FIXME(RBLN) - basic data type fp8 for REBEL, for now fp16
         default_bits_per_param = 16
+        # single device == Quad chiplet
+        num_runtimes = num_runtimes * REBEL_CHIPLET_SIZE
     else:
-        assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+        raise ValueError(
+            "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]")
 
     available_dram_bytes = int(available_dram_bytes * gpu_memory_utilization)
 
@@ -120,14 +122,17 @@ def estimate_available_memory(
         # kernel_size
         # - QKV params    - model parallel (tp) sharded
         # - MLP or expert - model parallel (ep) sharded
-        # - word embedding- non sharded,  not included into device, hidden_size * vocab_size
-        # - lm head       - model parallel (tp) sharded, hidden_size * vocab_size
+        # - word embedding- non sharded,  not included into device,
+        #                   hidden_size * vocab_size
+        # - lm head       - model parallel (tp) sharded,
+        #                   hidden_size * vocab_size
         lm_heads_params = align(vocab_size, 64) * hidden_size
         lm_heads_nbytes = (align_2MB(
             lm_heads_params * default_bits_per_param // 8 / tp_size) * tp_size)
         word_embedding_params = lm_heads_params
         params = n_model_params - lm_heads_params - word_embedding_params
-        layer_nbytes = (align_2MB(params * nbits_per_param // 8 / num_layers) * num_layers)
+        layer_nbytes = \
+            (align_2MB(params * nbits_per_param // 8 / num_layers) * num_layers)
         kernel_size = layer_nbytes + lm_heads_nbytes
     elif n_model_params is not None:
         raise ValueError(
@@ -141,6 +146,7 @@ def estimate_available_memory(
         # 1 for prefill, 1 for decoder
         buffer = buffer_per_runtime_per_core * num_runtimes
     available_dram_bytes -= buffer
+    available_dram_bytes = available_dram_bytes // rsd_size
 
     check_oom(available_dram_bytes)
 

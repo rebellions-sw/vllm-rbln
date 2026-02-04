@@ -187,14 +187,13 @@ class RBLNWorker(WorkerBase):
         n_model_experts = 0
         device_name = current_platform.get_device_name().lower()
         assert "rbln" in device_name
-        if "ca" in device_name:
-            # consider RSD size for ATOM
-            num_runtimes = 2 * envs.VLLM_RBLN_TP_SIZE
-        elif "cr" in device_name:
-            # single device == Quad chiplet
-            num_runtimes = 2 * 4
-        else:
-            assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+
+        specialized_moe_decode = int(self.model_runner.specialized_moe_decode)
+        decode_batch_buckets_count = \
+            self.model_runner.bucketing_manager.decode_batch_buckets_count
+
+        num_runtimes = \
+            1 + (1 + specialized_moe_decode) * decode_batch_buckets_count
 
         if self.model_config.quantization is not None:
             # FIXME(RBLN) - for now, mxfp4 quantization is only supported
@@ -211,7 +210,8 @@ class RBLNWorker(WorkerBase):
                 nbits_per_param = 4
                 ratio = 1
             else:
-                assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+                raise ValueError("invalid RBLN architecture, candidates "
+                                 "= [ATOM(ca), REBEL(cr)]")
 
             # pack 2 mxfp4 elems into single uint8 elem
             packed_num_elems = 8 // 4
@@ -226,7 +226,8 @@ class RBLNWorker(WorkerBase):
                 # quantized params is handled
                 n_model_experts += value.numel() * packed_num_elems * ratio
 
-        # NOTE - model parallel(tp, dp, ep, pp) already applied into model params
+        # NOTE - model parallel(tp, dp, ep, pp)
+        #        already applied into model params
         n_model_params = n_model_attentions + n_model_experts
 
         available_memory_estimate = estimate_available_memory(
