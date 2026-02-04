@@ -25,7 +25,7 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.v1.sample.metadata import SamplingMetadata
-
+from vllm.model_executor.models.interfaces_base import VllmModelForTextGeneration
 from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 
@@ -176,7 +176,7 @@ class RBLNOptimumModelBase(nn.Module):
         return self.model.rbln_config.dtype
 
 
-class RBLNOptimumDecoderMixin:
+class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
 
     def setup_decoder_mixin(
         self,
