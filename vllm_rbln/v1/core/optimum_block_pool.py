@@ -38,7 +38,6 @@ class RBLNBlockHashToBlockMap(BlockHashToBlockMap):
                 # Multiple blocks are allocated.
                 # Return the second-to-last block.
                 block_values = blocks.values()
-                print(f"block_values: {block_values}")
                 iterator = reversed(block_values)
                 _ = next(iterator)
                 return next(iterator)

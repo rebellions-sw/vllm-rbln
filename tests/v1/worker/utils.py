@@ -186,6 +186,7 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
     )
     model_config = ModelConfig(
         model="facebook/opt-125m",
+        max_model_len=max_model_len,
         dtype=torch.float,
         seed=42,
     )

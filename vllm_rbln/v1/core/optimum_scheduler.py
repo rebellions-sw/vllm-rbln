@@ -101,7 +101,6 @@ class RBLNOptimumScheduler(Scheduler):
         self.prev_step_scheduled_req_ids: set[str] = set()
 
         # Scheduling constraints.
-        # Scheduling constraints.
         self.max_num_running_reqs = \
             self.scheduler_config.max_num_seqs
         self.max_num_scheduled_tokens = \
@@ -157,7 +156,7 @@ class RBLNOptimumScheduler(Scheduler):
             attn_block_size = None
         self.kv_cache_manager = RBLNKVCacheManager(
             kv_cache_config=kv_cache_config,
-            max_model_len=self.max_num_scheduled_tokens,
+            max_model_len=self.max_model_len,
             enable_caching=self.cache_config.enable_prefix_caching,
             use_eagle=False,
             log_stats=self.log_stats,
@@ -375,8 +374,8 @@ class RBLNOptimumScheduler(Scheduler):
                 # does not exceed the max model len.
                 # This is necessary when using spec decoding.
                 num_new_tokens = min(
-                    num_new_tokens, self.max_num_scheduled_tokens - 1 -
-                    request.num_computed_tokens)
+                    num_new_tokens,
+                    self.max_model_len - 1 - request.num_computed_tokens)
 
                 if num_new_tokens == 0:
                     # The request cannot be scheduled
