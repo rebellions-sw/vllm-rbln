@@ -69,6 +69,7 @@ def create_scheduler(
     )
     model_config = ModelConfig(
         model=model,
+        max_model_len=max_model_len,
         trust_remote_code=True,
         dtype=torch.float,
         seed=42,
