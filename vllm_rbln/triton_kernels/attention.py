@@ -20,7 +20,7 @@ from rebel.triton.language.extra.rbln import libdevice as rblib
 from torch.library import register_fake, triton_op
 
 @triton.jit
-def attention_naive_prefill(
+def attention_prefill(
     query_base,
     key_base,
     value_base,
@@ -203,7 +203,7 @@ def attention_naive_prefill(
         tl.store(output_ptr, attn_out)  # (1,h,g,l,d)
 
 @triton.jit
-def attention_naive_decode(
+def attention_decode(
     query_base,
     key_base,
     value_base,
@@ -392,7 +392,7 @@ def warmup(func, *args):
     return kernel
 
 
-@triton_op("rbln_triton_ops::attention_naive_prefill", mutates_args=())
+@triton_op("rbln_triton_ops::attention_prefill", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -446,12 +446,12 @@ def _(
         NUM_BATCH,
         DIM_BLOCK_TABLE,
     ]
-    warmup(attention_naive_prefill, *params)
+    warmup(attention_prefill, *params)
 
     return output.to(original_dtype)
 
 
-@triton_op("rbln_triton_ops::attention_naive_decode", mutates_args=())
+@triton_op("rbln_triton_ops::attention_decode", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -506,12 +506,12 @@ def _(
         DIM_BLOCK_TABLE,
     ]
 
-    warmup(attention_naive_decode, *params)
+    warmup(attention_decode, *params)
 
     return output.to(original_dtype)
 
 
-@register_fake("rbln_triton_ops::attention_naive_prefill")
+@register_fake("rbln_triton_ops::attention_prefill")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -526,7 +526,7 @@ def _(
     return torch.empty_like(query)
 
 
-@register_fake("rbln_triton_ops::attention_naive_decode")
+@register_fake("rbln_triton_ops::attention_decode")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,

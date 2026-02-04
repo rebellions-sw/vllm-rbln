@@ -21,7 +21,7 @@ from torch.library import register_fake, triton_op
 
 
 @triton.jit
-def flash_causal_attention_naive_prefill(
+def flash_causal_attention_prefill(
     query_base,
     key_base,
     value_base,
@@ -254,7 +254,7 @@ def flash_causal_attention_naive_prefill(
 
 
 @triton.jit
-def flash_causal_attention_naive_decode(
+def flash_causal_attention_decode(
     query_base,
     key_base,
     value_base,
@@ -497,7 +497,7 @@ def warmup(func, *args):
     return kernel
 
 
-@triton_op("rbln_triton_ops::flash_causal_attention_naive_prefill",
+@triton_op("rbln_triton_ops::flash_causal_attention_prefill",
            mutates_args=())
 def _(
     query: torch.Tensor,
@@ -554,12 +554,12 @@ def _(
         DIM_BLOCK_TABLE,
     ]
 
-    warmup(flash_causal_attention_naive_prefill, *params)
+    warmup(flash_causal_attention_prefill, *params)
 
     return output.to(original_dtype)
 
 
-@register_fake("rbln_triton_ops::flash_causal_attention_naive_prefill")
+@register_fake("rbln_triton_ops::flash_causal_attention_prefill")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -573,7 +573,7 @@ def _(
     return torch.empty_like(query)
 
 
-@triton_op("rbln_triton_ops::flash_causal_attention_naive_decode",
+@triton_op("rbln_triton_ops::flash_causal_attention_decode",
            mutates_args=())
 def _(
     query: torch.Tensor,
@@ -630,12 +630,12 @@ def _(
         DIM_BLOCK_TABLE,
     ]
 
-    warmup(flash_causal_attention_naive_decode, *params)
+    warmup(flash_causal_attention_decode, *params)
 
     return output.to(original_dtype)
 
 
-@register_fake("rbln_triton_ops::flash_causal_attention_naive_decode")
+@register_fake("rbln_triton_ops::flash_causal_attention_decode")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,

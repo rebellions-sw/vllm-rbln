@@ -21,7 +21,7 @@ from torch.library import register_fake, triton_op
 
 
 @triton.jit
-def flash_attention_naive_prefill(
+def flash_attention_prefill(
     query,
     key,
     value,
@@ -185,7 +185,7 @@ def flash_attention_naive_prefill(
 
 
 @triton.jit
-def flash_attention_naive_decode(
+def flash_attention_decode(
     query,
     key,
     value,
@@ -354,7 +354,7 @@ def warmup(func, *args):
     return kernel
 
 
-@triton_op("rbln_triton_ops::flash_attention_naive_prefill", mutates_args=())
+@triton_op("rbln_triton_ops::flash_attention_prefill", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -412,11 +412,11 @@ def _(
         NUM_BLOCK,
         DIM_BLOCK_TABLE,
     ]
-    warmup(flash_attention_naive_prefill, *params)
+    warmup(flash_attention_prefill, *params)
     return output.to(original_dtype)
 
 
-@triton_op("rbln_triton_ops::flash_attention_naive_decode", mutates_args=())
+@triton_op("rbln_triton_ops::flash_attention_decode", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -475,12 +475,12 @@ def _(
         DIM_BLOCK_TABLE,
     ]
 
-    warmup(flash_attention_naive_decode, *params)
+    warmup(flash_attention_decode, *params)
 
     return output.to(original_dtype)
 
 
-@register_fake("rbln_triton_ops::flash_attention_naive_prefill")
+@register_fake("rbln_triton_ops::flash_attention_prefill")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -495,7 +495,7 @@ def _(
     return torch.empty_like(query)
 
 
-@register_fake("rbln_triton_ops::flash_attention_naive_decode")
+@register_fake("rbln_triton_ops::flash_attention_decode")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
