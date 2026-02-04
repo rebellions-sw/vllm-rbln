@@ -1066,9 +1066,11 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         kv_sharing_target_layer_name: Optional[str] = None,
         sinks: Optional[torch.Tensor] = None,
     ) -> None:
-        self.enforce_eager = (
-            get_current_vllm_config().model_config.enforce_eager)
-        self.device = get_current_vllm_config().device_config.device
+        vllm_config = get_current_vllm_config()
+        self.enforce_eager = vllm_config.model_config.enforce_eager
+        self.device = vllm_config.device_config.device
+        self.block_size = vllm_config.cache_config.block_size
+        self.max_model_len = vllm_config.model_config.max_model_len
 
         if kv_sharing_target_layer_name is not None:
             raise NotImplementedError("KV sharing is not supported in RBLN.")
@@ -1120,6 +1122,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
 
         self.is_causal = envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
         self.is_batch_attention_opt = envs.VLLM_RBLN_BATCH_ATTN_OPT
+        self.is_normal = (self.block_size == self.max_model_len)
 
     def forward(
         self,
@@ -1260,107 +1263,190 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 )
         # actually non-flash paged attention DOES NOT use slot_mapping
         elif self.is_causal:
-            if envs.VLLM_RBLN_COMPILE_MODEL:
-                if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                    flash_causal_attention_naive_prefill = (
-                        torch.ops.rbln_triton_ops.
-                        flash_causal_attention_naive_prefill)
-                    flash_causal_attention_naive_decode = (
-                        torch.ops.rbln_triton_ops.
-                        flash_causal_attention_naive_decode)
-                elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                    flash_causal_attention_naive_decode = (
-                        torch.ops.rbln_custom_ops.
-                        flash_causal_attention_naive_decode)
-                    flash_causal_attention_naive_prefill = (
-                        torch.ops.rbln_custom_ops.
-                        flash_causal_attention_naive_prefill)
-                else:
-                    raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
-                                     f"{envs.VLLM_RBLN_KERNEL_MODE}")
-            else:
-                flash_causal_attention_naive_prefill = (
-                    flash_causal_attention_naive_prefill_impl)
-                flash_causal_attention_naive_decode = (
-                    flash_causal_attention_naive_decode_impl)
+            if self.is_normal:
+                assert attn_metadata.seq_lens is not None
+                assert attn_metadata.block_tables is not None
 
-            # * batched attention - seq_lens[B, 1] == seq_idx,
-            #   original sequence index
-            # * otherwise         - seq_lens[B, P] == dyn_size_for_partitions,
-            #   dynamic size for each partition
-            if q_len == 1:
-                attn_output = flash_causal_attention_naive_decode(  # noqa: E501
-                    query,
-                    key,
-                    value,
-                    kv_cache,
-                    self.scale,
-                    attn_metadata.seq_lens.to(torch.int16),
-                    attn_metadata.block_tables.to(torch.int16),
-                    self.scale,  # dummy
-                    self.sinks,
-                )
+                if envs.VLLM_RBLN_COMPILE_MODEL:
+                    if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
+                        causal_attention_naive_prefill = (
+                            torch.ops.rbln_triton_ops.causal_attention_naive_prefill
+                        )
+                        causal_attention_naive_decode = (
+                            torch.ops.rbln_triton_ops.causal_attention_naive_decode)
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                        raise ValueError("RBLN custom kernel is not supported for attention naive prefill/decode")
+                    else:
+                        raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                         f"{envs.VLLM_RBLN_KERNEL_MODE}")      
+
+                if q_len == 1:
+                    attn_output = causal_attention_naive_decode(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        self.scale,
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy (required by rbln_triton_ops signature)
+                    )
+                else:
+                    attn_output = causal_attention_naive_prefill(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        self.scale,
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy (required by rbln_triton_ops signature)
+                    )
             else:
-                attn_output = flash_causal_attention_naive_prefill(  # noqa: E501
-                    query,
-                    key,
-                    value,
-                    kv_cache,
-                    self.scale,
-                    attn_metadata.seq_lens.to(torch.int16),
-                    attn_metadata.block_tables.to(torch.int16),
-                    self.scale,  # dummy
-                    self.sinks,
-                )
+                if envs.VLLM_RBLN_COMPILE_MODEL:
+                    if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
+                        flash_causal_attention_naive_prefill = (
+                            torch.ops.rbln_triton_ops.
+                            flash_causal_attention_naive_prefill)
+                        flash_causal_attention_naive_decode = (
+                            torch.ops.rbln_triton_ops.
+                            flash_causal_attention_naive_decode)
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                        flash_causal_attention_naive_decode = (
+                            torch.ops.rbln_custom_ops.
+                            flash_causal_attention_naive_decode)
+                        flash_causal_attention_naive_prefill = (
+                            torch.ops.rbln_custom_ops.
+                            flash_causal_attention_naive_prefill)
+                    else:
+                        raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                         f"{envs.VLLM_RBLN_KERNEL_MODE}")
+                else:
+                    flash_causal_attention_naive_prefill = (
+                        flash_causal_attention_naive_prefill_impl)
+                    flash_causal_attention_naive_decode = (
+                        flash_causal_attention_naive_decode_impl)
+
+                # * batched attention - seq_lens[B, 1] == seq_idx,
+                #   original sequence index
+                # * otherwise         - seq_lens[B, P] == dyn_size_for_partitions,
+                #   dynamic size for each partition
+                if q_len == 1:
+                    attn_output = flash_causal_attention_naive_decode(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        self.scale,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy
+                        self.sinks,
+                    )
+                else:
+                    attn_output = flash_causal_attention_naive_prefill(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        self.scale,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy
+                        self.sinks,
+                    )
         else:
-            if envs.VLLM_RBLN_COMPILE_MODEL:
-                if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                    flash_attention_naive_prefill = (
-                        torch.ops.rbln_triton_ops.flash_attention_naive_prefill
-                    )
-                    flash_attention_naive_decode = (
-                        torch.ops.rbln_triton_ops.flash_attention_naive_decode)
-                elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                    flash_attention_naive_prefill = (
-                        torch.ops.rbln_custom_ops.flash_attention_naive_prefill
-                    )
-                    flash_attention_naive_decode = (
-                        torch.ops.rbln_custom_ops.flash_attention_naive_decode)
-                else:
-                    raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
-                                     f"{envs.VLLM_RBLN_KERNEL_MODE}")
-            else:
-                flash_attention_naive_prefill = (
-                    flash_attention_naive_prefill_impl)
-                flash_attention_naive_decode = (
-                    flash_attention_naive_decode_impl)
+            if self.is_normal:
+                assert attn_metadata.attn_masks is not None
+                assert attn_metadata.seq_lens is not None
+                assert attn_metadata.block_tables is not None
 
-            if q_len == 1:
-                attn_output = flash_attention_naive_decode(  # noqa: E501
-                    query,
-                    key,
-                    value,
-                    kv_cache,
-                    attn_metadata.attn_masks,
-                    self.scale,
-                    attn_metadata.seq_lens.to(torch.int16),
-                    attn_metadata.block_tables.to(torch.int16),
-                    self.scale,  # dummy
-                    self.sinks,
-                )
+                if envs.VLLM_RBLN_COMPILE_MODEL:
+                    if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
+                        attention_naive_prefill = (
+                            torch.ops.rbln_triton_ops.attention_naive_prefill
+                        )
+                        attention_naive_decode = (
+                            torch.ops.rbln_triton_ops.attention_naive_decode)
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                        raise ValueError("RBLN custom kernel is not supported for attention naive prefill/decode")
+                    else:
+                        raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                         f"{envs.VLLM_RBLN_KERNEL_MODE}")      
+
+                if q_len == 1:
+                    attn_output = attention_naive_decode(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        attn_metadata.attn_masks,
+                        kv_cache,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        self.scale,
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy (required by rbln_triton_ops signature)
+                    )
+                else:
+                    attn_output = attention_naive_prefill(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        attn_metadata.attn_masks,
+                        kv_cache,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        self.scale,
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy (required by rbln_triton_ops signature)
+                    )
             else:
-                attn_output = flash_attention_naive_prefill(  # noqa: E501
-                    query,
-                    key,
-                    value,
-                    kv_cache,
-                    attn_metadata.attn_masks,
-                    self.scale,
-                    attn_metadata.seq_lens.to(torch.int16),
-                    attn_metadata.block_tables.to(torch.int16),
-                    self.scale,  # dummy
-                    self.sinks,
-                )
+                if envs.VLLM_RBLN_COMPILE_MODEL:
+                    if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
+                        flash_attention_naive_prefill = (
+                            torch.ops.rbln_triton_ops.flash_attention_naive_prefill
+                        )
+                        flash_attention_naive_decode = (
+                            torch.ops.rbln_triton_ops.flash_attention_naive_decode)
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                        flash_attention_naive_prefill = (
+                            torch.ops.rbln_custom_ops.flash_attention_naive_prefill
+                        )
+                        flash_attention_naive_decode = (
+                            torch.ops.rbln_custom_ops.flash_attention_naive_decode)
+                    else:
+                        raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                         f"{envs.VLLM_RBLN_KERNEL_MODE}")
+                else:
+                    flash_attention_naive_prefill = (
+                        flash_attention_naive_prefill_impl)
+                    flash_attention_naive_decode = (
+                        flash_attention_naive_decode_impl)
+
+                if q_len == 1:
+                    attn_output = flash_attention_naive_decode(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        attn_metadata.attn_masks,
+                        self.scale,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy
+                        self.sinks,
+                    )
+                else:
+                    attn_output = flash_attention_naive_prefill(  # noqa: E501
+                        query,
+                        key,
+                        value,
+                        kv_cache,
+                        attn_metadata.attn_masks,
+                        self.scale,
+                        attn_metadata.seq_lens.to(torch.int16),
+                        attn_metadata.block_tables.to(torch.int16),
+                        self.scale,  # dummy
+                        self.sinks,
+                    )
 
         # 2. attention output reshape for attention backend return
         # attn_output = [batch,H*4,L,D] -> [batch,L,H*4,D] -> [batch,L,H*4*D]
