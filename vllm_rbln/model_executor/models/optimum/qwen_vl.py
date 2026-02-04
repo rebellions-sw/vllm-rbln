@@ -300,15 +300,6 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
         if second_per_grid_ts is None:
             raise ValueError(
                 "second_per_grid_ts is required for Qwen2.5-VL video inputs.")
-        # NOTE vLLM also squeezes the second_per_grid_ts tensor
-        # https://github.com/vllm-project/vllm/blob/v0.10.2/vllm/model_executor/models/qwen2_5_vl.py#L1021
-        # if envs.VLLM_USE_V1:
-        #     # [num_videos, 1] -> [num_videos]
-        #     second_per_grid_ts = second_per_grid_ts.squeeze(-1)
-        # else:
-        #     # [1, num_videos] -> [num_videos]
-        #     second_per_grid_ts = second_per_grid_ts.squeeze(-2)
-        # second_per_grid_ts = second_per_grid_ts.squeeze(-1)
         return Qwen2_5_VLVideoPixelInputs(
             type="pixel_values_videos",
             pixel_values_videos=pixel_values_videos,

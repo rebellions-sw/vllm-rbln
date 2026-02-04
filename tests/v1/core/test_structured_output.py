@@ -36,12 +36,12 @@ def test_structured_output():
         ):
             continue
 
-    # # Prefill 1st request
+    # Prefill 1st request
     scheduler_output = scheduler.schedule()
     grammar_bitmask = scheduler.get_grammar_bitmask(scheduler_output)
     assert len(grammar_bitmask.structured_output_request_ids) == 1
     assert grammar_bitmask.grammar_bitmask.shape[0] == 1
-    # # Prefill 2nd request
+    # Prefill 2nd request
     scheduler_output = scheduler.schedule()
     grammar_bitmask = scheduler.get_grammar_bitmask(scheduler_output)
     assert len(grammar_bitmask.structured_output_request_ids) == 1
