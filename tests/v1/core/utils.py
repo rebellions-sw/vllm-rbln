@@ -74,7 +74,7 @@ def create_scheduler(
         dtype=torch.float,
         seed=42,
     )
-    # Cache config
+
     cache_config = CacheConfig(
         block_size=block_size,
         swap_space=0,
