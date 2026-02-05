@@ -23,8 +23,9 @@ from vllm.lora.resolver import LoRAResolver, LoRAResolverRegistry
 class DummyLoRAResolver(LoRAResolver):
     """A dummy LoRA resolver for testing."""
 
-    async def resolve_lora(self, base_model_name: str,
-                           lora_name: str) -> LoRARequest | None:
+    async def resolve_lora(
+        self, base_model_name: str, lora_name: str
+    ) -> LoRARequest | None:
         if lora_name == "test_lora":
             return LoRARequest(
                 lora_name=lora_name,
@@ -68,20 +69,24 @@ def test_resolver_registry_unknown_resolver():
         registry.get_resolver("unknown_resolver")
 
 
-@pytest.mark.asyncio
-async def test_dummy_resolver_resolve():
+def test_dummy_resolver_resolve():
     """Test the dummy resolver's resolve functionality."""
+    import asyncio
+
     dummy_resolver = DummyLoRAResolver()
     base_model_name = "base_model_test"
     lora_name = "test_lora"
 
     # Test successful resolution
-    result = await dummy_resolver.resolve_lora(base_model_name, lora_name)
+    result = asyncio.run(
+        dummy_resolver.resolve_lora(base_model_name, lora_name)
+    )
     assert isinstance(result, LoRARequest)
     assert result.lora_name == lora_name
     assert result.lora_path == f"/dummy/path/{base_model_name}/{lora_name}"
 
     # Test failed resolution
-    result = await dummy_resolver.resolve_lora(base_model_name,
-                                               "nonexistent_lora")
+    result = asyncio.run(
+        dummy_resolver.resolve_lora(base_model_name, "nonexistent_lora")
+    )
     assert result is None

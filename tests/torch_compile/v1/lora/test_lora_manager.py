@@ -25,12 +25,13 @@ from safetensors.torch import load_file
 from torch import nn
 from vllm.config import ModelConfig, VllmConfig
 from vllm.config.lora import LoRAConfig
-from vllm.lora.layers import (ColumnParallelLinearWithLoRA,
+from vllm.lora.layers import (ColumnParallelLinearWithLoRA, LoRAMapping,
                               MergedColumnParallelLinearWithLoRA,
                               RowParallelLinearWithLoRA)
 from vllm.lora.lora_weights import LoRALayerWeights, PackedLoRALayerWeights
-from vllm.lora.models import (LoRAMapping, LoRAModel, LoRAModelManager,
-                              LRUCacheLoRAModelManager)
+from vllm.lora.lora_model import LoRAModel
+from vllm.lora.model_manager import (LoRAModelManager,
+                                     LRUCacheLoRAModelManager)
 from vllm.lora.peft_helper import PEFTHelper
 from vllm.lora.request import LoRARequest
 from vllm.lora.worker_manager import (LRUCacheWorkerLoRAManager,
