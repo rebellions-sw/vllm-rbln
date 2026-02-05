@@ -14,9 +14,11 @@
 
 from vllm.v1.request import RequestStatus
 
-from tests.torch_compile.v1.core.utils import (create_requests,
-                                               create_runner_output,
-                                               create_scheduler)
+from tests.torch_compile.v1.core.utils import (
+    create_requests,
+    create_runner_output,
+    create_scheduler,
+)
 
 
 def test_schedule():
@@ -50,8 +52,9 @@ def test_schedule():
     output = scheduler.schedule()
     assert output.scheduled_cached_reqs.num_reqs == len(requests)
     assert len(output.num_scheduled_tokens) == len(requests)
-    assert all(num_tokens == 1
-               for num_tokens in output.num_scheduled_tokens.values())
+    assert all(
+        num_tokens == 1 for num_tokens in output.num_scheduled_tokens.values()
+    )
     assert len(output.finished_req_ids) == 0
 
 
@@ -132,3 +135,65 @@ def test_preempt_during_execution():
     # sampled token id.
     assert len(requests[1].output_token_ids) == 1
     assert requests[1].output_token_ids[0] == 42
+
+
+def test_no_mixed_batch_prefill_and_decode():
+    """RBLN constraint: when a prefill is scheduled, decode requests are removed."""
+    scheduler = create_scheduler()
+    # Add first request and complete prefill
+    requests = create_requests(num_requests=2)
+    scheduler.add_request(requests[0])
+    output = scheduler.schedule()
+    model_runner_output = create_runner_output(output, 0)
+    scheduler.update_from_output(output, model_runner_output)
+
+    # Now request[0] is in decode, add request[1] (will need prefill)
+    scheduler.add_request(requests[1])
+    output = scheduler.schedule()
+
+    # RBLN: only prefill should be scheduled, no decode
+    assert len(output.scheduled_new_reqs) == 1
+    assert output.scheduled_cached_reqs.num_reqs == 0
+    assert output.scheduled_new_reqs[0].req_id == requests[1].request_id
+
+
+def test_single_prefill_batch_size():
+    """RBLN constraint: only one prefill request per step."""
+    scheduler = create_scheduler()
+    requests = create_requests(num_requests=5)
+    for req in requests:
+        scheduler.add_request(req)
+
+    output = scheduler.schedule()
+    # Should only schedule 1 prefill at a time
+    assert len(output.scheduled_new_reqs) == 1
+    assert len(output.num_scheduled_tokens) == 1
+
+
+def test_decode_batch_after_all_prefills():
+    """After all requests are prefilled, decode should batch them all."""
+    scheduler = create_scheduler(max_num_seqs=8)
+    requests = create_requests(num_requests=4)
+    for req in requests:
+        scheduler.add_request(req)
+
+    # Complete all prefills
+    for _ in range(4):
+        output = scheduler.schedule()
+        model_runner_output = create_runner_output(output, 0)
+        scheduler.update_from_output(output, model_runner_output)
+
+    # Now all should decode together
+    output = scheduler.schedule()
+    assert len(output.scheduled_new_reqs) == 0
+    assert output.scheduled_cached_reqs.num_reqs == 4
+    assert all(t == 1 for t in output.num_scheduled_tokens.values())
+
+
+def test_empty_scheduler():
+    """Scheduling with no requests should produce empty output."""
+    scheduler = create_scheduler()
+    output = scheduler.schedule()
+    assert len(output.scheduled_new_reqs) == 0
+    assert output.scheduled_cached_reqs.num_reqs == 0
+    assert len(output.num_scheduled_tokens) == 0
