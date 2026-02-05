@@ -16,6 +16,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
 
 class TestRBLNWorkerInitDeviceEnv:
@@ -227,3 +228,389 @@ class TestRBLNWorkerSimpleMethods:
         worker.local_rank = 1  # non-zero, so no print
         RBLNWorker.profile(worker, is_start=False)
         worker.profiler.stop.assert_called_once()
+
+
+class TestDetermineAvailableMemory:
+    """Test determine_available_memory ATOM/REBEL branching and quantization logic."""
+
+    def _make_worker(
+        self,
+        device_name="rbln-ca25",
+        quantization=None,
+        tp_size=1,
+        params=None,
+    ):
+        """Create a worker mock with model parameters."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        worker = MagicMock(spec=RBLNWorker)
+
+        # model_runner.model.named_parameters
+        if params is None:
+            # Default: 2 bf16 params of size 100
+            params = [
+                ("attn.weight", torch.zeros(100, dtype=torch.bfloat16)),
+                ("mlp.weight", torch.zeros(200, dtype=torch.bfloat16)),
+            ]
+        worker.model_runner = MagicMock()
+        worker.model_runner.model = MagicMock()
+        worker.model_runner.model.named_parameters.return_value = iter(params)
+
+        worker.model_config = MagicMock()
+        worker.model_config.quantization = quantization
+        worker.parallel_config = MagicMock()
+        worker.cache_config = MagicMock()
+        worker.cache_config.gpu_memory_utilization = 0.9
+        return worker
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    @patch("vllm_rbln.v1.worker.rbln_worker.current_platform")
+    @patch("vllm_rbln.v1.worker.rbln_worker.estimate_available_memory")
+    def test_atom_no_quantization(
+        self, mock_estimate, mock_platform, mock_envs
+    ):
+        """ATOM (ca) without quantization: num_runtimes=2*tp, nbits=16."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_platform.get_device_name.return_value = "RBLN-CA25"
+        mock_envs.VLLM_RBLN_TP_SIZE = 2
+        mock_estimate.return_value = 1_000_000
+
+        worker = self._make_worker(device_name="rbln-ca25")
+        result = RBLNWorker.determine_available_memory(worker)
+
+        assert result == 1_000_000
+        call_kwargs = mock_estimate.call_args
+        assert call_kwargs[1]["nbits_per_param"] == 16
+        assert call_kwargs[1]["num_runtimes"] == 4  # 2 * tp_size=2
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    @patch("vllm_rbln.v1.worker.rbln_worker.current_platform")
+    @patch("vllm_rbln.v1.worker.rbln_worker.estimate_available_memory")
+    def test_rebel_no_quantization(
+        self, mock_estimate, mock_platform, mock_envs
+    ):
+        """REBEL (cr) without quantization: num_runtimes=2*4=8, nbits=16."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_platform.get_device_name.return_value = "RBLN-CR100"
+        mock_estimate.return_value = 2_000_000
+
+        worker = self._make_worker()
+        result = RBLNWorker.determine_available_memory(worker)
+
+        assert result == 2_000_000
+        call_kwargs = mock_estimate.call_args
+        assert call_kwargs[1]["nbits_per_param"] == 16
+        assert call_kwargs[1]["num_runtimes"] == 8  # 2 * 4
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    @patch("vllm_rbln.v1.worker.rbln_worker.current_platform")
+    @patch("vllm_rbln.v1.worker.rbln_worker.estimate_available_memory")
+    def test_atom_with_mxfp4_uses_bf16_bits(
+        self, mock_estimate, mock_platform, mock_envs
+    ):
+        """ATOM + mxfp4: still uses 16 bits (ATOM doesn't support mxfp4)."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_platform.get_device_name.return_value = "RBLN-CA25"
+        mock_envs.VLLM_RBLN_TP_SIZE = 1
+        mock_estimate.return_value = 500_000
+
+        worker = self._make_worker(quantization="mxfp4")
+        result = RBLNWorker.determine_available_memory(worker)
+
+        assert result == 500_000
+        call_kwargs = mock_estimate.call_args
+        assert call_kwargs[1]["nbits_per_param"] == 16  # ATOM fallback to bf16
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    @patch("vllm_rbln.v1.worker.rbln_worker.current_platform")
+    @patch("vllm_rbln.v1.worker.rbln_worker.estimate_available_memory")
+    def test_rebel_with_mxfp4_uses_4bits(
+        self, mock_estimate, mock_platform, mock_envs
+    ):
+        """REBEL + mxfp4: uses 4 bits per param."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_platform.get_device_name.return_value = "RBLN-CR100"
+        mock_estimate.return_value = 800_000
+
+        worker = self._make_worker(quantization="mxfp4")
+        result = RBLNWorker.determine_available_memory(worker)
+
+        assert result == 800_000
+        call_kwargs = mock_estimate.call_args
+        assert call_kwargs[1]["nbits_per_param"] == 4  # REBEL supports mxfp4
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    @patch("vllm_rbln.v1.worker.rbln_worker.current_platform")
+    @patch("vllm_rbln.v1.worker.rbln_worker.estimate_available_memory")
+    def test_param_counting_bf16_only(
+        self, mock_estimate, mock_platform, mock_envs
+    ):
+        """All bf16 params → counted as attention params."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_platform.get_device_name.return_value = "RBLN-CA25"
+        mock_envs.VLLM_RBLN_TP_SIZE = 1
+        mock_estimate.return_value = 100
+
+        params = [
+            ("layer.attn", torch.zeros(50, dtype=torch.bfloat16)),
+            ("layer.mlp", torch.zeros(30, dtype=torch.bfloat16)),
+        ]
+        worker = self._make_worker(params=params)
+        RBLNWorker.determine_available_memory(worker)
+
+        call_kwargs = mock_estimate.call_args
+        # 50 + 30 = 80 total bf16 params, packed_num_elems=1, ratio=1
+        assert call_kwargs[1]["n_model_params"] == 80
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    @patch("vllm_rbln.v1.worker.rbln_worker.current_platform")
+    @patch("vllm_rbln.v1.worker.rbln_worker.estimate_available_memory")
+    def test_param_counting_mixed_quant_rebel(
+        self, mock_estimate, mock_platform, mock_envs
+    ):
+        """REBEL mxfp4: bf16 params (attention) + uint8 params (expert)."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_platform.get_device_name.return_value = "RBLN-CR100"
+        mock_estimate.return_value = 100
+
+        params = [
+            ("attn.weight", torch.zeros(100, dtype=torch.bfloat16)),
+            ("expert.weight", torch.zeros(50, dtype=torch.uint8)),
+        ]
+        worker = self._make_worker(quantization="mxfp4", params=params)
+        RBLNWorker.determine_available_memory(worker)
+
+        call_kwargs = mock_estimate.call_args
+        # bf16: 100 numel (attention)
+        # uint8/quant: 50 * packed_num_elems(2) * ratio(1) = 100 (expert)
+        # total = 200
+        assert call_kwargs[1]["n_model_params"] == 200
+
+
+class TestCompileOrWarmUpModel:
+    """Test compile_or_warm_up_model DP divisibility and skip/warmup paths."""
+
+    def _make_worker(self):
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        worker = MagicMock(spec=RBLNWorker)
+        worker.parallel_config = MagicMock()
+        worker.scheduler_config = MagicMock()
+        worker.model_config = MagicMock()
+        worker.model_runner = MagicMock()
+        return worker
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    def test_dp_padded_decode_divisibility_ok(self, mock_envs):
+        """DP padded_decode: passes when max_num_batched_tokens % max_num_seqs == 0."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_envs.VLLM_RBLN_DP_IMPL = "padded_decode"
+        mock_envs.VLLM_RBLN_COMPILE_MODEL = True
+        mock_envs.VLLM_RBLN_ENABLE_WARM_UP = True
+
+        worker = self._make_worker()
+        worker.parallel_config.data_parallel_size = 2
+        worker.scheduler_config.max_num_batched_tokens = 128
+        worker.scheduler_config.max_num_seqs = 32  # 128 % 32 == 0
+        worker.model_config.enforce_eager = False
+
+        # Should not raise
+        RBLNWorker.compile_or_warm_up_model(worker)
+        worker.model_runner.prepare_dummy_run.assert_called_once()
+        worker.model_runner.warm_up_model.assert_called_once()
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    def test_dp_padded_decode_divisibility_fail(self, mock_envs):
+        """DP padded_decode: fails assertion when not divisible."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_envs.VLLM_RBLN_DP_IMPL = "padded_decode"
+
+        worker = self._make_worker()
+        worker.parallel_config.data_parallel_size = 2
+        worker.scheduler_config.max_num_batched_tokens = 100
+        worker.scheduler_config.max_num_seqs = 30  # 100 % 30 != 0
+
+        with pytest.raises(AssertionError):
+            RBLNWorker.compile_or_warm_up_model(worker)
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    def test_dp_dummy_prefill_raises_valueerror(self, mock_envs):
+        """DP dummy_prefill: raises ValueError (deprecated)."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_envs.VLLM_RBLN_DP_IMPL = "dummy_prefill"
+
+        worker = self._make_worker()
+        worker.parallel_config.data_parallel_size = 2
+
+        with pytest.raises(ValueError, match="dummy_prefill is not supported"):
+            RBLNWorker.compile_or_warm_up_model(worker)
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    def test_skip_warmup_enforce_eager(self, mock_envs):
+        """enforce_eager=True → skip warmup."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_envs.VLLM_RBLN_COMPILE_MODEL = True
+        mock_envs.VLLM_RBLN_ENABLE_WARM_UP = True
+
+        worker = self._make_worker()
+        worker.parallel_config.data_parallel_size = 1
+        worker.model_config.enforce_eager = True
+
+        RBLNWorker.compile_or_warm_up_model(worker)
+        worker.model_runner.warm_up_model.assert_not_called()
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    def test_skip_warmup_compile_disabled(self, mock_envs):
+        """VLLM_RBLN_COMPILE_MODEL=False → skip warmup."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_envs.VLLM_RBLN_COMPILE_MODEL = False
+        mock_envs.VLLM_RBLN_ENABLE_WARM_UP = True
+
+        worker = self._make_worker()
+        worker.parallel_config.data_parallel_size = 1
+        worker.model_config.enforce_eager = False
+
+        RBLNWorker.compile_or_warm_up_model(worker)
+        worker.model_runner.warm_up_model.assert_not_called()
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.envs")
+    def test_warmup_runs_and_enables_perf_tracker(self, mock_envs):
+        """Full warmup path: warm_up_model + _enable_performance_tracker."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_envs.VLLM_RBLN_COMPILE_MODEL = True
+        mock_envs.VLLM_RBLN_ENABLE_WARM_UP = True
+
+        worker = self._make_worker()
+        worker.parallel_config.data_parallel_size = 1
+        worker.model_config.enforce_eager = False
+
+        RBLNWorker.compile_or_warm_up_model(worker)
+        worker.model_runner.warm_up_model.assert_called_once()
+        worker.model_runner._enable_performance_tracker.assert_called_once()
+
+
+class TestExecuteModel:
+    """Test execute_model PP control flow and kv_connector passthrough."""
+
+    def _make_worker(self):
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        worker = MagicMock(spec=RBLNWorker)
+        worker.model_runner = MagicMock()
+        worker.vllm_config = MagicMock()
+        return worker
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.get_pp_group")
+    def test_direct_model_runner_output(self, mock_pp_group):
+        """When model_runner returns ModelRunnerOutput directly, pass it through."""
+        from vllm.v1.outputs import ModelRunnerOutput
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_pp_group.return_value.is_first_rank = True
+
+        scheduler_output = MagicMock()
+        scheduler_output.total_num_scheduled_tokens = 10
+
+        output = MagicMock(spec=ModelRunnerOutput)
+        worker = self._make_worker()
+        worker.model_runner.execute_model.return_value = output
+
+        result = RBLNWorker.execute_model(worker, scheduler_output)
+        assert result is output
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.get_pp_group")
+    def test_none_output(self, mock_pp_group):
+        """When model_runner returns None, return None."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_pp_group.return_value.is_first_rank = True
+
+        scheduler_output = MagicMock()
+        scheduler_output.total_num_scheduled_tokens = 10
+
+        worker = self._make_worker()
+        worker.model_runner.execute_model.return_value = None
+
+        result = RBLNWorker.execute_model(worker, scheduler_output)
+        assert result is None
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.get_pp_group")
+    def test_no_forward_pass(self, mock_pp_group):
+        """When total_num_scheduled_tokens == 0, no intermediate tensors needed."""
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_pp_group.return_value.is_first_rank = True
+
+        scheduler_output = MagicMock()
+        scheduler_output.total_num_scheduled_tokens = 0
+
+        worker = self._make_worker()
+        worker.model_runner.execute_model.return_value = None
+
+        result = RBLNWorker.execute_model(worker, scheduler_output)
+        assert result is None
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.get_pp_group")
+    def test_intermediate_tensor_send_no_kv_connector(self, mock_pp_group):
+        """PP non-last rank: IntermediateTensors sent, kv_connector_output is falsy → None."""
+        from vllm.sequence import IntermediateTensors
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_pp_group.return_value.is_first_rank = True
+        mock_pp_group.return_value.is_last_rank = False
+
+        scheduler_output = MagicMock()
+        scheduler_output.total_num_scheduled_tokens = 10
+
+        intermediate = IntermediateTensors({"hidden": torch.zeros(4)})
+        intermediate.kv_connector_output = None
+        worker = self._make_worker()
+        worker.model_runner.execute_model.return_value = intermediate
+        worker.vllm_config.parallel_config.distributed_executor_backend = "ray"
+
+        result = RBLNWorker.execute_model(worker, scheduler_output)
+        assert result is None
+        mock_pp_group.return_value.send_tensor_dict.assert_called_once()
+
+    @patch("vllm_rbln.v1.worker.rbln_worker.get_pp_group")
+    @patch("vllm_rbln.v1.worker.rbln_worker.EMPTY_MODEL_RUNNER_OUTPUT")
+    def test_intermediate_tensor_with_kv_connector_finished(
+        self, mock_empty_output, mock_pp_group
+    ):
+        """PP non-last rank with kv_connector that has finished_sending/recving."""
+        from vllm.sequence import IntermediateTensors
+        from vllm_rbln.v1.worker.rbln_worker import RBLNWorker
+
+        mock_pp_group.return_value.is_first_rank = True
+        mock_pp_group.return_value.is_last_rank = False
+
+        scheduler_output = MagicMock()
+        scheduler_output.total_num_scheduled_tokens = 10
+
+        kv_output = MagicMock()
+        kv_output.finished_sending = False
+        kv_output.finished_recving = False
+        kv_output.__bool__ = lambda self: True  # truthy
+
+        intermediate = IntermediateTensors({"hidden": torch.zeros(4)})
+        intermediate.kv_connector_output = kv_output
+
+        worker = self._make_worker()
+        worker.model_runner.execute_model.return_value = intermediate
+        worker.vllm_config.parallel_config.distributed_executor_backend = "ray"
+
+        result = RBLNWorker.execute_model(worker, scheduler_output)
+        # Neither finished_sending nor finished_recving → return EMPTY
+        assert result is mock_empty_output
