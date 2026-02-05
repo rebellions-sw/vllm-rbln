@@ -739,7 +739,13 @@ def sliding_window_attention_naive_decode_impl(
         kv_cache[1][block] = v_cache_slice.squeeze(0)
 
         attn_weights = torch.matmul(q_r, k_cache_curr.transpose(3, 4)) * scale
-        attn_weights = attn_weights + attn_mask
+        
+        ones = torch.ones(window_size + 1, window_size + 1)
+        mask_full = torch.tril(ones) - torch.tril(ones, diagonal=-window_size)
+        mask = mask_full[None, None, None, cache_start:cache_start + 1, :]
+        mask = torch.where(mask > 0, 0.0, float('-inf')).to(attn_weights.dtype)
+
+        attn_weights = attn_weights + mask
 
         if sinks is not None:
             sink_len = sinks.size(-1)
