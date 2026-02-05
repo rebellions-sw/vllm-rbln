@@ -41,6 +41,16 @@ class RBLNBucketingManager(ABC):
         """List of supported batch sizes including the prefill and decode."""
         return self._batch_buckets
 
+    @property
+    def batch_buckets_count(self) -> int:
+        """Return the number of batch buckets."""
+        return len(self.batch_buckets)
+
+    @property
+    def decode_batch_buckets_count(self) -> int:
+        """Return the number of decode buckets."""
+        return len(self.decode_batch_buckets)
+
     def find_decode_batch_bucket(self, batch_size: int) -> int:
         """Return the smallest decode bucket that is >= `batch_size`."""
         for bucket in self.decode_batch_buckets:
