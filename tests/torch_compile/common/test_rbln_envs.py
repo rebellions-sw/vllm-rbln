@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import pytest
 import vllm_rbln.rbln_envs as rbln_envs
 
 
@@ -118,7 +118,6 @@ def test_get_dp_impl_valid_choices(monkeypatch):
 
 def test_get_dp_impl_invalid(monkeypatch):
     """Test get_dp_impl raises ValueError for invalid choice."""
-    import pytest
     from vllm_rbln.rbln_envs import get_dp_impl
 
     monkeypatch.setenv("VLLM_RBLN_DP_IMPL", "invalid_impl")
@@ -128,8 +127,6 @@ def test_get_dp_impl_invalid(monkeypatch):
 
 def test_getattr_invalid():
     """Test __getattr__ raises AttributeError for unknown names."""
-    import pytest
-
     with pytest.raises(AttributeError, match="has no attribute"):
         _ = rbln_envs.THIS_DOES_NOT_EXIST
 
