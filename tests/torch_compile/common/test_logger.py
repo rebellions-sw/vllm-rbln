@@ -61,16 +61,27 @@ def test_logger_once_only_logs_once():
 
 
 def test_enable_trace_function_call(tmp_path):
-    """Test enable_trace_function_call sets sys.settrace."""
+    """Test enable_trace_function_call sets sys.settrace and writes trace logs."""
     import sys
-    from unittest.mock import patch
 
     from vllm_rbln.logger import enable_trace_function_call
 
-    log_file = str(tmp_path / "trace.log")
+    log_file = tmp_path / "trace.log"
     old_trace = sys.gettrace()
     try:
-        enable_trace_function_call(log_file)
+        enable_trace_function_call(str(log_file))
         assert sys.gettrace() is not None
+
+        # Trigger a traced function call to verify file output
+        from vllm_rbln.logger import init_logger
+
+        init_logger("trace_test_verification")
+
+        assert log_file.exists(), "Trace log file should be created"
+        content = log_file.read_text()
+        assert len(content) > 0, "Trace log should contain entries"
+        assert "Call to" in content or "Return from" in content, (
+            "Trace log should contain call/return entries"
+        )
     finally:
         sys.settrace(old_trace)
