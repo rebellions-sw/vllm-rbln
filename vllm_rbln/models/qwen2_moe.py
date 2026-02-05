@@ -25,9 +25,8 @@ def __qwen2_moe_forward_v10(self, hidden_states: torch.Tensor) -> torch.Tensor:
         if self.shared_expert_gate is not None:
             shared_output = F.sigmoid(
                 self.shared_expert_gate(hidden_states)) * shared_output
-    router_logits, _ = self.gate(hidden_states)
     final_hidden_states = self.experts(hidden_states=hidden_states,
-                                       router_logits=router_logits)
+                                       router=lambda x: self.gate(x)[0])
     if shared_output is not None:
         final_hidden_states = final_hidden_states + shared_output
     if self.tp_size > 1:
@@ -45,10 +44,8 @@ def __qwen2_moe_forward_v12(self, hidden_states: torch.Tensor) -> torch.Tensor:
     # hidden_dim = hidden_states.shape[-1]
     # hidden_states = hidden_states.view(-1, hidden_dim)
 
-    # router_logits: (num_tokens, n_experts)
-    router_logits, _ = self.gate(hidden_states)
     final_hidden_states = self.experts(
-        hidden_states=hidden_states, router_logits=router_logits
+        hidden_states=hidden_states, router=lambda x: self.gate(x)[0]
     )
     if self.shared_expert is not None:
         final_hidden_states = final_hidden_states[0] + final_hidden_states[1]
