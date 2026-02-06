@@ -348,7 +348,7 @@ def flash_attention_decode(
 
 
 def warmup(func, *args):
-    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3:4")
+    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3")
     rblib.write_rtosa(kernel, args)
 
     return kernel
