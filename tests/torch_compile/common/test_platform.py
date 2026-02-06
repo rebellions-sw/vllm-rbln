@@ -14,6 +14,9 @@
 
 import pytest
 import torch
+from vllm.attention.backends.abstract import AttentionType
+from vllm.attention.backends.registry import AttentionBackendEnum
+from vllm.attention.selector import AttentionSelectorConfig
 
 
 def test_platform_plugins():
@@ -69,7 +72,18 @@ def test_register_ops(monkeypatch: pytest.MonkeyPatch, vllm_config):
 def test_get_attn_backend_cls():
     from vllm_rbln.platform import RblnPlatform
     attn_backend_cls = RblnPlatform.get_attn_backend_cls(
-        None, 16, torch.float16, None, 16, False, False, False)
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionSelectorConfig(
+            16,  # head_size
+            torch.float16,  # dtype
+            None,  # kv_cache_dtype
+            1024,  # block_size
+            False,  # use_mla
+            False,  # has_sink
+            False,  # use_sparse
+            False,  # use_mm_prefix
+            AttentionType.DECODER,  # attn_type
+        ))
     assert (
         attn_backend_cls ==
         "vllm_rbln.v1.attention.backends.flash_attention.RBLNAttentionBackend"

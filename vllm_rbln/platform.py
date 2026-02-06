@@ -18,8 +18,8 @@ import torch
 from vllm.attention.backends.registry import AttentionBackendEnum
 
 if TYPE_CHECKING:
+    from vllm.attention.selector import AttentionSelectorConfig
     from vllm.config import VllmConfig
-    from vllm.config.cache import CacheDType
     from vllm.utils.argparse_utils import FlexibleArgumentParser
 else:
     VllmConfig = None
@@ -68,7 +68,8 @@ class RblnPlatform(Platform):
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
-        return rebel.get_npu_name(device_id)
+        assert (device_name := rebel.get_npu_name(device_id))
+        return device_name
 
     @staticmethod
     def inference_mode():
@@ -211,17 +212,18 @@ class RblnPlatform(Platform):
     def get_attn_backend_cls(
         cls,
         selected_backend: "AttentionBackendEnum",
-        head_size: int,
-        dtype: torch.dtype,
-        kv_cache_dtype: "Optional[CacheDType]",
-        block_size: int,
-        use_mla: bool,
-        has_sink: bool,
-        use_sparse: bool,
-        attn_type: Optional[str] = None,
+        attn_selector_config: "AttentionSelectorConfig",
     ) -> str:
-        attn_backend_cls = ("vllm_rbln.v1.attention.backends."
-                            "flash_attention.RBLNAttentionBackend")
+        if selected_backend and \
+            selected_backend != AttentionBackendEnum.FLASH_ATTN:
+            logger.info("Cannot use %s backend on RBLN.", selected_backend)
+        if attn_selector_config.use_mla:
+            raise NotImplementedError("MLA is not supported on RBLN.")
+        if attn_selector_config.use_sparse:
+            raise NotImplementedError(
+                "Sparse Attention is not supported on RBLN.")
+
+        attn_backend_cls = AttentionBackendEnum.FLASH_ATTN.get_path()
         logger.info("Using RBLN Attention Backend: %s", attn_backend_cls)
 
         return attn_backend_cls

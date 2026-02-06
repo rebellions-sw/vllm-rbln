@@ -15,7 +15,7 @@
 import atexit
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -25,11 +25,11 @@ logger = init_logger(__name__)
 @dataclass
 class StepMetrics:
     """Metrics for a single execution step."""
-    latencies: List[float] = field(default_factory=list)
-    token_counts: List[int] = field(default_factory=list)
-    host_times: List[int] = field(default_factory=list)
-    device_times: List[int] = field(default_factory=list)
-    ccl_times: List[int] = field(default_factory=list)
+    latencies: list[float] = field(default_factory=list)
+    token_counts: list[int] = field(default_factory=list)
+    host_times: list[int] = field(default_factory=list)
+    device_times: list[int] = field(default_factory=list)
+    ccl_times: list[int] = field(default_factory=list)
 
     def add_measurement(
         self,
@@ -49,7 +49,7 @@ class StepMetrics:
         if ccl_time is not None:
             self.ccl_times.append(ccl_time)
 
-    def _without_outlier_f(self, values: List[float]) -> List[float]:
+    def _without_outlier_f(self, values: list[float]) -> list[float]:
         """Return values excluding one outlier (max absolute deviation)."""
         if len(values) <= 1:
             return values
@@ -58,7 +58,7 @@ class StepMetrics:
         max_idx = deviations.index(max(deviations))
         return [v for i, v in enumerate(values) if i != max_idx]
 
-    def _without_outlier_i(self, values: List[int]) -> List[int]:
+    def _without_outlier_i(self, values: list[int]) -> list[int]:
         """Return values excluding one outlier (max absolute deviation)."""
         if len(values) <= 1:
             return values

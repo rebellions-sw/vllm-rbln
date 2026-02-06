@@ -50,7 +50,7 @@ def main():
         block_size=args.block_size,
         enable_chunked_prefill=True,
         max_num_batched_tokens=128,
-        gpu_memory_utilization=1,
+        gpu_memory_utilization=0.9,
         enable_expert_parallel=args.enable_expert_parallel,
     )
 

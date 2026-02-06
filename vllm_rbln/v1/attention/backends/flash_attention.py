@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Optional
 import torch
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionType)
+from vllm.attention.backends.registry import (AttentionBackendEnum,
+                                              register_backend)
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
                                               CommonAttentionMetadata)
@@ -768,6 +770,7 @@ def _(cache: torch.Tensor, state: torch.Tensor,
     return torch.empty_like(cache)
 
 
+@register_backend(AttentionBackendEnum.FLASH_ATTN)
 class RBLNAttentionBackend(AttentionBackend):
 
     @classmethod
@@ -911,6 +914,8 @@ class RBLNFlashAttentionMetadataBuilder(
         seq_lens = common_attn_metadata.seq_lens
         block_tables_tensor = common_attn_metadata.block_table_tensor
         slot_mapping = common_attn_metadata.slot_mapping
+        query_seq_lens = query_start_loc[1:] - query_start_loc[:-1]
+        num_computed_tokens = seq_lens - query_seq_lens
 
         cu_prefix_query_lens = None
         prefix_kv_lens = None
@@ -939,9 +944,8 @@ class RBLNFlashAttentionMetadataBuilder(
             "num_tokens is required for RBLN Attention Backend")
         assert batch_pad is not None, (
             "batch_pad is required for RBLN Attention Backend")
-        is_prefills = (
-            common_attn_metadata.num_computed_tokens_cpu[:num_reqs].numpy()
-            < num_tokens[:num_reqs] - 1)
+        is_prefills = (num_computed_tokens[:num_reqs].numpy()
+                       < num_tokens[:num_reqs] - 1)
         # The prefill and decode cannot be mixed.
         assert len(is_prefills) > 0 and all(
             is_prefill == is_prefills[0]
@@ -1000,11 +1004,9 @@ class RBLNFlashAttentionMetadataBuilder(
         cache_seq_lens, cache_offsets, local_block_tables = None, None, None
         if sliding_window := getattr(self.kv_cache_spec, "sliding_window",
                                      None):
-            num_computed_tokens = (
-                common_attn_metadata.num_computed_tokens_cpu[:num_reqs].view(
-                    -1, 1).to(torch.int16))
-            seq_lens = common_attn_metadata.seq_lens_cpu[:num_reqs].view(
-                -1, 1).to(torch.int16)
+            num_computed_tokens = (num_computed_tokens[:num_reqs].view(
+                -1, 1).to(torch.int16))
+            seq_lens = seq_lens[:num_reqs].view(-1, 1).to(torch.int16)
             query_lens = seq_lens - num_computed_tokens
             cache_seq_lens = torch.clamp(num_computed_tokens,
                                          max=sliding_window)
