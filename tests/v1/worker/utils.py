@@ -176,7 +176,7 @@ def finish_request(manager: KVCacheManager, request: Request):
 
 
 def get_vllm_config(async_scheduling=False, max_num_seqs=None):
-    max_model_len = max_num_seqs if max_num_seqs is not None else MAX_MODEL_LEN
+    max_model_len = MAX_MODEL_LEN
     scheduler_config = SchedulerConfig(
         max_num_seqs=max_num_seqs if max_num_seqs is not None else MAX_NUM_SEQ,
         max_num_batched_tokens=max_model_len,
