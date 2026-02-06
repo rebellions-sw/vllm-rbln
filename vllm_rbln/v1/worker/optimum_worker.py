@@ -162,7 +162,8 @@ class RBLNOptimumWorker(WorkerBase):
 
     def shutdown(self) -> None:
         logger.info("v1 optimum_worker shutdown called")
-        if envs.VLLM_RBLN_METRICS:
+        if envs.VLLM_RBLN_METRICS and \
+            self.model_runner.performance_tracker:
             # FIXME - performance tracker atexit is not called
             self.model_runner.performance_tracker.print_final_stats()
 
