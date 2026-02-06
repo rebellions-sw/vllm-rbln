@@ -21,7 +21,8 @@ import torch
 from vllm.v1.outputs import SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.ops.topk_topp_sampler import apply_top_k_top_p
-from vllm.v1.sample.rejection_sampler import RejectionSampler
+from vllm.v1.sample.rejection_sampler import (RejectionSampler,
+                                              generate_uniform_probs)
 from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 
 from vllm_rbln.logger import init_logger
@@ -36,10 +37,13 @@ MAX_SPEC_LEN = 128
 
 
 # TODO(RBLN): Enable RBLNSampler for
-# - apply_bad_words_with_drafts 
+# - apply_bad_words_with_drafts
 # - apply_all_penalties
 # - apply_top_k_top_p
 class RBLNRejectionSampler(RejectionSampler):
+    # NOTE(RBLN): This class simply overrides forward by copying the upstream
+    # implementation verbatim, so that it uses the functions defined in this 
+    # file. There are no behavioral changes.
     def forward(
         self,
         metadata: SpecDecodeMetadata,
@@ -192,43 +196,13 @@ def rejection_sample(
         # Rejection sampling for greedy sampling requests.
         target_argmax = target_probs.argmax(dim=-1)
 
-        # NOTE(RBLN): PyTorch native replacement of rejection_greedy_sample_kernel.
-        if is_greedy is None:
-            is_greedy_mask = torch.ones(batch_size, dtype=torch.bool, device=device)
-        else:
-            is_greedy_mask = is_greedy.to(device=device, dtype=torch.bool)
-
-        cu = cu_num_draft_tokens.to(device=device, dtype=torch.int64)
-        start = torch.zeros_like(cu)
-        start[1:] = cu[:-1]
-        end = cu
-        lens = (end - start).to(torch.int64)
-
-        for req_idx in range(batch_size):
-            if not bool(is_greedy_mask[req_idx]):
-                continue
-
-            n = int(lens[req_idx].item())
-
-            if n == 0:
-                output_token_ids[req_idx, 0] = bonus_token_ids[req_idx].to(torch.int32)
-                continue
-
-            s = int(start[req_idx].item())
-            e = s + n
-
-            d = draft_token_ids[s:e]
-            t = target_argmax[s:e]
-
-            mismatch = (d != t)
-            if mismatch.any():
-                k = int(mismatch.to(torch.int64).argmax().item())
-                out_len = k + 1
-                output_token_ids[req_idx, :out_len] = t[:out_len].to(torch.int32)
-            else:
-                output_token_ids[req_idx, :n] = t.to(torch.int32)
-                output_token_ids[req_idx, n] = bonus_token_ids[req_idx].to(torch.int32)
-
+        # NOTE(RBLN): Call torch_rejection_greedy_sample_kernel instead of
+        # rejection_greedy_sample_kernel
+        torch_rejection_greedy_sample_kernel(output_token_ids,
+                                             cu_num_draft_tokens,
+                                             draft_token_ids, target_argmax,
+                                             bonus_token_ids, is_greedy,
+                                             batch_size, device)
         if sampling_metadata.all_greedy:
             return output_token_ids
 
@@ -254,62 +228,20 @@ def rejection_sample(
         device,
     )
 
-    # NOTE(RBLN): PyTorch native replacement of rejection_random_sample_kernel.
-    if is_greedy is None:
-        is_greedy_mask = torch.zeros(batch_size, dtype=torch.bool, device=device)
-    else:
-        is_greedy_mask = is_greedy.to(device=device, dtype=torch.bool)
-
-    cu = cu_num_draft_tokens.to(device=device, dtype=torch.int64)
-    start = torch.zeros_like(cu)
-    start[1:] = cu[:-1]
-    end = cu
-    lens = (end - start).to(torch.int64)
-
-    NO_DRAFT_PROBS = draft_probs is None
-
-    for req_idx in range(batch_size):
-        if bool(is_greedy_mask[req_idx]):
-            continue
-
-        n = int(lens[req_idx].item())
-
-        if n == 0:
-            output_token_ids[req_idx, 0] = bonus_token_ids[req_idx].to(torch.int32)
-            continue
-
-        s = int(start[req_idx].item())
-        e = s + n
-
-        d_ids = draft_token_ids[s:e].to(torch.int64)
-        u = uniform_probs[s:e].to(torch.float64)
-
-        t_prob = target_probs[s:e].gather(1, d_ids.unsqueeze(1)).squeeze(1).to(
-            torch.float64
-        )
-
-        if NO_DRAFT_PROBS:
-            accept = (t_prob >= u)
-        else:
-            d_prob = draft_probs[s:e].gather(1, d_ids.unsqueeze(1)).squeeze(1).to(
-                torch.float64
-            )
-            accept = (d_prob > 0) & ((t_prob / d_prob) >= u)
-
-        if (~accept).any():
-            k = int((~accept).to(torch.int64).argmax().item())
-            if k > 0:
-                output_token_ids[req_idx, :k] = draft_token_ids[s : s + k].to(
-                    torch.int32
-                )
-            output_token_ids[req_idx, k] = recovered_token_ids[s + k].to(torch.int32)
-        else:
-            output_token_ids[req_idx, :n] = draft_token_ids[s:e].to(torch.int32)
-            output_token_ids[req_idx, n] = bonus_token_ids[req_idx].to(torch.int32)
+    # NOTE(RBLN): Call torch_rejection_random_sample_kernel instead of
+    # rejection_random_sample_kernel
+    torch_rejection_random_sample_kernel(output_token_ids, cu_num_draft_tokens,
+                                         draft_token_ids, draft_probs,
+                                         target_probs, bonus_token_ids,
+                                         recovered_token_ids, uniform_probs,
+                                         is_greedy, batch_size, device)
 
     return output_token_ids
 
 
+# NOTE(RBLN): This function was copied without modification to replace
+# expand_batch_to_tokens it calls with the PyTorch native implementations
+# defined in this file.
 def apply_sampling_constraints(
     logits: torch.Tensor,  # [num_tokens, vocab_size]
     cu_num_draft_tokens: torch.Tensor,  # [batch_size]
@@ -396,86 +328,14 @@ def expand_batch_to_tokens(
     """
     batch_size = x.shape[0]
     assert cu_num_tokens.shape[0] == batch_size
-
-    # NOTE(RBLN): PyTorch native replacement of expand_kernel.
-    prev = torch.zeros_like(cu_num_tokens)
-    prev[1:] = cu_num_tokens[:-1]
-    counts = (cu_num_tokens - prev).to(torch.int64)
-
-    expanded_x = x.repeat_interleave(counts)
-
-    if replace_from != replace_to:
-        expanded_x = torch.where(
-            expanded_x == replace_from,
-            expanded_x.new_tensor(replace_to),
-            expanded_x,
-        )
-
-    if expanded_x.numel() != num_tokens:
-        if expanded_x.numel() > num_tokens:
-            expanded_x = expanded_x[:num_tokens]
-        else:
-            pad = expanded_x.new_full((num_tokens - expanded_x.numel(),), replace_to)
-            expanded_x = torch.cat([expanded_x, pad], dim=0)
-
+    # NOTE(RBLN): Call torch_expand_kernel instead of expand_kernel
+    expanded_x = torch_expand_kernel(x, cu_num_tokens, num_tokens,
+                                     replace_from, replace_to)
     return expanded_x
 
 
-def generate_uniform_probs(
-    num_tokens: int,
-    num_draft_tokens: list[int],
-    generators: dict[int, torch.Generator],
-    device: torch.device,
-) -> torch.Tensor:
-    """
-    Generates a batch of uniform random samples, with optional seeding
-    if available.
-
-    This method creates a tensor of shape `(num_tokens, )` filled
-    with uniform random values in the range [0, 1). If `generators` is provided,
-    the requests with their own seeds will use the provided `torch.Generator`
-    for reproducibility. The samples for the other requests will be generated
-    without a seed.
-
-    Args:
-        num_tokens: int
-            Total number of tokens.
-        num_draft_tokens: List[List[int]]
-            Number of draft tokens per request.
-        generators: Optional[Dict[int, torch.Generator]]
-            A dictionary mapping indices in the batch to
-            `torch.Generator` objects.
-        device: torch.device
-            The device on which to allocate the tensor.
-    Returns:
-        uniform_rand: torch.Tensor
-            A tensor of shape `(num_tokens, )` containing uniform
-            random values in the range [0, 1).
-    """
-    # NOTE(woosuk): We deliberately use float64 instead of float32 here
-    # because when using float32, there's a non-negligible chance that
-    # uniform_prob is sampled to be exact 0.0 as reported in
-    # https://github.com/pytorch/pytorch/issues/16706. Using float64
-    # mitigates the issue.
-    uniform_probs = torch.rand(
-        (num_tokens,),
-        dtype=torch.float64,
-        device=device,
-    )
-    start_idx = 0
-    for req_idx, n in enumerate(num_draft_tokens):
-        # Do not generate random numbers for requests with no draft tokens.
-        # This can be important for reproducibility.
-        if n == 0:
-            continue
-        end_idx = start_idx + n
-        generator = generators.get(req_idx)
-        if generator is not None:
-            uniform_probs[start_idx:end_idx].uniform_(generator=generator)
-        start_idx = end_idx
-    return uniform_probs
-
-
+# NOTE(RBLN): Note that max_spec_len is not used, but kept to match with the
+# upstream code and prevent confusions.
 def sample_recovered_tokens(
     max_spec_len: int,
     num_draft_tokens: list[int],
@@ -505,9 +365,180 @@ def sample_recovered_tokens(
         if num_draft_tokens[i] > 0:
             q[i].exponential_(generator=generator)
 
+    # NOTE(RBLN): Call torch_sample_recovered_tokens_kernel instead of
+    # sample_recovered_tokens_kernel
+    recovered_token_ids = torch_sample_recovered_tokens_kernel(
+        cu_num_draft_tokens, draft_token_ids, draft_probs, target_probs, q,
+        batch_size, device)
+    return recovered_token_ids
+
+
+# NOTE(RBLN): PyTorch native replacement of rejection_greedy_sample_kernel
+def torch_rejection_greedy_sample_kernel(
+    output_token_ids: torch.Tensor,
+    cu_num_draft_tokens: torch.Tensor,
+    draft_token_ids: torch.Tensor,
+    target_argmax: torch.Tensor,
+    bonus_token_ids: torch.Tensor,
+    is_greedy: torch.Tensor | None,
+    batch_size: int,
+    device: torch.device,
+) -> None:
+    if is_greedy is None:
+        is_greedy_mask = torch.ones(batch_size,
+                                    dtype=torch.bool,
+                                    device=device)
+    else:
+        is_greedy_mask = is_greedy.to(device=device, dtype=torch.bool)
+
+    cu = cu_num_draft_tokens.to(device=device, dtype=torch.int64)
+    start = torch.zeros_like(cu)
+    start[1:] = cu[:-1]
+    end = cu
+    lens = (end - start).to(torch.int64)
+
+    for req_idx in range(batch_size):
+        if not bool(is_greedy_mask[req_idx]):
+            continue
+
+        n = int(lens[req_idx].item())
+
+        if n == 0:
+            output_token_ids[req_idx,
+                             0] = bonus_token_ids[req_idx].to(torch.int32)
+            continue
+
+        s = int(start[req_idx].item())
+        e = s + n
+
+        d = draft_token_ids[s:e]
+        t = target_argmax[s:e]
+
+        mismatch = (d != t)
+        if mismatch.any():
+            k = int(mismatch.to(torch.int64).argmax().item())
+            out_len = k + 1
+            output_token_ids[req_idx, :out_len] = t[:out_len].to(torch.int32)
+        else:
+            output_token_ids[req_idx, :n] = t.to(torch.int32)
+            output_token_ids[req_idx,
+                             n] = bonus_token_ids[req_idx].to(torch.int32)
+
+
+# NOTE(RBLN): PyTorch native replacement of rejection_random_sample_kernel
+def torch_rejection_random_sample_kernel(
+    output_token_ids: torch.Tensor,
+    cu_num_draft_tokens: torch.Tensor,
+    draft_token_ids: torch.Tensor,
+    draft_probs: torch.Tensor | None,
+    target_probs: torch.Tensor,
+    bonus_token_ids: torch.Tensor,
+    recovered_token_ids: torch.Tensor,
+    uniform_probs: torch.Tensor,
+    is_greedy: torch.Tensor | None,
+    batch_size: int,
+    device: torch.device,
+) -> None:
+    if is_greedy is None:
+        is_greedy_mask = torch.zeros(batch_size,
+                                     dtype=torch.bool,
+                                     device=device)
+    else:
+        is_greedy_mask = is_greedy.to(device=device, dtype=torch.bool)
+
+    cu = cu_num_draft_tokens.to(device=device, dtype=torch.int64)
+    start = torch.zeros_like(cu)
+    start[1:] = cu[:-1]
+    end = cu
+    lens = (end - start).to(torch.int64)
+
+    NO_DRAFT_PROBS = draft_probs is None
+
+    for req_idx in range(batch_size):
+        if bool(is_greedy_mask[req_idx]):
+            continue
+
+        n = int(lens[req_idx].item())
+
+        if n == 0:
+            output_token_ids[req_idx,
+                             0] = bonus_token_ids[req_idx].to(torch.int32)
+            continue
+
+        s = int(start[req_idx].item())
+        e = s + n
+
+        d_ids = draft_token_ids[s:e].to(torch.int64)
+        u = uniform_probs[s:e].to(torch.float64)
+
+        t_prob = target_probs[s:e].gather(1, d_ids.unsqueeze(1)).squeeze(1).to(
+            torch.float64)
+
+        if NO_DRAFT_PROBS:
+            accept = (t_prob >= u)
+        else:
+            d_prob = draft_probs[s:e].gather(
+                1, d_ids.unsqueeze(1)).squeeze(1).to(torch.float64)
+            accept = (d_prob > 0) & ((t_prob / d_prob) >= u)
+
+        if (~accept).any():
+            k = int((~accept).to(torch.int64).argmax().item())
+            if k > 0:
+                output_token_ids[req_idx, :k] = draft_token_ids[s:s + k].to(
+                    torch.int32)
+            output_token_ids[req_idx,
+                             k] = recovered_token_ids[s + k].to(torch.int32)
+        else:
+            output_token_ids[req_idx, :n] = draft_token_ids[s:e].to(
+                torch.int32)
+            output_token_ids[req_idx,
+                             n] = bonus_token_ids[req_idx].to(torch.int32)
+
+
+# NOTE(RBLN): PyTorch native replacement of expand_kernel
+def torch_expand_kernel(
+    input: torch.Tensor,
+    cu_num_tokens: torch.Tensor,
+    num_tokens: int,
+    replace_from: int = 0,
+    replace_to: int = 0,
+) -> torch.Tensor:
+    prev = torch.zeros_like(cu_num_tokens)
+    prev[1:] = cu_num_tokens[:-1]
+    counts = (cu_num_tokens - prev).to(torch.int64)
+
+    expanded_x = input.repeat_interleave(counts)
+
+    if replace_from != replace_to:
+        expanded_x = torch.where(
+            expanded_x == replace_from,
+            expanded_x.new_tensor(replace_to),
+            expanded_x,
+        )
+
+    if expanded_x.numel() != num_tokens:
+        if expanded_x.numel() > num_tokens:
+            expanded_x = expanded_x[:num_tokens]
+        else:
+            pad = expanded_x.new_full((num_tokens - expanded_x.numel(), ),
+                                      replace_to)
+            expanded_x = torch.cat([expanded_x, pad], dim=0)
+
+    return expanded_x
+
+
+# NOTE(RBLN): PyTorch native replacement of sample_recovered_tokens_kernel
+def torch_sample_recovered_tokens_kernel(
+    cu_num_draft_tokens: torch.Tensor,
+    draft_token_ids: torch.Tensor,
+    draft_probs: torch.Tensor | None,
+    target_probs: torch.Tensor,
+    q: torch.Tensor,
+    batch_size: int,
+    device: torch.device,
+) -> torch.Tensor:
     recovered_token_ids = torch.empty_like(draft_token_ids)
 
-    # NOTE(RBLN): PyTorch native replacement of sample_recovered_tokens_kernel.
     cu = cu_num_draft_tokens.to(device=device, dtype=torch.int64)
     start = torch.zeros_like(cu)
     start[1:] = cu[:-1]
@@ -523,20 +554,22 @@ def sample_recovered_tokens(
         s = int(start[req_idx].item())
         e = s + n
 
-        q_req = q[req_idx].to(torch.float32)  # [vocab]
+        q_req = q[req_idx].to(torch.float32)
 
         if NO_DRAFT_PROBS:
-            prob = target_probs[s:e].to(torch.float32)  # [n, vocab]
-            d_ids = draft_token_ids[s:e].to(torch.int64)  # [n]
+            prob = target_probs[s:e].to(torch.float32)
+            d_ids = draft_token_ids[s:e].to(torch.int64)
             prob = prob.clone()
             prob.scatter_(1, d_ids.unsqueeze(1), 0.0)
         else:
             prob = torch.maximum(
-                target_probs[s:e].to(torch.float32) - draft_probs[s:e].to(torch.float32),
+                target_probs[s:e].to(torch.float32) -
+                draft_probs[s:e].to(torch.float32),
                 torch.zeros((), device=device, dtype=torch.float32),
             )
 
         scores = prob / q_req.unsqueeze(0)
-        recovered_token_ids[s:e] = scores.argmax(dim=-1).to(recovered_token_ids.dtype)
+        recovered_token_ids[s:e] = scores.argmax(dim=-1).to(
+            recovered_token_ids.dtype)
 
     return recovered_token_ids
