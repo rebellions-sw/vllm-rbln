@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Optional
 import torch
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionType)
+from vllm.attention.backends.registry import (AttentionBackendEnum,
+                                              register_backend)
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
                                               CommonAttentionMetadata)
@@ -768,6 +770,7 @@ def _(cache: torch.Tensor, state: torch.Tensor,
     return torch.empty_like(cache)
 
 
+@register_backend(AttentionBackendEnum.FLASH_ATTN)
 class RBLNAttentionBackend(AttentionBackend):
 
     @classmethod

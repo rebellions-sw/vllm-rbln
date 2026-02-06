@@ -269,16 +269,13 @@ def run_vllm(llm_kwargs, prompts):
 
 
 @pytest.mark.parametrize("target", targets)
-@pytest.mark.parametrize("vllm_use_v1", ["0", "1"])
 def test_model_coverage(
     monkeypatch: pytest.MonkeyPatch,
     target,
-    vllm_use_v1,
     common_env,
     prompts,
 ):
     test_env = target.pop("extra_env", {})
-    test_env["VLLM_USE_V1"] = vllm_use_v1
     test_env.update(common_env)
     patch_and_run(
         monkeypatch,

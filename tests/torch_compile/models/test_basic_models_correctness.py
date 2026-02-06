@@ -31,24 +31,17 @@ PROMPTS = [
 
 
 @pytest.mark.parametrize("model", DENSE_MODELS)
-@pytest.mark.parametrize("vllm_use_v1", [True])
 @pytest.mark.parametrize("max_num_seqs", [1])
 @pytest.mark.parametrize("max_tokens", [5])
 def test_dense_models(
     monkeypatch: pytest.MonkeyPatch,
     model: str,
-    vllm_use_v1: bool,
     max_num_seqs: int,
     max_tokens: int,
 ) -> None:
     with monkeypatch.context() as m:
         m.setenv("VLLM_RBLN_USE_VLLM_MODEL", "1")
         m.setenv("VLLM_DISABLE_COMPILE_CACHE", "1")
-
-        if vllm_use_v1:
-            m.setenv("VLLM_USE_V1", "1")
-        else:
-            m.setenv("VLLM_USE_V1", "0")
 
         prompts = PROMPTS
 
