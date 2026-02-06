@@ -18,6 +18,7 @@ import torch
 from vllm.attention.backends.registry import AttentionBackendEnum
 
 if TYPE_CHECKING:
+    from vllm.attention.selector import AttentionSelectorConfig
     from vllm.config import VllmConfig
     from vllm.utils.argparse_utils import FlexibleArgumentParser
 else:
