@@ -98,7 +98,8 @@ from vllm_rbln.v1.attention.backends.flash_attention import (
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
 from vllm_rbln.v1.sample import RBLNSampler
 from vllm_rbln.v1.worker.bucketing import get_bucketing_manager_class
-from vllm_rbln.worker.metrics import PerformanceTracker
+from vllm_rbln.worker.metrics import (ModelPerformanceTracker,
+                                      SamplerPerformanceTracker)
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
@@ -486,8 +487,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
-            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker = ModelPerformanceTracker()
             self.performance_tracker.register_cleanup()
+            self.sampler_performance_tracker = SamplerPerformanceTracker()
+            self.sampler_performance_tracker.register_cleanup()
 
     def _get_positions(self, num_tokens: Any):
         if isinstance(num_tokens, int):
@@ -1601,20 +1604,32 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
         if spec_decode_metadata is None:
+            start_time = time.perf_counter()
             sampler_output = self.sampler(
                 logits=logits,
                 sampling_metadata=sampling_metadata,
             )
+            end_time = time.perf_counter()
         else:
+            start_time = time.perf_counter()
             sampler_output = self.rejection_sampler(
                 spec_decode_metadata,
                 None,  # draft_probs
                 logits,
                 sampling_metadata,
             )
+            end_time = time.perf_counter()
             self._update_states_after_model_execute(
                 sampler_output.sampled_token_ids)
-
+        if envs.VLLM_RBLN_METRICS:
+            # Record performance metrics
+            execution_time = end_time - start_time
+            if self.performance_tracker:
+                self.performance_tracker.record_prefill(
+                    execution_time, request_ids=self.input_batch.req_ids)
+            if self.sampler_performance_tracker:
+                self.sampler_performance_tracker.record_decode(
+                    execution_time, request_ids=self.input_batch.req_ids)
         return sampler_output
 
     def compute_logits(

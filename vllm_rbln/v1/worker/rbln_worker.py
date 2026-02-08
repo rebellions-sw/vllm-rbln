@@ -361,10 +361,14 @@ class RBLNWorker(WorkerBase):
 
     def shutdown(self) -> None:
         logger.info("v1 rbln_worker shutdown called")
-        if envs.VLLM_RBLN_METRICS and \
-            self.model_runner.performance_tracker:
-            # FIXME - performance tracker atexit is not called
-            self.model_runner.performance_tracker.print_final_stats()
+        # FIXME - performance tracker atexit is not called
+        if envs.VLLM_RBLN_METRICS:
+            if self.model_runner.performance_tracker:
+                self.model_runner.performance_tracker.print_final_stats()
+
+            if self.model_runner.sampler_performance_tracker:
+                self.model_runner.sampler_performance_tracker.print_final_stats(
+                )
 
 
 def init_worker_distributed_environment(

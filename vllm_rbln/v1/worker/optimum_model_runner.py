@@ -56,7 +56,8 @@ from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
-from vllm_rbln.worker.metrics import PerformanceTracker
+from vllm_rbln.worker.metrics import (ModelPerformanceTracker,
+                                      SamplerPerformanceTracker)
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -224,8 +225,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             pin_memory=self.pin_memory)
 
         if envs.VLLM_RBLN_METRICS:
-            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker = ModelPerformanceTracker()
             self.performance_tracker.register_cleanup()
+            self.sampler_performance_tracker = SamplerPerformanceTracker()
+            self.sampler_performance_tracker.register_cleanup()
 
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
@@ -330,10 +333,21 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 padded_logits[:num_reqs].copy_(logits)
             else:
                 padded_logits = logits
+            start_time = time.perf_counter()
             sampler_output = self.sampler(
                 logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
+            end_time = time.perf_counter()
+            if envs.VLLM_RBLN_METRICS:
+                # Record performance metrics
+                execution_time = end_time - start_time
+                if model_input.is_prompt:
+                    self.sampler_performance_tracker.record_prefill(
+                        execution_time, num_scheduled_tokens)
+                else:
+                    self.sampler_performance_tracker.record_decode(
+                        execution_time, num_scheduled_tokens)
             if self.use_rbln_sampler:
                 sampler_output.sampled_token_ids = \
                     sampler_output.sampled_token_ids[:num_reqs]
