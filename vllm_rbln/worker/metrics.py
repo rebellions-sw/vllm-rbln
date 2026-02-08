@@ -16,24 +16,16 @@ import atexit
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, TypeVar
 
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
 
-
-def _remove_outlier_f(values: list[float]) -> list[float]:
-    """Return values excluding one outlier (max absolute deviation)."""
-    if len(values) <= 1:
-        return values
-    mean = sum(values) / len(values)
-    deviations = [abs(v - mean) for v in values]
-    max_idx = deviations.index(max(deviations))
-    return [v for i, v in enumerate(values) if i != max_idx]
+T = TypeVar('T', int, float)
 
 
-def _remove_outlier_i(values: list[int]) -> list[int]:
+def _remove_outlier(values: list[T]) -> list[T]:
     """Return values excluding one outlier (max absolute deviation)."""
     if len(values) <= 1:
         return values
@@ -55,7 +47,7 @@ class BaseStepMetrics:
     def get_avg_latency(self, ignore_outlier: bool = True) -> float:
         """Get average latency in milliseconds,
         optionally ignoring one outlier."""
-        values = _remove_outlier_f(
+        values = _remove_outlier(
             self.latencies) if ignore_outlier else self.latencies
         return sum(values) / len(values) * 1000 if values else 0.0
 
@@ -88,9 +80,9 @@ class ThroughputMetrics(BaseStepMetrics):
         optionally ignoring one outlier."""
         if not self.latencies or not self.token_counts:
             return 0.0
-        latencies = _remove_outlier_f(
+        latencies = _remove_outlier(
             self.latencies) if ignore_outlier else self.latencies
-        tokens = _remove_outlier_i(
+        tokens = _remove_outlier(
             self.token_counts) if ignore_outlier else self.token_counts
         total_time = sum(latencies)
         total_tokens = sum(tokens)
