@@ -140,8 +140,7 @@ class ThroughputMetrics(BaseStepMetrics):
 class BasePerformanceTracker(ABC):
     """Base class for performance trackers with unified API."""
 
-    def __init__(self, metric_name: str):
-        self.metric_name = metric_name
+    def __init__(self):
         self._registered_cleanup = False
 
     def register_cleanup(self):
@@ -193,8 +192,8 @@ class BasePerformanceTracker(ABC):
 class ModelPerformanceTracker(BasePerformanceTracker):
     """Tracks performance metrics with throughput calculation for models."""
 
-    def __init__(self, metric_name: str = "MODEL"):
-        super().__init__(metric_name)
+    def __init__(self):
+        super().__init__()
         self.prefill_metrics = ThroughputMetrics()
         self.decode_metrics = ThroughputMetrics()
         self.padded_decode_metrics = ThroughputMetrics()
@@ -245,7 +244,7 @@ class ModelPerformanceTracker(BasePerformanceTracker):
     def print_final_stats(self):
         """Print final statistics with throughput information."""
         logger.info("=" * 80)
-        logger.info(f"FINAL PERFORMANCE STATISTICS ({self.metric_name})")
+        logger.info(f"FINAL PERFORMANCE STATISTICS (MODEL)")
         logger.info("=" * 80)
 
         # Prefill stats
@@ -327,8 +326,8 @@ class ModelPerformanceTracker(BasePerformanceTracker):
 class SamplerPerformanceTracker(BasePerformanceTracker):
     """Tracks performance metrics with latency-only tracking for samplers."""
 
-    def __init__(self, metric_name: str = "SAMPLER"):
-        super().__init__(metric_name)
+    def __init__(self):
+        super().__init__()
         self.prefill_metrics = LatencyOnlyMetrics()
         self.decode_metrics = LatencyOnlyMetrics()
         self.padded_decode_metrics = LatencyOnlyMetrics()
@@ -370,7 +369,7 @@ class SamplerPerformanceTracker(BasePerformanceTracker):
     def print_final_stats(self):
         """Print final statistics with latency-only information."""
         logger.info("=" * 80)
-        logger.info(f"FINAL PERFORMANCE STATISTICS ({self.metric_name})")
+        logger.info("FINAL PERFORMANCE STATISTICS (SAMPLER)")
         logger.info("=" * 80)
 
         # Prefill stats
@@ -435,15 +434,3 @@ class SamplerPerformanceTracker(BasePerformanceTracker):
             logger.info("PADDED DECODE METRICS: No data recorded")
 
         logger.info("=" * 80)
-
-
-# Legacy alias for backward compatibility
-class PerformanceTracker(ModelPerformanceTracker):
-    """Legacy alias for ModelPerformanceTracker.
-    
-    Maintained for backward compatibility with existing code.
-    New code should use ModelPerformanceTracker directly.
-    """
-
-    def __init__(self):
-        super().__init__(metric_name="MODEL")
