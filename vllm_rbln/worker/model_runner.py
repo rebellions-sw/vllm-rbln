@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
-from vllm_rbln.worker.metrics import PerformanceTracker
+from vllm_rbln.worker.metrics import ModelPerformanceTracker
 
 logger = init_logger(__name__)
 
@@ -431,7 +431,7 @@ class RBLNModelRunner(ModelRunnerBase[ModelInputForRebelWithSamplingMetadata]):
             self.builder = self._builder_cls(
                 cast(RBLNModelRunner, weakref.proxy(self)))
         if envs.VLLM_RBLN_METRICS:
-            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker = ModelPerformanceTracker()
             self.performance_tracker.register_cleanup()
 
     def compile_model(self, model):

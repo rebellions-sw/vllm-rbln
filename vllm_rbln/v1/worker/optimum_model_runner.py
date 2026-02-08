@@ -56,7 +56,8 @@ from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
-from vllm_rbln.worker.metrics import PerformanceTracker
+from vllm_rbln.worker.metrics import (ModelPerformanceTracker,
+                                      SamplerPerformanceTracker)
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -224,9 +225,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             pin_memory=self.pin_memory)
 
         if envs.VLLM_RBLN_METRICS:
-            self.performance_tracker = PerformanceTracker("MODEL")
+            self.performance_tracker = ModelPerformanceTracker()
             self.performance_tracker.register_cleanup()
-            self.sampler_performance_tracker = PerformanceTracker("SAMPLER")
+            self.sampler_performance_tracker = SamplerPerformanceTracker()
             self.sampler_performance_tracker.register_cleanup()
 
     def load_model(self) -> None:
