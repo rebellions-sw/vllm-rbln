@@ -479,6 +479,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.bucketing_manager.decode_batch_buckets)
 
         self.performance_tracker = None
+        self.sampler_performance_tracker = None
 
         self.dummy_run_state: DummyRunState | None = None
 
@@ -1621,13 +1622,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             end_time = time.perf_counter()
             self._update_states_after_model_execute(
                 sampler_output.sampled_token_ids)
-        if envs.VLLM_RBLN_METRICS:
+        if envs.VLLM_RBLN_METRICS and self.sampler_performance_tracker is not None:
             # Record performance metrics
             execution_time = end_time - start_time
-            if self.performance_tracker:
-                self.performance_tracker.record_prefill(
+            is_prefill = self.is_prefills()[0]
+            if is_prefill:
+                self.sampler_performance_tracker.record_prefill(
                     execution_time, request_ids=self.input_batch.req_ids)
-            if self.sampler_performance_tracker:
+            else:
                 self.sampler_performance_tracker.record_decode(
                     execution_time, request_ids=self.input_batch.req_ids)
         return sampler_output
@@ -2470,6 +2472,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.performance_tracker.record_prefill(
                         execution_time,
                         num_scheduled_tokens,
+                        request_ids=self.input_batch.req_ids,
                         host_time=host_time,
                         device_time=device_time,
                         ccl_time=ccl_time)
@@ -2479,6 +2482,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.performance_tracker.record_decode(
                         execution_time,
                         num_scheduled_tokens,
+                        request_ids=self.input_batch.req_ids,
                         host_time=host_time,
                         device_time=device_time,
                         ccl_time=ccl_time,
