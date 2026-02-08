@@ -1611,7 +1611,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         sampling_metadata = self.input_batch.sampling_metadata
         if spec_decode_metadata is None:
             start_time = time.perf_counter()
-            with capture_ctx as reports:
+            with capture_ctx as sampler_reports:
                 sampler_output = self.sampler(
                     logits=logits,
                     sampling_metadata=sampling_metadata,
@@ -1619,7 +1619,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             end_time = time.perf_counter()
         else:
             start_time = time.perf_counter()
-            with capture_ctx as reports:
+            with capture_ctx as sampler_reports:
                 sampler_output = self.rejection_sampler(
                     spec_decode_metadata,
                     None,  # draft_probs
@@ -1635,10 +1635,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             host_time = None
             device_time = None
             ccl_time = None
-            if reports is not None and len(reports) > 0:
-                host_time = reports[0].get('total_host', None)
-                device_time = reports[0].get('total_device', None)
-                ccl_time = reports[0].get('total_ccl', None)
+            if sampler_reports is not None and len(sampler_reports) > 0:
+                host_time = sampler_reports[0].get('total_host', None)
+                device_time = sampler_reports[0].get('total_device', None)
+                ccl_time = sampler_reports[0].get('total_ccl', None)
             is_prefill = self.is_prefills()[0]
             if is_prefill:
                 self.sampler_performance_tracker.record_prefill(
