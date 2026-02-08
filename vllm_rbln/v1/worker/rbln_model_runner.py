@@ -2646,11 +2646,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                   self.input_batch, logits)
             logits = logits.to(original_dtype)
 
-        if hasattr(rebel, "capture_reports"):
-            capture_ctx = rebel.capture_reports()
-        else:
-            # use a dummy context manager that does nothing
-            capture_ctx = contextlib.nullcontext()
+        with record_function_or_nullcontext("Sample"):
+            sampler_output = self._sample(logits, spec_decode_metadata)
 
         def propose_draft_token_ids(sampled_token_ids):
             assert spec_decode_common_attn_metadata is not None
