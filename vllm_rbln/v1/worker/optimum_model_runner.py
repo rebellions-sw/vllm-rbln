@@ -333,21 +333,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 padded_logits[:num_reqs].copy_(logits)
             else:
                 padded_logits = logits
-            start_time = time.perf_counter()
             sampler_output = self.sampler(
                 logits=padded_logits,
                 sampling_metadata=self.input_batch.sampling_metadata,
             )
-            end_time = time.perf_counter()
-            if envs.VLLM_RBLN_METRICS:
-                # Record performance metrics
-                execution_time = end_time - start_time
-                if model_input.is_prompt:
-                    self.sampler_performance_tracker.record_prefill(
-                        execution_time, num_scheduled_tokens)
-                else:
-                    self.sampler_performance_tracker.record_decode(
-                        execution_time, num_scheduled_tokens)
             if self.use_rbln_sampler:
                 sampler_output.sampled_token_ids = \
                     sampler_output.sampled_token_ids[:num_reqs]

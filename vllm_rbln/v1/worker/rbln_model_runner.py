@@ -1603,35 +1603,59 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             spec_decode_metadata: Optional[SpecDecodeMetadata]
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
+        if hasattr(rebel, "capture_reports"):
+            capture_ctx = rebel.capture_reports()
+        else:
+            # use a dummy context manager that does nothing
+            capture_ctx = contextlib.nullcontext()
         sampling_metadata = self.input_batch.sampling_metadata
         if spec_decode_metadata is None:
             start_time = time.perf_counter()
-            sampler_output = self.sampler(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
+            with capture_ctx as reports:
+                sampler_output = self.sampler(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
             end_time = time.perf_counter()
         else:
             start_time = time.perf_counter()
-            sampler_output = self.rejection_sampler(
-                spec_decode_metadata,
-                None,  # draft_probs
-                logits,
-                sampling_metadata,
-            )
+            with capture_ctx as reports:
+                sampler_output = self.rejection_sampler(
+                    spec_decode_metadata,
+                    None,  # draft_probs
+                    logits,
+                    sampling_metadata,
+                )
             end_time = time.perf_counter()
             self._update_states_after_model_execute(
                 sampler_output.sampled_token_ids)
         if envs.VLLM_RBLN_METRICS and self.sampler_performance_tracker is not None:
             # Record performance metrics
             execution_time = end_time - start_time
+            host_time = None
+            device_time = None
+            ccl_time = None
+            if reports is not None and len(reports) > 0:
+                host_time = reports[0].get('total_host', None)
+                device_time = reports[0].get('total_device', None)
+                ccl_time = reports[0].get('total_ccl', None)
             is_prefill = self.is_prefills()[0]
             if is_prefill:
                 self.sampler_performance_tracker.record_prefill(
-                    execution_time, request_ids=self.input_batch.req_ids)
+                    execution_time,
+                    request_ids=self.input_batch.req_ids,
+                    host_time=host_time,
+                    device_time=device_time,
+                    ccl_time=ccl_time,
+                )
             else:
                 self.sampler_performance_tracker.record_decode(
-                    execution_time, request_ids=self.input_batch.req_ids)
+                    execution_time,
+                    request_ids=self.input_batch.req_ids,
+                    host_time=host_time,
+                    device_time=device_time,
+                    ccl_time=ccl_time,
+                )
         return sampler_output
 
     def compute_logits(
@@ -2622,8 +2646,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                   self.input_batch, logits)
             logits = logits.to(original_dtype)
 
-        with record_function_or_nullcontext("Sample"):
-            sampler_output = self._sample(logits, spec_decode_metadata)
+        if hasattr(rebel, "capture_reports"):
+            capture_ctx = rebel.capture_reports()
+        else:
+            # use a dummy context manager that does nothing
+            capture_ctx = contextlib.nullcontext()
 
         def propose_draft_token_ids(sampled_token_ids):
             assert spec_decode_common_attn_metadata is not None
