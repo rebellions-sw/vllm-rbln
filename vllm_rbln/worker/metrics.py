@@ -102,11 +102,12 @@ class PrefillMetricsByRequestID:
 class PerformanceTracker:
     """Tracks performance metrics for prefill and decode steps."""
 
-    def __init__(self):
+    def __init__(self, metric_name: str):
         self.prefill_metrics = StepMetrics()
         self.decode_metrics = StepMetrics()
         self.prefill_metrics_by_request_id = PrefillMetricsByRequestID()
         self._registered_cleanup = False
+        self.metric_name = metric_name
 
     def register_cleanup(self):
         """Register cleanup function to print stats on exit."""
@@ -150,7 +151,7 @@ class PerformanceTracker:
 
     def print_final_stats(self):
         logger.info("=" * 80)
-        logger.info("FINAL PERFORMANCE STATISTICS")
+        logger.info(f"FINAL PERFORMANCE STATISTICS ({self.metric_name})")
         logger.info("=" * 80)
 
         # Prefill stats

@@ -200,6 +200,7 @@ class RBLNOptimumWorker(WorkerBase):
         if envs.VLLM_RBLN_METRICS:
             # FIXME - performance tracker atexit is not called
             self.model_runner.performance_tracker.print_final_stats()
+            self.model_runner.sampler_performance_tracker.print_final_stats()
 
 
 def init_worker_distributed_environment(
