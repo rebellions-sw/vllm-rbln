@@ -490,6 +490,7 @@ def torch_rejection_random_sample_kernel(
         if NO_DRAFT_PROBS:
             accept = t_prob >= u
         else:
+            assert draft_probs is not None
             d_prob = (
                 draft_probs[s:e]
                 .gather(1, d_ids.unsqueeze(1))
@@ -576,6 +577,7 @@ def torch_sample_recovered_tokens_kernel(
             prob = prob.clone()
             prob.scatter_(1, d_ids.unsqueeze(1), 0.0)
         else:
+            assert draft_probs is not None
             prob = torch.maximum(
                 target_probs[s:e].to(torch.float32)
                 - draft_probs[s:e].to(torch.float32),

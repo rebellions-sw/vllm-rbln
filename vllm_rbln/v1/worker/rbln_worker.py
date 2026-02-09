@@ -412,6 +412,7 @@ class RBLNWorker(WorkerBase):
         logger.info("v1 rbln_worker shutdown called")
         if envs.VLLM_RBLN_METRICS:
             # FIXME - performance tracker atexit is not called
+            assert self.model_runner.performance_tracker is not None
             self.model_runner.performance_tracker.print_final_stats()
 
 

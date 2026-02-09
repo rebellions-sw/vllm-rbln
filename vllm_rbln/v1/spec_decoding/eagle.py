@@ -29,7 +29,6 @@ import vllm_rbln.utils as rbln_utils
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.attention.backends.flash_attention import (
     RBLNFlashAttentionMetadata,
-    RBLNFlashAttentionMetadataBuilder,
 )
 
 logger = init_logger(__name__)
@@ -65,11 +64,11 @@ def __custom_init__(
         vllm_config.model_config
     )
 
-    self.attn_metadata_builder: RBLNFlashAttentionMetadataBuilder | None = None
-    self.draft_indexer_metadata_builder: RBLNFlashAttentionMetadataBuilder | None = None
-    self.attn_layer_names: list[str] = []
-    self.indexer_layer_names: list[str] = []
-    self.eagle3_use_aux_hidden_state: bool = (
+    self.attn_metadata_builder = None
+    self.draft_indexer_metadata_builder = None
+    self.attn_layer_names = []
+    self.indexer_layer_names = []
+    self.eagle3_use_aux_hidden_state = (
         self._get_eagle3_use_aux_hidden_state_from_config()
     )
 
@@ -128,7 +127,7 @@ def __custom_init__(
 
     # Parse the speculative token tree.
     spec_token_tree = self.speculative_config.speculative_token_tree
-    self.tree_choices: list[tuple[int, ...]] = ast.literal_eval(spec_token_tree)
+    self.tree_choices = ast.literal_eval(spec_token_tree)
     tree_depth = len(self.tree_choices[-1])
     # Precompute per-level properties of the tree.
     num_drafts_per_level = [0] * tree_depth
@@ -253,6 +252,7 @@ def custom_propose(
     # reshapes input tensors in the same way as the RBLN model runner.
     is_prefills = self.runner.is_prefills()
     num_reqs = self.runner.input_batch.num_reqs
+    assert input_ids is not None
     input_ids = input_ids.view(num_reqs, -1)
     target_positions = target_positions.view(num_reqs, -1)
     if is_prefills[0]:
