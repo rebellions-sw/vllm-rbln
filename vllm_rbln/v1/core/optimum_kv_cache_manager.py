@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import torch
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
@@ -22,15 +21,13 @@ from vllm.v1.metrics.stats import PrefixCacheStats
 from vllm.v1.request import Request
 
 from vllm_rbln.logger import init_logger
-from vllm_rbln.v1.core.optimum_kv_cache_coordinator import (
-    RBLNKVCacheCoordinator)
+from vllm_rbln.v1.core.optimum_kv_cache_coordinator import RBLNKVCacheCoordinator
 from vllm_rbln.v1.core.prefix_cache_manager import RBLNPrefixKVCacheManager
 
 logger = init_logger(__name__)
 
 
 class RBLNKVCacheManager(KVCacheManager):
-
     def __init__(
         self,
         kv_cache_config: KVCacheConfig,
@@ -43,7 +40,7 @@ class RBLNKVCacheManager(KVCacheManager):
         dcp_world_size: int = 1,
         pcp_world_size: int = 1,
         metrics_collector: KVCacheMetricsCollector | None = None,
-        attn_block_size: Optional[int] = None,
+        attn_block_size: int | None = None,
         max_num_seqs: int = 1,
     ) -> None:
         """
@@ -76,8 +73,7 @@ class RBLNKVCacheManager(KVCacheManager):
         self.num_kv_cache_groups = len(kv_cache_config.kv_cache_groups)
         self.block_pool = self.coordinator.block_pool
         self.kv_cache_config = kv_cache_config
-        block_size = kv_cache_config.kv_cache_groups[
-            0].kv_cache_spec.block_size
+        block_size = kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
         if enable_caching:
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=attn_block_size,
@@ -92,14 +88,15 @@ class RBLNKVCacheManager(KVCacheManager):
         #
         # We use nested tuples to ensure the empty KVCacheBlocks is immutable.
         self.empty_kv_cache_blocks = KVCacheBlocks(
-            tuple(() for _ in range(self.num_kv_cache_groups)))
+            tuple(() for _ in range(self.num_kv_cache_groups))
+        )
 
     def free(self, request: Request, preemption: int = False) -> None:
-        """Free the blocks allocated for the request.
-        """
+        """Free the blocks allocated for the request."""
         if self.enable_caching:
-            self.prefix_cache_manager.free_request(request.request_id,
-                                                   preemption=preemption)
+            self.prefix_cache_manager.free_request(
+                request.request_id, preemption=preemption
+            )
         self.coordinator.free(request.request_id)
 
     def allocate_slots(
@@ -107,11 +104,11 @@ class RBLNKVCacheManager(KVCacheManager):
         request: Request,
         num_new_tokens: int,
         num_new_computed_tokens: int = 0,
-        new_computed_blocks: Optional[KVCacheBlocks] = None,
+        new_computed_blocks: KVCacheBlocks | None = None,
         num_lookahead_tokens: int = 0,
         delay_cache_blocks: bool = False,
         num_encoder_tokens: int = 0,
-    ) -> Optional[KVCacheBlocks]:
+    ) -> KVCacheBlocks | None:
         assert num_lookahead_tokens == 0
         assert not delay_cache_blocks
         assert num_encoder_tokens == 0
@@ -140,11 +137,10 @@ class RBLNKVCacheManager(KVCacheManager):
             # Cannot allocate new blocks
             return None
 
-        if self.enable_caching and \
-            not self.prefix_cache_manager.can_allocate(
-                    num_blocks_to_allocate,
-                    num_computed_tokens,
-            ):
+        if self.enable_caching and not self.prefix_cache_manager.can_allocate(
+            num_blocks_to_allocate,
+            num_computed_tokens,
+        ):
             # Cannot allocate new outer blocks for prefix caching
             return None
 
@@ -158,7 +154,8 @@ class RBLNKVCacheManager(KVCacheManager):
         )
 
         new_blocks = self.coordinator.allocate_new_blocks(
-            request.request_id, num_tokens_need_slot, 0)
+            request.request_id, num_tokens_need_slot, 0
+        )
 
         # P/D: delay caching blocks if we have to recv from
         # remote. Update state for locally cached blocks.
@@ -189,10 +186,12 @@ class RBLNKVCacheManager(KVCacheManager):
         num_new_computed_tokens: int,
     ) -> tuple[list[int], list[int]]:
         cached_blocks = new_computed_blocks.get_block_ids()[0]
-        cached_block_table, cached_length = \
+        cached_block_table, cached_length = (
             self.prefix_cache_manager.get_matched_outer_blocks(
-            request.request_id, cached_blocks,
-            num_new_computed_tokens,
+                request.request_id,
+                cached_blocks,
+                num_new_computed_tokens,
+            )
         )
 
         return cached_block_table, cached_length

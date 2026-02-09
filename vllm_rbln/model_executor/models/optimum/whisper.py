@@ -15,24 +15,35 @@
 import torch
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.models.interfaces import (SupportsMultiModal,
-                                                   SupportsTranscription)
-from vllm.model_executor.models.whisper import (ISO639_1_SUPPORTED_LANGS,
-                                                WhisperAudioInputs)
+from vllm.model_executor.models.interfaces import (
+    SupportsMultiModal,
+    SupportsTranscription,
+)
+from vllm.model_executor.models.whisper import (
+    ISO639_1_SUPPORTED_LANGS,
+    WhisperAudioInputs,
+)
 from vllm.utils.jsontree import json_map_leaves
 
 from .base import ModelInputForRBLN
 from .model_base import RBLNOptimumDecoderMixin, RBLNOptimumModelBase
-from .optimum_attention import (AttentionManager, InnerAttentionEntry,
-                                InnerAttentionStrategy, InnerR1, InnerR2)
+from .optimum_attention import (
+    AttentionManager,
+    InnerAttentionEntry,
+    InnerAttentionStrategy,
+    InnerR1,
+    InnerR2,
+)
 
 logger = init_logger(__name__)
 
 
-class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
-                                                 RBLNOptimumDecoderMixin,
-                                                 SupportsTranscription,
-                                                 SupportsMultiModal):
+class RBLNOptimumWhisperForConditionalGeneration(
+    RBLNOptimumModelBase,
+    RBLNOptimumDecoderMixin,
+    SupportsTranscription,
+    SupportsMultiModal,
+):
     INVALID_TOKEN = 100
     # Whisper only supports audio-conditioned generation.
     supports_transcription_only = True
@@ -48,7 +59,8 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             logger.warning(
                 "Defaulting to language='en'. If you wish to transcribe "
                 "audio in a different language, pass the `language` field "
-                "in the TranscriptionRequest.")
+                "in the TranscriptionRequest."
+            )
             language = "en"
         return super().validate_language(language)
 
@@ -71,13 +83,11 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         self.dec_lengths = [0] * self.batch_size
 
         self.strategy = InnerAttentionStrategy()
-        self.attention_manager: AttentionManager[InnerAttentionStrategy,
-                                                 InnerAttentionEntry, InnerR1,
-                                                 InnerR2] = AttentionManager(
-                                                     self.strategy)
+        self.attention_manager: AttentionManager[
+            InnerAttentionStrategy, InnerAttentionEntry, InnerR1, InnerR2
+        ] = AttentionManager(self.strategy)
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         block_tables = model_input.block_tables
 
@@ -98,28 +108,32 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
         if is_prompt:
             if model_input.multi_modal_kwargs:
                 input_features = self._parse_and_validate_audio_input(
-                    **model_input.multi_modal_kwargs)
+                    **model_input.multi_modal_kwargs
+                )
             if input_features is None:
-                raise ValueError(
-                    "Whisper requires `input_features` as an input.")
+                raise ValueError("Whisper requires `input_features` as an input.")
             # FIXME I think encoder should be called here
 
         cache_position = torch.zeros(request_nums, 1, dtype=torch.int32)
 
-        kwargs = self.preprocess_for_decoder(is_prompt,
-                                             block_tables,
-                                             input_ids,
-                                             cache_position,
-                                             input_block_ids=valid_block_ids)
+        kwargs = self.preprocess_for_decoder(
+            is_prompt,
+            block_tables,
+            input_ids,
+            cache_position,
+            input_block_ids=valid_block_ids,
+        )
         input_ids = kwargs.pop("input_ids")
         cache_position = kwargs.pop("cache_position")
         block_tables = kwargs.pop("block_tables")
 
         if is_prompt:
-            _ = self.model.encoder(input_features=input_features,
-                                   block_tables=block_tables)
+            _ = self.model.encoder(
+                input_features=input_features, block_tables=block_tables
+            )
             lm_logits = torch.zeros(
-                1, 1, self.model.config.vocab_size + self.INVALID_TOKEN)
+                1, 1, self.model.config.vocab_size + self.INVALID_TOKEN
+            )
             # Set the probability of INVALID_TOKEN (the last token in
             # the logits tensor) to 1.0.
             lm_logits[0][0][-1] = 1
@@ -130,20 +144,19 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             self.dec_lengths[table_ids[0]] = 0
 
         else:
-            input_ids[input_ids == (
-                self.model.config.vocab_size + self.INVALID_TOKEN -
-                1)] = self.model.config.decoder_start_token_id
+            input_ids[
+                input_ids == (self.model.config.vocab_size + self.INVALID_TOKEN - 1)
+            ] = self.model.config.decoder_start_token_id
 
             # FIXME Is it ok generate torch.zero tensor for each forward?
             # OR just generate pooled tensor in the model instance?
-            decoder_attention_mask = torch.zeros(self.batch_size,
-                                                 self.dec_max_seq_len,
-                                                 dtype=self.dtype)
+            decoder_attention_mask = torch.zeros(
+                self.batch_size, self.dec_max_seq_len, dtype=self.dtype
+            )
             # Generate cache_position using dec_lengths
             for batch_idx in valid_block_ids:
                 cache_position[batch_idx] = self.dec_lengths[batch_idx]
-                decoder_attention_mask[batch_idx, :cache_position[batch_idx] +
-                                       1] = 1
+                decoder_attention_mask[batch_idx, : cache_position[batch_idx] + 1] = 1
                 self.dec_lengths[batch_idx] += 1
 
             decoder_output = self.model.decoder(
@@ -157,12 +170,10 @@ class RBLNOptimumWhisperForConditionalGeneration(RBLNOptimumModelBase,
             lm_logits = lm_logits[valid_block_ids]
         return lm_logits
 
-    def _parse_and_validate_audio_input(
-            self, **kwargs: object) -> WhisperAudioInputs:
+    def _parse_and_validate_audio_input(self, **kwargs: object) -> WhisperAudioInputs:
         input_features = kwargs.pop("input_features", None)
 
         if input_features is not None:
-            input_features = json_map_leaves(lambda x: x.to(self.dtype),
-                                             input_features)
+            input_features = json_map_leaves(lambda x: x.to(self.dtype), input_features)
 
         return WhisperAudioInputs(input_features=input_features)

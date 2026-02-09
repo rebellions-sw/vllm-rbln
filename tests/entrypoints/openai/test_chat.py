@@ -44,13 +44,10 @@ async def client(server):
     [MODEL_NAME],
 )
 async def test_chat_streaming(client: openai.AsyncOpenAI, model_name: str):
-    messages = [{
-        "role": "system",
-        "content": "you are a helpful assistant"
-    }, {
-        "role": "user",
-        "content": "what is 1+1?"
-    }]
+    messages = [
+        {"role": "system", "content": "you are a helpful assistant"},
+        {"role": "user", "content": "what is 1+1?"},
+    ]
 
     # test single completion
     chat_completion = await client.chat.completions.create(
@@ -95,14 +92,8 @@ async def test_chat_streaming(client: openai.AsyncOpenAI, model_name: str):
 )
 async def test_some_logprobs_chat(client: openai.AsyncOpenAI, model_name: str):
     messages = [
-        {
-            "role": "system",
-            "content": "you are a helpful assistant"
-        },
-        {
-            "role": "user",
-            "content": "what is 1+1?"
-        },
+        {"role": "system", "content": "you are a helpful assistant"},
+        {"role": "user", "content": "what is 1+1?"},
     ]
 
     chat_completion = await client.chat.completions.create(

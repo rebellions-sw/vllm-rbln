@@ -31,4 +31,5 @@ def get_bucketing_manager_class(strategy: str) -> type[RBLNBucketingManager]:
     else:
         raise ValueError(
             f"Invalid bucketing strategy: {strategy}. "
-            "Valid strategies are [exponential, exp, linear].", )
+            "Valid strategies are [exponential, exp, linear].",
+        )

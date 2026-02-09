@@ -32,13 +32,15 @@ SQL_LORA_MODEL_ID = "Rustamshry/Llama3.2-SQL-1B"
 
 
 def create_test_prompts(
-        lora_path: str | None,
-        lora_id: int = -1
+    lora_path: str | None, lora_id: int = -1
 ) -> list[tuple[str, SamplingParams, LoRARequest | None]]:
     if lora_path is None:
         return [
-            ("A robot may not injure a human being",
-             SamplingParams(temperature=0.0, max_tokens=128), None),
+            (
+                "A robot may not injure a human being",
+                SamplingParams(temperature=0.0, max_tokens=128),
+                None,
+            ),
         ]
 
     if "sql" in lora_path.lower():
@@ -49,15 +51,20 @@ def create_test_prompts(
         instruction = (
             "You are a skilled SQL assistant."
             "Using the given database context, generate the correct SQL query to answer the question.\n\n"  # noqa
-            f"Context: {context.strip()}")
+            f"Context: {context.strip()}"
+        )
 
-        prompt = (f"### Instruction:\n{instruction}\n\n"
-                  f"### Question:\n{question}\n\n"
-                  f"### Response:\n")
+        prompt = (
+            f"### Instruction:\n{instruction}\n\n"
+            f"### Question:\n{question}\n\n"
+            f"### Response:\n"
+        )
         return [
             (
                 prompt,  # noqa
-                SamplingParams(max_tokens=256, ),
+                SamplingParams(
+                    max_tokens=256,
+                ),
                 LoRARequest("sql-lora", lora_id, lora_path),
             ),
         ]
@@ -75,10 +82,9 @@ def process_requests(
     while prompts or engine.has_unfinished_requests():
         if prompts:
             prompt, sampling_params, lora_request = prompts.pop(0)
-            engine.add_request(str(request_id),
-                               prompt,
-                               sampling_params,
-                               lora_request=lora_request)
+            engine.add_request(
+                str(request_id), prompt, sampling_params, lora_request=lora_request
+            )
             request_id += 1
 
         request_outputs: list[RequestOutput] = engine.step()

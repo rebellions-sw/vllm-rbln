@@ -34,16 +34,17 @@ class RBLNBucketingManager(ABC):
             raise ValueError(
                 "max_batch_size must be >= min_batch_size, "
                 f"max_batch_size: {self.max_batch_size}, "
-                f"min_batch_size: {self.min_batch_size}", )
+                f"min_batch_size: {self.min_batch_size}",
+            )
         if self.limit <= 0:
-            raise ValueError(
-                f"limit must be greater than 0, limit: {self.limit}")
+            raise ValueError(f"limit must be greater than 0, limit: {self.limit}")
         if self.step <= 0:
             raise ValueError(f"step must be greater than 0, step: {self.step}")
         if self.min_batch_size <= 0:
             raise ValueError(
                 "min_batch_size must be greater than 0, "
-                f"min_batch_size: {self.min_batch_size}", )
+                f"min_batch_size: {self.min_batch_size}",
+            )
 
         # build the decode buckets
         self.decode_batch_buckets: list[int]
@@ -68,5 +69,7 @@ class RBLNBucketingManager(ABC):
             if bucket >= batch_size:
                 return bucket
         raise ValueError(
-            "No batch bucket found for batch size %d, "
-            "batch buckets: %s", batch_size, self.batch_buckets)
+            "No batch bucket found for batch size %d, batch buckets: %s",
+            batch_size,
+            self.batch_buckets,
+        )

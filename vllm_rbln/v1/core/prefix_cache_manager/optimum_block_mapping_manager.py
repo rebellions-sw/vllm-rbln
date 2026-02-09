@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Optional
 
 from vllm_rbln.logger import init_logger
 
@@ -21,7 +20,6 @@ logger = init_logger(__name__)
 
 
 class RBLNBlock:
-
     def __init__(self, block_id: int):
         self.block_id = block_id
 
@@ -33,7 +31,7 @@ class RBLNBlock:
 class BlockMapping:
     outer_block_id: int
     inner_block_ids: list[int]
-    request_id: Optional[str] = None
+    request_id: str | None = None
     is_active: bool = True
 
 
@@ -70,8 +68,7 @@ class BlockMappingManager:
         """
         return inner_block_id in self._inner_to_outer
 
-    def add_new_inner_to_outer(self, inner_block_id: int,
-                               outer_block_id: int) -> None:
+    def add_new_inner_to_outer(self, inner_block_id: int, outer_block_id: int) -> None:
         """
         Add a new mapping from an inner block ID to an outer block ID.
         And remove previous caching history of newly allocated
@@ -79,14 +76,17 @@ class BlockMappingManager:
         """
         self._inner_to_outer[inner_block_id] = outer_block_id
 
-    def create_mapping(self, outer_block: RBLNBlock, inner_blocks: list[int],
-                       request_id: str) -> None:
+    def create_mapping(
+        self, outer_block: RBLNBlock, inner_blocks: list[int], request_id: str
+    ) -> None:
         """
         Create a new block mapping.
         """
-        mapping = BlockMapping(outer_block_id=outer_block.block_id,
-                               inner_block_ids=inner_blocks.copy(),
-                               request_id=request_id)
+        mapping = BlockMapping(
+            outer_block_id=outer_block.block_id,
+            inner_block_ids=inner_blocks.copy(),
+            request_id=request_id,
+        )
         self._block_mappings[outer_block.block_id] = mapping
 
         # Update Inner to outer mapping
@@ -98,14 +98,17 @@ class BlockMappingManager:
             self._request_to_outer_blocks[request_id] = []
         self._request_to_outer_blocks[request_id].append(outer_block.block_id)
 
-    def remove_mapping(self, outer_block_id: int) -> Optional[BlockMapping]:
+    def remove_mapping(self, outer_block_id: int) -> BlockMapping | None:
         """
         Remove a mapping by outer block ID and return the removed mapping.
         """
         inner_block_ids = self.get_inner_blocks_for_outer(outer_block_id)
-        logger.debug("[PFX] [MAPPING-REMOVE] OB=%d | "
-                     "IB_COUNT=%d IB=%s", outer_block_id, len(inner_block_ids),
-                     inner_block_ids)
+        logger.debug(
+            "[PFX] [MAPPING-REMOVE] OB=%d | IB_COUNT=%d IB=%s",
+            outer_block_id,
+            len(inner_block_ids),
+            inner_block_ids,
+        )
         # 1. Remove inner_block_id mapped to the removed outer_block_id
         for ib_id in inner_block_ids:
             self._inner_to_outer.pop(ib_id, None)
@@ -129,13 +132,13 @@ class BlockMappingManager:
         """
         return self._request_to_outer_blocks.pop(request_id, [])
 
-    def get_mapping(self, outer_block_id: int) -> Optional[BlockMapping]:
+    def get_mapping(self, outer_block_id: int) -> BlockMapping | None:
         """
         Return the mapping for a given outer block ID.
         """
         return self._block_mappings.get(outer_block_id)
 
-    def get_outer_block_for_inner(self, inner_block_id: int) -> Optional[int]:
+    def get_outer_block_for_inner(self, inner_block_id: int) -> int | None:
         """
         Return the outer block ID that maps to a given inner block ID.
         """
@@ -153,12 +156,14 @@ class BlockMappingManager:
         Return a list of inactive mappings.
         """
         return [
-            mapping for mapping in self._block_mappings.values()
+            mapping
+            for mapping in self._block_mappings.values()
             if not mapping.is_active
         ]
 
     def get_longest_matched_block(
-            self, cached_ib_segment: list[int]) -> tuple[int, int]:
+        self, cached_ib_segment: list[int]
+    ) -> tuple[int, int]:
         """
         Given a segment of cached inner block IDs,
         return the outer block ID that has the longest matching prefix
@@ -171,8 +176,12 @@ class BlockMappingManager:
         logger.debug(
             "[PFX] [MAPPING-SEARCH] QUERY_IB=%d | "
             "SEGMENT_SIZE=%d SEGMENT=%s | "
-            "MATCHED_OB=%s", cached_ib_segment[0] if cached_ib_segment else -1,
-            len(cached_ib_segment), cached_ib_segment, matched_ob)
+            "MATCHED_OB=%s",
+            cached_ib_segment[0] if cached_ib_segment else -1,
+            len(cached_ib_segment),
+            cached_ib_segment,
+            matched_ob,
+        )
         final_outer_block_id = -1
         final_num_ibs = 0
         if matched_ob is not None:

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Union
+from typing import Union
 
 import torch
 from vllm.config import VllmConfig
@@ -31,7 +31,7 @@ logger = init_logger(__name__)
 
 class RBLNClassifierPooler(Pooler):
     """
-    A pooler for RBLN models that simply wraps pre-processed 
+    A pooler for RBLN models that simply wraps pre-processed
     hidden states into vLLM's PoolerOutput format.
     """
 
@@ -72,7 +72,8 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
                 "embed": Pooler.for_embed(pooler_config),
                 "classify": RBLNClassifierPooler(),
                 "score": RBLNClassifierPooler(),
-            }, )
+            },
+        )
 
     def is_classification_arch(self):
         architectures = getattr(
@@ -91,19 +92,20 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         target_batch_size = self.batch_size
 
         def pad_if_needed(
-            tensor: Optional[torch.Tensor], ) -> Optional[torch.Tensor]:
+            tensor: torch.Tensor | None,
+        ) -> torch.Tensor | None:
             if tensor is None:
                 return None
 
             if tensor.size(1) > self.rbln_model_config.max_seq_len:
-                tensor = tensor[:, :self.rbln_model_config.max_seq_len]
+                tensor = tensor[:, : self.rbln_model_config.max_seq_len]
             elif tensor.size(1) < self.rbln_model_config.max_seq_len:
                 padded_tensor = torch.zeros(
                     batch_size,
                     self.rbln_model_config.max_seq_len,
                     dtype=tensor.dtype,
                 )
-                padded_tensor[:, :tensor.size(1)] = tensor
+                padded_tensor[:, : tensor.size(1)] = tensor
                 tensor = padded_tensor
 
             if tensor.size(0) >= target_batch_size:
@@ -117,16 +119,16 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
             pad_if_needed(positions),
         )
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids, positions = self.preprocess(
             model_input.input_tokens,
             model_input.input_positions,
         )
 
         max_position = torch.max(positions, dim=1).indices
-        position_indices = torch.arange(positions.shape[1],
-                                        device=positions.device).unsqueeze(0)
+        position_indices = torch.arange(
+            positions.shape[1], device=positions.device
+        ).unsqueeze(0)
         attention_mask = (position_indices <= max_position.unsqueeze(1)).long()
         request_nums = input_ids.shape[0]
         kwargs = {
@@ -134,11 +136,9 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
             "attention_mask": attention_mask,
         }
 
-        model_input_names = getattr(self.rbln_model_config,
-                                    "model_input_names", None)
+        model_input_names = getattr(self.rbln_model_config, "model_input_names", None)
         if model_input_names is not None:
-            rbln_model_input_names = \
-                self.rbln_model_config.model_input_names
+            rbln_model_input_names = self.rbln_model_config.model_input_names
             if "token_type_ids" in rbln_model_input_names:
                 kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
@@ -160,7 +160,8 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         else:
             assert hidden_states.dim() == 2, (
                 f"We expected the shape to be dim 2 ([batch, num_labels]), "
-                f"but the current output is dim {hidden_states.dim()}.")
+                f"but the current output is dim {hidden_states.dim()}."
+            )
             hidden_states = hidden_states[:request_nums].squeeze(-1)
 
         return hidden_states

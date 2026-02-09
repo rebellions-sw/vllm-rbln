@@ -11,28 +11,31 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Generic, List, TypeVar
+from typing import Any, Generic, TypeVar
 
 import torch
 from vllm.logger import init_logger
 
-from .optimum_attention_strategy import (AttentionStrategy, EntryT,
-                                         HybridAttentionImageEntry,
-                                         HybridAttentionImageStrategy,
-                                         HybridR1, HybridR2, Result1T,
-                                         Result2T)
+from .optimum_attention_strategy import (
+    AttentionStrategy,
+    EntryT,
+    HybridAttentionImageEntry,
+    HybridAttentionImageStrategy,
+    HybridR1,
+    HybridR2,
+    Result1T,
+    Result2T,
+)
 
 logger = init_logger(__name__)
 StrategyT = TypeVar("StrategyT", bound=AttentionStrategy[Any, Any, Any])
 
 
 class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
-
     def __init__(self, strategy: StrategyT):
         self._s: StrategyT = strategy
 
-    def add(self, running_requests_id: str, local_table_id: int,
-            **kwargs) -> None:
+    def add(self, running_requests_id: str, local_table_id: int, **kwargs) -> None:
         self._s.add(running_requests_id, local_table_id, **kwargs)
 
     def get(
@@ -53,7 +56,7 @@ class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
 
     def preprocess(
         self,
-        local_block_table_ids: List[int],
+        local_block_table_ids: list[int],
         cache_positions: torch.Tensor,
         request_nums: int,
         decoder_batch_size: int,
@@ -72,9 +75,10 @@ class AttentionManager(Generic[StrategyT, EntryT, Result1T, Result2T]):
 
 
 class HybridAttentionImageManager(
-        AttentionManager[HybridAttentionImageStrategy,
-                         HybridAttentionImageEntry, HybridR1, HybridR2]):
-
+    AttentionManager[
+        HybridAttentionImageStrategy, HybridAttentionImageEntry, HybridR1, HybridR2
+    ]
+):
     def update(
         self,
         running_requests_ids: list[str],

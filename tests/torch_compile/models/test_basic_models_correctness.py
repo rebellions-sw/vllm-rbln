@@ -18,7 +18,7 @@ from vllm import LLM, SamplingParams
 DENSE_MODELS = [
     "meta-llama/Llama-3.2-1B",
     # TODO(jiwoo.park) We will add more models.
-    #"Qwen/Qwen3-0.6B",
+    # "Qwen/Qwen3-0.6B",
 ]
 
 MOE_MODELS = [
@@ -45,14 +45,15 @@ def test_dense_models(
 
         prompts = PROMPTS
 
-        sampling_params = SamplingParams(temperature=0.0,
-                                         max_tokens=max_tokens)
-        llm = LLM(model=model,
-                  max_model_len=4 * 1024,
-                  block_size=1024,
-                  enable_chunked_prefill=True,
-                  max_num_batched_tokens=128,
-                  max_num_seqs=max_num_seqs)
+        sampling_params = SamplingParams(temperature=0.0, max_tokens=max_tokens)
+        llm = LLM(
+            model=model,
+            max_model_len=4 * 1024,
+            block_size=1024,
+            enable_chunked_prefill=True,
+            max_num_batched_tokens=128,
+            max_num_seqs=max_num_seqs,
+        )
         outputs = llm.generate(prompts, sampling_params)
         for output in outputs:
             generated_text = output.outputs[0].text

@@ -62,8 +62,10 @@ def test_basic():
         assert req_index == 0 or num_computed_tokens == num_cached_tokens
 
         # check if ref count of blocks are properly counted
-        assert all(block.ref_cnt == 1 for block in
-                   scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0])
+        assert all(
+            block.ref_cnt == 1
+            for block in scheduler.kv_cache_manager.get_blocks(req_ids[0]).blocks[0]
+        )
 
         model_runner_output = create_runner_output(scheduler_output, 0)
         scheduler.update_from_output(scheduler_output, model_runner_output)
@@ -132,7 +134,8 @@ def test_preallocation_in_prefill():
     assert len(cache) == 1
     assert not isinstance(entry, dict) or len(entry) == 1
     assert (isinstance(entry, dict) and first_block_id in entry) or (
-        not isinstance(entry, dict) and first_block_id == entry.block_id)
+        not isinstance(entry, dict) and first_block_id == entry.block_id
+    )
 
 
 def test_preallocation_in_decode():
@@ -155,7 +158,8 @@ def test_preallocation_in_decode():
             num_tokens=block_size,
             max_tokens=1,
             same_prompt=True,
-        ))
+        )
+    )
     assert req_a.prompt_token_ids
     req_a.prompt_token_ids.pop()
     req_a._all_token_ids.pop()

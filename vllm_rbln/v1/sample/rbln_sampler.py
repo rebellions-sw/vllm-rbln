@@ -13,14 +13,14 @@
 # limitations under the License.
 # isort: off
 import torch
-from typing import Optional
 from vllm_rbln.logger import init_logger
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
 from vllm.config.model import LogprobsMode
-from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
-                                               rbln_apply_all_penalties)
+from vllm_rbln.v1.sample.ops.penalties import (
+    apply_all_penalties as rbln_apply_all_penalties,
+)
 import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
@@ -30,8 +30,8 @@ _SAMPLING_EPS = 1e-5
 
 def apply_top_k_top_p(
     logits: torch.Tensor,
-    k: Optional[torch.Tensor],
-    p: Optional[torch.Tensor],
+    k: torch.Tensor | None,
+    p: torch.Tensor | None,
 ) -> torch.Tensor:
     """
     Mock implementation of `top_k_top_p`
@@ -47,9 +47,7 @@ def apply_top_k_top_p(
         # We return a clone to satisfy this strict aliasing constraint.
         return logits.clone()
 
-    logits_sort, logits_idx = logits.sort(dim=-1,
-                                          descending=False,
-                                          stable=True)
+    logits_sort, logits_idx = logits.sort(dim=-1, descending=False, stable=True)
 
     if k is not None:
         # Apply top-k.
@@ -74,22 +72,21 @@ def apply_top_k_top_p(
 
 
 @torch.library.custom_op("rbln::top_k_top_p", mutates_args=())
-def top_k_top_p(logits: torch.Tensor, k: Optional[torch.Tensor],
-                p: Optional[torch.Tensor]) -> torch.Tensor:
+def top_k_top_p(
+    logits: torch.Tensor, k: torch.Tensor | None, p: torch.Tensor | None
+) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
 
 @top_k_top_p.register_fake
-def top_k_top_p_fake(logits: torch.Tensor, k: Optional[torch.Tensor],
-                     p: Optional[torch.Tensor]) -> torch.Tensor:
+def top_k_top_p_fake(
+    logits: torch.Tensor, k: torch.Tensor | None, p: torch.Tensor | None
+) -> torch.Tensor:
     return apply_top_k_top_p(logits, k, p)
 
 
 class RBLNSampler(VLLMSampler):
-
-    def __init__(self,
-                 logprobs_mode: LogprobsMode = "raw_logprobs",
-                 seed: int = 42):
+    def __init__(self, logprobs_mode: LogprobsMode = "raw_logprobs", seed: int = 42):
         super().__init__()
         rebel.manual_seed(seed)
 
@@ -118,9 +115,11 @@ class RBLNSampler(VLLMSampler):
         return logits.div(temp.unsqueeze(dim=1))
 
     def apply_topk_topp_sampler(
-        self, logits: torch.Tensor, top_k: Optional[torch.Tensor],
-        top_p: Optional[torch.Tensor]
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        self,
+        logits: torch.Tensor,
+        top_k: torch.Tensor | None,
+        top_p: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         sampled = self.rbln_topk_topp_sampler(logits, top_k, top_p)
         logits_to_return = None
         if self.logprobs_mode == "processed_logits":
@@ -130,8 +129,9 @@ class RBLNSampler(VLLMSampler):
         return sampled, logits_to_return
 
     @staticmethod
-    def _rbln_topk_topp_sampler_impl(logits: torch.Tensor, top_k: torch.Tensor,
-                                     top_p: torch.Tensor) -> torch.Tensor:
+    def _rbln_topk_topp_sampler_impl(
+        logits: torch.Tensor, top_k: torch.Tensor, top_p: torch.Tensor
+    ) -> torch.Tensor:
         """
         Implementation of RBLN top-k top-p sampling.
         To avoid self parameter issues when torch.compile is used,
@@ -144,8 +144,9 @@ class RBLNSampler(VLLMSampler):
         return sampled
 
     @torch.compiler.disable
-    def rbln_topk_topp_sampler(self, logits: torch.Tensor, top_k: torch.Tensor,
-                               top_p: torch.Tensor) -> torch.Tensor:
+    def rbln_topk_topp_sampler(
+        self, logits: torch.Tensor, top_k: torch.Tensor, top_p: torch.Tensor
+    ) -> torch.Tensor:
         """
         Wrapper for the compiled RBLN top-p sampler.
         To avoid recompile on runtime, we decorate this method with
@@ -158,15 +159,14 @@ class RBLNSampler(VLLMSampler):
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         logprobs_mode_override: LogprobsMode | None = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Sample logits based on sampling metadata.
 
         The various logits processing functions called in this method
         may update the logits tensor in-place.
         """
         logprobs_mode = logprobs_mode_override or self.logprobs_mode
-        assert not (sampling_metadata.all_greedy
-                    and sampling_metadata.all_random)
+        assert not (sampling_metadata.all_greedy and sampling_metadata.all_random)
         if sampling_metadata.all_random:
             greedy_sampled = None
         else:
@@ -183,15 +183,17 @@ class RBLNSampler(VLLMSampler):
         assert sampling_metadata.temperature is not None
 
         # Apply temperature.
-        logits = self.apply_temperature(logits, sampling_metadata.temperature,
-                                        sampling_metadata.all_random)
+        logits = self.apply_temperature(
+            logits, sampling_metadata.temperature, sampling_metadata.all_random
+        )
         # Apply logits processors that only apply to random sampling
         # (argmax invariant)
         for processor in sampling_metadata.logitsprocs.argmax_invariant:
             logits = processor.apply(logits)
 
         random_sampled, processed_logprobs = self.apply_topk_topp_sampler(
-            logits, sampling_metadata.top_k, sampling_metadata.top_p)
+            logits, sampling_metadata.top_k, sampling_metadata.top_p
+        )
 
         if greedy_sampled is None:
             return random_sampled, processed_logprobs
@@ -231,7 +233,7 @@ WARM_UP_CONFIGS = [
         "no_penalties": True,
         "all_greedy": True,
         "all_random": False,
-        "temperature": 0.0
+        "temperature": 0.0,
     },
     {
         "name": "no_penalty_topp",
@@ -239,7 +241,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_p": 0.9,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "no_penalty_topk",
@@ -247,7 +249,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "no_penalty_topp_topk",
@@ -256,7 +258,7 @@ WARM_UP_CONFIGS = [
         "all_random": True,
         "top_p": 0.9,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "penalty_greedy",
@@ -266,7 +268,7 @@ WARM_UP_CONFIGS = [
         "repetition_penalties": 1.0,
         "all_greedy": True,
         "all_random": False,
-        "temperature": 0.0
+        "temperature": 0.0,
     },
     {
         "name": "penalty_topp",
@@ -277,7 +279,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_p": 0.9,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "penalty_topk",
@@ -288,7 +290,7 @@ WARM_UP_CONFIGS = [
         "all_greedy": False,
         "all_random": True,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
     {
         "name": "penalty_topp_topk",
@@ -300,6 +302,6 @@ WARM_UP_CONFIGS = [
         "all_random": True,
         "top_p": 0.9,
         "top_k": 1.0,
-        "temperature": 0.5
+        "temperature": 0.5,
     },
 ]

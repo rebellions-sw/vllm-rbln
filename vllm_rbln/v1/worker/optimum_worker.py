@@ -14,14 +14,16 @@
 
 from contextlib import nullcontext
 from types import NoneType
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed
 import torch.nn as nn
 from vllm.config import VllmConfig
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
+from vllm.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.tasks import SupportedTask
@@ -39,33 +41,38 @@ logger = init_logger(__name__)
 
 
 class RBLNOptimumWorker(WorkerBase):
-
     def __init__(
-            self,
-            vllm_config: VllmConfig,
-            local_rank: int,
-            rank: int,
-            distributed_init_method: str,
-            is_driver_worker: bool = False,
-            # Additional parameters for compatibility with vllm
-            **kwargs):
-        super().__init__(vllm_config=vllm_config,
-                         local_rank=local_rank,
-                         rank=rank,
-                         distributed_init_method=distributed_init_method,
-                         is_driver_worker=is_driver_worker)
+        self,
+        vllm_config: VllmConfig,
+        local_rank: int,
+        rank: int,
+        distributed_init_method: str,
+        is_driver_worker: bool = False,
+        # Additional parameters for compatibility with vllm
+        **kwargs,
+    ):
+        super().__init__(
+            vllm_config=vllm_config,
+            local_rank=local_rank,
+            rank=rank,
+            distributed_init_method=distributed_init_method,
+            is_driver_worker=is_driver_worker,
+        )
 
         if self.model_config.trust_remote_code:
             # note: lazy import to avoid importing torch before initializing
             from vllm.utils import init_cached_hf_modules
+
             init_cached_hf_modules()
 
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: %s",
-                        torch_profiler_trace_dir)
+            logger.info(
+                "Profiling enabled. Traces will be saved to: %s",
+                torch_profiler_trace_dir,
+            )
             logger.debug(
                 "Profiler config: record_shapes=%s,"
                 "profile_memory=%s,with_stack=%s,with_flops=%s",
@@ -83,25 +90,25 @@ class RBLNOptimumWorker(WorkerBase):
                 with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
                 with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                    torch_profiler_trace_dir, use_gzip=True
+                ),
+            )
         else:
             self.profiler = None
 
     def init_device(self) -> None:
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.vllm_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank)
+        init_worker_distributed_environment(
+            self.vllm_config, self.rank, self.distributed_init_method, self.local_rank
+        )
         # Set random seed.
         set_random_seed(self.model_config.seed)
         self.device = self.vllm_config.device_config.device
-        self.model_runner = RBLNOptimumModelRunner(self.vllm_config,
-                                                   self.device)
+        self.model_runner = RBLNOptimumModelRunner(self.vllm_config, self.device)
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        """It follows the way to calculate num_blocks in vLLM.
-        """
+        """It follows the way to calculate num_blocks in vLLM."""
         kv_cache_spec = self.model_runner.get_kv_cache_spec()
         num_layers = len(kv_cache_spec)
         page_size = get_uniform_page_size(kv_cache_spec.values())
@@ -123,7 +130,8 @@ class RBLNOptimumWorker(WorkerBase):
         num_cached = len(scheduler_output.scheduled_cached_reqs.req_ids)
 
         return self.profiler.annotate_context_manager(
-            f"execute_new_{num_new}_cached_{num_cached}")
+            f"execute_new_{num_new}_cached_{num_cached}"
+        )
 
     @torch.inference_mode()
     def sample_tokens(
@@ -134,13 +142,14 @@ class RBLNOptimumWorker(WorkerBase):
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> Optional[ModelRunnerOutput]:
+    ) -> ModelRunnerOutput | None:
         intermediate_tensors = None
         # TODO setting intermediate_tensors for PP
 
         with self.annotate_profile(scheduler_output):
-            output = self.model_runner.execute_model(scheduler_output,
-                                                     intermediate_tensors)
+            output = self.model_runner.execute_model(
+                scheduler_output, intermediate_tensors
+            )
             if isinstance(output, (ModelRunnerOutput, NoneType)):
                 return output
         return None
@@ -154,8 +163,9 @@ class RBLNOptimumWorker(WorkerBase):
             self.profiler.stop()
             # only print profiler results on rank 0
             if self.local_rank == 0:
-                print(self.profiler.key_averages().table(
-                    sort_by="self_cuda_time_total"))
+                print(
+                    self.profiler.key_averages().table(sort_by="self_cuda_time_total")
+                )
 
     def load_model(self):
         self.model_runner.load_model()
@@ -167,8 +177,7 @@ class RBLNOptimumWorker(WorkerBase):
 
         if not envs.VLLM_RBLN_ENABLE_WARM_UP:
             logger.info(
-                "Warm up is disabled. " \
-                "Set VLLM_RBLN_ENABLE_WARM_UP=1 to enable warm up."
+                "Warm up is disabled. Set VLLM_RBLN_ENABLE_WARM_UP=1 to enable warm up."
             )
             return
 
@@ -187,8 +196,7 @@ class RBLNOptimumWorker(WorkerBase):
     def initialize_from_config(self, kv_cache_configs: list[Any]) -> None:
         pass
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
         """Initialize the KV cache with the given size in blocks."""
         pass
 
@@ -229,7 +237,7 @@ class RBLNOptimumWorker(WorkerBase):
 def init_worker_distributed_environment(
     vllm_config: VllmConfig,
     rank: int,
-    distributed_init_method: Optional[str] = None,
+    distributed_init_method: str | None = None,
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""

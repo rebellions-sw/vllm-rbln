@@ -11,13 +11,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import pytest
 from vllm.v1.request import RequestStatus
 
-from .utils import (create_model_runner_output, create_requests,
-                    create_scheduler)
+from .utils import create_model_runner_output, create_requests, create_scheduler
 
 
 @pytest.mark.parametrize(
@@ -26,28 +24,20 @@ from .utils import (create_model_runner_output, create_requests,
     "exp_new_req0_blocks, exp_new_req1_blocks, "
     "exp_cached0_new, exp_cached1_new",
     [
-        pytest.param(2,
-                     16,
-                     64,
-                     9,
-                     32, [1, 2], [3, 4], ([5], ), ([6], ),
-                     id="16bsize-32len"),
-        pytest.param(2,
-                     8,
-                     24,
-                     7,
-                     17, [1, 2, 3], [4, 5, 6],
-                     None,
-                     None,
-                     id="8bsize-17len")
+        pytest.param(
+            2, 16, 64, 9, 32, [1, 2], [3, 4], ([5],), ([6],), id="16bsize-32len"
+        ),
+        pytest.param(
+            2, 8, 24, 7, 17, [1, 2, 3], [4, 5, 6], None, None, id="8bsize-17len"
+        ),
     ],
 )
 def test_schedule_alloc_block(
-    max_num_seqs: Optional[int],
-    block_size: Optional[int],
-    max_model_len: Optional[int],
-    num_blocks: Optional[int],
-    num_tokens_per_batch: Optional[int],
+    max_num_seqs: int | None,
+    block_size: int | None,
+    max_model_len: int | None,
+    num_blocks: int | None,
+    num_tokens_per_batch: int | None,
     exp_new_req0_blocks: list[int],
     exp_new_req1_blocks: list[int],
     exp_cached0_new: list[int],
@@ -70,14 +60,12 @@ def test_schedule_alloc_block(
     # Schedule the first request.
     scheduler.add_request(requests[0])
     scheduler_output0 = scheduler.schedule()
-    assert scheduler_output0.scheduled_new_reqs[0].block_ids[
-        0] == exp_new_req0_blocks
+    assert scheduler_output0.scheduled_new_reqs[0].block_ids[0] == exp_new_req0_blocks
 
     # Schedule the second request.
     scheduler.add_request(requests[1])
     scheduler_output1 = scheduler.schedule()
-    assert scheduler_output1.scheduled_new_reqs[0].block_ids[
-        0] == exp_new_req1_blocks
+    assert scheduler_output1.scheduled_new_reqs[0].block_ids[0] == exp_new_req1_blocks
 
     # Model output of the first request.
     model_runner_output = create_model_runner_output(scheduler_output0)
@@ -112,10 +100,12 @@ def test_running_queue(
     exp_running_sz: list[int],
 ):
     assert num_requests == len(exp_running_sz)
-    scheduler = create_scheduler(max_num_seqs=max_num_seqs,
-                                 num_blocks=num_blocks,
-                                 block_size=10,
-                                 async_scheduling=True)
+    scheduler = create_scheduler(
+        max_num_seqs=max_num_seqs,
+        num_blocks=num_blocks,
+        block_size=10,
+        async_scheduling=True,
+    )
     requests = create_requests(num_requests=num_requests, max_tokens=5)
 
     for req in requests:
@@ -136,10 +126,12 @@ def test_preempt(
 ):
     MAX_TOKENS = 5
     NUM_TOKENS = 5
-    scheduler = create_scheduler(async_scheduling=True,
-                                 max_num_seqs=max_num_seqs,
-                                 num_blocks=MAX_TOKENS * max_num_seqs + 1,
-                                 block_size=MAX_TOKENS + NUM_TOKENS)
+    scheduler = create_scheduler(
+        async_scheduling=True,
+        max_num_seqs=max_num_seqs,
+        num_blocks=MAX_TOKENS * max_num_seqs + 1,
+        block_size=MAX_TOKENS + NUM_TOKENS,
+    )
     requests = create_requests(
         num_requests=num_requests,
         max_tokens=MAX_TOKENS,
@@ -161,14 +153,12 @@ def test_preempt(
     # and the WAITING request with the highest priority is scheduled.
     for abort_idx, abort_req in enumerate(abort_order[:-max_num_seqs]):
         scheduler.finish_requests(abort_req, RequestStatus.FINISHED_ABORTED)
-        next_req = scheduler.requests.get(abort_order[abort_idx +
-                                                      max_num_seqs])
+        next_req = scheduler.requests.get(abort_order[abort_idx + max_num_seqs])
         assert requests[abort_idx].status == RequestStatus.FINISHED_ABORTED
         assert next_req.status == RequestStatus.WAITING
 
         sched_output = scheduler.schedule()
         model_runner_output = create_model_runner_output(sched_output)
         scheduler.update_from_output(sched_output, model_runner_output)
-        next_req = scheduler.requests.get(abort_order[abort_idx +
-                                                      max_num_seqs])
+        next_req = scheduler.requests.get(abort_order[abort_idx + max_num_seqs])
         assert next_req.status == RequestStatus.RUNNING
