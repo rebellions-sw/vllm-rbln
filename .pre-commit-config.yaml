@@ -42,6 +42,7 @@ repos:
   - id: mypy-local
     name: Run mypy locally for lowest supported Python version
     entry: python tools/pre_commit/mypy.py 0 "3.10"
+    verbose: true
     stages: [pre-commit] # Don't run in CI
     <<: &mypy_common
       language: python
