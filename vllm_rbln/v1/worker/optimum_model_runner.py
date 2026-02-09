@@ -520,8 +520,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         MultiModalKwargs | None,
         list[str],
     ]:
-        input_tokens: list[list[int]] = []
-        input_positions: list[list[int]] = []
         running_request_ids = []
         batched_mm_inputs: BatchedTensorInputs | None = None
 

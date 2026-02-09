@@ -75,6 +75,9 @@ class RBLNKVCacheManager(KVCacheManager):
         self.kv_cache_config = kv_cache_config
         block_size = kv_cache_config.kv_cache_groups[0].kv_cache_spec.block_size
         if enable_caching:
+            assert attn_block_size is not None, (
+                "attn_block_size must be specified for prefix caching"
+            )
             self.prefix_cache_manager = RBLNPrefixKVCacheManager(
                 ob_size=attn_block_size,
                 ib_size=block_size,
@@ -91,7 +94,7 @@ class RBLNKVCacheManager(KVCacheManager):
             tuple(() for _ in range(self.num_kv_cache_groups))
         )
 
-    def free(self, request: Request, preemption: int = False) -> None:
+    def free(self, request: Request, preemption: bool = False) -> None:
         """Free the blocks allocated for the request."""
         if self.enable_caching:
             self.prefix_cache_manager.free_request(
