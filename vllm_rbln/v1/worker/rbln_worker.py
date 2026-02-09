@@ -40,8 +40,8 @@ from vllm.v1.worker.worker_base import WorkerBase
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
-from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
-from vllm_rbln.worker.utils import estimate_available_memory
+from vllm_rbln.v1.worker.utils import (estimate_available_memory,
+                                       set_cpu_affinity, set_omp_num_threads)
 
 logger = init_logger(__name__)
 
@@ -216,7 +216,9 @@ class RBLNWorker(WorkerBase):
             # single device == Quad chiplet
             num_runtimes = 2 * 4
         else:
-            assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+            raise ValueError(
+                "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+            )
 
         if self.model_config.quantization is not None:
             # FIXME(RBLN) - for now, mxfp4 quantization is only supported
@@ -233,7 +235,8 @@ class RBLNWorker(WorkerBase):
                 nbits_per_param = 4
                 ratio = 1
             else:
-                assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+                raise ValueError("invalid RBLN architecture, "
+                                 "candidates = [ATOM(ca), REBEL(cr)]")
 
             # pack 2 mxfp4 elems into single uint8 elem
             packed_num_elems = 8 // 4
@@ -248,7 +251,8 @@ class RBLNWorker(WorkerBase):
                 # quantized params is handled
                 n_model_experts += value.numel() * packed_num_elems * ratio
 
-        # NOTE - model parallel(tp, dp, ep, pp) already applied into model params
+        # NOTE - model parallel(tp, dp, ep, pp) already applied into
+        # model params
         n_model_params = n_model_attentions + n_model_experts
 
         available_memory_estimate = estimate_available_memory(
@@ -322,7 +326,7 @@ class RBLNWorker(WorkerBase):
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
-        if isinstance(output, (ModelRunnerOutput, NoneType)):
+        if isinstance(output, ModelRunnerOutput | NoneType):
             return output
 
         assert isinstance(output, IntermediateTensors)

@@ -23,4 +23,3 @@ run_mypy() {
 run_mypy # Note that this is less strict than CI
 run_mypy vllm_rbln/attention
 run_mypy vllm_rbln/model_executor
-run_mypy vllm_rbln/worker
