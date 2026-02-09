@@ -492,7 +492,7 @@ def _(
     return output.to(original_dtype)
 
 
-@register_fake("rbln_triton_ops::sliding_window_attention_prefill")
+@register_fake("rbln_triton_ops::sliding_window_attention_naive_prefill")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,

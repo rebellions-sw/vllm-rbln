@@ -497,7 +497,7 @@ def warmup(func, *args):
     return kernel
 
 
-@triton_op("rbln_triton_ops::flash_causal_attention_prefill",
+@triton_op("rbln_triton_ops::flash_causal_attention_naive_prefill",
            mutates_args=())
 def _(
     query: torch.Tensor,
@@ -635,7 +635,7 @@ def _(
     return output.to(original_dtype)
 
 
-@register_fake("rbln_triton_ops::flash_causal_attention_decode")
+@register_fake("rbln_triton_ops::flash_causal_attention_naive_decode")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
