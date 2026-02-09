@@ -61,6 +61,15 @@ dev = [
     "fire",
 ]
 
+# Primary package index
+index-url = "https://pypi.org/simple"
+
+# Additional package indexes
+extra-index-url = [
+    "https://download.pytorch.org/whl/cpu"
+]
+
+
 [project.urls]
 Homepage="https://rebellions.ai"
 Documentation="https://docs.rbln.ai"
@@ -121,14 +130,6 @@ plugins = ['pydantic.mypy']
 ignore_missing_imports = true
 check_untyped_defs = true
 follow_imports = "silent"
-
-# Primary package index
-index-url = "https://pypi.org/simple"
-
-# Additional package indexes
-extra-index-url = [
-    "https://download.pytorch.org/whl/cpu"
-]
 
 [tool.uv]
 required-environments = [

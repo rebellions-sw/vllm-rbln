@@ -135,7 +135,7 @@ def create_requests(
     prompt_logprobs: int | None = None,
     same_prompt: bool = False,
     block_size: int = 16,
-    sample_json_schema: str = None,
+    sample_json_schema: str | None = None,
 ) -> list[Request]:
     global _none_hash_initialized
     if not _none_hash_initialized:

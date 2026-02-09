@@ -120,11 +120,11 @@ def test_schedule_multi_seq():
     ],
 )
 def test_schedule_alloc_block_policy(
-    max_num_seqs: int | None,
-    block_size: int | None,
-    max_model_len: int | None,
-    num_blocks: int | None,
-    num_tokens_per_batch: int | None,
+    max_num_seqs: int,
+    block_size: int,
+    max_model_len: int,
+    num_blocks: int,
+    num_tokens_per_batch: int,
     exp_new_req0_blocks: list[int],
     exp_cached0_new: list[int],
     exp_new_req1_blocks: list[int],

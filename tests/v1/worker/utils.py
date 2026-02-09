@@ -284,7 +284,7 @@ def _schedule_new_request(
 
 def _schedule_new_request_from_request(
     req: Request,
-    block_ids: list[int],
+    block_ids: tuple[list[int], ...],
     outer_block_ids: list[int],
     new_computed_tokens: int = 0,
     token_ids: list[int] | None = None,
@@ -331,7 +331,7 @@ def _schedule_new_request_from_request(
 
 def _schedule_cached_reqs(
     reqs: list[Request],
-    new_block_ids: list[tuple[list[int], ...]],
+    new_block_ids: list[tuple[list[int], ...] | None],
     finished_req_ids: list[str] | None = None,
 ) -> RBLNSchedulerOutput:
     req_ids = []
