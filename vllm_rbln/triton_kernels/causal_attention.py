@@ -20,7 +20,7 @@ from rebel.triton.language.extra.rbln import libdevice as rblib
 from torch.library import register_fake, triton_op
 
 @triton.jit
-def causal_attention_prefill(
+def causal_attention_naive_prefill(
     query_base,
     key_base,
     value_base,
@@ -186,7 +186,7 @@ def causal_attention_prefill(
         tl.store(output_ptr, attn_out)  # (1,h,g,l,d)
 
 @triton.jit
-def causal_attention_decode(
+def causal_attention_naive_decode(
     query_base,
     key_base,
     value_base,
@@ -358,7 +358,7 @@ def warmup(func, *args):
     return kernel
 
 
-@triton_op("rbln_triton_ops::causal_attention_prefill", mutates_args=())
+@triton_op("rbln_triton_ops::causal_attention_naive_prefill", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -409,12 +409,12 @@ def _(
         NUM_BATCH,
         DIM_BLOCK_TABLE,
     ]
-    warmup(causal_attention_prefill, *params)
+    warmup(causal_attention_naive_prefill, *params)
 
     return output.to(original_dtype)
 
 
-@triton_op("rbln_triton_ops::causal_attention_decode", mutates_args=())
+@triton_op("rbln_triton_ops::causal_attention_naive_decode", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -466,12 +466,12 @@ def _(
         DIM_BLOCK_TABLE,
     ]
 
-    warmup(causal_attention_decode, *params)
+    warmup(causal_attention_naive_decode, *params)
 
     return output.to(original_dtype)
 
 
-@register_fake("rbln_triton_ops::causal_attention_prefill")
+@register_fake("rbln_triton_ops::causal_attention_naive_prefill")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -485,7 +485,7 @@ def _(
     return torch.empty_like(query)
 
 
-@register_fake("rbln_triton_ops::attention_decode")
+@register_fake("rbln_triton_ops::causal_attention_naive_decode")
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
