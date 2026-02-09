@@ -55,8 +55,8 @@ from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
+from vllm_rbln.v1.worker.metrics import PerformanceTracker
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
-from vllm_rbln.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
     import xgrammar as xgr

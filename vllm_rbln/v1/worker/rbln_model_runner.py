@@ -98,7 +98,7 @@ from vllm_rbln.v1.attention.backends.flash_attention import (
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
 from vllm_rbln.v1.sample import RBLNSampler
 from vllm_rbln.v1.worker.bucketing import get_bucketing_manager_class
-from vllm_rbln.worker.metrics import PerformanceTracker
+from vllm_rbln.v1.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
@@ -571,7 +571,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         src_indices = orig_indices[sorted_order]
         src_dest_map = {
             int(src): int(dst)
-            for src, dst in zip(src_indices, orig_indices)
+            for src, dst in zip(src_indices, orig_indices, strict=False)
         }
 
         for src in src_dest_map:
@@ -1110,9 +1110,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         query_start_loc_cpu = self.query_start_loc.cpu[:num_reqs + 1]
         seq_lens = self.seq_lens.gpu[:num_reqs]
         max_seq_len = self.seq_lens.np[:num_reqs].max().item()
-        seq_lens_cpu = self.seq_lens.cpu[:num_reqs]
-        num_computed_tokens_cpu = (
-            self.input_batch.num_computed_tokens_cpu_tensor[:num_reqs])
         spec_decode_common_attn_metadata = None
         if use_spec_decode:
             self.num_accepted_tokens.np[:num_reqs] = (
@@ -1165,8 +1162,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 query_start_loc=query_start_loc,
                 query_start_loc_cpu=query_start_loc_cpu,
                 seq_lens=seq_lens,
-                seq_lens_cpu=seq_lens_cpu,
-                num_computed_tokens_cpu=num_computed_tokens_cpu,
                 num_reqs=num_reqs,
                 num_actual_tokens=total_num_scheduled_tokens,
                 max_query_len=max_num_scheduled_tokens,
@@ -1530,14 +1525,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
 
+        # TODO(RBLN): Support SP
         # Pad tokens to multiple of tensor_parallel_size when
         # enabled collective fusion for SP
-        tp_size = self.vllm_config.parallel_config.tensor_parallel_size
-        if self.compilation_config.pass_config. \
-            enable_sequence_parallelism and tp_size > 1:
-            num_input_tokens = round_up(num_scheduled_tokens, tp_size)
-        else:
-            num_input_tokens = num_scheduled_tokens
+        num_input_tokens = num_scheduled_tokens
 
         # Padding for DP
         # NOTE(RBLN): RBLN handles DP padding in _prepare_inputs
@@ -1895,9 +1886,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Used in the below loop.
         query_start_loc_cpu = query_start_loc
-        seq_lens_cpu = seq_lens
-        num_computed_tokens_cpu = (
-            input_batch.num_computed_tokens_cpu_tensor[:num_reqs])
 
         attn_metadata_bucket: dict[int, dict[str, Any]] = {}
         input_ids_bucket: dict[int, torch.Tensor] = {}
@@ -1934,8 +1922,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     query_start_loc=query_start_loc,
                     query_start_loc_cpu=query_start_loc_cpu,
                     seq_lens=seq_lens,
-                    seq_lens_cpu=seq_lens_cpu,
-                    num_computed_tokens_cpu=num_computed_tokens_cpu,
                     num_reqs=num_reqs,
                     num_actual_tokens=total_num_scheduled_tokens,
                     max_query_len=max_num_scheduled_tokens,
@@ -3398,7 +3384,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
             tensor = torch.zeros(kv_cache_tensor.size,
                                  dtype=torch.int8,
-                                 device="meta")
+                                 device="cpu")
             for layer_name in kv_cache_tensor.shared_by:
                 kv_cache_raw_tensors[layer_name] = tensor
 
