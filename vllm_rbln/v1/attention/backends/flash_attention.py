@@ -185,7 +185,7 @@ def _(
 @torch.library.custom_op(
     "rbln_custom_ops::flash_causal_attention_naive_prefill",
     mutates_args=["kv_cache"])
-def flash_causal_attention_prefill_impl(
+def flash_causal_attention_naive_prefill_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -1323,7 +1323,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")
                 else:
                     flash_causal_attention_prefill = (
-                        flash_causal_attention_prefill_impl)
+                        flash_causal_attention_naive_prefill_impl)
                     flash_causal_attention_decode = (
                         flash_causal_attention_naive_decode_impl)
 
