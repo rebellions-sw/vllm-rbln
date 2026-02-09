@@ -1213,30 +1213,30 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             assert attn_metadata.cache_offsets is not None
             if envs.VLLM_RBLN_COMPILE_MODEL:
                 if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                    sliding_window_attention_prefill = (
+                    sliding_window_attention_naive_prefill = (
                         torch.ops.rbln_triton_ops.
                         sliding_window_attention_naive_prefill)
-                    sliding_window_attention_decode = (
+                    sliding_window_attention_naive_decode = (
                         torch.ops.rbln_triton_ops.
                         sliding_window_attention_naive_decode)
                 elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                    sliding_window_attention_prefill = (
+                    sliding_window_attention_naive_prefill = (
                         torch.ops.rbln_custom_ops.
                         sliding_window_attention_naive_prefill)
-                    sliding_window_attention_decode = (
+                    sliding_window_attention_naive_decode = (
                         torch.ops.rbln_custom_ops.
                         sliding_window_attention_naive_decode)
                 else:
                     raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                      f"{envs.VLLM_RBLN_KERNEL_MODE}")
             else:
-                sliding_window_attention_prefill = (
+                sliding_window_attention_naive_prefill = (
                     sliding_window_attention_naive_prefill_impl)
-                sliding_window_attention_decode = (
+                sliding_window_attention_naive_decode = (
                     sliding_window_attention_naive_decode_impl)
 
             if q_len == 1:
-                attn_output = sliding_window_attention_decode(  # noqa: E501
+                attn_output = sliding_window_attention_naive_decode(  # noqa: E501
                     query,
                     key,
                     value,
@@ -1248,7 +1248,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,  # dummy
                 )
             else:
-                attn_output = sliding_window_attention_prefill(  # noqa: E501
+                attn_output = sliding_window_attention_naive_prefill(  # noqa: E501
                     query,
                     key,
                     value,
@@ -1267,10 +1267,10 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
 
                 if envs.VLLM_RBLN_COMPILE_MODEL:
                     if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                        causal_attention_prefill = (
+                        causal_attention_naive_prefill = (
                             torch.ops.rbln_triton_ops.causal_attention_naive_prefill
                         )
-                        causal_attention_decode = (
+                        causal_attention_naive_decode = (
                             torch.ops.rbln_triton_ops.causal_attention_naive_decode)
                     elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
                         raise ValueError("RBLN custom kernel is not supported for attention naive prefill/decode")
@@ -1279,7 +1279,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")      
 
                 if q_len == 1:
-                    attn_output = causal_attention_decode(  # noqa: E501
+                    attn_output = causal_attention_naive_decode(  # noqa: E501
                         query,
                         key,
                         value,
@@ -1290,7 +1290,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         self.scale,  # dummy (required by rbln_triton_ops signature)
                     )
                 else:
-                    attn_output = causal_attention_prefill(  # noqa: E501
+                    attn_output = causal_attention_naive_prefill(  # noqa: E501
                         query,
                         key,
                         value,
@@ -1303,26 +1303,26 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             else:
                 if envs.VLLM_RBLN_COMPILE_MODEL:
                     if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                        flash_causal_attention_prefill = (
+                        flash_causal_attention_naive_prefill = (
                             torch.ops.rbln_triton_ops.
                             flash_causal_attention_naive_prefill)
-                        flash_causal_attention_decode = (
+                        flash_causal_attention_naive_decode = (
                             torch.ops.rbln_triton_ops.
                             flash_causal_attention_naive_decode)
                     elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                        flash_causal_attention_decode = (
-                            torch.ops.rbln_custom_ops.
-                            flash_causal_attention_naive_decode)
-                        flash_causal_attention_prefill = (
+                        flash_causal_attention_naive_prefill = (
                             torch.ops.rbln_custom_ops.
                             flash_causal_attention_naive_prefill)
+                        flash_causal_attention_naive_decode = (
+                            torch.ops.rbln_custom_ops.
+                            flash_causal_attention_naive_decode)
                     else:
                         raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")
                 else:
-                    flash_causal_attention_prefill = (
+                    flash_causal_attention_naive_prefill = (
                         flash_causal_attention_naive_prefill_impl)
-                    flash_causal_attention_decode = (
+                    flash_causal_attention_naive_decode = (
                         flash_causal_attention_naive_decode_impl)
 
                 # * batched attention - seq_lens[B, 1] == seq_idx,
@@ -1330,7 +1330,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 # * otherwise         - seq_lens[B, P] == dyn_size_for_partitions,
                 #   dynamic size for each partition
                 if q_len == 1:
-                    attn_output = flash_causal_attention_decode(  # noqa: E501
+                    attn_output = flash_causal_attention_naive_decode(  # noqa: E501
                         query,
                         key,
                         value,
@@ -1341,7 +1341,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         self.scale,  # dummy
                     )
                 else:
-                    attn_output = flash_causal_attention_prefill(  # noqa: E501
+                    attn_output = flash_causal_attention_naive_prefill(  # noqa: E501
                         query,
                         key,
                         value,
@@ -1359,10 +1359,10 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
 
                 if envs.VLLM_RBLN_COMPILE_MODEL:
                     if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                        attention_prefill = (
+                        attention_naive_prefill = (
                             torch.ops.rbln_triton_ops.attention_naive_prefill
                         )
-                        attention_decode = (
+                        attention_naive_decode = (
                             torch.ops.rbln_triton_ops.attention_naive_decode)
                     elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
                         raise ValueError("RBLN custom kernel is not supported for attention naive prefill/decode")
@@ -1371,7 +1371,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")      
 
                 if q_len == 1:
-                    attn_output = attention_decode(  # noqa: E501
+                    attn_output = attention_naive_decode(  # noqa: E501
                         query,
                         key,
                         value,
@@ -1383,7 +1383,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         self.scale,  # dummy (required by rbln_triton_ops signature)
                     )
                 else:
-                    attn_output = attention_prefill(  # noqa: E501
+                    attn_output = attention_naive_prefill(  # noqa: E501
                         query,
                         key,
                         value,
@@ -1397,28 +1397,28 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             else:
                 if envs.VLLM_RBLN_COMPILE_MODEL:
                     if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                        flash_attention_prefill = (
+                        flash_attention_naive_prefill = (
                             torch.ops.rbln_triton_ops.flash_attention_naive_prefill
                         )
-                        flash_attention_decode = (
+                        flash_attention_naive_decode = (
                             torch.ops.rbln_triton_ops.flash_attention_naive_decode)
                     elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                        flash_attention_prefill = (
+                        flash_attention_naive_prefill = (
                             torch.ops.rbln_custom_ops.flash_attention_naive_prefill
                         )
-                        flash_attention_decode = (
+                        flash_attention_naive_decode = (
                             torch.ops.rbln_custom_ops.flash_attention_naive_decode)
                     else:
                         raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")
                 else:
-                    flash_attention_prefill = (
+                    flash_attention_naive_prefill = (
                         flash_attention_naive_prefill_impl)
-                    flash_attention_decode = (
+                    flash_attention_naive_decode = (
                         flash_attention_naive_decode_impl)
 
                 if q_len == 1:
-                    attn_output = flash_attention_decode(  # noqa: E501
+                    attn_output = flash_attention_naive_decode(  # noqa: E501
                         query,
                         key,
                         value,
@@ -1430,7 +1430,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         self.scale,  # dummy
                     )
                 else:
-                    attn_output = flash_attention_prefill(  # noqa: E501
+                    attn_output = flash_attention_naive_prefill(  # noqa: E501
                         query,
                         key,
                         value,
