@@ -66,10 +66,12 @@ class KVCacheBlockAdapter:
             return default
 
     def _estimated_num_blocks(self) -> int:
-        return self._env_int(
-            "VLLM_RBLN_NPU_NUM_BLOCKS",
-            int(self.estimated_kvcache_num_blocks),
-        )
+        """Override estimated blocks if num_gpu_blocks_override is set."""
+        num_gpu_blocks_override = self.vllm_config.cache_config.num_gpu_blocks_override
+        if num_gpu_blocks_override is not None:
+            return num_gpu_blocks_override
+        else:
+            return int(self.estimated_kvcache_num_blocks)
 
     def is_full_block_available(self) -> bool:
         """True if we can allocate a full batch worth of blocks."""
