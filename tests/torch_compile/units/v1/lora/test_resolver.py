@@ -71,24 +71,21 @@ def test_resolver_registry_unknown_resolver():
         registry.get_resolver("unknown_resolver")
 
 
-def test_dummy_resolver_resolve():
+@pytest.mark.asyncio
+async def test_dummy_resolver_resolve():
     """Test the dummy resolver's resolve functionality."""
-    import asyncio
-
     dummy_resolver = DummyLoRAResolver()
     base_model_name = "base_model_test"
     lora_name = "test_lora"
 
     # Test successful resolution
-    result = asyncio.run(
-        dummy_resolver.resolve_lora(base_model_name, lora_name)
-    )
+    result = await dummy_resolver.resolve_lora(base_model_name, lora_name)
     assert isinstance(result, LoRARequest)
     assert result.lora_name == lora_name
     assert result.lora_path == f"/dummy/path/{base_model_name}/{lora_name}"
 
     # Test failed resolution
-    result = asyncio.run(
-        dummy_resolver.resolve_lora(base_model_name, "nonexistent_lora")
+    result = await dummy_resolver.resolve_lora(
+        base_model_name, "nonexistent_lora"
     )
     assert result is None
