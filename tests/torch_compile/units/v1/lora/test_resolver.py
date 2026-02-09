@@ -17,6 +17,8 @@
 
 import pytest
 from vllm.lora.request import LoRARequest
+
+pytestmark = pytest.mark.cpu_test
 from vllm.lora.resolver import LoRAResolver, LoRAResolverRegistry
 
 

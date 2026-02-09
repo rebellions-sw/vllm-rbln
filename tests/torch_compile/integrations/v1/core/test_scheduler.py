@@ -14,9 +14,11 @@
 
 from vllm.v1.request import RequestStatus
 
-from tests.torch_compile.v1.core.utils import (create_requests,
-                                               create_runner_output,
-                                               create_scheduler)
+from tests.torch_compile.integrations.v1.core.utils import (
+    create_requests,
+    create_runner_output,
+    create_scheduler,
+)
 
 
 def test_schedule():
@@ -50,8 +52,9 @@ def test_schedule():
     output = scheduler.schedule()
     assert output.scheduled_cached_reqs.num_reqs == len(requests)
     assert len(output.num_scheduled_tokens) == len(requests)
-    assert all(num_tokens == 1
-               for num_tokens in output.num_scheduled_tokens.values())
+    assert all(
+        num_tokens == 1 for num_tokens in output.num_scheduled_tokens.values()
+    )
     assert len(output.finished_req_ids) == 0
 
 

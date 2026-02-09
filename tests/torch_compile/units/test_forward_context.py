@@ -17,11 +17,14 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+pytestmark = pytest.mark.cpu_test
+
 
 @pytest.fixture
 def attn_metadata_mock():
     from vllm_rbln.v1.attention.backends.flash_attention import (
-        RBLNFlashAttentionMetadata)
+        RBLNFlashAttentionMetadata,
+    )
 
     attn_metadata_mock = MagicMock(spec=RBLNFlashAttentionMetadata)
     attn_metadata_mock.num_actual_tokens = 16
@@ -33,13 +36,16 @@ def test_forward_context(vllm_config, attn_metadata_mock: MagicMock):
     from vllm.forward_context import get_forward_context, set_forward_context
 
     with set_forward_context(
-            attn_metadata_mock,
-            vllm_config,
-            num_tokens_across_dp=torch.tensor([0, 1]),
-            num_padded_tokens=1,
+        attn_metadata_mock,
+        vllm_config,
+        num_tokens_across_dp=torch.tensor([0, 1]),
+        num_padded_tokens=1,
     ):
         # assert dp_metadata class name is RBLNDPMetadata
-        assert (get_forward_context().dp_metadata.__class__.__name__ ==
-                "RBLNDPMetadata"
-                ), f"Expected 'dp_metadata' class name is RBLNDPMetadata, \
+        assert (
+            get_forward_context().dp_metadata.__class__.__name__
+            == "RBLNDPMetadata"
+        ), (
+            f"Expected 'dp_metadata' class name is RBLNDPMetadata, \
                     got {get_forward_context().dp_metadata.__class__.__name__}"
+        )

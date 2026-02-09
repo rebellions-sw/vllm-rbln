@@ -4,7 +4,11 @@
 
 import os
 
+import pytest
+
 from vllm_rbln.v1.worker.utils import set_omp_num_threads
+
+pytestmark = pytest.mark.cpu_test
 
 
 def test_set_omp_num_threads_default(monkeypatch):

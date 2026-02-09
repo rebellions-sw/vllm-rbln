@@ -15,7 +15,11 @@
 import logging
 import logging.handlers
 
+import pytest
+
 from vllm_rbln.logger import init_logger
+
+pytestmark = pytest.mark.cpu_test
 
 
 def test_logger():

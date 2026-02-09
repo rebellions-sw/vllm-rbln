@@ -2,11 +2,15 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
+import pytest
+
 from vllm_rbln.worker.metrics import (
     PrefillMetricsByRequestID,
     PerformanceTracker,
     StepMetrics,
 )
+
+pytestmark = pytest.mark.cpu_test
 
 
 # --- StepMetrics tests ---

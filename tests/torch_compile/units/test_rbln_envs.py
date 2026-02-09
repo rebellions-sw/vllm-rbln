@@ -14,6 +14,8 @@
 import pytest
 import vllm_rbln.rbln_envs as rbln_envs
 
+pytestmark = pytest.mark.cpu_test
+
 
 def test_rbln_envs():
     # check default values

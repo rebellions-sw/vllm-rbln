@@ -16,19 +16,21 @@ import pytest
 import torch
 
 from vllm_rbln.lora.inputs import LoRAInputs
+
+pytestmark = pytest.mark.cpu_test
 from vllm_rbln.v1.worker.rbln_model_runner import create_sampler_indices_padded
 
 STAGES = [True, False]  # prefill(True) stage and decode(False) stage
 
 
-def get_random_id_to_index(num_loras: int,
-                           num_slots: int,
-                           log: bool = True) -> list[int | None]:
+def get_random_id_to_index(
+    num_loras: int, num_slots: int, log: bool = True
+) -> list[int | None]:
     """Creates a random lora_id_to_index mapping.
-    
+
     Args:
         num_loras: The number of active loras in the mapping.
-        num_slots: The number of slots in the mapping. 
+        num_slots: The number of slots in the mapping.
                    Must be larger than num_loras.
         log: Whether to log the output.
     """
@@ -36,7 +38,8 @@ def get_random_id_to_index(num_loras: int,
     if num_loras > num_slots:
         raise ValueError(
             f"num_loras is higher than num_slots: {num_loras} > {num_slots}. "
-            "num_loras must be less than or equal to num_slots.")
+            "num_loras must be less than or equal to num_slots."
+        )
 
     slots: list[int | None] = [None] * num_slots
     random_slot_selections = (torch.randperm(num_slots)[:num_loras]).tolist()
@@ -64,18 +67,21 @@ def test_create_sampler_indices_padded(num_loras, stage):
     max_loras = 8
 
     id_to_index = get_random_id_to_index(num_loras, max_loras)
-    lora_ids = torch.randint(0, num_loras + 1,
-                             (1 if stage else max_num_seqs, )).tolist()
+    lora_ids = torch.randint(
+        0, num_loras + 1, (1 if stage else max_num_seqs,)
+    ).tolist()
 
     if stage and len(lora_ids) > 1:
         # the case that the number of sequences is greater than 1
         # and current stage is prefill.
         with pytest.raises(AssertionError):
             sampler_indices_padded = create_sampler_indices_padded(
-                lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu")
+                lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu"
+            )
     else:
         sampler_indices_padded = create_sampler_indices_padded(
-            lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu")
+            lora_ids, id_to_index, max_num_seqs, stage, max_loras, "cpu"
+        )
 
         assert sampler_indices_padded.dtype == torch.long
         assert len(sampler_indices_padded) == (1 if stage else max_num_seqs)

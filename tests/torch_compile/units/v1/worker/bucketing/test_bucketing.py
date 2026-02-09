@@ -10,6 +10,8 @@ from vllm_rbln.v1.worker.bucketing import (
     get_bucketing_manager_class,
 )
 
+pytestmark = pytest.mark.cpu_test
+
 
 # --- Factory function tests ---
 

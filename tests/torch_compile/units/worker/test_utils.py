@@ -8,6 +8,8 @@ import pytest
 
 from vllm_rbln.worker.utils import estimate_available_memory
 
+pytestmark = pytest.mark.cpu_test
+
 
 def _make_model_config(
     num_layers=12,
