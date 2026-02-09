@@ -235,7 +235,7 @@ def get_vllm_config(async_scheduling=False, max_num_seqs=None):
 
 def _schedule_new_request(
     *req_ids: str,
-    block_ids: list[int],
+    block_ids: tuple[list[int], ...],
     outer_block_ids: list[int],
     new_computed_tokens: int = 0,
     token_ids: list[int] | None = None,

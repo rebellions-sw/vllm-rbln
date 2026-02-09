@@ -33,15 +33,15 @@ from .utils import create_model_runner_output, create_requests, create_scheduler
     ],
 )
 def test_schedule_alloc_block(
-    max_num_seqs: int | None,
-    block_size: int | None,
-    max_model_len: int | None,
-    num_blocks: int | None,
-    num_tokens_per_batch: int | None,
+    max_num_seqs: int,
+    block_size: int,
+    max_model_len: int,
+    num_blocks: int,
+    num_tokens_per_batch: int,
     exp_new_req0_blocks: list[int],
     exp_new_req1_blocks: list[int],
-    exp_cached0_new: list[int],
-    exp_cached1_new: list[int],
+    exp_cached0_new: list[int] | None,
+    exp_cached1_new: list[int] | None,
 ):
     scheduler = create_scheduler(
         max_num_seqs=max_num_seqs,
