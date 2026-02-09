@@ -34,9 +34,9 @@ logger = init_logger(__name__)
 
 
 # RBLN custom op (flash attention naive prefill/decode)
-@torch.library.custom_op("rbln_custom_ops::flash_attention_prefill",
+@torch.library.custom_op("rbln_custom_ops::flash_attention_naive_prefill",
                          mutates_args=["kv_cache"])
-def flash_attention_prefill_impl(
+def flash_attention_naive_prefill_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -79,7 +79,7 @@ def flash_attention_prefill_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake("rbln_custom_ops::flash_attention_prefill")
+@torch.library.register_fake("rbln_custom_ops::flash_attention_naive_prefill")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -94,9 +94,9 @@ def _(
     return torch.empty_like(q)
 
 
-@torch.library.custom_op("rbln_custom_ops::flash_attention_decode",
+@torch.library.custom_op("rbln_custom_ops::flash_attention_naive_decode",
                          mutates_args=["kv_cache"])
-def flash_attention_decode_impl(
+def flash_attention_naive_decode_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -137,7 +137,7 @@ def flash_attention_decode_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake("rbln_custom_ops::flash_attention_decode")
+@torch.library.register_fake("rbln_custom_ops::flash_attention_naive_decode")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -154,9 +154,9 @@ def _(
 
 # RBLN custom op (flash causal attention naive prefill/decode w/o attn mask)
 @torch.library.custom_op(
-    "rbln_custom_ops::flash_causal_attention_prefill",
+    "rbln_custom_ops::flash_causal_attention_naive_prefill",
     mutates_args=["kv_cache"])
-def flash_causal_attention_prefill_impl(
+def flash_causal_attention_naive_prefill_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -200,7 +200,7 @@ def flash_causal_attention_prefill_impl(
 
 
 @torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_prefill")
+    "rbln_custom_ops::flash_causal_attention_naive_prefill")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -215,9 +215,9 @@ def _(
 
 
 @torch.library.custom_op(
-    "rbln_custom_ops::flash_causal_attention_decode",
+    "rbln_custom_ops::flash_causal_attention_naive_decode",
     mutates_args=["kv_cache"])
-def flash_causal_attention_decode_impl(
+def flash_causal_attention_naive_decode_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -260,7 +260,7 @@ def flash_causal_attention_decode_impl(
 
 
 @torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_decode")
+    "rbln_custom_ops::flash_causal_attention_naive_decode")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -625,25 +625,25 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
                 if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
                     flash_causal_attention_decode = (
                         torch.ops.rbln_triton_ops.
-                        flash_causal_attention_decode)
+                        flash_causal_attention_naive_decode)
                     flash_causal_attention_prefill = (
                         torch.ops.rbln_triton_ops.
-                        flash_causal_attention_prefill)
+                        flash_causal_attention_naive_prefill)
                 elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
                     flash_causal_attention_decode = (
                         torch.ops.rbln_custom_ops.
-                        flash_causal_attention_decode)
+                        flash_causal_attention_naive_decode)
                     flash_causal_attention_prefill = (
                         torch.ops.rbln_custom_ops.
-                        flash_causal_attention_prefill)
+                        flash_causal_attention_naive_prefill)
                 else:
                     raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                      f"{envs.VLLM_RBLN_KERNEL_MODE}")
             else:
                 flash_causal_attention_prefill = (
-                    flash_causal_attention_prefill_impl)
+                    flash_causal_attention_naive_prefill_impl)
                 flash_causal_attention_decode = (
-                    flash_causal_attention_decode_impl)
+                    flash_causal_attention_naive_decode_impl)
 
             if q_len == 1:
                 attn_output = flash_causal_attention_decode(  # noqa: E501
@@ -671,24 +671,24 @@ class RBLNAttentionImpl(AttentionImpl[RBLNAttentionMetadata]):
             if envs.VLLM_RBLN_COMPILE_MODEL:
                 if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
                     flash_attention_prefill = (
-                        torch.ops.rbln_triton_ops.flash_attention_prefill
+                        torch.ops.rbln_triton_ops.flash_attention_naive_prefill
                     )
                     flash_attention_decode = (
-                        torch.ops.rbln_triton_ops.flash_attention_decode)
+                        torch.ops.rbln_triton_ops.flash_attention_naive_decode)
                 elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
                     flash_attention_prefill = (
-                        torch.ops.rbln_custom_ops.flash_attention_prefill
+                        torch.ops.rbln_custom_ops.flash_attention_naive_prefill
                     )
                     flash_attention_decode = (
-                        torch.ops.rbln_custom_ops.flash_attention_decode)
+                        torch.ops.rbln_custom_ops.flash_attention_naive_decode)
                 else:
                     raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                      f"{envs.VLLM_RBLN_KERNEL_MODE}")
             else:
                 flash_attention_prefill = (
-                    flash_attention_prefill_impl)
+                    flash_attention_naive_prefill_impl)
                 flash_attention_decode = (
-                    flash_attention_decode_impl)
+                    flash_attention_naive_decode_impl)
 
             if q_len == 1:
                 attn_output = flash_attention_decode(  # noqa: E501

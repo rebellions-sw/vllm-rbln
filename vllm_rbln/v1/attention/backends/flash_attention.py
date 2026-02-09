@@ -155,9 +155,9 @@ def _(
 
 
 # RBLN custom op (flash attention naive prefill/decode)
-@torch.library.custom_op("rbln_custom_ops::flash_attention_prefill",
+@torch.library.custom_op("rbln_custom_ops::flash_attention_naive_prefill",
                          mutates_args=["kv_cache"])
-def flash_attention_prefill_impl(
+def flash_attention_naive_prefill_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -222,7 +222,7 @@ def flash_attention_prefill_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake("rbln_custom_ops::flash_attention_prefill")
+@torch.library.register_fake("rbln_custom_ops::flash_attention_naive_prefill")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -238,9 +238,9 @@ def _(
     return torch.empty_like(q)
 
 
-@torch.library.custom_op("rbln_custom_ops::flash_attention_decode",
+@torch.library.custom_op("rbln_custom_ops::flash_attention_naive_decode",
                          mutates_args=["kv_cache"])
-def flash_attention_decode_impl(
+def flash_attention_naive_decode_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -281,7 +281,7 @@ def flash_attention_decode_impl(
         return torch.empty_like(q)
 
 
-@torch.library.register_fake("rbln_custom_ops::flash_attention_decode")
+@torch.library.register_fake("rbln_custom_ops::flash_attention_naive_decode")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -299,7 +299,7 @@ def _(
 
 # RBLN custom op (flash causal attention naive prefill/decode w/o attn mask)
 @torch.library.custom_op(
-    "rbln_custom_ops::flash_causal_attention_prefill",
+    "rbln_custom_ops::flash_causal_attention_naive_prefill",
     mutates_args=["kv_cache"])
 def flash_causal_attention_prefill_impl(
     q: torch.Tensor,
@@ -477,7 +477,7 @@ def flash_causal_attention_prefill_impl(
 
 
 @torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_prefill")
+    "rbln_custom_ops::flash_causal_attention_naive_prefill")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -493,9 +493,9 @@ def _(
 
 
 @torch.library.custom_op(
-    "rbln_custom_ops::flash_causal_attention_decode",
+    "rbln_custom_ops::flash_causal_attention_naive_decode",
     mutates_args=["kv_cache"])
-def flash_causal_attention_decode_impl(
+def flash_causal_attention_naive_decode_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -639,7 +639,7 @@ def flash_causal_attention_decode_impl(
 
 
 @torch.library.register_fake(
-    "rbln_custom_ops::flash_causal_attention_decode")
+    "rbln_custom_ops::flash_causal_attention_naive_decode")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -655,9 +655,9 @@ def _(
 
 
 @torch.library.custom_op(
-    "rbln_custom_ops::sliding_window_attention_prefill",
+    "rbln_custom_ops::sliding_window_attention_naive_prefill",
     mutates_args=["kv_cache"])
-def sliding_window_attention_prefill_impl(
+def sliding_window_attention_naive_prefill_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -767,7 +767,7 @@ def sliding_window_attention_prefill_impl(
 
 
 @torch.library.register_fake(
-    "rbln_custom_ops::sliding_window_attention_prefill")
+    "rbln_custom_ops::sliding_window_attention_naive_prefill")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -784,9 +784,9 @@ def _(
 
 
 @torch.library.custom_op(
-    "rbln_custom_ops::sliding_window_attention_decode",
+    "rbln_custom_ops::sliding_window_attention_naive_decode",
     mutates_args=["kv_cache"])
-def sliding_window_attention_decode_impl(
+def sliding_window_attention_naive_decode_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -882,7 +882,7 @@ def sliding_window_attention_decode_impl(
 
 
 @torch.library.register_fake(
-    "rbln_custom_ops::sliding_window_attention_decode")
+    "rbln_custom_ops::sliding_window_attention_naive_decode")
 def _(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -1373,10 +1373,9 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             assert attn_metadata.cache_offsets is not None
             if envs.VLLM_RBLN_COMPILE_MODEL:
                 if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-<<<<<<< HEAD
                     sliding_window_attention_naive_prefill = (
-                        torch.ops.rbln_triton_ops.sliding_window_attention_naive_prefill
-                    )
+                        torch.ops.rbln_triton_ops.
+                        sliding_window_attention_naive_prefill)
                     sliding_window_attention_naive_decode = (
                         torch.ops.rbln_triton_ops.
                         sliding_window_attention_naive_decode)
@@ -1384,20 +1383,18 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                      envs.VLLM_RBLN_KERNEL_MODE == "str":
                     sliding_window_attention_naive_prefill = (
                         torch.ops.rbln_custom_ops.
-                        sliding_window_attention_prefill)
-                    sliding_window_attention_decode = (
+                        sliding_window_attention_naive_prefill)
+                    sliding_window_attention_naive_decode = (
                         torch.ops.rbln_custom_ops.
-                        sliding_window_attention_decode)
->>>>>>> 97dae2d (removed _naive_ in kernel name)
+                        sliding_window_attention_naive_decode)
                 else:
-                    raise ValueError(
-                        f"Invalid VLLM_RBLN_KERNEL_MODE: {envs.VLLM_RBLN_KERNEL_MODE}"
-                    )
+                    raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                     f"{envs.VLLM_RBLN_KERNEL_MODE}")
             else:
-                sliding_window_attention_prefill = (
-                    sliding_window_attention_prefill_impl)
-                sliding_window_attention_decode = (
-                    sliding_window_attention_decode_impl)
+                sliding_window_attention_naive_prefill = (
+                    sliding_window_attention_naive_prefill_impl)
+                sliding_window_attention_naive_decode = (
+                    sliding_window_attention_naive_decode_impl)
 
             if q_len == 1:
                 attn_output = sliding_window_attention_naive_decode(  # noqa: E501
