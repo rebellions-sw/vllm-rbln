@@ -1246,7 +1246,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
-                    self.sinks,
                 )
             else:
                 attn_output = sliding_window_attention_prefill(  # noqa: E501
@@ -1259,7 +1258,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
-                    self.sinks,
                 )
         # actually non-flash paged attention DOES NOT use slot_mapping
         elif self.is_causal:
@@ -1341,7 +1339,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         attn_metadata.seq_lens.to(torch.int16),
                         attn_metadata.block_tables.to(torch.int16),
                         self.scale,  # dummy
-                        self.sinks,
                     )
                 else:
                     attn_output = flash_causal_attention_prefill(  # noqa: E501
@@ -1353,7 +1350,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         attn_metadata.seq_lens.to(torch.int16),
                         attn_metadata.block_tables.to(torch.int16),
                         self.scale,  # dummy
-                        self.sinks,
                     )
         else:
             if self.is_normal:
@@ -1405,7 +1401,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                             torch.ops.rbln_triton_ops.flash_attention_naive_prefill
                         )
                         flash_attention_decode = (
-                            torch.ops.rbln_triton_ops.flash_attention_decode)
+                            torch.ops.rbln_triton_ops.flash_attention_naive_decode)
                     elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
                         flash_attention_prefill = (
                             torch.ops.rbln_custom_ops.flash_attention_naive_prefill
@@ -1432,7 +1428,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         attn_metadata.seq_lens.to(torch.int16),
                         attn_metadata.block_tables.to(torch.int16),
                         self.scale,  # dummy
-                        self.sinks,
                     )
                 else:
                     attn_output = flash_attention_prefill(  # noqa: E501
@@ -1445,7 +1440,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         attn_metadata.seq_lens.to(torch.int16),
                         attn_metadata.block_tables.to(torch.int16),
                         self.scale,  # dummy
-                        self.sinks,
                     )
 
         # 2. attention output reshape for attention backend return
