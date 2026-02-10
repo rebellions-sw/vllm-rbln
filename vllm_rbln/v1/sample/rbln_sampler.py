@@ -218,6 +218,12 @@ class RBLNSampler(VLLMSampler):
             bucket_sizes += list(range(256, max_num_seqs + 1, 16))
         return bucket_sizes
 
+    def greedy_sample(self, logits: torch.Tensor) -> torch.Tensor:
+        # NOTE:
+        # If there are any parameters for top-k or top-p,
+        # this function works as a greedy sampler.
+        sampled, _ = self.topk_topp_sampler(logits, dict(), None, None)
+        return sampled
 
 WARM_UP_CONFIGS = [
     {
