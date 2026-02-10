@@ -508,7 +508,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             "decode batch buckets: %s", self.bucketing_manager.decode_batch_buckets
         )
 
-        self.performance_tracker = None
+        self.performance_tracker: PerformanceTracker | None = None
 
         self.dummy_run_state: DummyRunState | None = None
 
@@ -1025,11 +1025,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         num_padded_tokens: int | None = None,
     ) -> tuple[
         dict[str, Any],
-        torch.Tensor,
-        SpecDecodeMetadata | None,
-        np.ndarray,
-        CommonAttentionMetadata | None,
+        Any,
+        Any | None,
+        Any,
+        Any | None,
         int,
+        int,
+        int | None,
+        Any | None,
     ]:
         """
         :return: tuple[
@@ -1184,16 +1187,19 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.num_accepted_tokens.copy_to_gpu()
 
         max_num_scheduled_tokens = int(num_scheduled_tokens.max())
-        batch_bucket_size = self.bucketing_manager.find_decode_batch_bucket(num_reqs)
+        initial_batch_bucket_size = self.bucketing_manager.find_decode_batch_bucket(
+            num_reqs
+        )
 
         (batch_bucket_size, num_padded_tokens, num_tokens_across_dp) = (
             self.get_dp_padding(
                 total_num_scheduled_tokens,
-                batch_bucket_size,
+                initial_batch_bucket_size,
                 num_padded_tokens,
                 bool(self.is_prefills()[0]),
             )
         )
+        assert batch_bucket_size is not None
         # Prepare the attention metadata for each KV cache group and make layers
         # in the same group share the same metadata.
         for kv_cache_group_id, kv_cache_group_spec in enumerate(
@@ -1333,7 +1339,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             options["mode"] = "strict"
 
         # compile compute_logits
-        self.compute_logits = torch.compile(
+        # FIXME(jiwoo.park): method assignment for torch.compile
+        self.compute_logits = torch.compile(  # type: ignore[method-assign]
             self.compute_logits,
             backend="rbln",
             options=copy(options),
@@ -1522,10 +1529,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def get_dp_padding(
         self,
         num_tokens: int,
-        batch_bucket_size: int,
+        batch_bucket_size: int | None,
         num_padded_tokens: int | None = None,
         is_prefill: bool = False,
-    ) -> tuple[int, int | None, torch.Tensor | None]:
+    ) -> tuple[int | None, int | None, torch.Tensor | None]:
         dp_size = self.vllm_config.parallel_config.data_parallel_size
         dp_rank = self.vllm_config.parallel_config.data_parallel_rank
 
@@ -1561,6 +1568,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if any_prefill or not self.specialized_moe_decode:
             num_padded_tokens = self.max_num_batched_tokens
         else:
+            assert max_decode_tokens is not None
             batch_bucket_size = self.bucketing_manager.find_decode_batch_bucket(
                 max_decode_tokens
             )
@@ -1611,15 +1619,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def _preprocess(
         self,
         scheduler_output: "SchedulerOutput",
-    ) -> tuple[
-        int,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor,
-        IntermediateTensors | None,
-        dict[str, Any],
-    ]:
+    ) -> tuple[Any, Any | None, Any, Any, dict[Any, Any]]:
         num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
 
         # TODO(RBLN): Support SP
@@ -1725,8 +1725,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if self.scheduler_config.enable_chunked_prefill
             else self.model_config.max_model_len
         )
-        dummy_prefill_requests = []
-        dummy_prefill_num_scheduled_tokens = {}
+        dummy_prefill_requests: list[NewRequestData] = []
+        dummy_prefill_num_scheduled_tokens: dict[str, int] = {}
         self._add_dummy_requests(
             requests=dummy_prefill_requests,
             num_scheduled_tokens=dummy_prefill_num_scheduled_tokens,
@@ -1751,8 +1751,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
             decode_max_seq_len = self.max_model_len
 
-            dummy_decode_requests = []
-            dummy_decode_num_scheduled_tokens = {}
+            dummy_decode_requests: list[NewRequestData] = []
+            dummy_decode_num_scheduled_tokens: dict[str, int] = {}
             num_speculative_tokens = (
                 self.speculative_config.num_speculative_tokens
                 if self.speculative_config is not None
@@ -2181,8 +2181,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             raise NotImplementedError("LoRA is not supported for DP dummy run")
 
         num_kv_cache_groups = len(self.kv_cache_config.kv_cache_groups)
-        dummy_run_requests = []
-        dummy_run_num_scheduled_tokens = {}
+        dummy_run_requests: list[NewRequestData] = []
+        dummy_run_num_scheduled_tokens: dict[str, int] = {}
         self._add_dummy_requests(
             requests=dummy_run_requests,
             num_scheduled_tokens=dummy_run_num_scheduled_tokens,
@@ -2208,6 +2208,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     @torch.inference_mode()
     def dummy_run(self) -> None:
+        assert self.dummy_run_state is not None
         (attn_metadata, num_input_tokens, input_ids, positions) = self.dummy_run_state
 
         (batch_bucket_size, num_padded_tokens, num_tokens_across_dp) = (
@@ -2216,17 +2217,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
         )
 
-        attn_metadata = attn_metadata.get(batch_bucket_size)
-        input_ids = input_ids.get(batch_bucket_size)
-        positions = positions.get(batch_bucket_size)
         assert (
-            attn_metadata is not None
-            and input_ids is not None
-            and positions is not None
+            batch_bucket_size in attn_metadata
+            and batch_bucket_size in input_ids
+            and batch_bucket_size in positions
         ), (
             "attn_metadata, input_ids, and positions should be defined"
             f" for batch_bucket_size: {batch_bucket_size}"
         )
+        bucket_attn_metadata = attn_metadata[batch_bucket_size]
+        bucket_input_ids = input_ids[batch_bucket_size]
+        bucket_positions = positions[batch_bucket_size]
 
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
@@ -2237,7 +2238,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             assert intermediate_tensors is not None
 
         with set_forward_context(
-            attn_metadata,
+            bucket_attn_metadata,
             self.vllm_config,
             num_tokens=num_input_tokens,
             num_tokens_across_dp=num_tokens_across_dp,
@@ -2248,8 +2249,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             model_kwargs = dict[str, Any]({})
 
             _ = self.model_executable(
-                input_ids=input_ids,
-                positions=positions,
+                input_ids=bucket_input_ids,
+                positions=bucket_positions,
                 intermediate_tensors=intermediate_tensors,
                 selected_token_indices=token_indices,
                 inputs_embeds=inputs_embeds,
@@ -2451,6 +2452,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Padding for speculative decoding
         # in case of that all requests are not scheduled equally.
+        assert input_ids is not None
         num_scheduled_tokens_per_req = torch.tensor(
             [
                 scheduler_output.num_scheduled_tokens[i]
@@ -2596,7 +2598,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     )
                 else:
                     padded_decode = (
-                        num_padded_tokens and num_padded_tokens != batch_bucket_size
+                        num_padded_tokens is not None
+                        and num_padded_tokens != batch_bucket_size
                     )
                     self.performance_tracker.record_decode(
                         execution_time,
@@ -2610,9 +2613,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
-                hidden_states, aux_hidden_states, logits = model_output
+                hidden_states, aux_hidden_states, logits = model_output  # type: ignore[misc]
             else:
-                hidden_states, logits = model_output
+                hidden_states, logits = model_output  # type: ignore[misc]
                 aux_hidden_states = None
             sample_hidden_states = None
 
@@ -3046,7 +3049,16 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             intermediate_tensors: IntermediateTensors | None = None,
             inputs_embeds: torch.Tensor | None = None,
             selected_token_indices: torch.Tensor | None = None,
-        ) -> tuple[Union[torch.Tensor, IntermediateTensors], torch.Tensor | None]:
+        ) -> (
+            tuple[Any, Any, Any]
+            | tuple[Any, Any]
+            | tuple[
+                Union[torch.Tensor, IntermediateTensors],
+                torch.Tensor | Any,
+                Any,
+                Any | None,
+            ]
+        ):
             """
             This wrapper function is designed to be compiled by torch.compile.
             It handles the forward pass of the underlying model and, computes
