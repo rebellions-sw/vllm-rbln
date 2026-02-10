@@ -723,8 +723,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # up_proj_weight - second half, layer.w13_weight[intermediate_size:]
         # down_proj_weights = layer.w2_weight
         gate_proj_weight = layer.w13_weight[:, :intermediate_size, :]
+        gate_proj_weight_scale = layer.w13_weight_scale[:, :intermediate_size, :]
         up_proj_weight = layer.w13_weight[:, intermediate_size:, :]
+        up_proj_weight_scale = layer.w13_weight_scale[:, intermediate_size:, :]
         down_proj_weight = layer.w2_weight
+        down_proj_weight_scale = layer.w2_weight_scale
 
         # expected tensor shape - [num_tokens, dim]
         hidden_states = x.reshape(num_tokens, -1)
@@ -742,18 +745,22 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
         if use_moe_tokens_mask:
             tokens_mask = get_tokens_mask(num_tokens)
-            router_logits = router_logits * tokens_mask
 
         # TODO(RBLN) - implement custom_moe_glu_fp8 custom kernel
         final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu_fp8(
             hidden_states,
             gate_proj_weight,
+            gate_proj_weight_scale,
             up_proj_weight,
+            up_proj_weight_scale,
             down_proj_weight,
+            down_proj_weight_scale,
             router_logits,
+            torch.tensor(self.weight_block_size[1], dtype=torch.int32),
             top_k,
-            renormalize,
-            expert_map_const,
+            self.e_score_correction_bias,
+            expert_map=expert_map_const,
+            dp_mask=tokens_mask,
         )
 
         return final_hidden_states.reshape(orig_shape)
