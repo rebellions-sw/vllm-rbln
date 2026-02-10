@@ -15,8 +15,6 @@
 # NOTE: This module should be imported before creating model config,
 # because the function we're patching is imported at that moment.
 
-from typing import Optional
-
 import vllm.envs as envs
 import vllm.model_executor.layers.quantization.kernels.mixed_precision as mp
 from vllm.model_executor.layers.quantization.kernels.mixed_precision.MPLinearKernel import (  # noqa: E501
