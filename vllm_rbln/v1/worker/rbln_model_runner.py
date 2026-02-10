@@ -3829,7 +3829,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if is_prefill:
             performance_tracker.record_prefill(
                 execution_time,
-                0,
+                token_count,
                 host_time=host_time,
                 device_time=device_time,
                 ccl_time=ccl_time,
@@ -3837,7 +3837,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         else:
             performance_tracker.record_decode(
                 execution_time,
-                0,
+                token_count,
                 host_time=host_time,
                 device_time=device_time,
                 ccl_time=ccl_time,
