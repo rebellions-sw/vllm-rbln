@@ -478,6 +478,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.bucketing_manager.decode_batch_buckets)
 
         self.performance_tracker = None
+        self.sampler_performance_tracker = None
 
         self.dummy_run_state: DummyRunState | None = None
 
@@ -486,8 +487,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
-            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker = PerformanceTracker("MODEL")
             self.performance_tracker.register_cleanup()
+            self.sampler_performance_tracker = PerformanceTracker("SAMPLER")
+            self.sampler_performance_tracker.register_cleanup()
 
     def _get_positions(self, num_tokens: Any):
         if isinstance(num_tokens, int):
@@ -1612,20 +1615,37 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
-        if spec_decode_metadata is None:
-            sampler_output = self.sampler(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
+        if hasattr(rebel, "capture_reports"):
+            capture_ctx = rebel.capture_reports()
         else:
-            sampler_output = self.rejection_sampler(
-                spec_decode_metadata,
-                None,  # draft_probs
-                logits,
-                sampling_metadata,
+            # use a dummy context manager that does nothing
+            capture_ctx = contextlib.nullcontext()
+        start_time = time.perf_counter()
+        with capture_ctx as sampler_reports:
+            if spec_decode_metadata is None:
+                sampler_output = self.sampler(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
+            else:
+                sampler_output = self.rejection_sampler(
+                    spec_decode_metadata,
+                    None,  # draft_probs
+                    logits,
+                    sampling_metadata,
+                )
+                self._update_states_after_model_execute(
+                    sampler_output.sampled_token_ids)
+        if envs.VLLM_RBLN_METRICS and self.sampler_performance_tracker is not None:
+            self.collect_metrics(
+                self.sampler_performance_tracker,
+                self.is_prefills()[0],
+                start_time=start_time,
+                end_time=time.perf_counter(),
+                reports=sampler_reports,
+                token_count=
+                0  # the performance of sampler doesn't depend on token count
             )
-            self._update_states_after_model_execute(
-                sampler_output.sampled_token_ids)
 
         return sampler_output
 
@@ -3809,6 +3829,35 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         return not (self.lora_config is not None or
                     (self.speculative_config is not None and
                      self.speculative_config.method in ("eagle", "eagle3")))
+
+    def collect_metrics(self, performance_tracker: PerformanceTracker,
+                                is_prefill: bool, start_time: float,
+                                end_time: float, reports: list[dict],
+                                token_count: int) -> None:
+        execution_time = end_time - start_time
+        host_time = None
+        device_time = None
+        ccl_time = None
+        if reports is not None and len(reports) > 0:
+            host_time = reports[0].get('total_host', None)
+            device_time = reports[0].get('total_device', None)
+            ccl_time = reports[0].get('total_ccl', None)
+        if is_prefill:
+            performance_tracker.record_prefill(
+                execution_time,
+                token_count,
+                host_time=host_time,
+                device_time=device_time,
+                ccl_time=ccl_time,
+            )
+        else:
+            performance_tracker.record_decode(
+                execution_time,
+                token_count,
+                host_time=host_time,
+                device_time=device_time,
+                ccl_time=ccl_time,
+            )
 
 
 def create_lora_mask(
