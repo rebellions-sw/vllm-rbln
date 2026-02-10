@@ -1603,34 +1603,53 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
-        start_time = time.perf_counter()
-        if spec_decode_metadata is None:
-            sampler_output = self.sampler(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
+        if hasattr(rebel, "capture_reports"):
+            capture_ctx = rebel.capture_reports()
         else:
-            sampler_output = self.rejection_sampler(
-                spec_decode_metadata,
-                None,  # draft_probs
-                logits,
-                sampling_metadata,
-            )
-            self._update_states_after_model_execute(
-                sampler_output.sampled_token_ids)
-        end_time = time.perf_counter()
+            # use a dummy context manager that does nothing
+            capture_ctx = contextlib.nullcontext()
+        start_time = time.perf_counter()
+        with capture_ctx as sampler_reports:
+            if spec_decode_metadata is None:
+                sampler_output = self.sampler(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
+            else:
+                sampler_output = self.rejection_sampler(
+                    spec_decode_metadata,
+                    None,  # draft_probs
+                    logits,
+                    sampling_metadata,
+                )
+                self._update_states_after_model_execute(
+                    sampler_output.sampled_token_ids)
         if envs.VLLM_RBLN_METRICS and self.sampler_performance_tracker is not None:
+            end_time = time.perf_counter()
             execution_time = end_time - start_time
+            host_time = None
+            device_time = None
+            ccl_time = None
+            if sampler_reports is not None and len(sampler_reports) > 0:
+                host_time = sampler_reports[0].get('total_host', None)
+                device_time = sampler_reports[0].get('total_device', None)
+                ccl_time = sampler_reports[0].get('total_ccl', None)
             is_prefill = self.is_prefills()[0]
             if is_prefill:
                 self.sampler_performance_tracker.record_prefill(
                     execution_time,
                     0,
+                    host_time=host_time,
+                    device_time=device_time,
+                    ccl_time=ccl_time,
                 )
             else:
                 self.sampler_performance_tracker.record_decode(
                     execution_time,
                     0,
+                    host_time=host_time,
+                    device_time=device_time,
+                    ccl_time=ccl_time,
                 )
         return sampler_output
 
