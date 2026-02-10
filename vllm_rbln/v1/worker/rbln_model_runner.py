@@ -478,6 +478,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     self.bucketing_manager.decode_batch_buckets)
 
         self.performance_tracker = None
+        self.sampler_performance_tracker = None
 
         self.dummy_run_state: DummyRunState | None = None
 
@@ -486,8 +487,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
     def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
-            self.performance_tracker = PerformanceTracker()
+            self.performance_tracker = PerformanceTracker("MODEL")
             self.performance_tracker.register_cleanup()
+            self.sampler_performance_tracker = PerformanceTracker("SAMPLER")
+            self.sampler_performance_tracker.register_cleanup()
 
     def _get_positions(self, num_tokens: Any):
         if isinstance(num_tokens, int):
@@ -571,7 +574,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         src_indices = orig_indices[sorted_order]
         src_dest_map = {
             int(src): int(dst)
-            for src, dst in zip(src_indices, orig_indices)
+            for src, dst in zip(src_indices, orig_indices, strict=False)
         }
 
         for src in src_dest_map:
@@ -1600,6 +1603,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     ) -> SamplerOutput:
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
+        start_time = time.perf_counter()
         if spec_decode_metadata is None:
             sampler_output = self.sampler(
                 logits=logits,
@@ -1614,7 +1618,20 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
             self._update_states_after_model_execute(
                 sampler_output.sampled_token_ids)
-
+        end_time = time.perf_counter()
+        if envs.VLLM_RBLN_METRICS and self.sampler_performance_tracker is not None:
+            execution_time = end_time - start_time
+            is_prefill = self.is_prefills()[0]
+            if is_prefill:
+                self.sampler_performance_tracker.record_prefill(
+                    execution_time,
+                    0,
+                )
+            else:
+                self.sampler_performance_tracker.record_decode(
+                    execution_time,
+                    0,
+                )
         return sampler_output
 
     def compute_logits(

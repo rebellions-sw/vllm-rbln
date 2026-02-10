@@ -115,7 +115,8 @@ class StepMetrics:
 class PerformanceTracker:
     """Tracks performance metrics for prefill and decode steps."""
 
-    def __init__(self):
+    def __init__(self, name: Optional[str] = None):
+        self.name = name
         self.prefill_metrics = StepMetrics()
         self.decode_metrics = StepMetrics()
         self.padded_decode_metrics = StepMetrics()
@@ -156,7 +157,10 @@ class PerformanceTracker:
 
     def print_final_stats(self):
         logger.info("=" * 80)
-        logger.info("FINAL PERFORMANCE STATISTICS")
+        if self.name:
+            logger.info("FINAL PERFORMANCE STATISTICS [%s]", self.name)
+        else:
+            logger.info("FINAL PERFORMANCE STATISTICS")
         logger.info("=" * 80)
 
         # Prefill stats
@@ -164,12 +168,13 @@ class PerformanceTracker:
             logger.info("PREFILL METRICS:")
             logger.info("  Total call counts: %d",
                         self.prefill_metrics.get_call_counts())
-            logger.info("  Total tokens processed: %d",
-                        sum(self.prefill_metrics.token_counts))
             logger.info("  Average latency: %.2f ms",
                         self.prefill_metrics.get_avg_latency())
-            logger.info("  Average throughput: %.2f tokens/sec",
-                        self.prefill_metrics.get_avg_throughput())
+            if sum(self.prefill_metrics.token_counts) > 0:
+                logger.info("  Total tokens processed: %d",
+                            sum(self.prefill_metrics.token_counts))
+                logger.info("  Average throughput: %.2f tokens/sec",
+                            self.prefill_metrics.get_avg_throughput())
             if self.prefill_metrics.host_times:
                 logger.info("  Average host time: %.2f us",
                             self.prefill_metrics.get_avg_host_time())
@@ -190,12 +195,13 @@ class PerformanceTracker:
             logger.info("DECODE METRICS:")
             logger.info("  Total call counts: %d",
                         self.decode_metrics.get_call_counts())
-            logger.info("  Total tokens processed: %d",
-                        sum(self.decode_metrics.token_counts))
             logger.info("  Average latency: %.2f ms",
                         self.decode_metrics.get_avg_latency())
-            logger.info("  Average throughput: %.2f tokens/sec",
-                        self.decode_metrics.get_avg_throughput())
+            if sum(self.prefill_metrics.token_counts) > 0:
+                logger.info("  Total tokens processed: %d",
+                            sum(self.decode_metrics.token_counts))
+                logger.info("  Average throughput: %.2f tokens/sec",
+                            self.prefill_metrics.get_avg_throughput())
             if self.decode_metrics.host_times:
                 logger.info("  Average host time: %.2f us",
                             self.decode_metrics.get_avg_host_time())
