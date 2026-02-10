@@ -37,6 +37,7 @@ def test_forward_context(vllm_config, attn_metadata_mock: MagicMock):
         attn_metadata_mock,
         vllm_config,
         num_tokens_across_dp=torch.tensor([0, 1]),
+        num_padded_tokens=1,
     ):
         # assert dp_metadata class name is RBLNDPMetadata
         assert (

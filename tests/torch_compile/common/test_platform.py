@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
 import torch
 from vllm.attention.backends.abstract import AttentionType
 from vllm.attention.backends.registry import AttentionBackendEnum
@@ -44,37 +43,38 @@ def test_platform_plugins():
     )
 
 
-def test_register_ops(monkeypatch: pytest.MonkeyPatch, vllm_config):
-    monkeypatch.setattr("vllm.config._current_vllm_config", vllm_config)
+def test_register_ops(vllm_config):
+    from vllm.config import set_current_vllm_config
 
-    # Attention
-    from vllm.attention.layer import Attention
+    with set_current_vllm_config(vllm_config):
+        # Attention
+        from vllm.attention.layer import Attention
 
-    attention = Attention(16, 32, 16, 16, prefix="layer.0")
-    assert hasattr(attention, "layer_index"), (
-        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
-    )
-    assert isinstance(attention.layer_index, int), (
-        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
-    )
-    assert attention.layer_index == 0, (
-        f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
-    )
+        attention = Attention(16, 32, 16, 16, prefix="layer.0")
+        assert hasattr(attention, "layer_index"), (
+            f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        )
+        assert isinstance(attention.layer_index, int), (
+            f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        )
+        assert attention.layer_index == 0, (
+            f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        )
 
-    # RotaryEmbedding
-    from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
+        # RotaryEmbedding
+        from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
 
-    rope = RotaryEmbedding(16, 16, 16, 16, True, torch.float16)
-    assert "rope_forward_oot" in str(rope.__dict__["_forward_method"]), (
-        f"Expected 'rope_forward_oot' in layer.__dict__['_forward_method'], \
-            got {rope.__dict__['_forward_method']}"
-    )
-    assert isinstance(rope.get_buffer("cos_cache"), torch.Tensor), (
-        f"Expected 'cos_cache' in buffer, got {rope.get_buffer('cos_cache')}"
-    )
-    assert isinstance(rope.get_buffer("sin_cache"), torch.Tensor), (
-        f"Expected 'sin_cache' in buffer, got {rope.get_buffer('sin_cache')}"
-    )
+        rope = RotaryEmbedding(16, 16, 16, 16, True, torch.float16)
+        assert "rope_forward_oot" in str(rope.__dict__["_forward_method"]), (
+            f"Expected 'rope_forward_oot' in layer.__dict__['_forward_method'], \
+                got {rope.__dict__['_forward_method']}"
+        )
+        assert isinstance(rope.get_buffer("cos_cache"), torch.Tensor), (
+            f"Expected 'cos_cache' in buffer, got {rope.get_buffer('cos_cache')}"
+        )
+        assert isinstance(rope.get_buffer("sin_cache"), torch.Tensor), (
+            f"Expected 'sin_cache' in buffer, got {rope.get_buffer('sin_cache')}"
+        )
 
 
 def test_get_attn_backend_cls():
