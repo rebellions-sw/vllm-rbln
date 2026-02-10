@@ -122,14 +122,6 @@ ignore_missing_imports = true
 check_untyped_defs = true
 follow_imports = "silent"
 
-# Primary package index
-index-url = "https://pypi.org/simple"
-
-# Additional package indexes
-extra-index-url = [
-    "https://download.pytorch.org/whl/cpu"
-]
-
 [tool.uv]
 required-environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'"

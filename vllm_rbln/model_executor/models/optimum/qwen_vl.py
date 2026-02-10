@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from vllm.config import VllmConfig
@@ -310,7 +310,7 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
         self,
         pixel_values_videos: torch.Tensor,
         video_grid_thw: torch.Tensor,
-        second_per_grid_ts=Optional[torch.Tensor],
+        second_per_grid_ts=torch.Tensor | None,
     ):
         if second_per_grid_ts is None:
             raise ValueError(

@@ -71,7 +71,7 @@ def get_rbln_params(
     else:
         # decoder
         kvcache_block_size = rbln_config.get("kvcache_block_size")
-        prefill_chunk_size = rbln_config.get("prefill_chunk_size")
+        prefill_chunk_size = rbln_config.get("prefill_chunk_size", 128)
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
 

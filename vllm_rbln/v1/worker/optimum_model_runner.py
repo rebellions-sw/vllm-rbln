@@ -520,8 +520,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         MultiModalKwargs | None,
         list[str],
     ]:
-        input_tokens: list[list[int]] = []
-        input_positions: list[list[int]] = []
         running_request_ids = []
         batched_mm_inputs: BatchedTensorInputs | None = None
 
@@ -1115,7 +1113,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             sampled_token_ids = sampler_output.sampled_token_ids
             logprobs_tensors = sampler_output.logprobs_tensors
 
-        invalid_req_indices = []
+        invalid_req_indices: list[int] = []
         cu_num_tokens: list[int] | None = None
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
@@ -1130,7 +1128,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             #     valid_sampled_token_ids[int(i)].clear()
         else:
             valid_sampled_token_ids = []
-            # FIXME: we need disacrd_sampled_tokens_req_indices for async scheduling # noqa: E501
             # invalid_req_indices = discard_sampled_tokens_req_indices.tolist()
             invalid_req_indices = []
             invalid_req_indices_set = set(invalid_req_indices)
@@ -1348,11 +1345,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 # kv_connector_output=kv_connector_output,
                 num_nans_in_logits=num_nans_in_logits,
             )
-
-        if not self.use_async_scheduling:
-            return output
-        # else: # FIXME
-        # return
+        # FIXME: enable async scheduling
+        assert not self.use_async_scheduling
+        return output
 
     def _sample(
         self,

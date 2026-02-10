@@ -59,7 +59,7 @@ class RBLNSchedulerOutput(SchedulerOutput):
         in decode phase.
     """
 
-    block_table_dict: dict[str, torch.Tensor] = None
+    block_table_dict: dict[str, torch.Tensor] = field(default_factory=dict)
     cached_block_table: list[int] = field(default_factory=list)
     cached_length: list[int] = field(default_factory=list)
     dummy_block: int | None = None
@@ -218,13 +218,13 @@ class RBLNOptimumScheduler(Scheduler):
         req_to_new_blocks: dict[str, KVCacheBlocks] = {}
         num_scheduled_tokens: dict[str, int] = {}
         token_budget = self.max_num_scheduled_tokens
-        scheduled_spec_decode_tokens = {}
+        scheduled_spec_decode_tokens: dict[str, list[int]] = {}
         # For logging.
         scheduled_timestamp = time.monotonic()
-        block_table_dict = {}
-        cached_block_table = []
-        cached_length = []
-        dummy_block = None
+        block_table_dict: dict[str, torch.Tensor] = {}
+        cached_block_table: list[int] = []
+        cached_length: list[int] = []
+        dummy_block: int | None = None
 
         # NOTE The scheduling process is changed like below.
         # (1) vllm-rbln distinguishes

@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 import torch
 from vllm import SamplingParams
@@ -83,7 +86,7 @@ def create_request(
     request_id: str,
     prompt_token_ids: list[int],
     block_size: int,
-    hash_fn: callable,
+    hash_fn: Callable[[Any], str],
 ) -> Request:
     block_hasher = get_request_block_hasher(block_size, hash_fn)
     request = Request(
