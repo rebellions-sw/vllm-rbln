@@ -1691,14 +1691,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         spec_decode_metadata: SpecDecodeMetadata | None,
     ) -> SamplerOutput:
         # Logits can be empty during intermediate chunked prefill. This breaks
-        # MinTokensLogitsProcessor and RBLNSampler. So we skip logit processing
-        # and sampling, and return empty tensor with expected shape. The output
-        # is discarded anyway (discard_sampled_tokens_req_indices).
+        # MinTokensLogitsProcessor. So we skip logit processing and sampling,
+        # and return empty tensor with expected shape. The output is discarded
+        # anyway (discard_sampled_tokens_req_indices).
         if logits is not None and logits.shape[0] == 0:
             return SamplerOutput(
-                sampled_token_ids=torch.empty(
-                    0, 1, dtype=torch.int32, device=logits.device
-                ),
+                sampled_token_ids=torch.empty(0,
+                                              1,
+                                              dtype=torch.int32,
+                                              device=logits.device),
                 logprobs_tensors=None,
             )
         # Sample the next token and get logprobs if needed.

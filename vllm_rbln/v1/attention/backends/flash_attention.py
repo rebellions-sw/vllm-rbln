@@ -806,6 +806,7 @@ def sliding_window_attention_naive_decode_impl(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    attn_mask: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if envs.VLLM_RBLN_COMPILE_MODEL:
@@ -902,7 +903,8 @@ def _(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
-    sinks: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor,
+    sinks: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
 
