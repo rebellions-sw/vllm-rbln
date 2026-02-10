@@ -50,9 +50,7 @@ def main():
         "A robot may not injure a human being",
         "The capital of France is",
     ]
-    sampling_params = SamplingParams(temperature=0.1,
-                                     top_p=0.9,
-                                     max_tokens=128)
+    sampling_params = SamplingParams(temperature=0.1, top_p=0.9, max_tokens=128)
     outputs = llm.generate(prompts, sampling_params=sampling_params)
 
     for output in outputs:
@@ -68,7 +66,8 @@ def main():
         return
 
     total_num_output_tokens = sum(
-        len(output.outputs[0].token_ids) for output in outputs)
+        len(output.outputs[0].token_ids) for output in outputs
+    )
     num_drafts = 0
     num_draft_tokens = 0
     num_accepted_tokens = 0
@@ -93,15 +92,13 @@ def main():
     print(f"num_drafts: {num_drafts}")
     print(f"num_draft_tokens: {num_draft_tokens}")
     print(f"num_accepted_tokens: {num_accepted_tokens}")
-    acceptance_length = 1 + (num_accepted_tokens /
-                             num_drafts) if num_drafts > 0 else 1
+    acceptance_length = 1 + (num_accepted_tokens / num_drafts) if num_drafts > 0 else 1
     print(f"mean acceptance length: {acceptance_length:.2f}")
     print("-" * 50)
 
     # print acceptance at each token position
     for i in range(len(acceptance_counts)):
-        acceptance_rate = acceptance_counts[
-            i] / num_drafts if num_drafts > 0 else 0
+        acceptance_rate = acceptance_counts[i] / num_drafts if num_drafts > 0 else 0
         print(f"acceptance at token {i}: {acceptance_rate:.2f}")
 
 

@@ -35,17 +35,18 @@ LLM_PARAMS = [
 
 
 def run_vllm_score(llm_kwargs: dict) -> None:
-    prefix = '<|im_start|>system\nJudge whether the Document meets the ' + \
-        'requirements based on the Query and the Instruct provided. ' + \
-        'Note that the answer can only be "yes" or "no".<|im_end|>\n' + \
-        '<|im_start|>user\n'
+    prefix = (
+        "<|im_start|>system\nJudge whether the Document meets the "
+        + "requirements based on the Query and the Instruct provided. "
+        + 'Note that the answer can only be "yes" or "no".<|im_end|>\n'
+        + "<|im_start|>user\n"
+    )
     suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
     query_template = "{prefix}<Instruct>: {instruction}\n<Query>: {query}\n"
     document_template = "<Document>: {doc}{suffix}"
 
-    instruction = (
-        "Given a query, retrieve relevant passages that answer the query")
+    instruction = "Given a query, retrieve relevant passages that answer the query"
 
     queries = [
         "What is the capital of China?",
@@ -54,14 +55,14 @@ def run_vllm_score(llm_kwargs: dict) -> None:
     ]
 
     documents = [
-        "The capital of China is Beijing.", "The capital of China is Beijing.",
-        "Gravity is a force that attracts two bodies towards each other."
+        "The capital of China is Beijing.",
+        "The capital of China is Beijing.",
+        "Gravity is a force that attracts two bodies towards each other.",
     ]
 
     templated_queries = [
-        query_template.format(prefix=prefix,
-                              instruction=instruction,
-                              query=query) for query in queries
+        query_template.format(prefix=prefix, instruction=instruction, query=query)
+        for query in queries
     ]
     templated_documents = [
         document_template.format(doc=doc, suffix=suffix) for doc in documents
@@ -73,13 +74,16 @@ def run_vllm_score(llm_kwargs: dict) -> None:
 
     assert outputs[0].outputs.score > 0.8, (
         f"Score ({outputs[0].outputs.score}) should be large."
-        f" <Query>: {queries[0]} <Document>: {documents[0]}.")
+        f" <Query>: {queries[0]} <Document>: {documents[0]}."
+    )
     assert outputs[1].outputs.score < 0.2, (
         f"Score ({outputs[1].outputs.score}) should be small."
-        f" <Query>: {queries[1]} <Document>: {documents[1]}.")
+        f" <Query>: {queries[1]} <Document>: {documents[1]}."
+    )
     assert outputs[2].outputs.score > 0.8, (
         f"Score ({outputs[2].outputs.score}) should be large."
-        f" <Query>: {queries[2]} <Document>: {documents[2]}.")
+        f" <Query>: {queries[2]} <Document>: {documents[2]}."
+    )
 
 
 @pytest.mark.parametrize("llm_params", LLM_PARAMS)
@@ -87,7 +91,6 @@ def test_pooling_model_score(
     monkeypatch: pytest.MonkeyPatch,
     llm_params: dict,
 ) -> None:
-
     env = {
         "VLLM_RBLN_USE_VLLM_MODEL": "1",
         "VLLM_DISABLE_COMPILE_CACHE": "1",

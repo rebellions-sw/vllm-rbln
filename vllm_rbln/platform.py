@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import torch
 from vllm.attention.backends.registry import AttentionBackendEnum
@@ -31,10 +31,15 @@ from vllm.utils.torch_utils import _StreamPlaceholder
 
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
-from vllm_rbln.utils.optimum.configuration import (is_qwen3_pooling,
-                                                   sync_with_rbln_config)
-from vllm_rbln.utils.optimum.registry import (is_enc_dec_arch, is_multi_modal,
-                                              is_pooling_arch)
+from vllm_rbln.utils.optimum.configuration import (
+    is_qwen3_pooling,
+    sync_with_rbln_config,
+)
+from vllm_rbln.utils.optimum.registry import (
+    is_enc_dec_arch,
+    is_multi_modal,
+    is_pooling_arch,
+)
 
 logger = init_logger(__name__)
 
@@ -94,7 +99,8 @@ class RblnPlatform(Platform):
 
     @classmethod
     def pre_register_and_update(
-            cls, parser: "Optional[FlexibleArgumentParser]" = None) -> None:
+        cls, parser: "FlexibleArgumentParser | None" = None
+    ) -> None:
         if parser is None:
             return
 
@@ -114,8 +120,7 @@ class RblnPlatform(Platform):
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
             if envs.VLLM_RBLN_ENFORCE_MODEL_FP32:
-                logger.info("original model_config.dtype = %s",
-                            model_config.dtype)
+                logger.info("original model_config.dtype = %s", model_config.dtype)
                 if model_config.dtype == torch.bfloat16:
                     logger.warning("bfloat16 is not supported on RBLN.")
 
@@ -126,36 +131,41 @@ class RblnPlatform(Platform):
 
                 if (lora_config := vllm_config.lora_config) is not None:
                     lora_config.lora_dtype = torch.float
-                    logger.info(
-                        "RBLN enforce lora_config.lora_dtype as torch.float")
+                    logger.info("RBLN enforce lora_config.lora_dtype as torch.float")
             else:
                 dtype = model_config.dtype
                 logger.info("original model_config.dtype = %s", dtype)
-                if dtype != torch.bfloat16 and dtype != torch.float16 \
-                            and dtype != torch.float:
+                if (
+                    dtype != torch.bfloat16
+                    and dtype != torch.float16
+                    and dtype != torch.float
+                ):
                     logger.warning(
-                        "%s not supported on RBLN, "
-                        "only fp32,fp16,bf16 supported", dtype)
+                        "%s not supported on RBLN, only fp32,fp16,bf16 supported", dtype
+                    )
                     model_config.dtype = torch.float
-                logger.info("RBLN use model_config.dtype = %s",
-                            model_config.dtype)
+                logger.info("RBLN use model_config.dtype = %s", model_config.dtype)
 
             if parallel_config.worker_cls == "auto":
                 parallel_config.worker_cls = (
-                    "vllm_rbln.v1.worker.rbln_worker.RBLNWorker")
+                    "vllm_rbln.v1.worker.rbln_worker.RBLNWorker"
+                )
             scheduler_config.scheduler_cls = (
-                "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler")
+                "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler"
+            )
 
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
                 hf_config = vllm_config.model_config.hf_config
-                assert not hasattr(hf_config, "sliding_window") \
-                    or not getattr(hf_config, "use_sliding_window", True)
+                assert not hasattr(hf_config, "sliding_window") or not getattr(
+                    hf_config, "use_sliding_window", True
+                )
 
                 RblnPlatform.device_type = "rbln"
                 vllm_config.device_config.device_type = RblnPlatform.device_type
-                vllm_config.device_config.device = (torch.device(
-                    RblnPlatform.device_type))
+                vllm_config.device_config.device = torch.device(
+                    RblnPlatform.device_type
+                )
                 # NOTE - force dtype into fp16 for eager mode
                 model_config.dtype = torch.float16
 
@@ -170,32 +180,43 @@ class RblnPlatform(Platform):
             assert model_config.dtype == torch.float
 
             if parallel_config.worker_cls == "auto":
-                parallel_config.worker_cls = \
+                parallel_config.worker_cls = (
                     "vllm_rbln.v1.worker.optimum_worker.RBLNOptimumWorker"
-            scheduler_config.scheduler_cls = \
+                )
+            scheduler_config.scheduler_cls = (
                 "vllm_rbln.v1.core.optimum_scheduler.RBLNOptimumScheduler"
+            )
 
             assert vllm_config.parallel_config.tensor_parallel_size == 1, (
-                "Tensor parallelism is set when compiled in optimum-rbln.")
+                "Tensor parallelism is set when compiled in optimum-rbln."
+            )
             assert vllm_config.parallel_config.pipeline_parallel_size == 1, (
-                "Pipeline parallelism is not supported in optimum-rbln.")
+                "Pipeline parallelism is not supported in optimum-rbln."
+            )
             assert vllm_config.speculative_config is None, (
-                "Speculative decoding is not supported in vLLM RBLN.")
+                "Speculative decoding is not supported in vLLM RBLN."
+            )
             cls.disable_unsupported_prefix_caching(vllm_config)
             sync_with_rbln_config(vllm_config)
 
-        if (parallel_config.distributed_executor_backend is not None
-                and parallel_config.distributed_executor_backend != "mp"):
+        if (
+            parallel_config.distributed_executor_backend is not None
+            and parallel_config.distributed_executor_backend != "mp"
+        ):
             logger.warning(
-                ("%s is not supported on RBLN, fallback to mp "
-                 "distributed executor backend."),
+                (
+                    "%s is not supported on RBLN, fallback to mp "
+                    "distributed executor backend."
+                ),
                 parallel_config.distributed_executor_backend,
             )
 
-        assert (not vllm_config.speculative_config
-                ), "Speculative decoding not yet supported for RBLN backend."
-        assert not envs.VLLM_USE_V2_MODEL_RUNNER, \
+        assert not vllm_config.speculative_config, (
+            "Speculative decoding not yet supported for RBLN backend."
+        )
+        assert not envs.VLLM_USE_V2_MODEL_RUNNER, (
             "v2 model runner is not supported for RBLN backend."
+        )
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
             from vllm.config import CompilationMode
@@ -203,14 +224,16 @@ class RblnPlatform(Platform):
             if vllm_config.compilation_config.mode != CompilationMode.NONE:
                 logger.info("RBLN doesn't @support_torch_compile decorator")
                 vllm_config.compilation_config.mode = CompilationMode.NONE
-                if (len(vllm_config.compilation_config.custom_ops) == 1
-                        and vllm_config.compilation_config.custom_ops[0]
-                        == "none"):
+                if (
+                    len(vllm_config.compilation_config.custom_ops) == 1
+                    and vllm_config.compilation_config.custom_ops[0] == "none"
+                ):
                     vllm_config.compilation_config.custom_ops = []
 
             if not model_config.disable_cascade_attn:
-                logger.info("The cascade attention is disabled"
-                            " because RBLN does not support it")
+                logger.info(
+                    "The cascade attention is disabled because RBLN does not support it"
+                )
                 model_config.disable_cascade_attn = True
 
     @classmethod
@@ -219,14 +242,12 @@ class RblnPlatform(Platform):
         selected_backend: "AttentionBackendEnum",
         attn_selector_config: "AttentionSelectorConfig",
     ) -> str:
-        if selected_backend and \
-            selected_backend != AttentionBackendEnum.FLASH_ATTN:
+        if selected_backend and selected_backend != AttentionBackendEnum.FLASH_ATTN:
             logger.info("Cannot use %s backend on RBLN.", selected_backend)
         if attn_selector_config.use_mla:
             raise NotImplementedError("MLA is not supported on RBLN.")
         if attn_selector_config.use_sparse:
-            raise NotImplementedError(
-                "Sparse Attention is not supported on RBLN.")
+            raise NotImplementedError("Sparse Attention is not supported on RBLN.")
 
         attn_backend_cls = AttentionBackendEnum.FLASH_ATTN.get_path()
         logger.info("Using RBLN Attention Backend: %s", attn_backend_cls)
@@ -234,45 +255,43 @@ class RblnPlatform(Platform):
         return attn_backend_cls
 
     @classmethod
-    def _disable_prefix_caching(cls, vllm_config: VllmConfig,
-                                reason: str) -> None:
+    def _disable_prefix_caching(cls, vllm_config: VllmConfig, reason: str) -> None:
         """Disable prefix caching with warning message."""
         logger.warning(
             "Prefix caching is not available for %s. "
-            "It has been automatically disabled.", reason)
+            "It has been automatically disabled.",
+            reason,
+        )
         vllm_config.cache_config.enable_prefix_caching = False
 
     @classmethod
-    def disable_unsupported_prefix_caching(cls,
-                                           vllm_config: VllmConfig) -> None:
+    def disable_unsupported_prefix_caching(cls, vllm_config: VllmConfig) -> None:
         if not vllm_config.cache_config.enable_prefix_caching:
             return
 
         hf_config = vllm_config.model_config.hf_config
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
-            if getattr(hf_config, "sliding_window", None) is not None \
-                   and getattr(hf_config, "use_sliding_window", True):
-                cls._disable_prefix_caching(vllm_config,
-                                            "sliding window models")
+            if getattr(hf_config, "sliding_window", None) is not None and getattr(
+                hf_config, "use_sliding_window", True
+            ):
+                cls._disable_prefix_caching(vllm_config, "sliding window models")
 
         else:
             # Prefix caching is supported only for decoder-only models for now.
             if is_qwen3_pooling(vllm_config):
                 # Qwen3 pooling model does not support prefix caching for now.
-                cls._disable_prefix_caching(vllm_config,
-                                            "Qwen3 pooling models")
+                cls._disable_prefix_caching(vllm_config, "Qwen3 pooling models")
             elif is_enc_dec_arch(hf_config):
-                cls._disable_prefix_caching(vllm_config,
-                                            "encoder-decoder models")
+                cls._disable_prefix_caching(vllm_config, "encoder-decoder models")
             elif is_multi_modal(hf_config):
                 cls._disable_prefix_caching(vllm_config, "multimodal models")
             elif is_pooling_arch(hf_config):
                 cls._disable_prefix_caching(vllm_config, "pooling models")
-            elif getattr(hf_config, "sliding_window", None) is not None \
-                    and getattr(hf_config, "use_sliding_window", True):
-                cls._disable_prefix_caching(vllm_config,
-                                            "sliding window models")
+            elif getattr(hf_config, "sliding_window", None) is not None and getattr(
+                hf_config, "use_sliding_window", True
+            ):
+                cls._disable_prefix_caching(vllm_config, "sliding window models")
 
     @classmethod
     def support_hybrid_kv_cache(cls) -> bool:

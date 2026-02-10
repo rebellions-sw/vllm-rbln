@@ -69,14 +69,13 @@ def sliding_window_attention_naive_prefill(
         # -- get physical block index from block table --
         block_table_ptr = tl.make_block_ptr(
             base=block_table_base,
-            shape=(NUM_PARTITION, ),
-            strides=(1, ),
-            offsets=(batch_id, ),
-            block_shape=(1, ),
-            order=(0, ),
+            shape=(NUM_PARTITION,),
+            strides=(1,),
+            offsets=(batch_id,),
+            block_shape=(1,),
+            order=(0,),
         )
-        tl.static_assert(
-            len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
+        tl.static_assert(len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
 
         block_number = rblib.to_dynamic_index(block_table_ptr)
 
@@ -177,40 +176,39 @@ def sliding_window_attention_naive_prefill(
         k_state = tl.load(k_block_ptr)
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k_base = rblib.dynamic_load(k_cache_base_ptr)
-        k_insert = rblib.window_insert(k_base, k_state, WINDOW_AXIS,
-                                       cache_start)
-        k_slice = rblib.window_slice(k_insert, cache_end, WINDOW_AXIS,
-                                     WINDOW_SIZE)
+        k_insert = rblib.window_insert(k_base, k_state, WINDOW_AXIS, cache_start)
+        k_slice = rblib.window_slice(k_insert, cache_end, WINDOW_AXIS, WINDOW_SIZE)
         rblib.dynamic_store(k_cache_base_ptr, k_slice)
 
         k_insert = tl.reshape(
-            k_insert, (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN, HEAD_DIM))
+            k_insert, (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN, HEAD_DIM)
+        )
         k_tmp = tl.permute(k_insert, (0, 1, 2, 4, 3))
         k = tl.broadcast_to(
-            k_tmp, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, WINDOW_SIZE + QUERY_LEN))
+            k_tmp, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, WINDOW_SIZE + QUERY_LEN)
+        )
         # 2.1 a = MM(Q, Kt)
         qk = tl.dot(q, k)  # (1,h,g,l,d) x (1,h,g,d,p) = (1,h,g,l,p)
         # 2.2 b = a * qk_scale
         qk_scaled = qk * qk_scale  # (1,h,g,l,p)
         # 2.3 c = window_softmax(b)
-        window_qk_scaled = rblib.window_softmax(qk_scaled,
-                                                cache_start,
-                                                window_size=WINDOW_SIZE)
+        window_qk_scaled = rblib.window_softmax(
+            qk_scaled, cache_start, window_size=WINDOW_SIZE
+        )
 
         v_state = tl.load(v_block_ptr)
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_base = rblib.dynamic_load(v_cache_base_ptr)
-        v_insert = rblib.window_insert(v_base, v_state, WINDOW_AXIS,
-                                       cache_start)
-        v_slice = rblib.window_slice(v_insert, cache_end, WINDOW_AXIS,
-                                     WINDOW_SIZE)
+        v_insert = rblib.window_insert(v_base, v_state, WINDOW_AXIS, cache_start)
+        v_slice = rblib.window_slice(v_insert, cache_end, WINDOW_AXIS, WINDOW_SIZE)
         rblib.dynamic_store(v_cache_base_ptr, v_slice)
 
         v_insert = tl.reshape(
-            v_insert, (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN, HEAD_DIM))
+            v_insert, (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN, HEAD_DIM)
+        )
         v = tl.broadcast_to(
-            v_insert,
-            (1, NUM_HEAD, NUM_GROUP, WINDOW_SIZE + QUERY_LEN, HEAD_DIM))
+            v_insert, (1, NUM_HEAD, NUM_GROUP, WINDOW_SIZE + QUERY_LEN, HEAD_DIM)
+        )
         attn_out = tl.dot(window_qk_scaled, v)
         tl.store(output_ptr, attn_out)
 
@@ -255,8 +253,7 @@ def sliding_window_attention_naive_decode(
             block_shape=(1, 1),
             order=(1, 0),
         )
-        tl.static_assert(
-            len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
+        tl.static_assert(len(block_table_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
         cache_seq_len_ptr = tl.make_block_ptr(
             base=cache_seq_len_base,
             shape=(NUM_BATCH, WINDOW_SIZE // WINDOW_SIZE),
@@ -375,64 +372,63 @@ def sliding_window_attention_naive_decode(
         k_state = tl.load(k_block_ptr)
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k_base = rblib.dynamic_load(k_cache_base_ptr)
-        k_insert = rblib.window_insert(k_base, k_state, WINDOW_AXIS,
-                                       cache_start)
-        k_slice = rblib.window_slice(k_insert, cache_end, WINDOW_AXIS,
-                                     WINDOW_SIZE)
+        k_insert = rblib.window_insert(k_base, k_state, WINDOW_AXIS, cache_start)
+        k_slice = rblib.window_slice(k_insert, cache_end, WINDOW_AXIS, WINDOW_SIZE)
         rblib.dynamic_store(k_cache_base_ptr, k_slice)
 
         # TODO : remove this pad through compiler pass
         #        currently, only one padding
-        k_insert = rblib.nn_pad(k_insert, 0.0, WINDOW_AXIS, (0, PAD_SIZE),
-                                "constant")
+        k_insert = rblib.nn_pad(k_insert, 0.0, WINDOW_AXIS, (0, PAD_SIZE), "constant")
         k_insert = tl.reshape(
-            k_insert,
-            (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN + PAD_SIZE, HEAD_DIM))
+            k_insert, (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN + PAD_SIZE, HEAD_DIM)
+        )
         k_insert = tl.permute(k_insert, (0, 1, 2, 4, 3))
-        k = tl.broadcast_to(k_insert, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM,
-                                       WINDOW_SIZE + QUERY_LEN + PAD_SIZE))
+        k = tl.broadcast_to(
+            k_insert,
+            (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, WINDOW_SIZE + QUERY_LEN + PAD_SIZE),
+        )
         # 2.1 a = MM(Q, Kt)
         qk = tl.dot(q, k)  # (1,h,g,l,d) x (1,h,g,d,p) = (1,h,g,l,p)
         # 2.2 b = a * qk_scale
         qk_scaled = qk * qk_scale  # (1,h,g,l,p)
         # 2.3 c = window_softmax(b)
-        window_qk_scaled = rblib.window_softmax(qk_scaled,
-                                                cache_start,
-                                                window_size=WINDOW_SIZE)
+        window_qk_scaled = rblib.window_softmax(
+            qk_scaled, cache_start, window_size=WINDOW_SIZE
+        )
 
         v_state = tl.load(v_block_ptr)
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_base = rblib.dynamic_load(v_cache_base_ptr)
-        v_insert = rblib.window_insert(v_base, v_state, WINDOW_AXIS,
-                                       cache_start)
-        v_slice = rblib.window_slice(v_insert, cache_end, WINDOW_AXIS,
-                                     WINDOW_SIZE)
+        v_insert = rblib.window_insert(v_base, v_state, WINDOW_AXIS, cache_start)
+        v_slice = rblib.window_slice(v_insert, cache_end, WINDOW_AXIS, WINDOW_SIZE)
         rblib.dynamic_store(v_cache_base_ptr, v_slice)
 
         # TODO : remove this pad through compiler pass
-        v_insert = rblib.nn_pad(v_insert, 0.0, (WINDOW_AXIS), ((0, PAD_SIZE)),
-                                "constant")
+        v_insert = rblib.nn_pad(
+            v_insert, 0.0, (WINDOW_AXIS), ((0, PAD_SIZE)), "constant"
+        )
         v_insert = tl.reshape(
+            v_insert, (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN + PAD_SIZE, HEAD_DIM)
+        )
+        v = tl.broadcast_to(
             v_insert,
-            (1, NUM_HEAD, 1, WINDOW_SIZE + QUERY_LEN + PAD_SIZE, HEAD_DIM))
-        v = tl.broadcast_to(v_insert,
-                            (1, NUM_HEAD, NUM_GROUP, WINDOW_SIZE + QUERY_LEN +
-                             PAD_SIZE, HEAD_DIM))  # (1,h,g,p,d)
+            (1, NUM_HEAD, NUM_GROUP, WINDOW_SIZE + QUERY_LEN + PAD_SIZE, HEAD_DIM),
+        )  # (1,h,g,p,d)
         # 2.5 O = MM(d, V)
-        attn_out = tl.dot(window_qk_scaled,
-                          v)  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
+        attn_out = tl.dot(
+            window_qk_scaled, v
+        )  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
         tl.store(output_ptr, attn_out)  # (1,h,g,l,d)
 
 
 def warmup(func, *args):
-    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3")
+    kernel = func.warmup(*args, grid=(1,), host_layout="1:2:3")
     rblib.write_rtosa(kernel, args)
 
     return kernel
 
 
-@triton_op("rbln_triton_ops::sliding_window_attention_naive_prefill",
-           mutates_args=())
+@triton_op("rbln_triton_ops::sliding_window_attention_naive_prefill", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -507,8 +503,7 @@ def _(
     return torch.empty_like(query)
 
 
-@triton_op("rbln_triton_ops::sliding_window_attention_naive_decode",
-           mutates_args=())
+@triton_op("rbln_triton_ops::sliding_window_attention_naive_decode", mutates_args=())
 def _(
     query: torch.Tensor,
     key: torch.Tensor,

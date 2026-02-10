@@ -72,12 +72,9 @@ jobs:
           fi
 
   check-code-quality:
-    runs-on: rbln-sw-k8s-general
     needs: check-skip-ci
-    steps:
-      - name: Skip code quality check (temporarily)
-        run: echo "Code quality check skipped - always pass"
-  
+    uses: ./.github/workflows/pre-commit.yml
+
   trigger-internal-tests:
     needs: [check-skip-ci, check-team-member, check-code-quality]
     if: ${{ needs.check-skip-ci.outputs.should_skip != 'true' && (needs.check-team-member.outputs.is_team_member == 'true' || needs.check-team-member.outputs.is_collaborator == 'true') }}

@@ -22,8 +22,9 @@ class ExponentialBucketingManager(RBLNBucketingManager):
         """Fill buckets that shrink exponentially."""
         if self.step <= 1:
             raise ValueError(
-                "For exponential bucketing, step must be greater than 1, "
-                "step: %d", self.step)
+                "For exponential bucketing, step must be greater than 1, step: %d",
+                self.step,
+            )
 
         buckets = [self.max_batch_size]
         while len(buckets) < self.limit:

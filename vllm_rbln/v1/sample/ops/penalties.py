@@ -22,8 +22,7 @@ def apply_all_penalties(
     Applies presence, frequency and repetition penalties to the logits.
     """
     _, vocab_size = logits.shape
-    output_tokens_t = _convert_to_tensors(output_token_ids, vocab_size,
-                                          logits.device)
+    output_tokens_t = _convert_to_tensors(output_token_ids, vocab_size, logits.device)
 
     # In the async scheduling case, rows that won't have penalties applied may contain # noqa: E501
     # -1 placeholder token ids. We must replace these with valid token ids so that the # noqa: E501
@@ -42,8 +41,9 @@ def apply_all_penalties(
     )
 
 
-def _convert_to_tensors(output_token_ids: list[list[int]], vocab_size: int,
-                        device: torch.device) -> torch.Tensor:
+def _convert_to_tensors(
+    output_token_ids: list[list[int]], vocab_size: int, device: torch.device
+) -> torch.Tensor:
     """
     Convert the different list data structures to tensors.
 

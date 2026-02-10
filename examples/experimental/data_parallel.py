@@ -46,18 +46,30 @@ Multi-node:
                     --master-addr=10.99.48.128 \
                     --master-port=13345
 """
+
 import os
 from time import sleep
 
 from vllm import LLM, SamplingParams
 from vllm.utils import get_open_port
 
-os.environ['VLLM_TORCH_PROFILER_DIR'] = './profile'
+os.environ["VLLM_TORCH_PROFILER_DIR"] = "./profile"
 
 
-def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
-         dp_master_port, tp_size, enable_ep, max_model_len, block_size,
-         decode_batch, num_hidden_layers):
+def main(
+    model,
+    dp_size,
+    local_dp_rank,
+    global_dp_rank,
+    dp_master_ip,
+    dp_master_port,
+    tp_size,
+    enable_ep,
+    max_model_len,
+    block_size,
+    decode_batch,
+    num_hidden_layers,
+):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     # paralle_config.data_parallel_size = envs.sVLLM_DP_SIZE
@@ -76,7 +88,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     # with DP, each rank should process different prompts.
     # usually all the DP ranks process a full dataset,
     # and each rank processes a different part of the dataset.
-    prompts_per_rank = (len(prompts) // dp_size)
+    prompts_per_rank = len(prompts) // dp_size
     start = global_dp_rank * prompts_per_rank
     end = start + prompts_per_rank
     prompts = prompts[start:end]
@@ -112,8 +124,8 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
         trust_remote_code=True,
         tensor_parallel_size=tp_size,
         enable_expert_parallel=enable_ep,
-        #data_parallel_size=dp_size,
-        #enforce_eager=True,
+        # data_parallel_size=dp_size,
+        # enforce_eager=True,
     )
     llm.start_profile()
     outputs = llm.generate(prompts, sampling_params)
@@ -122,8 +134,10 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     for i, output in enumerate(outputs):
         prompt = output.prompt
         generated_text = output.outputs[0].text
-        print(f"DP rank {global_dp_rank}, Prompt: {prompt!r}, "
-              f"Generated text: {generated_text!r}")
+        print(
+            f"DP rank {global_dp_rank}, Prompt: {prompt!r}, "
+            f"Generated text: {generated_text!r}"
+        )
 
     # Give engines time to pause their processing loops before exiting.
     sleep(1)
@@ -131,54 +145,37 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Data Parallel Inference")
-    parser.add_argument("--model",
-                        type=str,
-                        default="ibm-research/PowerMoE-3b",
-                        help="Model name or path")
-    parser.add_argument("--dp-size",
-                        type=int,
-                        default=1,
-                        help="Data parallel size")
-    parser.add_argument("--tp-size",
-                        type=int,
-                        default=1,
-                        help="Tensor parallel size")
-    parser.add_argument('--ep',
-                        action='store_true',
-                        help="vLLM enable_expert_parallel")
-    parser.add_argument("--max-model-len",
-                        type=int,
-                        default=8192,
-                        help="Max sequence length")
-    parser.add_argument("--block-size",
-                        type=int,
-                        default=4096,
-                        help="KV cache block size")
-    parser.add_argument("--decode-batch",
-                        type=int,
-                        default=1,
-                        help="decode batch size")
-    parser.add_argument("--num-hidden-layers",
-                        type=int,
-                        default=0,
-                        help="num hidden layers")
-    parser.add_argument("--node-size",
-                        type=int,
-                        default=1,
-                        help="Total number of nodes")
-    parser.add_argument("--node-rank",
-                        type=int,
-                        default=0,
-                        help="Rank of the current node")
-    parser.add_argument("--master-addr",
-                        type=str,
-                        default="",
-                        help="Master node IP address")
-    parser.add_argument("--master-port",
-                        type=int,
-                        default=0,
-                        help="Master node port")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="ibm-research/PowerMoE-3b",
+        help="Model name or path",
+    )
+    parser.add_argument("--dp-size", type=int, default=1, help="Data parallel size")
+    parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
+    parser.add_argument("--ep", action="store_true", help="vLLM enable_expert_parallel")
+    parser.add_argument(
+        "--max-model-len", type=int, default=8192, help="Max sequence length"
+    )
+    parser.add_argument(
+        "--block-size", type=int, default=4096, help="KV cache block size"
+    )
+    parser.add_argument("--decode-batch", type=int, default=1, help="decode batch size")
+    parser.add_argument(
+        "--num-hidden-layers", type=int, default=0, help="num hidden layers"
+    )
+    parser.add_argument(
+        "--node-size", type=int, default=1, help="Total number of nodes"
+    )
+    parser.add_argument(
+        "--node-rank", type=int, default=0, help="Rank of the current node"
+    )
+    parser.add_argument(
+        "--master-addr", type=str, default="", help="Master node IP address"
+    )
+    parser.add_argument("--master-port", type=int, default=0, help="Master node port")
     args = parser.parse_args()
 
     dp_size = args.dp_size
@@ -202,24 +199,37 @@ if __name__ == "__main__":
     dp_per_node = dp_size // node_size
 
     from multiprocessing import Process
+
     procs = []
     for local_dp_rank, global_dp_rank in enumerate(
-            range(node_rank * dp_per_node, (node_rank + 1) * dp_per_node)):
-        proc = Process(target=main,
-                       args=(args.model, dp_size, local_dp_rank,
-                             global_dp_rank, dp_master_ip, dp_master_port,
-                             tp_size, enable_ep, max_model_len, block_size,
-                             decode_batch, num_hidden_layers))
+        range(node_rank * dp_per_node, (node_rank + 1) * dp_per_node)
+    ):
+        proc = Process(
+            target=main,
+            args=(
+                args.model,
+                dp_size,
+                local_dp_rank,
+                global_dp_rank,
+                dp_master_ip,
+                dp_master_port,
+                tp_size,
+                enable_ep,
+                max_model_len,
+                block_size,
+                decode_batch,
+                num_hidden_layers,
+            ),
+        )
         proc.start()
         procs.append(proc)
     exit_code = 0
     for proc in procs:
-        #proc.join(timeout=3000)
+        # proc.join(timeout=3000)
         # disable timeout
         proc.join()
         if proc.exitcode is None:
-            print(f"Killing process {proc.pid} that "
-                  f"didn't stop within 5 minutes.")
+            print(f"Killing process {proc.pid} that didn't stop within 5 minutes.")
             proc.kill()
             exit_code = 1
         elif proc.exitcode:

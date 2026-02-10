@@ -17,6 +17,7 @@
 """
 Script to test add_lora, remove_lora, pin_lora, list_loras functions.
 """
+
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.llm_engine import LLMEngine
 from vllm.lora.request import LoRARequest
@@ -27,9 +28,9 @@ LORA_RANK = 8
 
 
 def make_lora_request(lora_id: int):
-    return LoRARequest(lora_name=f"{lora_id}",
-                       lora_int_id=lora_id,
-                       lora_path=LORA_MODULE_PATH)
+    return LoRARequest(
+        lora_name=f"{lora_id}", lora_int_id=lora_id, lora_path=LORA_MODULE_PATH
+    )
 
 
 def test_lora_functions_sync(monkeypatch):

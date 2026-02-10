@@ -19,14 +19,14 @@ import pytest
 import pytest_asyncio
 from utils import RemoteOpenAIServer
 
-MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
+MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR", "./")
 MODEL_NAME = MODEL_DIR + "/llama3_2-3b-128k_kv16k_batch4"
 MAX_TOKENS = 1
 
 
 @pytest.fixture(scope="module", params=[False, True])
 def server():
-    args = []
+    args: list[str] = []
     with RemoteOpenAIServer(MODEL_NAME, args) as remote_server:
         yield remote_server
 
@@ -44,13 +44,10 @@ async def client(server):
     [MODEL_NAME],
 )
 async def test_chat_streaming(client: openai.AsyncOpenAI, model_name: str):
-    messages = [{
-        "role": "system",
-        "content": "you are a helpful assistant"
-    }, {
-        "role": "user",
-        "content": "what is 1+1?"
-    }]
+    messages = [
+        {"role": "system", "content": "you are a helpful assistant"},
+        {"role": "user", "content": "what is 1+1?"},
+    ]
 
     # test single completion
     chat_completion = await client.chat.completions.create(
@@ -95,14 +92,8 @@ async def test_chat_streaming(client: openai.AsyncOpenAI, model_name: str):
 )
 async def test_some_logprobs_chat(client: openai.AsyncOpenAI, model_name: str):
     messages = [
-        {
-            "role": "system",
-            "content": "you are a helpful assistant"
-        },
-        {
-            "role": "user",
-            "content": "what is 1+1?"
-        },
+        {"role": "system", "content": "you are a helpful assistant"},
+        {"role": "user", "content": "what is 1+1?"},
     ]
 
     chat_completion = await client.chat.completions.create(

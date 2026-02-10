@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -21,9 +20,8 @@ from vllm.lora.layers.base_linear import BaseLinearLayerWithLoRA
 
 
 def base_linear_patched_apply(
-        self: BaseLinearLayerWithLoRA,
-        x: torch.Tensor,
-        bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    self: BaseLinearLayerWithLoRA, x: torch.Tensor, bias: torch.Tensor | None = None
+) -> torch.Tensor:
     output = self.base_layer.quant_method.apply(self.base_layer, x, bias)
     output_org_shape = output.shape
 
@@ -35,21 +33,22 @@ def base_linear_patched_apply(
     )  # [bs, seq_len, hidden_size] -> [bs * seq_len, hidden_size]
 
     lora_output: torch.Tensor = self.punica_wrapper.add_lora_linear(
-        output, x, self.lora_a_stacked, self.lora_b_stacked, 1.0,
-        self.output_slices)
+        output, x, self.lora_a_stacked, self.lora_b_stacked, 1.0, self.output_slices
+    )
 
     return lora_output.view(output_org_shape)
 
 
 def vocab_parallel_embedding_patched_forward(
-        self: VocabParallelEmbeddingWithLoRA, x: torch.Tensor) -> torch.Tensor:
+    self: VocabParallelEmbeddingWithLoRA, x: torch.Tensor
+) -> torch.Tensor:
     # NOTE: It assumes that the batch size of prefill phase is always 1.
     is_prefill = x.shape[0] == 1
-    added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1, 1,
-                                    0)
+    added_tokens_mask = torch.where(x > self.base_layer.org_vocab_size - 1, 1, 0)
     narrow_length = x.size(1) if is_prefill else x.size(0)
-    embeddings_indices = torch.narrow(self.punica_wrapper._embeddings_indices,
-                                      1, 0, narrow_length)
+    embeddings_indices = torch.narrow(
+        self.punica_wrapper._embeddings_indices, 1, 0, narrow_length
+    )
 
     indices = embeddings_indices[1]
     if not is_prefill:
@@ -66,8 +65,7 @@ def vocab_parallel_embedding_patched_forward(
 
     full_output_org = full_output
     if full_output.ndim == 3:
-        full_output = full_output.view(
-            full_output.shape[0] * full_output.shape[1], -1)
+        full_output = full_output.view(full_output.shape[0] * full_output.shape[1], -1)
     if full_lora_a_embeddings.ndim == 3:
         full_lora_a_embeddings = full_lora_a_embeddings.view(
             full_lora_a_embeddings.shape[0] * full_lora_a_embeddings.shape[1],
@@ -75,14 +73,11 @@ def vocab_parallel_embedding_patched_forward(
         )
 
     lora_output: torch.Tensor = self.punica_wrapper.add_lora_embedding(
-        full_output,
-        full_lora_a_embeddings,
-        self.lora_b_stacked,
-        add_input=True)
+        full_output, full_lora_a_embeddings, self.lora_b_stacked, add_input=True
+    )
 
     return lora_output.view_as(full_output_org)
 
 
 BaseLinearLayerWithLoRA.apply = base_linear_patched_apply
-VocabParallelEmbeddingWithLoRA.forward = \
-    vocab_parallel_embedding_patched_forward
+VocabParallelEmbeddingWithLoRA.forward = vocab_parallel_embedding_patched_forward
