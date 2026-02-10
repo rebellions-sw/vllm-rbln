@@ -1625,32 +1625,16 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 self._update_states_after_model_execute(
                     sampler_output.sampled_token_ids)
         if envs.VLLM_RBLN_METRICS and self.sampler_performance_tracker is not None:
-            end_time = time.perf_counter()
-            execution_time = end_time - start_time
-            host_time = None
-            device_time = None
-            ccl_time = None
-            if sampler_reports is not None and len(sampler_reports) > 0:
-                host_time = sampler_reports[0].get('total_host', None)
-                device_time = sampler_reports[0].get('total_device', None)
-                ccl_time = sampler_reports[0].get('total_ccl', None)
-            is_prefill = self.is_prefills()[0]
-            if is_prefill:
-                self.sampler_performance_tracker.record_prefill(
-                    execution_time,
-                    0,
-                    host_time=host_time,
-                    device_time=device_time,
-                    ccl_time=ccl_time,
-                )
-            else:
-                self.sampler_performance_tracker.record_decode(
-                    execution_time,
-                    0,
-                    host_time=host_time,
-                    device_time=device_time,
-                    ccl_time=ccl_time,
-                )
+            self.collect_metrics(
+                self.sampler_performance_tracker,
+                self.is_prefills()[0],
+                start_time=start_time,
+                end_time=time.perf_counter(),
+                reports=sampler_reports,
+                token_count=
+                0  # the performance of sampler doesn't depend on token count
+            )
+
         return sampler_output
 
     def compute_logits(
@@ -3829,6 +3813,35 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         return not (self.lora_config is not None or
                     (self.speculative_config is not None and
                      self.speculative_config.method in ("eagle", "eagle3")))
+
+    def collect_metrics(self, performance_tracker: PerformanceTracker,
+                                is_prefill: bool, start_time: float,
+                                end_time: float, reports: list[dict],
+                                token_count: int) -> None:
+        execution_time = end_time - start_time
+        host_time = None
+        device_time = None
+        ccl_time = None
+        if reports is not None and len(reports) > 0:
+            host_time = reports[0].get('total_host', None)
+            device_time = reports[0].get('total_device', None)
+            ccl_time = reports[0].get('total_ccl', None)
+        if is_prefill:
+            performance_tracker.record_prefill(
+                execution_time,
+                0,
+                host_time=host_time,
+                device_time=device_time,
+                ccl_time=ccl_time,
+            )
+        else:
+            performance_tracker.record_decode(
+                execution_time,
+                0,
+                host_time=host_time,
+                device_time=device_time,
+                ccl_time=ccl_time,
+            )
 
 
 def create_lora_mask(
