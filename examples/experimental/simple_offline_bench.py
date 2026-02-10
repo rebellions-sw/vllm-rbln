@@ -30,9 +30,7 @@ from vllm import LLM, SamplingParams
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model",
-                        type=str,
-                        default="meta-llama/Llama-3.2-3B-instruct")
+    parser.add_argument("--model", type=str, default="meta-llama/Llama-3.2-3B-instruct")
     parser.add_argument("--max-num-seqs", type=int, default=32)
     parser.add_argument("--max-num-batched-tokens", type=int, default=128)
     parser.add_argument("--max-model-len", type=int, default=2 * 1024)
@@ -53,9 +51,10 @@ def main():
     vocab = iter(tokenizer.vocab)
     single_token_string = next(vocab)
     while True:
-        if (len(
-                tokenizer.encode(single_token_string * 2,
-                                 add_special_tokens=False)) == 2):
+        if (
+            len(tokenizer.encode(single_token_string * 2, add_special_tokens=False))
+            == 2
+        ):
             break
         single_token_string = next(vocab)
 
@@ -75,12 +74,13 @@ def main():
     )
 
     _ = llm.generate(
-        prompts[:min(len(prompts), 3)],
+        prompts[: min(len(prompts), 3)],
         SamplingParams(
             temperature=0.0,
             ignore_eos=True,
             max_tokens=args.output_len,
-        ))
+        ),
+    )
 
     st = time.perf_counter()
     outputs = llm.generate(
@@ -89,16 +89,22 @@ def main():
             temperature=0.0,
             ignore_eos=True,
             max_tokens=args.output_len,
-        ))
+        ),
+    )
     total_run_time = time.perf_counter() - st
 
     print(f"total run time: {total_run_time} (sec)")
-    assert all(output.prompt_token_ids and (
-        len(output.prompt_token_ids) == args.input_len) for output in outputs)
     assert all(
-        len(output.outputs[0].token_ids) == args.output_len
-        for output in outputs)
-    print(f"output throughput: {(args.num_requests*args.output_len)/total_run_time} (token/sec)")
+        output.prompt_token_ids and (len(output.prompt_token_ids) == args.input_len)
+        for output in outputs
+    )
+    assert all(
+        len(output.outputs[0].token_ids) == args.output_len for output in outputs
+    )
+    print(
+        "output throughput: "
+        f"{(args.num_requests * args.output_len) / total_run_time} (token/sec)"
+    )
 
 
 if __name__ == "__main__":

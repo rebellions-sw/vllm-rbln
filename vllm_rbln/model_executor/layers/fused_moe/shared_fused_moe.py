@@ -14,8 +14,7 @@
 
 import torch
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
-from vllm.model_executor.layers.fused_moe.shared_fused_moe import (
-    SharedFusedMoE)
+from vllm.model_executor.layers.fused_moe.shared_fused_moe import SharedFusedMoE
 
 from vllm_rbln.logger import init_logger
 

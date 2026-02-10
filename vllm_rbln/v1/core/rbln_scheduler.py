@@ -13,15 +13,12 @@
 # limitations under the License.
 
 import time
-from typing import Optional
 
 from vllm.distributed.ec_transfer.ec_connector.base import ECConnectorMetadata
-from vllm.distributed.kv_transfer.kv_connector.v1.base import (
-    KVConnectorMetadata)
+from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorMetadata
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
-from vllm.v1.core.sched.request_queue import (SchedulingPolicy,
-                                              create_request_queue)
+from vllm.v1.core.sched.request_queue import SchedulingPolicy, create_request_queue
 from vllm.v1.core.sched.scheduler import Scheduler
 from vllm.v1.engine import EngineCoreEventType
 from vllm.v1.request import Request, RequestStatus
@@ -39,12 +36,12 @@ def is_prefill(request: Request) -> bool:
 def undo_uncomputed_block_caching(
     request: Request,
     kv_cache_manager: KVCacheManager,
-    num_computed_tokens: Optional[int] = None,
+    num_computed_tokens: int | None = None,
 ) -> None:
     grouped_blocks = kv_cache_manager.get_blocks(request.request_id).blocks
     num_computed_blocks = [
-        (num_computed_tokens or request.num_computed_tokens) //
-        group.kv_cache_spec.block_size
+        (num_computed_tokens or request.num_computed_tokens)
+        // group.kv_cache_spec.block_size
         for group in kv_cache_manager.kv_cache_config.kv_cache_groups
     ]
     for blocks, num_full_block in zip(grouped_blocks, num_computed_blocks):
@@ -61,7 +58,6 @@ def undo_uncomputed_block_caching(
 
 
 class RBLNScheduler(Scheduler):
-
     def schedule(self) -> SchedulerOutput:
         # Copied from vllm.v1.core.sched.Scheduler.schedule: https://github.com/vllm-project/vllm/blob/v0.13.0/vllm/v1/core/sched/scheduler.py#L216-L757
         # The only differences are:
@@ -103,8 +99,11 @@ class RBLNScheduler(Scheduler):
         # Given our constraint that the prefill batch size fixed to 1
         # if any prefill request is running,
         # there must be exactly one at the end of the list.
-        req_index = (len(self.running) -
-                     1 if self.running and is_prefill(self.running[-1]) else 0)
+        req_index = (
+            len(self.running) - 1
+            if self.running and is_prefill(self.running[-1])
+            else 0
+        )
         while req_index < len(self.running) and token_budget > 0:
             request = self.running[req_index]
 
@@ -286,8 +285,9 @@ class RBLNScheduler(Scheduler):
         # Next, schedule the WAITING requests.
         # NOTE(RBLN): We do not attempt to schedule a new prefill request
         # when a running prefill request is already scheduled.
-        if not preempted_reqs and not (scheduled_running_reqs and is_prefill(
-                scheduled_running_reqs[0])):
+        if not preempted_reqs and not (
+            scheduled_running_reqs and is_prefill(scheduled_running_reqs[0])
+        ):
             # NOTE(RBLN): refresh the token budget to determine whether we
             # can schedule new prefill requests into the running batch.
             prefill_token_budget = self.max_num_scheduled_tokens
@@ -477,8 +477,8 @@ class RBLNScheduler(Scheduler):
                 # Therefore, if the block is not finalized in this iteration,
                 # we must clear the block hash and undo block caching.
                 undo_uncomputed_block_caching(
-                    request, self.kv_cache_manager,
-                    num_computed_tokens + num_new_tokens)
+                    request, self.kv_cache_manager, num_computed_tokens + num_new_tokens
+                )
 
                 # KVTransfer: the connector uses this info to determine
                 # if a load is needed. Note that
@@ -564,10 +564,11 @@ class RBLNScheduler(Scheduler):
                     req_to_new_blocks.pop(req.request_id)
                     num_scheduled_tokens.pop(req.request_id)
                     req.spec_token_ids = scheduled_spec_decode_tokens.pop(
-                        req.request_id, [])
+                        req.request_id, []
+                    )
                     scheduled_encoder_inputs.pop(req.request_id, None)
                     undo_uncomputed_block_caching(req, self.kv_cache_manager)
-                
+
                 scheduled_running_reqs.clear()
                 token_budget = prefill_token_budget
 

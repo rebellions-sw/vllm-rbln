@@ -14,8 +14,7 @@
 
 from vllm.v1.core.kv_cache_coordinator import UnitaryKVCacheCoordinator
 from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
-from vllm.v1.core.single_type_kv_cache_manager import (
-    get_manager_for_kv_cache_spec)
+from vllm.v1.core.single_type_kv_cache_manager import get_manager_for_kv_cache_spec
 from vllm.v1.kv_cache_interface import KVCacheConfig
 
 from vllm_rbln.v1.core.optimum_block_pool import RBLNBlockPool
@@ -42,10 +41,13 @@ class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
         self.max_model_len = max_model_len
         self.enable_caching = enable_caching
 
-        self.block_pool = RBLNBlockPool(kv_cache_config.num_blocks,
-                                        enable_caching, hash_block_size,
-                                        enable_kv_cache_events,
-                                        metrics_collector)
+        self.block_pool = RBLNBlockPool(
+            kv_cache_config.num_blocks,
+            enable_caching,
+            hash_block_size,
+            enable_kv_cache_events,
+            metrics_collector,
+        )
 
         # Needs special handling for find_longest_cache_hit if eagle is enabled
         self.use_eagle = use_eagle
@@ -55,12 +57,12 @@ class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
                 block_pool=self.block_pool,
                 kv_cache_group_id=i,
                 dcp_world_size=dcp_world_size,
-            ) for i, kv_cache_group in enumerate(
-                self.kv_cache_config.kv_cache_groups))
+            )
+            for i, kv_cache_group in enumerate(self.kv_cache_config.kv_cache_groups)
+        )
 
         # Unitary
-        self.kv_cache_spec = self.kv_cache_config.kv_cache_groups[
-            0].kv_cache_spec
+        self.kv_cache_spec = self.kv_cache_config.kv_cache_groups[0].kv_cache_spec
         self.block_size = self.kv_cache_spec.block_size
         self.dcp_world_size = dcp_world_size
         self.pcp_world_size = pcp_world_size
@@ -71,6 +73,8 @@ class RBLNKVCacheCoordinator(UnitaryKVCacheCoordinator):
         # For models using only Mamba, block_size is set to max_model_len when
         # prefix caching is disabled, and hash_block_size validation is skipped.
         assert not enable_caching or (hash_block_size == self.block_size), (
-            "UnitaryKVCacheCoordinator assumes hash_block_size == block_size")
+            "UnitaryKVCacheCoordinator assumes hash_block_size == block_size"
+        )
         assert len(self.kv_cache_config.kv_cache_groups) == 1, (
-            "UnitaryKVCacheCoordinator assumes only one kv cache group")
+            "UnitaryKVCacheCoordinator assumes only one kv cache group"
+        )

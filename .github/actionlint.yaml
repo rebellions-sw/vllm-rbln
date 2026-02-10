@@ -1,0 +1,12 @@
+# Configuration for actionlint
+# https://github.com/rhysd/actionlint/blob/main/docs/config.md
+
+self-hosted-runner:
+  # Labels for self-hosted runners used in this repository
+  labels:
+    - rbln-sw-k8s-general
+    - rbln-sw-k8s-ca22-1
+    - rbln-sw-k8s-ca22-4
+    - rbln-sw-k8s-ca22-8
+    - fsw-r18s-atom-ext-rbln-sw-general-c3m48a1
+    - fsw-r18s-atom-ext-rbln-sw-general-c1m12

@@ -17,7 +17,6 @@ import math
 import os
 import platform
 from collections.abc import Callable
-from typing import Optional
 
 from vllm.config import ModelConfig, ParallelConfig
 from vllm.platforms import CpuArchEnum, current_platform
@@ -33,10 +32,10 @@ logger = init_logger(__name__)
 def estimate_available_memory(
     model_config: ModelConfig,
     parallel_config: ParallelConfig,
-    nbits_per_param: Optional[int] = None,
-    n_model_params: Optional[int] = None,
-    kernel_size: Optional[int] = None,
-    buffer: Optional[int] = None,
+    nbits_per_param: int | None = None,
+    n_model_params: int | None = None,
+    kernel_size: int | None = None,
+    buffer: int | None = None,
     num_runtimes: int = 2,
     gpu_memory_utilization: float = 0.9,
 ) -> int:
@@ -97,8 +96,7 @@ def estimate_available_memory(
         # ATOM DRAM - 16GB (single chip)
         ATOM_DRAM_NBYTES = 16 * 2**30
         ATOM_SYS_DRAM_NBYTES = 288 * 2**20
-        available_dram_bytes = rsd_size * (ATOM_DRAM_NBYTES -
-                                           ATOM_SYS_DRAM_NBYTES)
+        available_dram_bytes = rsd_size * (ATOM_DRAM_NBYTES - ATOM_SYS_DRAM_NBYTES)
         # ATOM - basic data type fp16
         default_bits_per_param = 16
     elif "cr" in device_name:
@@ -113,19 +111,24 @@ def estimate_available_memory(
         default_bits_per_param = 16
     else:
         raise ValueError(
-            "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]")
+            "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+        )
 
     available_dram_bytes = int(available_dram_bytes * gpu_memory_utilization)
 
     def check_oom(available_dram_bytes: int) -> None:
         if available_dram_bytes <= 0:
-            raise MemoryError("Insufficient DRAM during block calculation. "
-                              "Try reducing gpu_memory_utilization.")
+            raise MemoryError(
+                "Insufficient DRAM during block calculation. "
+                "Try reducing gpu_memory_utilization."
+            )
 
     if kernel_size is None:
         if n_model_params is None:
-            raise ValueError("`n_model_params` should be specified \
-                to estimate the kernel memory.")
+            raise ValueError(
+                "`n_model_params` should be specified \
+                to estimate the kernel memory."
+            )
         # Get estimated kernel size (approximated)
         # kernel_size
         # - QKV params     - model parallel (tp) sharded
@@ -136,16 +139,17 @@ def estimate_available_memory(
         # - lm head        - model parallel (tp) sharded,
         #                    hidden_size * vocab_size
         lm_heads_params = align(vocab_size, 64) * hidden_size
-        lm_heads_nbytes = (align_2MB(
-            lm_heads_params * default_bits_per_param // 8 / tp_size) * tp_size)
+        lm_heads_nbytes = (
+            align_2MB(lm_heads_params * default_bits_per_param // 8 / tp_size) * tp_size
+        )
         word_embedding_params = lm_heads_params
         params = n_model_params - lm_heads_params - word_embedding_params
-        layer_nbytes = (align_2MB(params * nbits_per_param // 8 / num_layers) *
-                        num_layers)
+        layer_nbytes = (
+            align_2MB(params * nbits_per_param // 8 / num_layers) * num_layers
+        )
         kernel_size = layer_nbytes + lm_heads_nbytes
     elif n_model_params is not None:
-        raise ValueError(
-            "Both `n_model_params` and `kernel_size` cannot be specified.")
+        raise ValueError("Both `n_model_params` and `kernel_size` cannot be specified.")
 
     available_dram_bytes -= kernel_size
 
@@ -178,8 +182,7 @@ def get_autobind_cpu_ids(
     Returns:
         Comma-separated string of CPU IDs, or "all" or "nobind".
     """
-    allowed_numa_nodes, logical_cpu_list = (
-        CpuPlatform.get_allowed_cpu_core_node_list())
+    allowed_numa_nodes, logical_cpu_list = CpuPlatform.get_allowed_cpu_core_node_list()
 
     # Calculate rank_across_dp for CPU binding
     # This ensures different DP groups get different CPU allocations
@@ -201,20 +204,21 @@ def get_autobind_cpu_ids(
         numa_node_to_cpus[numa_node].append(cpu_info)
 
     # Filter to only allowed NUMA nodes
-    available_numa_nodes = [
-        n for n in allowed_numa_nodes if n in numa_node_to_cpus
-    ]
+    available_numa_nodes = [n for n in allowed_numa_nodes if n in numa_node_to_cpus]
 
     if not available_numa_nodes:
-        logger.error("Auto thread-binding failed: no available NUMA nodes "
-                     "with allowed CPUs. Please try to bind threads manually.")
+        logger.error(
+            "Auto thread-binding failed: no available NUMA nodes "
+            "with allowed CPUs. Please try to bind threads manually."
+        )
         return "all"
 
     numa_node_idx = rank_across_dp % len(available_numa_nodes)
     selected_numa_node = available_numa_nodes[numa_node_idx]
     numa_node_cpu_list = numa_node_to_cpus[selected_numa_node]
     ranks_in_same_numa = [
-        r for r in range(world_size_across_dp)
+        r
+        for r in range(world_size_across_dp)
         if r % len(available_numa_nodes) == numa_node_idx
     ]
 
@@ -237,10 +241,8 @@ def get_autobind_cpu_ids(
         remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
 
         rank_position = ranks_in_same_numa.index(rank_across_dp)
-        start_idx = rank_position * cpus_per_rank + min(
-            rank_position, remainder)
-        end_idx = (start_idx + cpus_per_rank +
-                   (1 if rank_position < remainder else 0))
+        start_idx = rank_position * cpus_per_rank + min(rank_position, remainder)
+        end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
         logical_cpu_list = selected_cpu_list[start_idx:end_idx]
     else:
         logical_cpu_list = selected_cpu_list
@@ -300,13 +302,16 @@ def set_cpu_affinity(
         if cpu_arch in (CpuArchEnum.POWERPC, CpuArchEnum.S390X):
             # For S390X/POWERPC SMT-8/4/2
             local_omp_cpuid = get_autobind_cpu_ids(
-                rank, local_rank, parallel_config,
-                lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4])
+                rank,
+                local_rank,
+                parallel_config,
+                lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4],
+            )
         elif cpu_arch == CpuArchEnum.X86:
             # For x86 SMT-2, use 1 CPU per core
-            local_omp_cpuid = get_autobind_cpu_ids(rank, local_rank,
-                                                   parallel_config,
-                                                   lambda cpus: cpus[-1:])
+            local_omp_cpuid = get_autobind_cpu_ids(
+                rank, local_rank, parallel_config, lambda cpus: cpus[-1:]
+            )
         else:
             local_omp_cpuid = "nobind"
     else:
@@ -314,9 +319,7 @@ def set_cpu_affinity(
 
     if local_omp_cpuid not in ("all", "nobind"):
         # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
-        cpu_ids = [
-            int(cpu_id.strip()) for cpu_id in local_omp_cpuid.split(",")
-        ]
+        cpu_ids = [int(cpu_id.strip()) for cpu_id in local_omp_cpuid.split(",")]
         # Set CPU affinity for current process
         try:
             os.sched_setaffinity(0, cpu_ids)
@@ -341,8 +344,7 @@ def set_cpu_affinity(
                 )
         except OSError as e:
             logger.error(
-                "Failed to set CPU affinity for rank %d (local_rank %d): "
-                "%s",
+                "Failed to set CPU affinity for rank %d (local_rank %d): %s",
                 rank,
                 local_rank,
                 str(e),
@@ -350,8 +352,7 @@ def set_cpu_affinity(
             raise
     elif local_omp_cpuid == "nobind":
         logger.info(
-            "Skipping CPU affinity binding for rank %d (local_rank %d): "
-            "nobind",
+            "Skipping CPU affinity binding for rank %d (local_rank %d): nobind",
             rank,
             local_rank,
         )
@@ -381,8 +382,7 @@ def set_omp_num_threads(
         )
     else:
         logger.info(
-            "OMP_NUM_THREADS is already defined for rank %d "
-            "(local_rank %d): %s",
+            "OMP_NUM_THREADS is already defined for rank %d (local_rank %d): %s",
             rank,
             local_rank,
             os.environ["OMP_NUM_THREADS"],

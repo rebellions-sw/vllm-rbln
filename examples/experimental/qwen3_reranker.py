@@ -67,17 +67,18 @@ def main():
     # Please use the query_template and document_template to format the query
     # and document for better reranker results.
 
-    prefix = '<|im_start|>system\nJudge whether the Document meets the ' + \
-        'requirements based on the Query and the Instruct provided. ' + \
-        'Note that the answer can only be "yes" or "no".<|im_end|>\n' + \
-        '<|im_start|>user\n'
+    prefix = (
+        "<|im_start|>system\nJudge whether the Document meets the "
+        + "requirements based on the Query and the Instruct provided. "
+        + 'Note that the answer can only be "yes" or "no".<|im_end|>\n'
+        + "<|im_start|>user\n"
+    )
     suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
     query_template = "{prefix}<Instruct>: {instruction}\n<Query>: {query}\n"
     document_template = "<Document>: {doc}{suffix}"
 
-    instruction = (
-        "Given a query, retrieve relevant passages that answer the query")
+    instruction = "Given a query, retrieve relevant passages that answer the query"
 
     queries = [
         "What is the capital of China?",
@@ -86,21 +87,18 @@ def main():
     ]
 
     documents = [
-        "Gravity is a force that attracts two bodies towards each other. " + \
-        "It gives weight to physical objects and is responsible for the " + \
-        "movement of planets around the sun.",
+        "Gravity is a force that attracts two bodies towards each other. "
+        + "It gives weight to physical objects and is responsible for the "
+        + "movement of planets around the sun.",
         "The capital of China is Beijing.",
         "The president of the United States is Donald Trump.",
     ]
 
     queries = [
-        query_template.format(prefix=prefix,
-                              instruction=instruction,
-                              query=query) for query in queries
+        query_template.format(prefix=prefix, instruction=instruction, query=query)
+        for query in queries
     ]
-    documents = [
-        document_template.format(doc=doc, suffix=suffix) for doc in documents
-    ]
+    documents = [document_template.format(doc=doc, suffix=suffix) for doc in documents]
 
     llm = get_llm()
     outputs = llm.score(queries, documents)

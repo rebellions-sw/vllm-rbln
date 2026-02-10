@@ -352,7 +352,7 @@ def causal_attention_naive_decode(
         tl.store(output_ptr, attn_out)  # (1,h,4,l,d)
 
 def warmup(func, *args):
-    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3")
+    kernel = func.warmup(*args, grid=(1,), host_layout="1:2:3")
     rblib.write_rtosa(kernel, args)
 
     return kernel

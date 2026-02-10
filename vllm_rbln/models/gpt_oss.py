@@ -15,9 +15,12 @@
 from collections.abc import Iterable
 
 import torch
-from vllm.distributed import (get_dp_group, get_pcp_group,
-                              get_tensor_model_parallel_world_size,
-                              tensor_model_parallel_all_reduce)
+from vllm.distributed import (
+    get_dp_group,
+    get_pcp_group,
+    get_tensor_model_parallel_world_size,
+    tensor_model_parallel_all_reduce,
+)
 from vllm.model_executor.layers.fused_moe.config import FusedMoEParallelConfig
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.models import gpt_oss
@@ -25,7 +28,6 @@ from vllm.model_executor.models.utils import is_pp_missing_parameter
 from vllm.utils.math_utils import cdiv
 
 if True:
-
     # NOTE(RBLN): support changing num_hidden_layers
     def _load_weights_mxfp4_custom(
         self: gpt_oss.GptOssModel,
@@ -55,15 +57,12 @@ if True:
 
         intermediate_size = self.config.intermediate_size
         intermediate_size_block = intermediate_size // mxfp4_block
-        per_rank_intermediate_size_block = cdiv(intermediate_size_block,
-                                                tp_size)
-        per_rank_intermediate_size = (per_rank_intermediate_size_block *
-                                      mxfp4_block)
+        per_rank_intermediate_size_block = cdiv(intermediate_size_block, tp_size)
+        per_rank_intermediate_size = per_rank_intermediate_size_block * mxfp4_block
 
         # Calculate common slicing bounds for current rank
         tp_rank_start = tp_rank * per_rank_intermediate_size
-        tp_rank_end = min((tp_rank + 1) * per_rank_intermediate_size,
-                          intermediate_size)
+        tp_rank_end = min((tp_rank + 1) * per_rank_intermediate_size, intermediate_size)
 
         for name, weight in weights:
             if name.startswith("layers"):
@@ -80,18 +79,17 @@ if True:
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
-                    narrow_weight = weight[:,
-                                           2 * tp_rank_start:2 * tp_rank_end,
-                                           ...]
+                    narrow_weight = weight[:, 2 * tp_rank_start : 2 * tp_rank_end, ...]
 
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param,
-                              narrow_weight,
-                              weight_name=name,
-                              shard_id=None,
-                              expert_id=None)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=name,
+                    shard_id=None,
+                    expert_id=None,
+                )
                 loaded_params.add(name)
                 continue
             elif ".w2_weight_scale" in name:
@@ -99,66 +97,68 @@ if True:
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
-                    narrow_weight = weight[..., tp_rank_start //
-                                           mxfp4_block:tp_rank_end //
-                                           mxfp4_block]
+                    narrow_weight = weight[
+                        ..., tp_rank_start // mxfp4_block : tp_rank_end // mxfp4_block
+                    ]
 
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param,
-                              narrow_weight,
-                              weight_name=name,
-                              shard_id=None,
-                              expert_id=None)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=name,
+                    shard_id=None,
+                    expert_id=None,
+                )
                 loaded_params.add(name)
                 continue
             elif ".w13_weight" in name:
                 # Handle MLP gate and up projection weights
                 # flat weight from (E, 2 * N, block_size, entry_per_block)
                 # to (E, 2 * N, -1), shouldn't trigger copy for contiguous
-                weight = weight.view(num_experts, 2 * intermediate_size,
-                                     -1).contiguous()
+                weight = weight.view(
+                    num_experts, 2 * intermediate_size, -1
+                ).contiguous()
 
                 # Extract gate and up projection parts
                 # since the weight is shuffled, we can slice directly
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
-                    narrow_weight = weight[:,
-                                           2 * tp_rank_start:2 * tp_rank_end,
-                                           ...]
+                    narrow_weight = weight[:, 2 * tp_rank_start : 2 * tp_rank_end, ...]
 
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param,
-                              narrow_weight,
-                              weight_name=name,
-                              shard_id=None,
-                              expert_id=None)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=name,
+                    shard_id=None,
+                    expert_id=None,
+                )
                 loaded_params.add(name)
                 continue
             elif ".w2_weight" in name:
                 # Handle MLP down projection weights
                 # same flatten here, but since 2 mx4 value are packed in 1
                 # uint8, divide by 2
-                weight = weight.view(num_experts, -1,
-                                     intermediate_size // 2).contiguous()
+                weight = weight.view(
+                    num_experts, -1, intermediate_size // 2
+                ).contiguous()
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
-                    narrow_weight = weight[...,
-                                           tp_rank_start // 2:tp_rank_end // 2]
+                    narrow_weight = weight[..., tp_rank_start // 2 : tp_rank_end // 2]
 
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param,
-                              narrow_weight,
-                              weight_name=name,
-                              shard_id=None,
-                              expert_id=None)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=name,
+                    shard_id=None,
+                    expert_id=None,
+                )
                 loaded_params.add(name)
                 continue
             elif ".w13_bias" in name:
@@ -167,35 +167,32 @@ if True:
                 if use_ep:
                     narrow_weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
-                    narrow_weight = weight[:,
-                                           2 * tp_rank_start:2 * tp_rank_end]
+                    narrow_weight = weight[:, 2 * tp_rank_start : 2 * tp_rank_end]
 
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
-                weight_loader(param,
-                              narrow_weight,
-                              weight_name=name,
-                              shard_id=None,
-                              expert_id=None)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(
+                    param,
+                    narrow_weight,
+                    weight_name=name,
+                    shard_id=None,
+                    expert_id=None,
+                )
                 loaded_params.add(name)
                 continue
             elif ".w2_bias" in name:
                 # Handle MLP down projection bias
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 if use_ep:
                     weight = weight[ep_rank_start:ep_rank_end, ...]
                 else:
                     # (only load on rank 0 to avoid duplication)
                     if tp_rank != 0:
                         weight.zero_()
-                weight_loader(param,
-                              weight,
-                              weight_name=name,
-                              shard_id=None,
-                              expert_id=None)
+                weight_loader(
+                    param, weight, weight_name=name, shard_id=None, expert_id=None
+                )
                 loaded_params.add(name)
                 continue
             elif "sinks" in name:
@@ -210,8 +207,7 @@ if True:
                     continue
                 name = name.replace(weight_name, param_name)
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 if weight_loader == default_weight_loader:
                     weight_loader(param, weight)
                 else:
@@ -222,21 +218,17 @@ if True:
                 if name not in params_dict:
                     continue
                 param = params_dict[name]
-                weight_loader = getattr(param, "weight_loader",
-                                        default_weight_loader)
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, weight)
             loaded_params.add(name)
         return loaded_params
 
-    def __gpt_oss_moe_forward_rsd(self,
-                                  hidden_states: torch.Tensor) -> torch.Tensor:
+    def __gpt_oss_moe_forward_rsd(self, hidden_states: torch.Tensor) -> torch.Tensor:
         g = self.router(hidden_states)
-        final_hidden_states = self.experts(hidden_states=hidden_states,
-                                           router_logits=g)
+        final_hidden_states = self.experts(hidden_states=hidden_states, router_logits=g)
         tp_size = get_tensor_model_parallel_world_size()
         if tp_size > 1:
-            final_hidden_states = tensor_model_parallel_all_reduce(
-                final_hidden_states)
+            final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
         return final_hidden_states
 
     gpt_oss.GptOssModel._load_weights_mxfp4 = _load_weights_mxfp4_custom

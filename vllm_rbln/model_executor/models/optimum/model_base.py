@@ -14,20 +14,20 @@
 import math
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-import optimum.rbln
 import torch
 import torch.nn as nn
-from optimum.rbln.transformers.models.decoderonly import (
-    decoderonly_runtime_utils as runtime_utils)
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
-from vllm.model_executor.models.interfaces_base import (
-    VllmModelForTextGeneration)
+from vllm.model_executor.models.interfaces_base import VllmModelForTextGeneration
 from vllm.v1.sample.metadata import SamplingMetadata
 
+import optimum.rbln
+from optimum.rbln.transformers.models.decoderonly import (
+    decoderonly_runtime_utils as runtime_utils,
+)
 from vllm_rbln.utils.optimum.common import select_bucket_size
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 
@@ -44,7 +44,7 @@ class KVCacheBlockAdapter:
     | not is_full_block | n()                 | max(0, n() - 1)  |
     +-------------------+---------------------+------------------+
     n = estimated_num_blocks()
-    
+
     """
 
     def __init__(
@@ -107,7 +107,6 @@ class KVCacheBlockAdapter:
 
 
 class RBLNOptimumModelBase(nn.Module):
-
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -120,12 +119,13 @@ class RBLNOptimumModelBase(nn.Module):
         self.init_model()
         self.batch_size = self.scheduler_config.max_num_seqs
         self.kv_block_adapter = KVCacheBlockAdapter(
-            vllm_config, self._resolve_kvcache_num_blocks())
+            vllm_config, self._resolve_kvcache_num_blocks()
+        )
 
     def _resolve_kvcache_num_blocks(self) -> int:
-        """Prefer model-provided KV-cache block count; 
-           else fall back to config."""
-        value: Optional[Any] = None
+        """Prefer model-provided KV-cache block count;
+        else fall back to config."""
+        value: Any | None = None
 
         getter = getattr(self.model, "get_kvcache_num_blocks", None)
         if callable(getter):
@@ -144,10 +144,10 @@ class RBLNOptimumModelBase(nn.Module):
         model_name, model_cls_name = get_rbln_model_info(config)
 
         if isinstance(self.model_config.model, str | Path) and os.path.exists(
-                self.model_config.model):
+            self.model_config.model
+        ):
             model_path = Path(self.model_config.model)
-            if model_path.is_dir() and any(
-                    model_path.glob('rbln_config.json')):
+            if model_path.is_dir() and any(model_path.glob("rbln_config.json")):
                 compiled_path = self.model_config.model
             else:
                 compiled_path = None
@@ -155,15 +155,19 @@ class RBLNOptimumModelBase(nn.Module):
             compiled_path = None
 
         if compiled_path is None or not os.path.exists(compiled_path):
-            raise RuntimeError(
-                f"Compiled model path does not exist: {compiled_path}")
+            raise RuntimeError(f"Compiled model path does not exist: {compiled_path}")
 
         # huggingface model class name
-        logger.info("model_name = %s, model_cls_name = %s, model_path = %s",
-                    model_name, model_cls_name, compiled_path)
+        logger.info(
+            "model_name = %s, model_cls_name = %s, model_path = %s",
+            model_name,
+            model_cls_name,
+            compiled_path,
+        )
 
         self.supports_transcription_only = (
-            model_cls_name == "RBLNOptimumWhisperForConditionalGeneration")
+            model_cls_name == "RBLNOptimumWhisperForConditionalGeneration"
+        )
 
         # huggingface model class
         model_cls = getattr(optimum.rbln, model_cls_name)
@@ -171,8 +175,9 @@ class RBLNOptimumModelBase(nn.Module):
         model = model_cls.from_pretrained(compiled_path, export=False)
         self.model = model
         self.rbln_model_config = model.rbln_config
-        self.attn_impl = model.get_attn_impl() if hasattr(
-            model, "get_attn_impl") else None
+        self.attn_impl = (
+            model.get_attn_impl() if hasattr(model, "get_attn_impl") else None
+        )
 
     @property
     def dtype(self) -> torch.dtype:
@@ -181,7 +186,6 @@ class RBLNOptimumModelBase(nn.Module):
 
 
 class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
-
     def setup_decoder_mixin(
         self,
         attn_impl: str,
@@ -198,8 +202,7 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
         if self.use_multiple_decoder:
             self.decoder_batch_sizes = tuple(reversed(decoder_batch_sizes))
 
-        self.logits_processor = LogitsProcessor(vocab_size,
-                                                logits_as_input=True)
+        self.logits_processor = LogitsProcessor(vocab_size, logits_as_input=True)
         self.available_blocks = torch.arange(
             0,
             num_blocks,
@@ -211,9 +214,9 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
         input_ids: torch.Tensor,
         positions: torch.Tensor,
         block_tables: torch.Tensor,
-        input_block_ids: Optional[torch.Tensor] = None,
-        padded_batch_size: Optional[int] = None,
-        dummy_block: Optional[int] = None,
+        input_block_ids: torch.Tensor | None = None,
+        padded_batch_size: int | None = None,
+        dummy_block: int | None = None,
     ):
         assert input_ids.shape[1] == 1
         if input_block_ids is None and padded_batch_size is None:
@@ -222,22 +225,19 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
             )
         elif input_block_ids is not None and padded_batch_size is not None:
             raise ValueError(
-                "Cannot provide both input_block_ids and padded_batch_size.")
+                "Cannot provide both input_block_ids and padded_batch_size."
+            )
 
         if padded_batch_size is None:
             padded_batch_size = self.decoder_batch_size
 
         original_batch_size = input_ids.shape[0]
 
-        padded_input_ids = torch.zeros(padded_batch_size,
-                                       1,
-                                       dtype=input_ids.dtype)
-        padded_position_ids = torch.zeros(padded_batch_size,
-                                          1,
-                                          dtype=positions.dtype)
-        padded_block_tables = torch.zeros(padded_batch_size,
-                                          block_tables.shape[1],
-                                          dtype=block_tables.dtype).fill_(-1)
+        padded_input_ids = torch.zeros(padded_batch_size, 1, dtype=input_ids.dtype)
+        padded_position_ids = torch.zeros(padded_batch_size, 1, dtype=positions.dtype)
+        padded_block_tables = torch.zeros(
+            padded_batch_size, block_tables.shape[1], dtype=block_tables.dtype
+        ).fill_(-1)
 
         mask = torch.ones_like(
             padded_block_tables,
@@ -258,11 +258,11 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
 
         if torch.any(mask):
             if dummy_block is not None:
-                padding_blocks = torch.tensor([dummy_block],
-                                              dtype=block_tables.dtype)
+                padding_blocks = torch.tensor([dummy_block], dtype=block_tables.dtype)
             else:
                 padding_blocks = self.available_blocks[
-                    ~torch.isin(self.available_blocks, block_tables.flatten())]
+                    ~torch.isin(self.available_blocks, block_tables.flatten())
+                ]
             padded_block_tables[mask] = padding_blocks[0]
         return padded_input_ids, padded_position_ids, padded_block_tables
 
@@ -270,18 +270,18 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
         self,
         is_prompt: bool,
         block_tables: torch.Tensor,
-        input_ids: Optional[torch.Tensor] = None,
-        cache_position: Optional[torch.Tensor] = None,
-        input_block_ids: Optional[list[int]] = None,
-        dummy_block: Optional[int] = None,
+        input_ids: torch.Tensor | None = None,
+        cache_position: torch.Tensor | None = None,
+        input_block_ids: list[int] | None = None,
+        dummy_block: int | None = None,
     ):
         padded_batch_size = None
         # 1. Set the type
         # TODO: Does it require changing the dtype dynamically?
-        input_ids = input_ids.to(
-            torch.int64) if input_ids is not None else None
-        cache_position = cache_position.to(
-            torch.int32) if cache_position is not None else None
+        input_ids = input_ids.to(torch.int64) if input_ids is not None else None
+        cache_position = (
+            cache_position.to(torch.int32) if cache_position is not None else None
+        )
         block_tables = block_tables.to(torch.int16)
 
         # 2. Adjust the shape of tensors by squeezing and padding
@@ -296,7 +296,8 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
                 # Select lower-bounded batch size in case of multiple decoders
                 if self.use_multiple_decoder:
                     padded_batch_size = select_bucket_size(
-                        request_nums, self.decoder_batch_sizes)
+                        request_nums, self.decoder_batch_sizes
+                    )
 
             input_ids, cache_position, block_tables = self.pad_decoder_items(
                 input_ids,
@@ -314,13 +315,15 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
         }
         return kwargs
 
-    def _copy_cached_kv_blocks(self,
-                               prefill_decoder: runtime_utils.RBLNRuntimeModel,
-                               cached_block_tables: list[int],
-                               cached_lengths: list[int],
-                               block_tables: torch.Tensor):
+    def _copy_cached_kv_blocks(
+        self,
+        prefill_decoder: runtime_utils.RBLNRuntimeModel,
+        cached_block_tables: list[int],
+        cached_lengths: list[int],
+        block_tables: torch.Tensor,
+    ):
         """Copy cached KV blocks from source to destination blocks.
-        
+
         Args:
             cached_block_tables: List of source block IDs to copy from
             cached_lengths: List of cached lengths for each block
@@ -332,28 +335,39 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
         if len(cached_block_tables) != len(cached_lengths):
             raise ValueError(
                 "Mismatch between cached_block_tables length (%s) "
-                "and cached_lengths length (%s)", len(cached_block_tables),
-                len(cached_lengths))
+                "and cached_lengths length (%s)",
+                len(cached_block_tables),
+                len(cached_lengths),
+            )
 
         # Convert to list once for efficiency
         dst_blocks = block_tables[0].tolist()
 
         for block_idx, (src_block, dst_block) in enumerate(
-                zip(cached_block_tables, dst_blocks)):
+            zip(cached_block_tables, dst_blocks)
+        ):
             try:
                 prefill_decoder.runtime._copy_kv_cache(
-                    src_block, dst_block, cached_lengths[block_idx])
+                    src_block, dst_block, cached_lengths[block_idx]
+                )
                 logger.debug(
                     "Successfully copied KV cache from block %d to block %d",
-                    src_block, dst_block)
+                    src_block,
+                    dst_block,
+                )
             except Exception as e:
                 error_msg = (
-                    "Failed to copy KV cache from block %d to block %d "
-                    "at index %d: %s", src_block, dst_block, block_idx, e)
+                    "Failed to copy KV cache from block %d to block %d at index %d: %s",
+                    src_block,
+                    dst_block,
+                    block_idx,
+                    e,
+                )
                 logger.error(error_msg)
                 raise RuntimeError(error_msg) from e
 
     # It is required for decoder models in openai api server
-    def compute_logits(self, hidden_states: torch.Tensor,
-                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    def compute_logits(
+        self, hidden_states: torch.Tensor, sampling_metadata: SamplingMetadata
+    ) -> torch.Tensor:
         return self.logits_processor(None, hidden_states, sampling_metadata)

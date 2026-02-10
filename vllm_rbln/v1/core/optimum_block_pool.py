@@ -16,14 +16,16 @@ from vllm.distributed.kv_events import KVCacheEvent
 from vllm.logger import init_logger
 from vllm.v1.core.block_pool import BlockHashToBlockMap, BlockPool
 from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
-from vllm.v1.core.kv_cache_utils import (BlockHashWithGroupId,
-                                         FreeKVCacheBlockQueue, KVCacheBlock)
+from vllm.v1.core.kv_cache_utils import (
+    BlockHashWithGroupId,
+    FreeKVCacheBlockQueue,
+    KVCacheBlock,
+)
 
 logger = init_logger(__name__)
 
 
 class RBLNBlockHashToBlockMap(BlockHashToBlockMap):
-
     def get_one_block(self, key: BlockHashWithGroupId) -> KVCacheBlock | None:
         """
         Gets any block with the given block hash key.
@@ -46,7 +48,6 @@ class RBLNBlockHashToBlockMap(BlockHashToBlockMap):
 
 
 class RBLNBlockPool(BlockPool):
-
     def __init__(
         self,
         num_gpu_blocks: int,
@@ -69,8 +70,9 @@ class RBLNBlockPool(BlockPool):
         self.free_block_queue = FreeKVCacheBlockQueue(self.blocks)
 
         # Cache for block lookup
-        self.cached_block_hash_to_block: RBLNBlockHashToBlockMap \
-            = RBLNBlockHashToBlockMap()
+        self.cached_block_hash_to_block: RBLNBlockHashToBlockMap = (
+            RBLNBlockHashToBlockMap()
+        )
 
         # To represent a placeholder block with block_id=0.
         # The ref_cnt of null_block is not maintained, needs special care to

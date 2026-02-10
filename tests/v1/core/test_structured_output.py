@@ -26,14 +26,14 @@ def test_structured_output():
 
     sample_json_schema = {"a": "int", "b": {"c": "str", "d": "float"}}
     str_sample_json_schema = json.dumps(sample_json_schema)
-    requests = create_requests(num_requests=2,
-                               sample_json_schema=str_sample_json_schema)
+    requests = create_requests(
+        num_requests=2, sample_json_schema=str_sample_json_schema
+    )
     for request in requests:
         scheduler.add_request(request)
         structured_output_manager.grammar_init(request)
         # The grammar might not yet be compiled, so we wait for it
-        while not request.structured_output_request._check_grammar_completion(
-        ):
+        while not request.structured_output_request._check_grammar_completion():
             continue
 
     # Prefill 1st request

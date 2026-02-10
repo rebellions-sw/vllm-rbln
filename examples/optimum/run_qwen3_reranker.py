@@ -24,59 +24,64 @@ SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 
 def format_instruction(instruction, query, doc):
-    text = [{
-        "role":
-        "system",
-        "content": ("Judge whether the Document meets the requirements "
-                    "based on the Query and the Instruct provided. "
-                    "Note that the answer can only be \"yes\" or \"no\".")
-    }, {
-        "role":
-        "user",
-        "content":
-        f"<Instruct>: {instruction}\n\n<Query>: {query}\n\n<Document>: {doc}"
-    }]
+    text = [
+        {
+            "role": "system",
+            "content": (
+                "Judge whether the Document meets the requirements "
+                "based on the Query and the Instruct provided. "
+                'Note that the answer can only be "yes" or "no".'
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"<Instruct>: {instruction}\n\n<Query>: {query}\n\n<Document>: {doc}",  # noqa: E501
+        },
+    ]
     return text
 
 
 def process_inputs(pairs, instruction, max_length, suffix_tokens, tokenizer):
-    messages = [
-        format_instruction(instruction, query, doc) for query, doc in pairs
-    ]
-    messages = tokenizer.apply_chat_template(messages,
-                                             tokenize=True,
-                                             add_generation_prompt=False,
-                                             enable_thinking=False)
+    messages = [format_instruction(instruction, query, doc) for query, doc in pairs]
+    messages = tokenizer.apply_chat_template(
+        messages, tokenize=True, add_generation_prompt=False, enable_thinking=False
+    )
     messages = [ele[:max_length] + suffix_tokens for ele in messages]
     messages = [TokensPrompt(prompt_token_ids=ele) for ele in messages]
     return messages
 
 
-def get_input_prompts(model_id, max_length, suffix_tokens,
-                      tokenizer) -> list[str]:
-    task = ('Given a web search query, '
-            'retrieve relevant passages that answer the query')
+def get_input_prompts(model_id, max_length, suffix_tokens, tokenizer) -> list[str]:
+    task = "Given a web search query, retrieve relevant passages that answer the query"
     queries = [
         "What is the capital of China?",
         "Explain gravity",
     ]
     documents = [
         "The capital of China is Beijing.",
-        ("Gravity is a force that attracts two bodies towards each other. "
-         "It gives weight to physical objects and "
-         "is responsible for the movement of planets around the sun.")
+        (
+            "Gravity is a force that attracts two bodies towards each other. "
+            "It gives weight to physical objects and "
+            "is responsible for the movement of planets around the sun."
+        ),
     ]
 
     pairs = list(zip(queries, documents))
-    inputs = process_inputs(pairs, task, max_length - len(suffix_tokens),
-                            suffix_tokens, tokenizer)
+    inputs = process_inputs(
+        pairs, task, max_length - len(suffix_tokens), suffix_tokens, tokenizer
+    )
 
     return inputs
 
 
-async def generate(engine: AsyncLLMEngine, prompt_tokens: list[int],
-                   model: str, request_id: int, true_token: int,
-                   false_token: int):
+async def generate(
+    engine: AsyncLLMEngine,
+    prompt_tokens: list[int],
+    model: str,
+    request_id: int,
+    true_token: int,
+    false_token: int,
+):
     print(f"generate request_id={request_id}, prompt_tokens={prompt_tokens}")
     example_input = {
         "stream": True,
@@ -138,8 +143,9 @@ async def main(
     false_token = tokenizer("no", add_special_tokens=False).input_ids[0]
 
     engine = AsyncLLMEngine.from_engine_args(engine_args)
-    prompt_tokens_list = get_input_prompts(model_id, max_seq_len,
-                                           suffix_tokens, tokenizer)
+    prompt_tokens_list = get_input_prompts(
+        model_id, max_seq_len, suffix_tokens, tokenizer
+    )
     futures = []
     for i, p in enumerate(prompt_tokens_list):
         if i == num_input_prompt:
@@ -147,12 +153,16 @@ async def main(
 
         futures.append(
             asyncio.create_task(
-                generate(engine,
-                         prompt_tokens=p,
-                         model=model_id,
-                         request_id=i,
-                         true_token=true_token,
-                         false_token=false_token)))
+                generate(
+                    engine,
+                    prompt_tokens=p,
+                    model=model_id,
+                    request_id=i,
+                    true_token=true_token,
+                    false_token=false_token,
+                )
+            )
+        )
 
     result = await asyncio.gather(*futures)
     score = compute_logits(result, true_token, false_token)
@@ -169,7 +179,8 @@ def entry_point(
             max_seq_len=max_seq_len,
             num_input_prompt=num_input_prompt,
             model_id=model_id,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":

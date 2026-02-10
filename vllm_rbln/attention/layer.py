@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -24,11 +23,9 @@ from vllm.attention.selector import get_attn_backend
 from vllm.attention.utils.kv_sharing_utils import validate_kv_sharing_target
 from vllm.config import CacheConfig, VllmConfig, get_current_vllm_config
 from vllm.forward_context import ForwardContext, get_forward_context
-from vllm.model_executor.layers.quantization.base_config import (
-    QuantizationConfig)
+from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 from vllm.model_executor.layers.quantization.input_quant_fp8 import QuantFP8
-from vllm.model_executor.layers.quantization.utils.quant_utils import (
-    GroupShape)
+from vllm.model_executor.layers.quantization.utils.quant_utils import GroupShape
 from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import kv_cache_dtype_str_to_dtype
@@ -45,16 +42,16 @@ def __custom_init__(
     num_heads: int,
     head_size: int,
     scale: float,
-    num_kv_heads: Optional[int] = None,
-    alibi_slopes: Optional[List[float]] = None,
-    cache_config: Optional[CacheConfig] = None,
-    quant_config: Optional[QuantizationConfig] = None,
-    logits_soft_cap: Optional[float] = None,
-    per_layer_sliding_window: Optional[int] = None,
+    num_kv_heads: int | None = None,
+    alibi_slopes: list[float] | None = None,
+    cache_config: CacheConfig | None = None,
+    quant_config: QuantizationConfig | None = None,
+    logits_soft_cap: float | None = None,
+    per_layer_sliding_window: int | None = None,
     prefix: str = "",
     attn_type: str = AttentionType.DECODER,
-    kv_sharing_target_layer_name: Optional[str] = None,
-    attn_backend: Optional[type[AttentionBackend]] = None,
+    kv_sharing_target_layer_name: str | None = None,
+    attn_backend: type[AttentionBackend] | None = None,
     **extra_impl_args,
 ) -> None:
     """
@@ -82,16 +79,18 @@ def __custom_init__(
         block_size = 16
         calculate_kv_scales = False
     self.kv_cache_torch_dtype = kv_cache_dtype_str_to_dtype(
-        kv_cache_dtype, vllm_config.model_config)
+        kv_cache_dtype, vllm_config.model_config
+    )
     if num_kv_heads is None:
         num_kv_heads = num_heads
-    assert num_heads % num_kv_heads == 0, \
-        f"num_heads ({num_heads}) is not " \
-        f"divisible by num_kv_heads ({num_kv_heads})"
+    assert num_heads % num_kv_heads == 0, (
+        f"num_heads ({num_heads}) is not divisible by num_kv_heads ({num_kv_heads})"
+    )
 
     # Initialize KV cache quantization attributes
-    _init_kv_cache_quant(self, quant_config, prefix, kv_cache_dtype,
-                         calculate_kv_scales)
+    _init_kv_cache_quant(
+        self, quant_config, prefix, kv_cache_dtype, calculate_kv_scales
+    )
 
     self.num_heads = num_heads
     self.head_size = head_size
@@ -103,21 +102,32 @@ def __custom_init__(
     # weight and activation dtype.
     dtype = torch.get_default_dtype()
     if attn_backend is None:
-        self.attn_backend = get_attn_backend(head_size,
-                                             dtype,
-                                             kv_cache_dtype,
-                                             block_size,
-                                             use_mla=False,
-                                             has_sink=self.has_sink,
-                                             attn_type=attn_type)
+        self.attn_backend = get_attn_backend(
+            head_size,
+            dtype,
+            kv_cache_dtype,
+            block_size,
+            use_mla=False,
+            has_sink=self.has_sink,
+            attn_type=attn_type,
+        )
     else:
         self.attn_backend = attn_backend
 
     impl_cls = self.attn_backend.get_impl_cls()
-    self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
-                         alibi_slopes, sliding_window, kv_cache_dtype,
-                         logits_soft_cap, attn_type,
-                         kv_sharing_target_layer_name, **extra_impl_args)
+    self.impl = impl_cls(
+        num_heads,
+        head_size,
+        scale,
+        num_kv_heads,
+        alibi_slopes,
+        sliding_window,
+        kv_cache_dtype,
+        logits_soft_cap,
+        attn_type,
+        kv_sharing_target_layer_name,
+        **extra_impl_args,
+    )
     backend_name = self.attn_backend.get_name()
     self.backend = AttentionBackendEnum.__members__.get(backend_name)
     self.dtype = dtype
@@ -159,10 +169,8 @@ def __custom_init__(
 
     # for attn backends supporting query quantization
     self.query_quant = None
-    if self.kv_cache_dtype.startswith(
-            "fp8") and self.impl.supports_quant_query_input():
-        self.query_quant = QuantFP8(static=True,
-                                    group_shape=GroupShape.PER_TENSOR)
+    if self.kv_cache_dtype.startswith("fp8") and self.impl.supports_quant_query_input():
+        self.query_quant = QuantFP8(static=True, group_shape=GroupShape.PER_TENSOR)
 
     # NOTE(jiwoo.park) layer index is required to use external binding KV cache.
     self.layer_index = extract_layer_index(self.layer_name)
@@ -184,7 +192,7 @@ def custom_attention_forward(
     # For some alternate attention backends like MLA the attention output
     # shape does not match the query shape, so we optionally let the model
     # definition specify the output tensor shape.
-    output_shape: Optional[torch.Size] = None,
+    output_shape: torch.Size | None = None,
 ) -> torch.Tensor:
     """
     The KV cache is stored inside this class and is accessed via
@@ -211,11 +219,8 @@ def custom_attention_forward(
             query, _ = self.query_quant(query, self._q_scale)
 
     if self.use_output:
-        output_shape = (output_shape
-                        if output_shape is not None else query.shape)
-        output = torch.empty(output_shape,
-                             dtype=output_dtype,
-                             device=query.device)
+        output_shape = output_shape if output_shape is not None else query.shape
+        output = torch.empty(output_shape, dtype=output_dtype, device=query.device)
         hidden_size = output_shape[-1]
         # Reshape the query, key, and value tensors.
         # NOTE(woosuk): We do this outside the custom op to minimize the
@@ -253,7 +258,8 @@ def custom_attention_forward(
             )
         else:
             torch.ops.vllm.unified_attention_with_output(
-                query, key, value, output, self.layer_name)
+                query, key, value, output, self.layer_name
+            )
         return output.view(-1, hidden_size)
     else:
         if self.use_direct_call:
@@ -272,11 +278,11 @@ def custom_attention_forward(
             assert attn_metadata.kv_caches is not None
             assert self.layer_index < len(attn_metadata.kv_caches)
             self_kv_cache = attn_metadata.kv_caches[self.layer_index]
-            return self.impl.forward(self, query, key, value, self_kv_cache,
-                                     attn_metadata)
+            return self.impl.forward(
+                self, query, key, value, self_kv_cache, attn_metadata
+            )
         else:
-            return torch.ops.vllm.unified_attention(query, key, value,
-                                                    self.layer_name)
+            return torch.ops.vllm.unified_attention(query, key, value, self.layer_name)
 
 
 def custom_get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec:
@@ -286,7 +292,8 @@ def custom_get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec:
     assert self.attn_type == AttentionType.DECODER
     if self.sliding_window is not None:
         assert not vllm_config.model_config.use_mla, (
-            "MLA is not supported for slidingwindow")
+            "MLA is not supported for slidingwindow"
+        )
         return RBLNSlidingWindowSpec(
             block_size=block_size,
             num_kv_heads=self.num_kv_heads,
