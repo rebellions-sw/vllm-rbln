@@ -175,9 +175,13 @@ class RBLNWorker(WorkerBase):
         # Only set OMP_NUM_THREADS when TP > 1 or DP > 1
         if (self.parallel_config.tensor_parallel_size > 1
                 or self.parallel_config.data_parallel_size > 1):
+            # Use half of allocated CPUs to avoid oversubscription
+            allocated_cpus = len(os.sched_getaffinity(0))
+            num_threads = max(2, allocated_cpus // 2)
             set_omp_num_threads(
                 self.rank,
-                self.local_rank, 2
+                self.local_rank,
+                num_threads,
             )
 
         # Initialize the distributed environment.
