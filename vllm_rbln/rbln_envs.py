@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_DECODE_BATCH_BUCKET_MIN: int = 1
     VLLM_RBLN_DECODE_BATCH_BUCKET_STEP: int = 2
     VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT: int = 4
+    VLLM_RBLN_NUMA: bool = True
 
 
 def get_dp_impl():
@@ -150,6 +151,10 @@ environment_variables = {
     # Decode batch bucket limit
     "VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT":
     lambda: int(os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 1)),
+    # Enable NUMA-based CPU affinity binding for OpenMP threads
+    "VLLM_RBLN_NUMA":
+    (lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in
+     ("true", "1")),
 }
 
 
