@@ -102,7 +102,8 @@ def main():
         len(output.outputs[0].token_ids) == args.output_len for output in outputs
     )
     print(
-        f"output throughput: {(args.num_requests * args.output_len) / total_run_time} (token/sec)"
+        "output throughput: "
+        f"{(args.num_requests * args.output_len) / total_run_time} (token/sec)"
     )
 
 
