@@ -61,15 +61,6 @@ dev = [
     "fire",
 ]
 
-# Primary package index
-index-url = "https://pypi.org/simple"
-
-# Additional package indexes
-extra-index-url = [
-    "https://download.pytorch.org/whl/cpu"
-]
-
-
 [project.urls]
 Homepage="https://rebellions.ai"
 Documentation="https://docs.rbln.ai"
