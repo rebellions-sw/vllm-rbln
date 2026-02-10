@@ -35,6 +35,118 @@ from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
 
+@torch.library.custom_op("rbln_custom_ops::attention_naive_prefill",
+                         mutates_args=["kv_cache"])
+def attention_naive_prefill_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    mask: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.register_fake("rbln_custom_ops::attention_naive_prefill")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    mask: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.custom_op("rbln_custom_ops::attention_naive_decode",
+                         mutates_args=["kv_cache"])
+def attention_naive_decode_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    mask: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.register_fake("rbln_custom_ops::attention_naive_decode")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    mask: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.custom_op("rbln_custom_ops::causal_attention_naive_prefill",
+                         mutates_args=["kv_cache"])
+def causal_attention_naive_prefill_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.register_fake("rbln_custom_ops::causal_attention_naive_prefill")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.custom_op("rbln_custom_ops::causal_attention_naive_decode",
+                         mutates_args=["kv_cache"])
+def causal_attention_naive_decode_impl(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
+@torch.library.register_fake("rbln_custom_ops::causal_attention_naive_decode")
+def _(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    scale: torch.Tensor,
+    block_tables: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    return torch.empty_like(q)
+
 
 # RBLN custom op (flash attention naive prefill/decode)
 @torch.library.custom_op("rbln_custom_ops::flash_attention_naive_prefill",
@@ -1219,7 +1331,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     sliding_window_attention_naive_decode = (
                         torch.ops.rbln_triton_ops.
                         sliding_window_attention_naive_decode)
-                elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                elif envs.VLLM_RBLN_KERNEL_MODE == "triton" or \
+                     envs.VLLM_RBLN_KERNEL_MODE == "str":
                     sliding_window_attention_naive_prefill = (
                         torch.ops.rbln_custom_ops.
                         sliding_window_attention_naive_prefill)
@@ -1274,8 +1387,13 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         )
                         causal_attention_naive_decode = (
                             torch.ops.rbln_triton_ops.causal_attention_naive_decode)
-                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                        raise ValueError("RBLN custom kernel is not supported for attention naive prefill/decode")
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton" or \
+                         envs.VLLM_RBLN_KERNEL_MODE == "str":
+                        causal_attention_naive_prefill = (
+                            torch.ops.rbln_custom_ops.causal_attention_naive_prefill
+                        )
+                        causal_attention_naive_decode = (
+                            torch.ops.rbln_custom_ops.causal_attention_naive_decode)
                     else:
                         raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")      
@@ -1311,13 +1429,13 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         flash_causal_attention_naive_decode = (
                             torch.ops.rbln_triton_ops.
                             flash_causal_attention_naive_decode)
-                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton" or \
+                         envs.VLLM_RBLN_KERNEL_MODE == "str":
                         flash_causal_attention_naive_prefill = (
-                            torch.ops.rbln_custom_ops.
-                            flash_causal_attention_naive_prefill)
+                            torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill
+                        )
                         flash_causal_attention_naive_decode = (
-                            torch.ops.rbln_custom_ops.
-                            flash_causal_attention_naive_decode)
+                            torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode)
                     else:
                         raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")
@@ -1366,8 +1484,13 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         )
                         attention_naive_decode = (
                             torch.ops.rbln_triton_ops.attention_naive_decode)
-                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
-                        raise ValueError("RBLN custom kernel is not supported for attention naive prefill/decode")
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton" or \
+                         envs.VLLM_RBLN_KERNEL_MODE == "str":
+                        attention_naive_prefill = (
+                            torch.ops.rbln_custom_ops.attention_naive_prefill
+                        )
+                        attention_naive_decode = (
+                            torch.ops.rbln_custom_ops.attention_naive_decode)
                     else:
                         raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
                                          f"{envs.VLLM_RBLN_KERNEL_MODE}")      
@@ -1404,7 +1527,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         )
                         flash_attention_naive_decode = (
                             torch.ops.rbln_triton_ops.flash_attention_naive_decode)
-                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                    elif envs.VLLM_RBLN_KERNEL_MODE == "triton" or \
+                         envs.VLLM_RBLN_KERNEL_MODE == "str":
                         flash_attention_naive_prefill = (
                             torch.ops.rbln_custom_ops.flash_attention_naive_prefill
                         )
