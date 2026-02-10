@@ -465,8 +465,6 @@ def torch_rejection_random_sample_kernel(
     end = cu
     lens = (end - start).to(torch.int64)
 
-    NO_DRAFT_PROBS = draft_probs is None
-
     for req_idx in range(batch_size):
         if bool(is_greedy_mask[req_idx]):
             continue
@@ -487,10 +485,9 @@ def torch_rejection_random_sample_kernel(
             target_probs[s:e].gather(1, d_ids.unsqueeze(1)).squeeze(1).to(torch.float64)
         )
 
-        if NO_DRAFT_PROBS:
+        if draft_probs is None:
             accept = t_prob >= u
         else:
-            assert draft_probs is not None
             d_prob = (
                 draft_probs[s:e]
                 .gather(1, d_ids.unsqueeze(1))
@@ -560,8 +557,6 @@ def torch_sample_recovered_tokens_kernel(
     end = cu
     lens = (end - start).to(torch.int64)
 
-    NO_DRAFT_PROBS = draft_probs is None
-
     for req_idx in range(batch_size):
         n = int(lens[req_idx].item())
         if n <= 0:
@@ -571,13 +566,12 @@ def torch_sample_recovered_tokens_kernel(
 
         q_req = q[req_idx].to(torch.float32)
 
-        if NO_DRAFT_PROBS:
+        if draft_probs is None:
             prob = target_probs[s:e].to(torch.float32)
             d_ids = draft_token_ids[s:e].to(torch.int64)
             prob = prob.clone()
             prob.scatter_(1, d_ids.unsqueeze(1), 0.0)
         else:
-            assert draft_probs is not None
             prob = torch.maximum(
                 target_probs[s:e].to(torch.float32)
                 - draft_probs[s:e].to(torch.float32),
