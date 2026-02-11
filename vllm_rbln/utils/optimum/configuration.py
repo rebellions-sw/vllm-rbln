@@ -155,6 +155,26 @@ def update_vllm_config_with_rbln_params(
         )
         vllm_config.scheduler_config.max_num_batched_tokens = max_model_len
 
+    # NOTE(RBLN): vLLM v0.13 may validate `max_tokens_per_mm_item` at startup
+    # even for non-MM models. Clamp to avoid EngineCore init failure.
+    if not is_multi_modal(vllm_config.model_config.hf_config):
+        mm_item_tokens = getattr(
+            vllm_config.scheduler_config, "max_tokens_per_mm_item", None
+        )
+        if (
+            mm_item_tokens is not None
+            and mm_item_tokens
+            > vllm_config.scheduler_config.max_num_batched_tokens
+        ):
+            logger.info(
+                "Clamping scheduler_config.max_tokens_per_mm_item from %s to %s for non-multimodal model (vLLM encoder budget check)",
+                mm_item_tokens,
+                vllm_config.scheduler_config.max_num_batched_tokens,
+            )
+            vllm_config.scheduler_config.max_tokens_per_mm_item = (
+                vllm_config.scheduler_config.max_num_batched_tokens
+            )
+
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.info(
             "Updating model_config.max_model_len and "
