@@ -1418,12 +1418,13 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     key,
                     value,
                     kv_cache,
-                    attn_metadata.cache_seq_lens,
+                    attn_metadata.cache_seq_lens.to(torch.int32),
                     attn_metadata.cache_offsets,
                     self.scale,
                     attn_metadata.local_block_tables,
-                    attn_metadata.swa_attn_masks,
                     self.scale,  # dummy
+                    attn_metadata.swa_attn_masks,
+                    self.sinks,
                 )
             else:
                 attn_output = sliding_window_attention_naive_prefill(  # noqa: E501
