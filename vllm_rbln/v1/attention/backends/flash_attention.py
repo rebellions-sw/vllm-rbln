@@ -649,6 +649,7 @@ def sliding_window_attention_naive_decode_impl(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    attn_mask: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if envs.VLLM_RBLN_COMPILE_MODEL:
@@ -748,6 +749,7 @@ def _(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    attn_mask: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
@@ -851,6 +853,7 @@ class RBLNFlashAttentionMetadata:
     cache_seq_lens: Optional[torch.Tensor] = None
     cache_offsets: Optional[torch.Tensor] = None
     local_block_tables: Optional[torch.Tensor] = None
+    swa_attn_masks: Optional[torch.Tensor] = None
 
 
 class RBLNFlashAttentionMetadataBuilder(
@@ -997,7 +1000,7 @@ class RBLNFlashAttentionMetadataBuilder(
                 attn_masks = decode_attention_mask
                 attn_masks = attn_masks.to(self.device)
 
-        cache_seq_lens, cache_offsets, local_block_tables = None, None, None
+        cache_seq_lens, cache_offsets, local_block_tables, swa_attn_masks = None, None, None, None
         if sliding_window := getattr(self.kv_cache_spec, "sliding_window",
                                      None):
             num_computed_tokens = (
@@ -1012,6 +1015,13 @@ class RBLNFlashAttentionMetadataBuilder(
             if not is_prefills[0]:
                 cache_seq_lens = rbln_utils.pad(cache_seq_lens, 0, batch_pad)
                 cache_offsets = rbln_utils.pad(cache_offsets, 0, batch_pad)
+                # Generate sliding window attention mask for decode
+                # mask[b, s] = 1.0 if s <= cache_seq_lens[b] else 0.0
+                positions = torch.arange(sliding_window)[None, :]
+                swa_attn_masks = torch.where(
+                    positions - cache_seq_lens > 0, 0.0, 1.0
+                )[:, None, None, :]
+                    
             local_block_tables = block_tables_tensor[..., :1]
 
         # * seq_idx(batch attention opt decode) - [B, 1],
@@ -1042,6 +1052,8 @@ class RBLNFlashAttentionMetadataBuilder(
             if cache_offsets is not None else None,
             local_block_tables=local_block_tables.to(self.device)
             if local_block_tables is not None else None,
+            swa_attn_masks=swa_attn_masks.to(self.device)
+            if swa_attn_masks is not None else None,
         )
 
         return attn_metadata
@@ -1238,11 +1250,12 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     key,
                     value,
                     kv_cache,
-                    attn_metadata.cache_seq_lens,
+                    attn_metadata.cache_seq_lens.to(torch.int32),
                     attn_metadata.cache_offsets,
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
+                    attn_metadata.swa_attn_masks,
                     self.sinks,
                 )
             else:
