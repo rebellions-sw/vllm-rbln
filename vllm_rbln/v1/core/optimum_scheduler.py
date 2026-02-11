@@ -23,7 +23,6 @@ from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.v1.core.encoder_cache_manager import (
     EncoderCacheManager,
     EncoderDecoderCacheManager,
-    compute_encoder_budget,
 )
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
 from vllm.v1.core.kv_cache_metrics import KVCacheMetricsCollector
@@ -175,11 +174,8 @@ class RBLNOptimumScheduler(Scheduler):
         # It is not used in RBLN.
         # But for reuse original functions(e.g. free_request) in vLLM,
         # we keep it here.
-        encoder_compute_budget, encoder_cache_size = compute_encoder_budget(
-            model_config=vllm_config.model_config,
-            scheduler_config=vllm_config.scheduler_config,
-            mm_registry=mm_registry,
-        )
+        encoder_compute_budget = 0
+        encoder_cache_size = 0
 
         # NOTE(woosuk): Here, "encoder" includes the vision encoder (and
         # projector if needed) for MM models as well as encoder-decoder

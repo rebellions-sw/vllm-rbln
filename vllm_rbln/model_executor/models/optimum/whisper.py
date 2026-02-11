@@ -107,9 +107,10 @@ class RBLNOptimumWhisperForConditionalGeneration(
 
         if is_prompt:
             if model_input.multi_modal_kwargs:
-                input_features = self._parse_and_validate_audio_input(
+                audio_input = self._parse_and_validate_audio_input(
                     **model_input.multi_modal_kwargs
                 )
+                input_features = audio_input["input_features"]
             if input_features is None:
                 raise ValueError("Whisper requires `input_features` as an input.")
             # FIXME I think encoder should be called here
@@ -175,5 +176,4 @@ class RBLNOptimumWhisperForConditionalGeneration(
 
         if input_features is not None:
             input_features = json_map_leaves(lambda x: x.to(self.dtype), input_features)
-
         return WhisperAudioInputs(input_features=input_features)
