@@ -34,7 +34,7 @@ def initialize_environment():
 
 @pytest.fixture
 def vllm_config():
-    scheduler_config = SchedulerConfig()
+    scheduler_config = SchedulerConfig.default_factory()
     model_config = ModelConfig(model="facebook/opt-125m")
     cache_config = CacheConfig(
         block_size=1024,
