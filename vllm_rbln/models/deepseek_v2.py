@@ -20,7 +20,6 @@ from vllm.model_executor.models.deepseek_v2 import DeepseekV2Attention, Deepseek
 def __deepseek_v2_moe_forward_rsd(self, hidden_states: torch.Tensor) -> torch.Tensor:
     if self.n_shared_experts is not None:
         shared_output = self.shared_experts(hidden_states)
-    router_logits, _ = self.gate(hidden_states)
     if hidden_states.dtype != torch.float16:
         final_hidden_states = (
             self.experts(hidden_states=hidden_states, router_logits=router_logits)

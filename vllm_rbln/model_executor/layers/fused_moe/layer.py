@@ -402,7 +402,8 @@ def fused_moe_forward_rbln(
         # 5. select each DP rank output
         # 6. to_group all reduce - {0+2+1+3}, {0+2+1+3}, {0+2+1+3}, {0+2+1+3}
         hidden_states = self.naive_multicast(hidden_states)
-        router_logits = self.naive_multicast(router_logits)
+        
+    router_logits = router(hidden_states)
 
     # Matrix multiply.
     final_hidden_states = self.quant_method.apply(
