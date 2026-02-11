@@ -31,7 +31,7 @@ from vllm.config import (
 )
 from vllm.config.load import LoadConfig
 from vllm.config.lora import LoRAConfig
-from vllm.lora.models import LoRAMapping
+from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
 
 from vllm_rbln.v1.worker.rbln_worker import RBLNWorker as Worker
