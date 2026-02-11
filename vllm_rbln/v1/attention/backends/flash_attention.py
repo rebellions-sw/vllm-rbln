@@ -1492,25 +1492,21 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             else:
                 if envs.VLLM_RBLN_COMPILE_MODEL:
                     if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
-                        flash_causal_attention_naive_prefill = (
-                            torch.ops.rbln_triton_ops
-                            .flash_causal_attention_naive_prefill
+                        flash_causal_attention_naive_prefill = (  # noqa: E501
+                            torch.ops.rbln_triton_ops.flash_causal_attention_naive_prefill
                         )
-                        flash_causal_attention_naive_decode = (
-                            torch.ops.rbln_triton_ops
-                            .flash_causal_attention_naive_decode
+                        flash_causal_attention_naive_decode = (  # noqa: E501
+                            torch.ops.rbln_triton_ops.flash_causal_attention_naive_decode
                         )
                     elif (
                         envs.VLLM_RBLN_KERNEL_MODE == "triton"
                         or envs.VLLM_RBLN_KERNEL_MODE == "str"
                     ):
-                        flash_causal_attention_naive_prefill = (
-                            torch.ops.rbln_custom_ops
-                            .flash_causal_attention_naive_prefill
+                        flash_causal_attention_naive_prefill = (  # noqa: E501
+                            torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill
                         )
-                        flash_causal_attention_naive_decode = (
-                            torch.ops.rbln_custom_ops
-                            .flash_causal_attention_naive_decode
+                        flash_causal_attention_naive_decode = (  # noqa: E501
+                            torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode
                         )
                     else:
                         raise ValueError(
