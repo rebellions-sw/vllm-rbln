@@ -41,6 +41,7 @@ Multi-node:
                     --master-addr=10.99.48.128 \
                     --master-port=13345
 """
+
 import os
 from time import sleep
 
@@ -48,8 +49,15 @@ from vllm import LLM, SamplingParams
 from vllm.utils import get_open_port
 
 
-def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
-         dp_master_port, GPUs_per_dp_rank):
+def main(
+    model,
+    dp_size,
+    local_dp_rank,
+    global_dp_rank,
+    dp_master_ip,
+    dp_master_port,
+    GPUs_per_dp_rank,
+):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     os.environ["VLLM_DP_SIZE"] = str(dp_size)
@@ -111,8 +119,10 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
             break
         prompt = output.prompt
         generated_text = output.outputs[0].text
-        print(f"DP rank {global_dp_rank}, Prompt: {prompt!r}, "
-              f"Generated text: {generated_text!r}")
+        print(
+            f"DP rank {global_dp_rank}, Prompt: {prompt!r}, "
+            f"Generated text: {generated_text!r}"
+        )
 
     # Give engines time to pause their processing loops before exiting.
     sleep(1)
@@ -122,34 +132,21 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Data Parallel Inference")
-    parser.add_argument("--model",
-                        type=str,
-                        default="Qwen/Qwen3-1.7B",
-                        help="Model name or path")
-    parser.add_argument("--dp-size",
-                        type=int,
-                        default=2,
-                        help="Data parallel size")
-    parser.add_argument("--tp-size",
-                        type=int,
-                        default=1,
-                        help="Tensor parallel size")
-    parser.add_argument("--node-size",
-                        type=int,
-                        default=1,
-                        help="Total number of nodes")
-    parser.add_argument("--node-rank",
-                        type=int,
-                        default=0,
-                        help="Rank of the current node")
-    parser.add_argument("--master-addr",
-                        type=str,
-                        default="",
-                        help="Master node IP address")
-    parser.add_argument("--master-port",
-                        type=int,
-                        default=0,
-                        help="Master node port")
+    parser.add_argument(
+        "--model", type=str, default="Qwen/Qwen3-1.7B", help="Model name or path"
+    )
+    parser.add_argument("--dp-size", type=int, default=2, help="Data parallel size")
+    parser.add_argument("--tp-size", type=int, default=1, help="Tensor parallel size")
+    parser.add_argument(
+        "--node-size", type=int, default=1, help="Total number of nodes"
+    )
+    parser.add_argument(
+        "--node-rank", type=int, default=0, help="Rank of the current node"
+    )
+    parser.add_argument(
+        "--master-addr", type=str, default="", help="Master node IP address"
+    )
+    parser.add_argument("--master-port", type=int, default=0, help="Master node port")
     args = parser.parse_args()
 
     dp_size = args.dp_size
@@ -171,11 +168,19 @@ if __name__ == "__main__":
 
     procs = []
     for local_dp_rank, global_dp_rank in enumerate(
-            range(node_rank * dp_per_node, (node_rank + 1) * dp_per_node)):
+        range(node_rank * dp_per_node, (node_rank + 1) * dp_per_node)
+    ):
         proc = Process(
             target=main,
-            args=(args.model, dp_size, local_dp_rank, global_dp_rank,
-                  dp_master_ip, dp_master_port, tp_size),
+            args=(
+                args.model,
+                dp_size,
+                local_dp_rank,
+                global_dp_rank,
+                dp_master_ip,
+                dp_master_port,
+                tp_size,
+            ),
         )
         proc.start()
         procs.append(proc)
@@ -183,8 +188,7 @@ if __name__ == "__main__":
     for proc in procs:
         proc.join(timeout=300)
         if proc.exitcode is None:
-            print(f"Killing process {proc.pid} that "
-                  f"didn't stop within 5 minutes.")
+            print(f"Killing process {proc.pid} that didn't stop within 5 minutes.")
             proc.kill()
             exit_code = 1
         elif proc.exitcode:

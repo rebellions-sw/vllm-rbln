@@ -12,17 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
 import torch
+from vllm.attention.backends.abstract import AttentionType
+from vllm.attention.backends.registry import AttentionBackendEnum
+from vllm.attention.selector import AttentionSelectorConfig
 
 
 def test_platform_plugins():
     import runpy
+
     current_file = __file__
     import os
+
     example_file = os.path.join(
         os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(current_file)))),
+            os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+        ),
         "examples",
         "experimental/offline_inference_basic.py",
     )
@@ -30,48 +35,69 @@ def test_platform_plugins():
 
     # check if the plugin is loaded correctly
     from vllm.platforms import _init_trace, current_platform
+
     assert current_platform.plugin_name == "rbln", (
         f"Expected DummyDevice, got {current_platform.plugin_name}, "
         "possibly because current_platform is imported before the plugin"
-        f" is loaded. The first import:\n{_init_trace}")
+        f" is loaded. The first import:\n{_init_trace}"
+    )
 
 
-def test_register_ops(monkeypatch: pytest.MonkeyPatch, vllm_config):
-    monkeypatch.setattr("vllm.config._current_vllm_config", vllm_config)
+def test_register_ops(vllm_config):
+    from vllm.config import set_current_vllm_config
 
-    # Attention
-    from vllm.attention.layer import Attention
-    attention = Attention(16, 32, 16, 16, prefix="layer.0")
-    assert hasattr(
-        attention, "layer_index"
-    ), f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
-    assert isinstance(
-        attention.layer_index, int
-    ), f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
-    assert (
-        attention.layer_index == 0
-    ), f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+    with set_current_vllm_config(vllm_config):
+        # Attention
+        from vllm.attention.layer import Attention
 
-    # RotaryEmbedding
-    from vllm.model_executor.layers.rotary_embedding.base import (
-        RotaryEmbedding)
+        attention = Attention(16, 32, 16, 16, prefix="layer.0")
+        assert hasattr(attention, "layer_index"), (
+            f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        )
+        assert isinstance(attention.layer_index, int), (
+            f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        )
+        assert attention.layer_index == 0, (
+            f"Expected 'layer_index' in attention.__dict__, got {attention.__dict__}"
+        )
 
-    rope = RotaryEmbedding(16, 16, 16, 16, True, torch.float16)
-    assert "rope_forward_oot" in str(rope.__dict__["_forward_method"]), (
-        f"Expected 'rope_forward_oot' in layer.__dict__['_forward_method'], \
-            got {rope.__dict__['_forward_method']}")
-    assert isinstance(rope.get_buffer("cos_cache"), torch.Tensor), (
-        f"Expected 'cos_cache' in buffer, got {rope.get_buffer('cos_cache')}")
-    assert isinstance(rope.get_buffer("sin_cache"), torch.Tensor), (
-        f"Expected 'sin_cache' in buffer, got {rope.get_buffer('sin_cache')}")
+        # RotaryEmbedding
+        from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
+
+        rope = RotaryEmbedding(16, 16, 16, 16, True, torch.float16)
+        assert "rope_forward_oot" in str(rope.__dict__["_forward_method"]), (
+            f"Expected 'rope_forward_oot' in layer.__dict__['_forward_method'], \
+                got {rope.__dict__['_forward_method']}"
+        )
+        assert isinstance(rope.get_buffer("cos_cache"), torch.Tensor), (
+            f"Expected 'cos_cache' in buffer, got {rope.get_buffer('cos_cache')}"
+        )
+        assert isinstance(rope.get_buffer("sin_cache"), torch.Tensor), (
+            f"Expected 'sin_cache' in buffer, got {rope.get_buffer('sin_cache')}"
+        )
 
 
 def test_get_attn_backend_cls():
     from vllm_rbln.platform import RblnPlatform
+
     attn_backend_cls = RblnPlatform.get_attn_backend_cls(
-        None, 16, torch.float16, None, 16, False, False, False)
+        AttentionBackendEnum.FLASH_ATTN,
+        AttentionSelectorConfig(
+            16,  # head_size
+            torch.float16,  # dtype
+            None,  # kv_cache_dtype
+            1024,  # block_size
+            False,  # use_mla
+            False,  # has_sink
+            False,  # use_sparse
+            False,  # use_mm_prefix
+            AttentionType.DECODER,  # attn_type
+        ),
+    )
     assert (
-        attn_backend_cls ==
-        "vllm_rbln.v1.attention.backends.flash_attention.RBLNAttentionBackend"
-    ), f"Expected 'vllm_rbln.attention.backends.flash_attention.\
+        attn_backend_cls
+        == "vllm_rbln.v1.attention.backends.flash_attention.RBLNAttentionBackend"
+    ), (
+        f"Expected 'vllm_rbln.attention.backends.flash_attention.\
         RBLNAttentionBackend', got {attn_backend_cls}"
+    )

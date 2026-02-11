@@ -21,8 +21,9 @@ from transformers import AutoTokenizer
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
 
-async def generate(engine: AsyncLLMEngine, prompt: str, model: str,
-                   request_id: int, max_tokens: int):
+async def generate(
+    engine: AsyncLLMEngine, prompt: str, model: str, request_id: int, max_tokens: int
+):
     print(f"generate request_id={request_id}, prompt={prompt}")
     example_input = {
         "stream": True,
@@ -40,11 +41,13 @@ async def generate(engine: AsyncLLMEngine, prompt: str, model: str,
 
     results_generator = engine.generate(
         chat,
-        SamplingParams(temperature=example_input["temperature"],
-                       ignore_eos=False,
-                       skip_special_tokens=True,
-                       stop_token_ids=[tokenizer.eos_token_id],
-                       max_tokens=max_tokens),
+        SamplingParams(
+            temperature=example_input["temperature"],
+            ignore_eos=False,
+            skip_special_tokens=True,
+            stop_token_ids=[tokenizer.eos_token_id],
+            max_tokens=max_tokens,
+        ),
         example_input["request_id"],
     )
 
@@ -102,11 +105,15 @@ async def main(
 
         futures.append(
             asyncio.create_task(
-                generate(engine,
-                         prompt=p,
-                         model=model_id,
-                         request_id=i,
-                         max_tokens=max_seq_len)))
+                generate(
+                    engine,
+                    prompt=p,
+                    model=model_id,
+                    request_id=i,
+                    max_tokens=max_seq_len,
+                )
+            )
+        )
 
     result = await asyncio.gather(*futures)
 
@@ -130,7 +137,8 @@ def entry_point(
             model_id=model_id,
             prompt_txt=prompt_txt,
             golden_json=golden_json,
-        ))
+        )
+    )
 
 
 if __name__ == "__main__":

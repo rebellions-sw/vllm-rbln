@@ -16,10 +16,17 @@ import tempfile
 
 import pytest
 import torch
-from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig, VllmConfig,
-                         set_current_vllm_config)
-from vllm.distributed import (ensure_model_parallel_initialized,
-                              init_distributed_environment)
+from vllm.config import (
+    CacheConfig,
+    ModelConfig,
+    SchedulerConfig,
+    VllmConfig,
+    set_current_vllm_config,
+)
+from vllm.distributed import (
+    ensure_model_parallel_initialized,
+    init_distributed_environment,
+)
 from vllm.platforms import current_platform
 from vllm.v1.core.sched.output import CachedRequestData
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -41,6 +48,7 @@ def get_vllm_config(async_scheduling=False):
         max_num_batched_tokens=128,
         max_model_len=128,
         async_scheduling=async_scheduling,
+        is_encoder_decoder=False,
     )
     model_config = ModelConfig(
         model="facebook/opt-125m",
@@ -89,10 +97,10 @@ def _is_req_added(model_runner, req_id: str) -> bool:
     return req_id in model_runner.requests
 
 
-def _is_sampling_metadata_changed(model_runner,
-                                  sampling_metadata_before: SamplingMetadata):
-    return model_runner.input_batch.sampling_metadata is not (
-        sampling_metadata_before)
+def _is_sampling_metadata_changed(
+    model_runner, sampling_metadata_before: SamplingMetadata
+):
+    return model_runner.input_batch.sampling_metadata is not (sampling_metadata_before)
 
 
 def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:
@@ -104,17 +112,19 @@ def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:
     num_block_of_req_state = len(req_state.block_ids[0])
     if num_block_of_runner != num_block_of_req_state:
         return False
-    return (block_table.block_table_np[req_index, :num_block_of_runner] ==
-            req_state.block_ids[0]).all()
+    return (
+        block_table.block_table.np[req_index, :num_block_of_runner]
+        == req_state.block_ids[0]
+    ).all()
 
 
 def test_update_states_new_request(model_runner):
     req_id = "req_0"
 
     # schedule new request
-    scheduler_output = _schedule_new_request(req_id,
-                                             block_ids=([0], ),
-                                             outer_block_ids=[0])
+    scheduler_output = _schedule_new_request(
+        req_id, block_ids=([0],), outer_block_ids=[0]
+    )
     metadata_before = model_runner.input_batch.sampling_metadata
     model_runner._update_states(scheduler_output)
     assert _is_sampling_metadata_changed(model_runner, metadata_before)
@@ -127,9 +137,9 @@ def test_update_states_request_finished(model_runner):
     req_id = "req_0"
 
     # schedule new request
-    scheduler_output = _schedule_new_request(req_id,
-                                             block_ids=([0], ),
-                                             outer_block_ids=[0])
+    scheduler_output = _schedule_new_request(
+        req_id, block_ids=([0],), outer_block_ids=[0]
+    )
 
     model_runner._update_states(scheduler_output)
     assert _is_req_added(model_runner, req_id)
@@ -146,8 +156,6 @@ def test_update_states_request_finished(model_runner):
         num_common_prefix_blocks=0,
         finished_req_ids={req_id},
         free_encoder_mm_hashes=[],
-        structured_output_request_ids={},
-        grammar_bitmask=None,
     )
 
     metadata_before = model_runner.input_batch.sampling_metadata
@@ -161,9 +169,9 @@ def test_update_states_request_resumed(model_runner):
     req_id = "req_0"
 
     # schedule new request
-    scheduler_output = _schedule_new_request(req_id,
-                                             block_ids=([0], ),
-                                             outer_block_ids=[0])
+    scheduler_output = _schedule_new_request(
+        req_id, block_ids=([0],), outer_block_ids=[0]
+    )
 
     model_runner._update_states(scheduler_output)
     assert _is_req_added(model_runner, req_id)
@@ -180,8 +188,6 @@ def test_update_states_request_resumed(model_runner):
         num_common_prefix_blocks=0,
         finished_req_ids=set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids={},
-        grammar_bitmask=None,
     )
 
     model_runner._update_states(scheduler_output)
@@ -191,10 +197,12 @@ def test_update_states_request_resumed(model_runner):
     # resume request
     cached_req_data = CachedRequestData(
         req_ids=[req_id],
-        resumed_from_preemption=[False],
+        resumed_req_ids=set(),
         new_token_ids=[],
-        new_block_ids=[([0], )],
+        all_token_ids={},
+        new_block_ids=[([0],)],
         num_computed_tokens=[0],
+        num_output_tokens=[0],
     )
 
     scheduler_output = RBLNSchedulerOutput(
@@ -207,8 +215,6 @@ def test_update_states_request_resumed(model_runner):
         num_common_prefix_blocks=0,
         finished_req_ids=set(),
         free_encoder_mm_hashes=[],
-        structured_output_request_ids={},
-        grammar_bitmask=None,
     )
 
     metadata_before = model_runner.input_batch.sampling_metadata
@@ -223,9 +229,9 @@ def test_update_states_request_unscheduled(model_runner):
     req_id = "req_0"
 
     # schedule req0
-    scheduler_output = _schedule_new_request(req_id,
-                                             block_ids=([0], ),
-                                             outer_block_ids=[0])
+    scheduler_output = _schedule_new_request(
+        req_id, block_ids=([0],), outer_block_ids=[0]
+    )
 
     model_runner._update_states(scheduler_output)
 
@@ -237,10 +243,9 @@ def test_update_states_request_unscheduled(model_runner):
     # schedule req1
     # scheduling new request(req1)
     # prevent req0 from being scheduled
-    scheduler_output = _schedule_new_request(new_req_id,
-                                             block_ids=([1], ),
-                                             outer_block_ids=torch.tensor([[1]
-                                                                           ]))
+    scheduler_output = _schedule_new_request(
+        new_req_id, block_ids=([1],), outer_block_ids=torch.tensor([[1]])
+    )
 
     metadata_before = model_runner._update_states(scheduler_output)
     assert _is_sampling_metadata_changed(model_runner, metadata_before)

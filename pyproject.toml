@@ -18,7 +18,6 @@ license = { "file"= "LICENSE" }
 readme = "README.md"
 description = "vLLM plugin for RBLN NPU"
 classifiers = [
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -31,7 +30,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
     "setuptools>=64",
@@ -39,9 +38,8 @@ dependencies = [
     "pyyaml",
     "datasets",
     "qwen_vl_utils",
-    "vllm==0.10.2",
-    "optimum-rbln==0.10.0.post2",
-    "torch==2.8.0",
+    "vllm==0.13.0",
+    "optimum-rbln>=0.10.1a1",
 ]
 
 [project.optional-dependencies]
@@ -83,19 +81,6 @@ where = ["."]
 exclude = ["benchmarks", "csrc", "docs", "examples", "tests*"]
 namespaces = false
 
-[tool.ruff]
-# Allow lines to be as long as 80.
-line-length = 80
-
-[tool.ruff.lint.per-file-ignores]
-"vllm/third_party/**" = ["ALL"]
-# Python 3.8 typing. TODO: Remove these excludes after v1.0.0
-"vllm_rbln/attention/**/*.py" = ["UP006", "UP035"]
-"vllm_rbln/core/**/*.py" = ["UP006", "UP035"]
-"vllm_rbln/model_executor/**/*.py" = ["UP006", "UP035"]
-"vllm_rbln/worker/**/*.py" = ["UP006", "UP035"]
-"vllm_rbln/platform.py" = ["UP006", "UP035"]
-
 [tool.ruff.lint]
 select = [
     # pycodestyle
@@ -109,7 +94,8 @@ select = [
     # flake8-simplify
     "SIM",
     # isort
-    # "I",
+    "I",
+    # flake8-logging-format
     "G",
 ]
 ignore = [
@@ -117,6 +103,8 @@ ignore = [
     "F405", "F403",
     # lambda expression assignment
     "E731",
+    # zip without `strict=`
+    "B905",
     # Loop control variable not used within loop body
     "B007",
     # f-string format
@@ -125,39 +113,18 @@ ignore = [
     "UP007",
 ]
 
+[tool.ruff.format]
+docstring-code-format = true
+
 [tool.mypy]
+plugins = ['pydantic.mypy']
 ignore_missing_imports = true
 check_untyped_defs = true
 follow_imports = "silent"
 
-# After fixing type errors resulting from follow_imports: "skip" -> "silent",
-# move the directory here and remove it from tools/mypy.sh
-files = [
-    "vllm_rbln/*.py",
-    "vllm_rbln/core",
-]
-
-[tool.codespell]
-ignore-words-list = "dout, te, indicies, subtile, ElementE"
-skip = "vllm/third_party/*"
-
-[tool.isort]
-use_parentheses = true
-skip_gitignore = true
-
-[tool.pymarkdown]
-plugins.md004.style = "sublist" # ul-style
-plugins.md013.enabled = false # line-length
-plugins.md041.enabled = false # first-line-h1
-plugins.md033.enabled = false # inline-html
-plugins.md024.allow_different_nesting = true # no-duplicate-headers
-
-# Primary package index
-index-url = "https://pypi.org/simple"
-
-# Additional package indexes
-extra-index-url = [
-    "https://download.pytorch.org/whl/cpu"
+[tool.uv]
+required-environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'"
 ]
 
 [tool.uv.sources]
@@ -168,3 +135,17 @@ torchvision = { index = "pytorch-cpu" }
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.typos.default]
+binary = false
+check-filename = false
+check-file = true
+unicode = true
+ignore-hex = true
+identifier-leading-digits = false
+locale = "en"
+extend-ignore-identifiers-re = ["NVML_*", ".*Unc.*", ".*_thw",
+    ".*UE8M0.*", ".*[UE4M3|ue4m3].*", ".*eles.*",
+     ".*[Tt]h[rR].*"]
+extend-ignore-words-re = []
+extend-ignore-re = []

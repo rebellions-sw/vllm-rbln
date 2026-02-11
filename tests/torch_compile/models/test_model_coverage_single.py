@@ -64,7 +64,7 @@ targets = [
         "enable_chunked_prefill": True,
         "max_num_batched_tokens": 128,
         "max_num_seqs": 8,
-        "trust_remote_code": True
+        "trust_remote_code": True,
     },
     # Qwen2ForCausalLM
     {
@@ -269,16 +269,13 @@ def run_vllm(llm_kwargs, prompts):
 
 
 @pytest.mark.parametrize("target", targets)
-@pytest.mark.parametrize("vllm_use_v1", ["0", "1"])
 def test_model_coverage(
     monkeypatch: pytest.MonkeyPatch,
     target,
-    vllm_use_v1,
     common_env,
     prompts,
 ):
     test_env = target.pop("extra_env", {})
-    test_env["VLLM_USE_V1"] = vllm_use_v1
     test_env.update(common_env)
     patch_and_run(
         monkeypatch,

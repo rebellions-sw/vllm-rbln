@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# NOTE(RBLN): Copy from https://github.com/vllm-project/vllm/blob/v0.12.0/benchmarks/backend_request_func.py
+
 import io
 import json
 import os
@@ -19,13 +21,11 @@ import sys
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Optional, Union
 
 import aiohttp
 import huggingface_hub.constants
 from tqdm.asyncio import tqdm
-from transformers import (AutoTokenizer, PreTrainedTokenizer,
-                          PreTrainedTokenizerFast)
+from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
 
 # NOTE(simon): do not import vLLM here so the benchmark script
 # can run without vLLM installed.
@@ -40,12 +40,13 @@ class RequestFuncInput:
     prompt_len: int
     output_len: int
     model: str
-    model_name: Optional[str] = None
-    logprobs: Optional[int] = None
-    extra_body: Optional[dict] = None
-    multi_modal_content: Optional[dict] = None
+    model_name: str | None = None
+    logprobs: int | None = None
+    extra_body: dict | None = None
+    multi_modal_content: dict | list[dict] | None = None
     ignore_eos: bool = False
-    language: Optional[str] = None
+    language: str | None = None
+    request_id: str | None = None
 
 
 @dataclass
@@ -55,8 +56,7 @@ class RequestFuncOutput:
     latency: float = 0.0
     output_tokens: int = 0
     ttft: float = 0.0  # Time to first token
-    itl: list[float] = field(
-        default_factory=list)  # list of inter-token latencies
+    itl: list[float] = field(default_factory=list)  # list of inter-token latencies
     tpot: float = 0.0  # avg next-token latencies
     prompt_len: int = 0
     error: str = ""
@@ -64,13 +64,14 @@ class RequestFuncOutput:
 
 async def async_request_tgi(
     request_func_input: RequestFuncInput,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
     assert api_url.endswith("generate_stream")
 
-    async with aiohttp.ClientSession(trust_env=True,
-                                     timeout=AIOHTTP_TIMEOUT) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
         params = {
             "max_new_tokens": request_func_input.output_len,
             "do_sample": True,
@@ -83,6 +84,9 @@ async def async_request_tgi(
             "inputs": request_func_input.prompt,
             "parameters": params,
         }
+        headers = None
+        if request_func_input.request_id:
+            headers = {"x-request-id": request_func_input.request_id}
         output = RequestFuncOutput()
         output.prompt_len = request_func_input.prompt_len
         if request_func_input.ignore_eos:
@@ -94,7 +98,9 @@ async def async_request_tgi(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
-            async with session.post(url=api_url, json=payload) as response:
+            async with session.post(
+                url=api_url, json=payload, headers=headers
+            ) as response:
                 if response.status == 200:
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
@@ -117,8 +123,7 @@ async def async_request_tgi(
 
                         # Decoding phase
                         else:
-                            output.itl.append(timestamp -
-                                              most_recent_timestamp)
+                            output.itl.append(timestamp - most_recent_timestamp)
 
                         most_recent_timestamp = timestamp
 
@@ -140,13 +145,14 @@ async def async_request_tgi(
 
 async def async_request_trt_llm(
     request_func_input: RequestFuncInput,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
     assert api_url.endswith("generate_stream")
 
-    async with aiohttp.ClientSession(trust_env=True,
-                                     timeout=AIOHTTP_TIMEOUT) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
         payload = {
             "accumulate_tokens": True,
             "text_input": request_func_input.prompt,
@@ -157,6 +163,9 @@ async def async_request_trt_llm(
         }
         if request_func_input.ignore_eos:
             payload["min_length"] = request_func_input.output_len
+        headers = None
+        if request_func_input.request_id:
+            headers = {"x-request-id": request_func_input.request_id}
         output = RequestFuncOutput()
         output.prompt_len = request_func_input.prompt_len
 
@@ -164,15 +173,16 @@ async def async_request_trt_llm(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
-            async with session.post(url=api_url, json=payload) as response:
+            async with session.post(
+                url=api_url, json=payload, headers=headers
+            ) as response:
                 if response.status == 200:
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
                         if not chunk_bytes:
                             continue
 
-                        chunk = chunk_bytes.decode("utf-8").removeprefix(
-                            "data:")
+                        chunk = chunk_bytes.decode("utf-8").removeprefix("data:")
 
                         data = json.loads(chunk)
                         output.generated_text += data["text_output"]
@@ -184,8 +194,7 @@ async def async_request_trt_llm(
 
                         # Decoding phase
                         else:
-                            output.itl.append(timestamp -
-                                              most_recent_timestamp)
+                            output.itl.append(timestamp - most_recent_timestamp)
 
                         most_recent_timestamp = timestamp
 
@@ -207,14 +216,16 @@ async def async_request_trt_llm(
 
 async def async_request_deepspeed_mii(
     request_func_input: RequestFuncInput,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
     assert api_url.endswith(("completions", "profile")), (
-        "OpenAI Completions API URL must end with 'completions' or 'profile'.")
+        "OpenAI Completions API URL must end with 'completions' or 'profile'."
+    )
 
-    async with aiohttp.ClientSession(trust_env=True,
-                                     timeout=AIOHTTP_TIMEOUT) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
         payload = {
             "model": request_func_input.model,
             "prompt": request_func_input.prompt,
@@ -222,9 +233,9 @@ async def async_request_deepspeed_mii(
             "temperature": 0.01,  # deepspeed-mii does not accept 0.0 temp.
             "top_p": 1.0,
         }
-        headers = {
-            "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
-        }
+        headers = {"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"}
+        if request_func_input.request_id:
+            headers["x-request-id"] = request_func_input.request_id
 
         output = RequestFuncOutput()
         output.prompt_len = request_func_input.prompt_len
@@ -236,19 +247,21 @@ async def async_request_deepspeed_mii(
 
         st = time.perf_counter()
         try:
-            async with session.post(url=api_url, json=payload,
-                                    headers=headers) as response:
+            async with session.post(
+                url=api_url, json=payload, headers=headers
+            ) as response:
                 if response.status == 200:
                     parsed_resp = await response.json()
                     output.latency = time.perf_counter() - st
                     if "choices" in parsed_resp:
-                        output.generated_text = parsed_resp["choices"][0][
-                            "text"]
+                        output.generated_text = parsed_resp["choices"][0]["text"]
                     elif "text" in parsed_resp:
                         output.generated_text = parsed_resp["text"][0]
                     else:
-                        output.error = ("Unexpected response format: "
-                                        "neither 'choices' nor 'text' found")
+                        output.error = (
+                            "Unexpected response format: "
+                            "neither 'choices' nor 'text' found"
+                        )
                         output.success = False
                     output.success = True
                 else:
@@ -266,30 +279,26 @@ async def async_request_deepspeed_mii(
 
 async def async_request_openai_completions(
     request_func_input: RequestFuncInput,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
     assert api_url.endswith(("completions", "profile")), (
-        "OpenAI Completions API URL must end with 'completions' or 'profile'.")
+        "OpenAI Completions API URL must end with 'completions' or 'profile'."
+    )
 
-    async with aiohttp.ClientSession(trust_env=True,
-                                     timeout=AIOHTTP_TIMEOUT) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
         payload = {
-            "model":
-            request_func_input.model_name
-            if request_func_input.model_name else request_func_input.model,
-            "prompt":
-            request_func_input.prompt,
-            "temperature":
-            0.0,
-            "repetition_penalty":
-            1.0,
-            "max_tokens":
-            request_func_input.output_len,
-            "logprobs":
-            request_func_input.logprobs,
-            "stream":
-            True,
+            "model": request_func_input.model_name
+            if request_func_input.model_name
+            else request_func_input.model,
+            "prompt": request_func_input.prompt,
+            "temperature": 0.0,
+            "repetition_penalty": 1.0,
+            "max_tokens": request_func_input.output_len,
+            "logprobs": request_func_input.logprobs,
+            "stream": True,
             "stream_options": {
                 "include_usage": True,
             },
@@ -298,9 +307,9 @@ async def async_request_openai_completions(
             payload["ignore_eos"] = request_func_input.ignore_eos
         if request_func_input.extra_body:
             payload.update(request_func_input.extra_body)
-        headers = {
-            "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
-        }
+        headers = {"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"}
+        if request_func_input.request_id:
+            headers["x-request-id"] = request_func_input.request_id
 
         output = RequestFuncOutput()
         output.prompt_len = request_func_input.prompt_len
@@ -309,8 +318,9 @@ async def async_request_openai_completions(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
-            async with session.post(url=api_url, json=payload,
-                                    headers=headers) as response:
+            async with session.post(
+                url=api_url, json=payload, headers=headers
+            ) as response:
                 if response.status == 200:
                     first_chunk_received = False
                     async for chunk_bytes in response.content:
@@ -318,8 +328,7 @@ async def async_request_openai_completions(
                         if not chunk_bytes:
                             continue
 
-                        chunk = chunk_bytes.decode("utf-8").removeprefix(
-                            "data: ")
+                        chunk = chunk_bytes.decode("utf-8").removeprefix("data: ")
                         if chunk != "[DONE]":
                             data = json.loads(chunk)
 
@@ -339,21 +348,20 @@ async def async_request_openai_completions(
 
                                 # Decoding phase
                                 else:
-                                    output.itl.append(timestamp -
-                                                      most_recent_timestamp)
+                                    output.itl.append(timestamp - most_recent_timestamp)
 
                                 most_recent_timestamp = timestamp
                                 generated_text += text or ""
                             if usage := data.get("usage"):
-                                output.output_tokens = usage.get(
-                                    "completion_tokens")
+                                output.output_tokens = usage.get("completion_tokens")
                     if first_chunk_received:
                         output.success = True
                     else:
                         output.success = False
                         output.error = (
                             "Never received a valid chunk to calculate TTFT."
-                            "This response will be marked as failed!")
+                            "This response will be marked as failed!"
+                        )
                     output.generated_text = generated_text
                     output.latency = most_recent_timestamp - st
                 else:
@@ -371,33 +379,37 @@ async def async_request_openai_completions(
 
 async def async_request_openai_chat_completions(
     request_func_input: RequestFuncInput,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
     assert api_url.endswith(("chat/completions", "profile")), (
-        "OpenAI Chat Completions API URL must end with 'chat/completions'.")
+        "OpenAI Chat Completions API URL must end with 'chat/completions'."
+    )
 
-    async with aiohttp.ClientSession(trust_env=True,
-                                     timeout=AIOHTTP_TIMEOUT) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
         content = [{"type": "text", "text": request_func_input.prompt}]
         if request_func_input.multi_modal_content:
-            content.append(request_func_input.multi_modal_content)
+            mm_content = request_func_input.multi_modal_content
+            if isinstance(mm_content, list):
+                content.extend(mm_content)
+            elif isinstance(mm_content, dict):
+                content.append(mm_content)
+            else:
+                raise TypeError(
+                    "multi_modal_content must be a dict or list[dict] for openai-chat"
+                )
         payload = {
-            "model":
-            request_func_input.model_name
-            if request_func_input.model_name else request_func_input.model,
+            "model": request_func_input.model_name
+            if request_func_input.model_name
+            else request_func_input.model,
             "messages": [
-                {
-                    "role": "user",
-                    "content": content
-                },
+                {"role": "user", "content": content},
             ],
-            "temperature":
-            0.0,
-            "max_completion_tokens":
-            request_func_input.output_len,
-            "stream":
-            True,
+            "temperature": 0.0,
+            "max_completion_tokens": request_func_input.output_len,
+            "stream": True,
             "stream_options": {
                 "include_usage": True,
             },
@@ -410,6 +422,8 @@ async def async_request_openai_chat_completions(
             "Content-Type": "application/json",
             "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
         }
+        if request_func_input.request_id:
+            headers["x-request-id"] = request_func_input.request_id
 
         output = RequestFuncOutput()
         output.prompt_len = request_func_input.prompt_len
@@ -419,16 +433,22 @@ async def async_request_openai_chat_completions(
         st = time.perf_counter()
         most_recent_timestamp = st
         try:
-            async with session.post(url=api_url, json=payload,
-                                    headers=headers) as response:
+            async with session.post(
+                url=api_url, json=payload, headers=headers
+            ) as response:
                 if response.status == 200:
                     async for chunk_bytes in response.content:
                         chunk_bytes = chunk_bytes.strip()
                         if not chunk_bytes:
                             continue
+                        chunk_bytes = chunk_bytes.decode("utf-8")
+                        # NOTE: SSE comments (often used as pings) start with a colon.
+                        # These are not JSON data payload and should be skipped.
+                        if chunk_bytes.startswith(":"):
+                            continue
 
-                        chunk = chunk_bytes.decode("utf-8").removeprefix(
-                            "data: ")
+                        chunk = chunk_bytes.removeprefix("data: ")
+
                         if chunk != "[DONE]":
                             timestamp = time.perf_counter()
                             data = json.loads(chunk)
@@ -442,13 +462,11 @@ async def async_request_openai_chat_completions(
 
                                 # Decoding phase
                                 else:
-                                    output.itl.append(timestamp -
-                                                      most_recent_timestamp)
+                                    output.itl.append(timestamp - most_recent_timestamp)
 
                                 generated_text += content or ""
                             elif usage := data.get("usage"):
-                                output.output_tokens = usage.get(
-                                    "completion_tokens")
+                                output.output_tokens = usage.get("completion_tokens")
 
                             most_recent_timestamp = timestamp
 
@@ -470,42 +488,40 @@ async def async_request_openai_chat_completions(
 
 async def async_request_openai_audio(
     request_func_input: RequestFuncInput,
-    pbar: Optional[tqdm] = None,
+    pbar: tqdm | None = None,
 ) -> RequestFuncOutput:
     # Lazy import without PlaceholderModule to avoid vllm dep.
     import soundfile
 
     api_url = request_func_input.api_url
     assert api_url.endswith(("transcriptions", "translations")), (
-        "OpenAI Chat Completions API URL must end with 'transcriptions' ")
+        "OpenAI Chat Completions API URL must end with 'transcriptions' "
+    )
     "or `translations`."
 
-    async with aiohttp.ClientSession(trust_env=True,
-                                     timeout=AIOHTTP_TIMEOUT) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True, timeout=AIOHTTP_TIMEOUT
+    ) as session:
         content = [{"type": "text", "text": request_func_input.prompt}]
         payload = {
-            "model":
-            request_func_input.model_name
-            if request_func_input.model_name else request_func_input.model,
-            "temperature":
-            0.0,
-            "max_completion_tokens":
-            request_func_input.output_len,
-            "stream":
-            True,
-            "language":
-            "en",
+            "model": request_func_input.model_name
+            if request_func_input.model_name
+            else request_func_input.model,
+            "temperature": 0.0,
+            "max_completion_tokens": request_func_input.output_len,
+            "stream": True,
+            "language": "en",
             # Flattened due to multipart/form-data
-            "stream_include_usage":
-            True,
-            "stream_continuous_usage_stats":
-            True,
+            "stream_include_usage": True,
+            "stream_continuous_usage_stats": True,
         }
         if request_func_input.extra_body:
             payload.update(request_func_input.extra_body)
         headers = {
             "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
         }
+        if request_func_input.request_id:
+            headers["x-request-id"] = request_func_input.request_id
 
         # Send audio file
         def to_bytes(y, sr):
@@ -514,7 +530,10 @@ async def async_request_openai_audio(
             buffer.seek(0)
             return buffer
 
-        with to_bytes(*request_func_input.multi_modal_content["audio"]) as f:
+        mm_audio = request_func_input.multi_modal_content
+        if not isinstance(mm_audio, dict) or "audio" not in mm_audio:
+            raise TypeError("multi_modal_content must be a dict containing 'audio'")
+        with to_bytes(*mm_audio["audio"]) as f:
             form = aiohttp.FormData()
             form.add_field("file", f, content_type="audio/wav")
             for key, value in payload.items():
@@ -528,24 +547,22 @@ async def async_request_openai_audio(
             st = time.perf_counter()
             most_recent_timestamp = st
             try:
-                async with session.post(url=api_url,
-                                        data=form,
-                                        headers=headers) as response:
+                async with session.post(
+                    url=api_url, data=form, headers=headers
+                ) as response:
                     if response.status == 200:
                         async for chunk_bytes in response.content:
                             chunk_bytes = chunk_bytes.strip()
                             if not chunk_bytes:
                                 continue
 
-                            chunk = chunk_bytes.decode("utf-8").removeprefix(
-                                "data: ")
+                            chunk = chunk_bytes.decode("utf-8").removeprefix("data: ")
                             if chunk != "[DONE]":
                                 timestamp = time.perf_counter()
                                 data = json.loads(chunk)
 
                                 if choices := data.get("choices"):
-                                    content = choices[0]["delta"].get(
-                                        "content")
+                                    content = choices[0]["delta"].get("content")
                                     # First token
                                     if ttft == 0.0:
                                         ttft = timestamp - st
@@ -554,12 +571,14 @@ async def async_request_openai_audio(
                                     # Decoding phase
                                     else:
                                         output.itl.append(
-                                            timestamp - most_recent_timestamp)
+                                            timestamp - most_recent_timestamp
+                                        )
 
                                     generated_text += content or ""
                                 elif usage := data.get("usage"):
                                     output.output_tokens = usage.get(
-                                        "completion_tokens")
+                                        "completion_tokens"
+                                    )
 
                                 most_recent_timestamp = timestamp
 
@@ -602,25 +621,25 @@ def get_tokenizer(
     tokenizer_mode: str = "auto",
     trust_remote_code: bool = False,
     **kwargs,
-) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
+) -> PreTrainedTokenizer | PreTrainedTokenizerFast:
     if pretrained_model_name_or_path is not None and not os.path.exists(
-            pretrained_model_name_or_path):
-        pretrained_model_name_or_path = get_model(
-            pretrained_model_name_or_path)
+        pretrained_model_name_or_path
+    ):
+        pretrained_model_name_or_path = get_model(pretrained_model_name_or_path)
     if tokenizer_mode == "slow":
         if kwargs.get("use_fast", False):
-            raise ValueError(
-                "Cannot use the fast tokenizer in slow tokenizer mode.")
+            raise ValueError("Cannot use the fast tokenizer in slow tokenizer mode.")
         kwargs["use_fast"] = False
     if tokenizer_mode == "mistral":
         try:
-            from vllm.transformers_utils.tokenizer import MistralTokenizer
+            from vllm.tokenizers import MistralTokenizer
         except ImportError as e:
-            raise ImportError("MistralTokenizer requires vllm package.\n"
-                              "Please install it with `pip install vllm` "
-                              "to use mistral tokenizer mode.") from e
-        return MistralTokenizer.from_pretrained(
-            str(pretrained_model_name_or_path))
+            raise ImportError(
+                "MistralTokenizer requires vllm package.\n"
+                "Please install it with `pip install vllm` "
+                "to use mistral tokenizer mode."
+            ) from e
+        return MistralTokenizer.from_pretrained(str(pretrained_model_name_or_path))
     else:
         return AutoTokenizer.from_pretrained(
             pretrained_model_name_or_path,
@@ -644,7 +663,7 @@ ASYNC_REQUEST_FUNCS = {
 }
 
 OPENAI_COMPATIBLE_BACKENDS = [
-    k for k, v in ASYNC_REQUEST_FUNCS.items()
-    if v in (async_request_openai_completions,
-             async_request_openai_chat_completions)
+    k
+    for k, v in ASYNC_REQUEST_FUNCS.items()
+    if v in (async_request_openai_completions, async_request_openai_chat_completions)
 ]

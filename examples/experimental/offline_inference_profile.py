@@ -15,7 +15,7 @@
 import os
 
 # The profile results can be visualized using https://ui.perfetto.dev/
-os.environ['VLLM_TORCH_PROFILER_DIR'] = './profile'
+os.environ["VLLM_TORCH_PROFILER_DIR"] = "./profile"
 
 from vllm import LLM, SamplingParams
 

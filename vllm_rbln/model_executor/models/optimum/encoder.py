@@ -12,16 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Union
+from typing import Union
 
 import torch
-import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.layers.pooler import DispatchPooler, Pooler
 from vllm.model_executor.models import VllmModelForPooling
-from vllm.sequence import PoolerOutput, PoolingSequenceGroupOutput
 from vllm.tasks import PoolingTask
+from vllm.v1.outputs import PoolerOutput
 from vllm.v1.pool.metadata import PoolingMetadata
 
 from .base import ModelInputForRBLN
@@ -32,7 +31,7 @@ logger = init_logger(__name__)
 
 class RBLNClassifierPooler(Pooler):
     """
-    A pooler for RBLN models that simply wraps pre-processed 
+    A pooler for RBLN models that simply wraps pre-processed
     hidden states into vLLM's PoolerOutput format.
     """
 
@@ -42,13 +41,6 @@ class RBLNClassifierPooler(Pooler):
     def get_supported_tasks(self) -> set[PoolingTask]:
         return {"classify", "score"}
 
-    @staticmethod
-    def _build_output(
-        all_data: Union[torch.Tensor, list[torch.Tensor]], ) -> PoolerOutput:
-        """Wrap tensor data into vLLM's PoolerOutput format."""
-        all_outputs = [PoolingSequenceGroupOutput(data) for data in all_data]
-        return PoolerOutput(outputs=all_outputs)
-
     def forward(
         self,
         hidden_states: Union[torch.Tensor, list[torch.Tensor]],
@@ -56,7 +48,7 @@ class RBLNClassifierPooler(Pooler):
     ) -> PoolerOutput:
         # RBLN models return already pooled/processed states for classification
         # No additional pooling needed - just format for vllm compatibility
-        return self._build_output(hidden_states)
+        return hidden_states
 
 
 class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
@@ -70,21 +62,18 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
     ) -> None:
         super().__init__(vllm_config=vllm_config)
         pooler_config = vllm_config.model_config.pooler_config
-        hf_config = vllm_config.model_config.hf_config
         assert pooler_config is not None
-        self.score = nn.Linear(
-            hf_config.hidden_size,
-            hf_config.num_labels,
-            bias=False,
-            dtype=vllm_config.model_config.head_dtype,
-        )
+        # https://github.com/vllm-project/vllm/blob/72506c98349d6bcd32b4e33eec7b5513453c1502/docs/models/pooling_models.md?plain=1#L312
+        # encode task is split into `token_embed` and `token_classify` tasks
         self.pooler = DispatchPooler(
             {
-                "encode": Pooler.for_encode(pooler_config),
+                "token_embed": Pooler.for_token_embed(pooler_config),
+                "token_classify": Pooler.for_token_classify(pooler_config),
                 "embed": Pooler.for_embed(pooler_config),
                 "classify": RBLNClassifierPooler(),
                 "score": RBLNClassifierPooler(),
-            }, )
+            },
+        )
 
     def is_classification_arch(self):
         architectures = getattr(
@@ -103,19 +92,20 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         target_batch_size = self.batch_size
 
         def pad_if_needed(
-            tensor: Optional[torch.Tensor], ) -> Optional[torch.Tensor]:
+            tensor: torch.Tensor | None,
+        ) -> torch.Tensor | None:
             if tensor is None:
                 return None
 
             if tensor.size(1) > self.rbln_model_config.max_seq_len:
-                tensor = tensor[:, :self.rbln_model_config.max_seq_len]
+                tensor = tensor[:, : self.rbln_model_config.max_seq_len]
             elif tensor.size(1) < self.rbln_model_config.max_seq_len:
                 padded_tensor = torch.zeros(
                     batch_size,
                     self.rbln_model_config.max_seq_len,
                     dtype=tensor.dtype,
                 )
-                padded_tensor[:, :tensor.size(1)] = tensor
+                padded_tensor[:, : tensor.size(1)] = tensor
                 tensor = padded_tensor
 
             if tensor.size(0) >= target_batch_size:
@@ -129,16 +119,16 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
             pad_if_needed(positions),
         )
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids, positions = self.preprocess(
             model_input.input_tokens,
             model_input.input_positions,
         )
 
         max_position = torch.max(positions, dim=1).indices
-        position_indices = torch.arange(positions.shape[1],
-                                        device=positions.device).unsqueeze(0)
+        position_indices = torch.arange(
+            positions.shape[1], device=positions.device
+        ).unsqueeze(0)
         attention_mask = (position_indices <= max_position.unsqueeze(1)).long()
         request_nums = input_ids.shape[0]
         kwargs = {
@@ -146,11 +136,9 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
             "attention_mask": attention_mask,
         }
 
-        model_input_names = getattr(self.rbln_model_config,
-                                    "model_input_names", None)
+        model_input_names = getattr(self.rbln_model_config, "model_input_names", None)
         if model_input_names is not None:
-            rbln_model_input_names = \
-                self.rbln_model_config.model_input_names
+            rbln_model_input_names = self.rbln_model_config.model_input_names
             if "token_type_ids" in rbln_model_input_names:
                 kwargs["token_type_ids"] = torch.zeros_like(input_ids)
 
@@ -172,7 +160,8 @@ class RBLNOptimumForEncoderModel(RBLNOptimumModelBase, VllmModelForPooling):
         else:
             assert hidden_states.dim() == 2, (
                 f"We expected the shape to be dim 2 ([batch, num_labels]), "
-                f"but the current output is dim {hidden_states.dim()}.")
+                f"but the current output is dim {hidden_states.dim()}."
+            )
             hidden_states = hidden_states[:request_nums].squeeze(-1)
 
         return hidden_states
