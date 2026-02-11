@@ -16,7 +16,7 @@
 # limitations under the License.
 
 import pytest
-from vllm.lora.models import LoRAModel
+from vllm.lora.lora_model import LoRAModel
 from vllm.lora.peft_helper import PEFTHelper
 from vllm.model_executor.models.baichuan import BaiChuanBaseForCausalLM
 from vllm.model_executor.models.utils import WeightsMapper
