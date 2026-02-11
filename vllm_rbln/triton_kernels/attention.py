@@ -19,6 +19,7 @@ from rebel.triton import language as tl
 from rebel.triton.language.extra.rbln import libdevice as rblib
 from torch.library import register_fake, triton_op
 
+
 @triton.jit
 def attention_naive_prefill(
     query_base,
@@ -173,11 +174,14 @@ def attention_naive_prefill(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k_base = rblib.dynamic_load(k_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         k_insert = rblib.insert(k_base, k_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
+        rblib.dynamic_store(
+            k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
+        )
 
         q = tl.load(query_ptr)
-        # to fuse transpose, broadcast ops into matmul op, make sure the sequence to be transpose - broadcast - matmul.
-        # if the sequence is broadcast - transpose - matmul, it may not be fused (NYI)
+        # to fuse transpose, broadcast ops into matmul op, make sure the sequence
+        # to be transpose - broadcast - matmul. if the sequence is broadcast -
+        # transpose - matmul, it may not be fused (NYI)
         k_insert = tl.reshape(k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         k = tl.permute(k_insert, (0, 1, 2, 4, 3))
         k = tl.broadcast_to(k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE))
@@ -194,13 +198,18 @@ def attention_naive_prefill(
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_base = rblib.dynamic_load(v_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         v_insert = rblib.insert(v_base, v_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
+        rblib.dynamic_store(
+            v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
+        )
 
         v = tl.reshape(v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         v = tl.broadcast_to(v, (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM))
         # 2.5 O = MM(d, V)
-        attn_out = tl.dot(softmax_masked_qk_scaled, v)  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
+        attn_out = tl.dot(
+            softmax_masked_qk_scaled, v
+        )  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
         tl.store(output_ptr, attn_out)  # (1,h,g,l,d)
+
 
 @triton.jit
 def attention_naive_decode(
@@ -250,7 +259,7 @@ def attention_naive_decode(
         block_offset = rblib.to_dynamic_index(seq_idx_ptr)
         block_number = block_number.cast(tl.int32)
         block_offset = block_offset.cast(tl.int32)
-        
+
         k_block_ptr = tl.make_block_ptr(
             base=key_base,
             shape=(NUM_BATCH, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM),
@@ -356,11 +365,14 @@ def attention_naive_decode(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k_base = rblib.dynamic_load(k_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         k_insert = rblib.insert(k_base, k_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
+        rblib.dynamic_store(
+            k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
+        )
 
         q = tl.load(query_ptr)
-        # to fuse transpose, broadcast ops into matmul op, make sure the sequence to be transpose - broadcast - matmul.
-        # if the sequence is broadcast - transpose - matmul, it may not be fused (NYI)
+        # to fuse transpose, broadcast ops into matmul op, make sure the sequence
+        # to be transpose - broadcast - matmul. if the sequence is broadcast -
+        # transpose - matmul, it may not be fused (NYI)
         k_insert = tl.reshape(k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         k = tl.permute(k_insert, (0, 1, 2, 4, 3))
         k = tl.broadcast_to(k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE))
@@ -377,16 +389,21 @@ def attention_naive_decode(
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_base = rblib.dynamic_load(v_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         v_insert = rblib.insert(v_base, v_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
+        rblib.dynamic_store(
+            v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
+        )
 
         v = tl.reshape(v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         v = tl.broadcast_to(v, (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM))
         # 2.5 O = MM(d, V)
-        attn_out = tl.dot(softmax_masked_qk_scaled, v)  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
+        attn_out = tl.dot(
+            softmax_masked_qk_scaled, v
+        )  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
         tl.store(output_ptr, attn_out)  # (1,h,4,l,d)
 
+
 def warmup(func, *args):
-    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:4")
+    kernel = func.warmup(*args, grid=(1,), host_layout="1:2:4")
     rblib.write_rtosa(kernel, args)
 
     return kernel

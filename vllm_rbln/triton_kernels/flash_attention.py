@@ -97,14 +97,13 @@ def flash_attention_naive_prefill(
         for partition_id in tl.static_range(0, NP, 1):
             BT_block_ptr = tl.make_block_ptr(
                 base=block_table,
-                shape=(NP, ),
-                strides=(1, ),
-                offsets=(partition_id, ),
-                block_shape=(1, ),
-                order=(0, ),
+                shape=(NP,),
+                strides=(1,),
+                offsets=(partition_id,),
+                block_shape=(1,),
+                order=(0,),
             )
-            tl.static_assert(
-                len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
+            tl.static_assert(len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
             SP_block_ptr = tl.make_block_ptr(
                 base=seq_idx,
                 shape=(NB, NP),
@@ -122,8 +121,7 @@ def flash_attention_naive_prefill(
                 k_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
                     shape=(2, B, H, 1, P, D),
-                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D,
-                             P * D, D, 1),
+                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D, P * D, D, 1),
                     offsets=(0, block_number, 0, 0, 0, 0),
                     block_shape=(1, 1, H, 1, P, D),
                     order=(5, 4, 3, 2, 1, 0),
@@ -131,8 +129,7 @@ def flash_attention_naive_prefill(
                 v_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
                     shape=(2, B, H, 1, P, D),
-                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D,
-                             P * D, D, 1),
+                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D, P * D, D, 1),
                     offsets=(1, block_number, 0, 0, 0, 0),
                     block_shape=(1, 1, H, 1, P, D),
                     order=(5, 4, 3, 2, 1, 0),
@@ -158,10 +155,12 @@ def flash_attention_naive_prefill(
                 v = tl.broadcast_to(v_insert, (1, H, G, P, D))
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i))
+                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i)
+                    )
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask))
+                        rblib.flash_attn_tile(qk_scaled, attn_mask)
+                    )
 
                 attn_out_cur = tl.dot(row_exp_normalize, v)
                 if partition_id > 0:
@@ -268,8 +267,7 @@ def flash_attention_naive_decode(
                 block_shape=(1, 1),
                 order=(1, 0),
             )
-            tl.static_assert(
-                len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
+            tl.static_assert(len(BT_block_ptr.type.element_ty.shape) == DIM_BLOCK_TABLE)
             SP_block_ptr = tl.make_block_ptr(
                 base=seq_idx,
                 shape=(NB, NP),
@@ -287,8 +285,7 @@ def flash_attention_naive_decode(
                 k_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
                     shape=(2, B, H, 1, P, D),
-                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D,
-                             P * D, D, 1),
+                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D, P * D, D, 1),
                     offsets=(0, block_number, 0, 0, 0, 0),
                     block_shape=(1, 1, H, 1, P, D),
                     order=(5, 4, 3, 2, 1, 0),
@@ -296,8 +293,7 @@ def flash_attention_naive_decode(
                 v_cache_ptr = tl.make_block_ptr(
                     base=kv_cache,
                     shape=(2, B, H, 1, P, D),
-                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D,
-                             P * D, D, 1),
+                    strides=(B * H * 1 * P * D, H * 1 * P * D, 1 * P * D, P * D, D, 1),
                     offsets=(1, block_number, 0, 0, 0, 0),
                     block_shape=(1, 1, H, 1, P, D),
                     order=(5, 4, 3, 2, 1, 0),
@@ -321,10 +317,12 @@ def flash_attention_naive_decode(
                 v = tl.broadcast_to(v_insert, (1, H, G, P, D))
                 if partition_id > 0:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i))
+                        rblib.flash_attn_tile(qk_scaled, attn_mask, row_max_i)
+                    )
                 else:
                     row_max_global, row_exp_normalize, row_sum_cur = (
-                        rblib.flash_attn_tile(qk_scaled, attn_mask))
+                        rblib.flash_attn_tile(qk_scaled, attn_mask)
+                    )
 
                 attn_out_cur = tl.dot(row_exp_normalize, v)
                 if partition_id > 0:
@@ -348,7 +346,7 @@ def flash_attention_naive_decode(
 
 
 def warmup(func, *args):
-    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3")
+    kernel = func.warmup(*args, grid=(1,), host_layout="1:2:3")
     rblib.write_rtosa(kernel, args)
 
     return kernel
