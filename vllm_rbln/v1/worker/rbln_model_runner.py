@@ -2539,27 +2539,28 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 model_kwargs,
             ) = self._preprocess(scheduler_output)
 
-        # Padding for speculative decoding
-        # in case of that all requests are not scheduled equally.
         assert input_ids is not None
-        num_scheduled_tokens_per_req = torch.tensor(
-            [
-                scheduler_output.num_scheduled_tokens[i]
-                for i in self.input_batch.req_ids
-            ],
-            device=input_ids.device,
-            dtype=torch.int32,
-        )
-        max_num_scheduled_tokens = torch.max(num_scheduled_tokens_per_req)
+        is_prefills = self.is_prefills()
 
-        if self.speculative_config is not None and not torch.all(
-            num_scheduled_tokens_per_req == max_num_scheduled_tokens
-        ):
+        # Padding length for speculative decoding by num_speculative_tokens
+        if self.speculative_config is not None and not is_prefills[0]:
+            num_scheduled_tokens_per_req = torch.tensor(
+                [
+                    scheduler_output.num_scheduled_tokens[i]
+                    for i in self.input_batch.req_ids
+                ],
+                device=input_ids.device,
+                dtype=torch.int32,
+            )
             input_ids = rbln_utils.pad_speculative_draft_tokens(
-                input_ids, num_scheduled_tokens_per_req
+                input_ids,
+                num_scheduled_tokens_per_req,
+                self.speculative_config.num_speculative_tokens + 1,
             )
             positions = rbln_utils.pad_speculative_draft_tokens(
-                positions, num_scheduled_tokens_per_req
+                positions,
+                num_scheduled_tokens_per_req,
+                self.speculative_config.num_speculative_tokens + 1,
             )
 
         # Run the model.
@@ -2583,8 +2584,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # we must resolve the batch dimension.
             input_ids = input_ids.view(num_reqs, -1).to(torch.long)
             positions = positions.view(num_reqs, -1)
-
-            is_prefills = self.is_prefills()
 
             token_indices = None
             if is_prefills[0]:
