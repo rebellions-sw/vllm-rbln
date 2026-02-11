@@ -1683,10 +1683,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         self._execute_dummy_requests(so, cso,
                                      self.prefill_intermediate_tensors)
 
-        # compile decode graph
+        # compile decode graph considering decode batch buckets
         for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
             decode_max_seq_len = self.max_model_len
-
             dummy_decode_requests = []
             dummy_decode_num_scheduled_tokens = {}
             num_speculative_tokens = \
@@ -1723,6 +1722,40 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     num_padded_tokens=self.max_num_batched_tokens)
 
             self._execute_dummy_requests(so, cso, current_intermediate_tensors)
+
+        # compile sampler for all possible decode batches
+        max_decode_batch = self.bucketing_manager.decode_batch_buckets[-1]
+        for decode_batch in range(1, max_decode_batch+1):
+            decode_max_seq_len = self.max_model_len
+            dummy_decode_requests = []
+            dummy_decode_num_scheduled_tokens = {}
+            num_speculative_tokens = \
+            self.speculative_config.num_speculative_tokens \
+                if self.speculative_config is not None else 0
+            for _ in range(decode_batch):
+                self._add_dummy_requests(
+                    requests=dummy_decode_requests,
+                    num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
+                    total_tokens=decode_max_seq_len - 1 -
+                    num_speculative_tokens,
+                    num_computed_tokens=decode_max_seq_len - 1 -
+                    num_speculative_tokens,
+                    num_kv_cache_groups=num_kv_cache_groups,
+                    sampling_params=None if self.is_pooling_model else
+                    SamplingParams(temperature=0.0),
+                    pooling_params=PoolingParams(
+                        task=self.get_supported_pooling_tasks()[0])
+                    if self.is_pooling_model else None,
+                    num_speculative_tokens=num_speculative_tokens,
+                )
+            so, cso = self._make_dummy_scheduler_outputs(
+                dummy_decode_requests, dummy_decode_num_scheduled_tokens,
+                num_kv_cache_groups)
+            current_intermediate_tensors = \
+                self.decode_intermediate_tensors.get(decode_batch)
+            assert current_intermediate_tensors is not None
+            self._execute_dummy_requests(so, cso, current_intermediate_tensors)
+
 
     def _add_dummy_requests(
         self,
@@ -2988,6 +3021,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             # if this flag is set, nn.modules parameters are treated
             # as model input
             torch._dynamo.config.inline_inbuilt_nn_modules = False
+            torch._dynamo.config.cache_size_limit = 64
             # RBLN compile context to mark static address for kv cache tensor
             # if tensor is set to have static address,
             # similar to RBLN kv cache binding
@@ -3003,14 +3037,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self._prepare_prefill_intermediate_tensors()
             for batch_bucket_size \
                 in self.bucketing_manager.decode_batch_buckets:
-                self._prepare_decode_intermediate_tensors(batch_bucket_size)
+                for decode_batch in range(1, batch_bucket_size+1):
+                    self._prepare_decode_intermediate_tensors(decode_batch)
         else:
             with torch.inference_mode():
                 self._prepare_prefill_intermediate_tensors()
                 for batch_bucket_size \
                     in self.bucketing_manager.decode_batch_buckets:
-                    self._prepare_decode_intermediate_tensors(
-                        batch_bucket_size)
+                    for decode_batch in range(1, batch_bucket_size+1):
+                        self._prepare_decode_intermediate_tensors(decode_batch)
 
     def _prepare_prefill_intermediate_tensors(self) -> None:
 
