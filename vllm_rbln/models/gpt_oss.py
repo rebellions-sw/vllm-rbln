@@ -224,8 +224,9 @@ if True:
         return loaded_params
 
     def __gpt_oss_moe_forward_rsd(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        g = self.router(hidden_states)
-        final_hidden_states = self.experts(hidden_states=hidden_states, router_logits=g)
+        final_hidden_states = self.experts(
+            hidden_states=hidden_states, router=self.router
+        )
         tp_size = get_tensor_model_parallel_world_size()
         if tp_size > 1:
             final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
