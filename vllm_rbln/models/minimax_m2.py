@@ -17,7 +17,8 @@ from vllm.distributed import tensor_model_parallel_all_reduce
 from vllm.model_executor.models.minimax_m2 import MiniMaxM2MoE
 
 
-def __minimax_m2_moe_forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+def __minimax_m2_moe_forward(self,
+                             hidden_states: torch.Tensor) -> torch.Tensor:
     # router_logits: (num_tokens, n_experts)
     router_logits, _ = self.gate(hidden_states.to(torch.float32))
     router_logits = torch.sigmoid(router_logits)
@@ -29,7 +30,6 @@ def __minimax_m2_moe_forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
             final_hidden_states)
 
     return final_hidden_states
-
 
 
 MiniMaxM2MoE.forward = __minimax_m2_moe_forward
