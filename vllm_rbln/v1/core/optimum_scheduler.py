@@ -527,7 +527,6 @@ class RBLNOptimumScheduler(Scheduler):
     ) -> None:
         request_id = request.request_id
         block_table = self.kv_cache_manager.get_block_table(request_id)
-        print("@@ block_table", block_table.shape, block_table)
         block_table_dict[request_id] = block_table
 
     def _preempt_request(
