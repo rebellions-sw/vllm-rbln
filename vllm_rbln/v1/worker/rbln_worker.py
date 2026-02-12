@@ -46,11 +46,9 @@ from vllm.v1.worker.worker_base import WorkerBase
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
-from vllm_rbln.v1.worker.utils import (
-    estimate_available_memory,
-    set_cpu_affinity,
-    set_omp_num_threads,
-)
+from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
+from vllm_rbln.worker.utils import estimate_available_memory
+from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
 
 logger = init_logger(__name__)
 
@@ -182,13 +180,15 @@ class RBLNWorker(WorkerBase):
         )
 
         # Only set OMP_NUM_THREADS when TP > 1 or DP > 1
-        if (
-            self.parallel_config.tensor_parallel_size > 1
-            or self.parallel_config.data_parallel_size > 1
-        ):
+        if (self.parallel_config.tensor_parallel_size > 1
+                or self.parallel_config.data_parallel_size > 1):
+            # Use half of allocated CPUs to avoid oversubscription
+            allocated_cpus = len(os.sched_getaffinity(0))
+            num_threads = max(2, allocated_cpus // 2)
             set_omp_num_threads(
                 self.rank,
                 self.local_rank,
+                num_threads,
             )
 
         # Initialize the distributed environment.
@@ -411,9 +411,11 @@ class RBLNWorker(WorkerBase):
     def shutdown(self) -> None:
         logger.info("v1 rbln_worker shutdown called")
         if envs.VLLM_RBLN_METRICS:
-            # FIXME - performance tracker atexit is not called
-            assert self.model_runner.performance_tracker is not None
-            self.model_runner.performance_tracker.print_final_stats()
+            if self.model_runner.performance_tracker:
+                self.model_runner.performance_tracker.print_final_stats()
+            if self.model_runner.sampler_performance_tracker:
+                self.model_runner.sampler_performance_tracker.print_final_stats(
+                )
 
 
 def init_worker_distributed_environment(
