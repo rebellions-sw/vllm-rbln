@@ -238,7 +238,9 @@ def unquantized_fused_moe_method_rbln(
     return final_hidden_states.reshape(orig_shape)
 
 
-def get_tokens_mask(num_tokens: int, left=0.0, right=float('-inf')):
+
+# TODO(RBLN) - check left/right values
+def get_tokens_mask(num_tokens: int, left=1.0, right=0.0):
     num_tokens_across_dp = \
         get_forward_context().dp_metadata.num_tokens_across_dp_cpu
     num_tokens_across_dp = num_tokens_across_dp.unsqueeze(1)

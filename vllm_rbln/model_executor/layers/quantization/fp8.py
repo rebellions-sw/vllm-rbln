@@ -355,6 +355,7 @@ def custom_moe_swiglu_group_dequantize(
     up_proj_bias: Optional[torch.Tensor] = None,
     down_proj_bias: Optional[torch.Tensor] = None,
     expert_map: Optional[torch.Tensor] = None,
+    dp_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Customized MoE SwiGLU operation.
@@ -399,6 +400,7 @@ def custom_moe_swiglu_group_dequantize_fake(
     up_proj_bias: Optional[torch.Tensor] = None,
     down_proj_bias: Optional[torch.Tensor] = None,
     expert_map: Optional[torch.Tensor] = None,
+    dp_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
@@ -733,6 +735,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # route_logits - selected routing & dp tokens mask
         # expert_map - dp expert_map mask is handled in compiler
         router_logits = router_logits.reshape(num_tokens, -1)
+        router_logits = torch.sigmoid(router_logits)
 
         expert_map_const = None
         if expert_map is not None:
@@ -743,7 +746,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
         if use_moe_tokens_mask:
             tokens_mask = get_tokens_mask(num_tokens)
-            router_logits = router_logits * tokens_mask
+            # TODO(RBLN) - do this job in custom converter
+            # router_logits = router_logits * tokens_mask
 
         # TODO(RBLN) - Need this?
         gate_proj_bias = None
@@ -766,6 +770,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             up_proj_bias,
             down_proj_bias,
             expert_map_const,
+            tokens_mask,
         )
 
         return final_hidden_states.reshape(orig_shape)

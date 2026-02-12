@@ -303,8 +303,17 @@ class RBLNWorker(WorkerBase):
             assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
         if self.model_config.quantization is not None:
-            # FIXME(RBLN) - for now, mxfp4 quantization is only supported
-            assert self.model_config.quantization == "mxfp4"
+            logger.info("model quantization scheme = %s", self.model_config.quantization)
+            # gpt-oss mxfp4 quantization - only applied to expert
+            # minimax fp8 quantization - applied into linear & expert
+            quantization = self.model_config.quantization
+
+            if quantization == "fp8":
+                return 32 * 2**30
+
+            assert quantization == "mxfp4"
+            device_name = current_platform.get_device_name().lower()
+            assert "rbln" in device_name
             if "ca" in device_name:
                 # ATOM DOES NOT support mxfp4 quantization, handled by bf16
                 nbits_per_param = 16
