@@ -1422,7 +1422,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
-                    self.sinks,
                 )
             else:
                 attn_output = sliding_window_attention_naive_prefill(  # noqa: E501
@@ -1435,7 +1434,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
-                    self.sinks,
                 )
         # actually non-flash paged attention DOES NOT use slot_mapping
         elif self.is_causal:
@@ -1582,8 +1580,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         query,
                         key,
                         value,
-                        attn_metadata.attn_masks,
                         kv_cache,
+                        attn_metadata.attn_masks,
                         attn_metadata.seq_lens.to(torch.int16),
                         self.scale,
                         attn_metadata.block_tables.to(torch.int16),
@@ -1594,8 +1592,8 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         query,
                         key,
                         value,
-                        attn_metadata.attn_masks,
                         kv_cache,
+                        attn_metadata.attn_masks,
                         attn_metadata.seq_lens.to(torch.int16),
                         self.scale,
                         attn_metadata.block_tables.to(torch.int16),

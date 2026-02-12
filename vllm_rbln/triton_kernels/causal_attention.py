@@ -19,7 +19,6 @@ from rebel.triton import language as tl
 from rebel.triton.language.extra.rbln import libdevice as rblib
 from torch.library import register_fake, triton_op
 
-
 @triton.jit
 def causal_attention_naive_prefill(
     query_base,
@@ -159,14 +158,11 @@ def causal_attention_naive_prefill(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k_base = rblib.dynamic_load(k_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         k_insert = rblib.insert(k_base, k_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(
-            k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
-        )
+        rblib.dynamic_store(k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
 
         q = tl.load(query_ptr)
-        # to fuse transpose, broadcast ops into matmul op, make sure the sequence
-        # to be transpose - broadcast - matmul. if the sequence is broadcast -
-        # transpose - matmul, it may not be fused (NYI)
+        # to fuse transpose, broadcast ops into matmul op, make sure the sequence to be transpose - broadcast - matmul.
+        # if the sequence is broadcast - transpose - matmul, it may not be fused (NYI)
         k_insert = tl.reshape(k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         k = tl.permute(k_insert, (0, 1, 2, 4, 3))
         k = tl.broadcast_to(k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE))
@@ -181,18 +177,13 @@ def causal_attention_naive_prefill(
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_base = rblib.dynamic_load(v_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         v_insert = rblib.insert(v_base, v_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(
-            v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
-        )
+        rblib.dynamic_store(v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
 
         v = tl.reshape(v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         v = tl.broadcast_to(v, (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM))
         # 2.5 O = MM(d, V)
-        attn_out = tl.dot(
-            softmax_masked_qk_scaled, v
-        )  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
+        attn_out = tl.dot(softmax_masked_qk_scaled, v)  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
         tl.store(output_ptr, attn_out)  # (1,h,g,l,d)
-
 
 @triton.jit
 def causal_attention_naive_decode(
@@ -241,7 +232,7 @@ def causal_attention_naive_decode(
         block_offset = rblib.to_dynamic_index(seq_idx_ptr)
         block_number = block_number.cast(tl.int32)
         block_offset = block_offset.cast(tl.int32)
-
+        
         k_block_ptr = tl.make_block_ptr(
             base=key_base,
             shape=(NUM_BATCH, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM),
@@ -333,14 +324,11 @@ def causal_attention_naive_decode(
         k_state = tl.reshape(k_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         k_base = rblib.dynamic_load(k_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         k_insert = rblib.insert(k_base, k_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(
-            k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
-        )
+        rblib.dynamic_store(k_cache_base_ptr, k_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
 
         q = tl.load(query_ptr)
-        # to fuse transpose, broadcast ops into matmul op, make sure the sequence
-        # to be transpose - broadcast - matmul. if the sequence is broadcast -
-        # transpose - matmul, it may not be fused (NYI)
+        # to fuse transpose, broadcast ops into matmul op, make sure the sequence to be transpose - broadcast - matmul.
+        # if the sequence is broadcast - transpose - matmul, it may not be fused (NYI)
         k_insert = tl.reshape(k_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         k = tl.permute(k_insert, (0, 1, 2, 4, 3))
         k = tl.broadcast_to(k, (1, NUM_HEAD, NUM_GROUP, HEAD_DIM, PARTITION_SIZE))
@@ -355,25 +343,20 @@ def causal_attention_naive_decode(
         v_state = tl.reshape(v_state, (1, 1, NUM_HEAD, 1, QUERY_LEN, HEAD_DIM))
         v_base = rblib.dynamic_load(v_cache_base_ptr, DYNAMIC_AXIS, block_offset)
         v_insert = rblib.insert(v_base, v_state, DYNAMIC_AXIS, block_offset)
-        rblib.dynamic_store(
-            v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN
-        )
+        rblib.dynamic_store(v_cache_base_ptr, v_insert, DYNAMIC_AXIS, block_offset + QUERY_LEN)
 
         v = tl.reshape(v_insert, (1, NUM_HEAD, 1, PARTITION_SIZE, HEAD_DIM))
         v = tl.broadcast_to(v, (1, NUM_HEAD, NUM_GROUP, PARTITION_SIZE, HEAD_DIM))
         # 2.5 O = MM(d, V)
-        attn_out = tl.dot(
-            softmax_masked_qk_scaled, v
-        )  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
+        attn_out = tl.dot(softmax_masked_qk_scaled, v)  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
         tl.store(output_ptr, attn_out)  # (1,h,4,l,d)
 
+__triton_op_files__ = rblib.collect_triton_op_files()
 
 def warmup(func, *args):
-    kernel = func.warmup(*args, grid=(1,), host_layout="1:2:3")
-    rblib.write_rtosa(kernel, args)
-
+    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3")
+    rblib.write_kernel(kernel)
     return kernel
-
 
 @triton_op("rbln_triton_ops::causal_attention_naive_prefill", mutates_args=())
 def _(
@@ -386,50 +369,7 @@ def _(
     block_table: torch.Tensor,
     dummy: torch.Tensor,
 ) -> torch.Tensor:
-    original_dtype = query.dtype
-
-    query = query.to(torch.float32)
-    key = key.to(torch.float32)
-    value = value.to(torch.float32)
-    kv_cache = kv_cache.to(torch.float32)
-    qk_scale = qk_scale.to(torch.float32)
-
-    output = torch.empty_like(query)
-
-    query = rblib.align_tensor_last_dim_to_64(query)
-    key = rblib.align_tensor_last_dim_to_64(key)
-    value = rblib.align_tensor_last_dim_to_64(value)
-
-    NUM_HEAD = query.shape[1]
-    NUM_GROUP = query.shape[2]
-    HEAD_DIM = query.shape[-1]
-    QUERY_LEN = query.shape[-2]
-    PARTITION_SIZE = kv_cache.shape[-2]
-    NUM_BATCH = query.shape[0]
-    DIM_BLOCK_TABLE = block_table.dim()
-
-    params = [
-        query,
-        key,
-        value,
-        kv_cache,
-        output,
-        seq_idx,
-        qk_scale,
-        block_table,
-        qk_scale,
-        NUM_HEAD,
-        NUM_GROUP,
-        HEAD_DIM,
-        QUERY_LEN,
-        PARTITION_SIZE,
-        NUM_BATCH,
-        DIM_BLOCK_TABLE,
-    ]
-    warmup(causal_attention_naive_prefill, *params)
-
-    return output.to(original_dtype)
-
+    return torch.empty_like(query)
 
 @triton_op("rbln_triton_ops::causal_attention_naive_decode", mutates_args=())
 def _(
@@ -442,51 +382,7 @@ def _(
     block_table: torch.Tensor,
     dummy: torch.Tensor,
 ) -> torch.Tensor:
-    original_dtype = query.dtype
-
-    query = query.to(torch.float32)
-    key = key.to(torch.float32)
-    value = value.to(torch.float32)
-    kv_cache = kv_cache.to(torch.float32)
-    qk_scale = qk_scale.to(torch.float32)
-
-    output = torch.empty_like(query)
-
-    query = rblib.align_tensor_last_dim_to_64(query)
-    key = rblib.align_tensor_last_dim_to_64(key)
-    value = rblib.align_tensor_last_dim_to_64(value)
-
-    NUM_HEAD = query.shape[1]
-    NUM_GROUP = query.shape[2]
-    HEAD_DIM = query.shape[-1]
-    QUERY_LEN = query.shape[-2]
-    PARTITION_SIZE = kv_cache.shape[-2]
-    NUM_BATCH = query.shape[0]
-    DIM_BLOCK_TABLE = block_table.dim()
-
-    params = [
-        query,
-        key,
-        value,
-        kv_cache,
-        output,
-        seq_idx,
-        qk_scale,
-        block_table,
-        qk_scale,
-        NUM_HEAD,
-        NUM_GROUP,
-        HEAD_DIM,
-        QUERY_LEN,
-        PARTITION_SIZE,
-        NUM_BATCH,
-        DIM_BLOCK_TABLE,
-    ]
-
-    warmup(causal_attention_naive_decode, *params)
-
-    return output.to(original_dtype)
-
+    return torch.empty_like(query)
 
 @register_fake("rbln_triton_ops::causal_attention_naive_prefill")
 def _(
@@ -514,3 +410,96 @@ def _(
     dummy: torch.Tensor,
 ) -> torch.Tensor:
     return torch.empty_like(query)
+
+def causal_attention_naive_prefill_wrapper(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    qk_scale: torch.Tensor,
+    block_table: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    output = torch.empty_like(query)
+
+    NUM_HEAD = query.shape[1]
+    NUM_GROUP = query.shape[2]
+    HEAD_DIM = query.shape[-1] * query.shape[-3]
+    QUERY_LEN = query.shape[-2]
+    PARTITION_SIZE = kv_cache.shape[-2]
+    NUM_BATCH = query.shape[0]
+    DIM_BLOCK_TABLE = block_table.dim()
+
+    params = [
+        query,
+        key,
+        value,
+        kv_cache,
+        output,
+        seq_idx,
+        qk_scale,
+        block_table,
+        qk_scale,
+        NUM_HEAD,
+        NUM_GROUP,
+        HEAD_DIM,
+        QUERY_LEN,
+        PARTITION_SIZE,
+        NUM_BATCH,
+        DIM_BLOCK_TABLE,
+    ]
+    warmup(causal_attention_naive_prefill, *params)
+
+    return output
+
+
+def causal_attention_naive_decode_wrapper(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    kv_cache: torch.Tensor,
+    seq_idx: torch.Tensor,
+    qk_scale: torch.Tensor,
+    block_table: torch.Tensor,
+    dummy: torch.Tensor,
+) -> torch.Tensor:
+    output = torch.empty_like(query)
+
+    NUM_HEAD = query.shape[1]
+    NUM_GROUP = query.shape[2]
+    HEAD_DIM = query.shape[-1] * query.shape[-3]
+    QUERY_LEN = query.shape[-2]
+    PARTITION_SIZE = kv_cache.shape[-2]
+    NUM_BATCH = query.shape[0]
+    DIM_BLOCK_TABLE = block_table.dim()
+
+    params = [
+        query,
+        key,
+        value,
+        kv_cache,
+        output,
+        seq_idx,
+        qk_scale,
+        block_table,
+        qk_scale,
+        NUM_HEAD,
+        NUM_GROUP,
+        HEAD_DIM,
+        QUERY_LEN,
+        PARTITION_SIZE,
+        NUM_BATCH,
+        DIM_BLOCK_TABLE,
+    ]
+
+    warmup(causal_attention_naive_decode, *params)
+
+    return output
+
+
+kernel_conf = {
+    "vector_inputs":4,
+    "host_layout":[1, 2, 3],
+    "indices":[4, 6]
+}
