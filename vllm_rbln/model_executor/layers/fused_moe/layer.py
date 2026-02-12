@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Callable
-
 import torch
 import torch.nn.functional as F
 from vllm.distributed import get_dp_group
@@ -146,23 +144,10 @@ else:
 
 
 def unquantized_fused_moe_method_rbln(
-    self,
-    layer: torch.nn.Module,
+    self: UnquantizedFusedMoEMethod,
+    layer: FusedMoE,
     x: torch.Tensor,
-    use_grouped_topk: bool,
-    top_k: int,
     router_logits: torch.Tensor,
-    renormalize: bool,
-    topk_group: int | None = None,
-    num_expert_group: int | None = None,
-    global_num_experts: int = -1,
-    expert_map: torch.Tensor | None = None,
-    custom_routing_function: Callable | None = None,
-    scoring_func: str = "softmax",
-    e_score_correction_bias: torch.Tensor | None = None,
-    activation: str = "silu",
-    apply_router_weight_on_input: bool = False,
-    **kwargs,
 ):
     # selected_experts
     w1 = layer.w13_weight
@@ -174,17 +159,18 @@ def unquantized_fused_moe_method_rbln(
     num_experts = w1.shape[0]
     intermediate_size = w2.shape[-1]
     dtype = x.dtype
+    top_k = layer.top_k
 
     hidden_states = x
     gating_output = router_logits
     topk_weights = gating_output.softmax(dim=-1, dtype=torch.float)
     topk_weights = topk_weights.to(torch.float)
     topk_weights, selected_experts = topk_weights.topk(top_k, dim=-1)
-    if renormalize:
+    if layer.renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
 
-    if expert_map is not None:
-        selected_experts = expert_map[selected_experts]
+    if layer.expert_map is not None:
+        selected_experts = layer.expert_map[selected_experts]
 
     final_hidden_states = None
 
@@ -306,23 +292,10 @@ def get_masked_routing_weights(router_logits, top_k, renormalize, expert_map):
 
 
 def unquantized_fused_moe_method_custom(
-    self,
-    layer: torch.nn.Module,
+    self: UnquantizedFusedMoEMethod,
+    layer: FusedMoE,
     x: torch.Tensor,
-    use_grouped_topk: bool,
-    top_k: int,
     router_logits: torch.Tensor,
-    renormalize: bool,
-    topk_group: int | None = None,
-    num_expert_group: int | None = None,
-    global_num_experts: int = -1,
-    expert_map: torch.Tensor | None = None,
-    custom_routing_function: Callable | None = None,
-    scoring_func: str = "softmax",
-    e_score_correction_bias: torch.Tensor | None = None,
-    activation: str = "silu",
-    apply_router_weight_on_input: bool = False,
-    **kwargs,
 ):
     # selected_experts
     # w1 : gate_proj, w2 : down_proj, w3 : up_proj
@@ -344,7 +317,7 @@ def unquantized_fused_moe_method_custom(
     router_logits = router_logits.reshape(num_tokens, -1)
 
     masked_routing_weights, expert_select_count = get_masked_routing_weights(
-        router_logits, top_k, renormalize, expert_map
+        router_logits, layer.top_k, layer.renormalize, layer.expert_map
     )
     final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
         hidden_states,
@@ -358,23 +331,10 @@ def unquantized_fused_moe_method_custom(
 
 
 def unquantized_fused_optimize_moe_method_custom(
-    self,
-    layer: torch.nn.Module,
+    self: UnquantizedFusedMoEMethod,
+    layer: FusedMoE,
     x: torch.Tensor,
-    use_grouped_topk: bool,
-    top_k: int,
     router_logits: torch.Tensor,
-    renormalize: bool,
-    topk_group: int | None = None,
-    num_expert_group: int | None = None,
-    global_num_experts: int = -1,
-    expert_map: torch.Tensor | None = None,
-    custom_routing_function: Callable | None = None,
-    scoring_func: str = "softmax",
-    e_score_correction_bias: torch.Tensor | None = None,
-    activation: str = "silu",
-    apply_router_weight_on_input: bool = False,
-    **kwargs,
 ):
     # selected_experts
     # w1 : gate_proj, w2 : down_proj, w3 : up_proj
@@ -396,9 +356,9 @@ def unquantized_fused_optimize_moe_method_custom(
     router_logits = router_logits.reshape(num_tokens, -1)
 
     expert_map_const = None
-    if expert_map is not None:
+    if layer.expert_map is not None:
         # Extract numpy array and create a fresh constant tensor
-        expert_map_list = expert_map.tolist()
+        expert_map_list = layer.expert_map.tolist()
         expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
 
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
@@ -414,15 +374,15 @@ def unquantized_fused_optimize_moe_method_custom(
         up_proj_weight,
         down_proj_weight,
         router_logits,
-        top_k,
-        renormalize,
+        layer.top_k,
+        layer.renormalize,
         expert_map_const,
     )
     return final_hidden_states.reshape(orig_shape)
 
 
 def fused_moe_forward_rbln(
-    self, hidden_states: torch.Tensor, router_logits: torch.Tensor
+    self: FusedMoE, hidden_states: torch.Tensor, router_logits: torch.Tensor
 ):
     assert self.quant_method is not None
 
@@ -449,18 +409,6 @@ def fused_moe_forward_rbln(
         layer=self,
         x=hidden_states,
         router_logits=router_logits,
-        top_k=self.top_k,
-        renormalize=self.renormalize,
-        use_grouped_topk=self.use_grouped_topk,
-        global_num_experts=self.global_num_experts,
-        expert_map=self.expert_map,
-        topk_group=self.topk_group,
-        num_expert_group=self.num_expert_group,
-        custom_routing_function=self.custom_routing_function,
-        scoring_func=self.scoring_func,
-        e_score_correction_bias=self.e_score_correction_bias,
-        activation=self.activation,
-        apply_router_weight_on_input=self.apply_router_weight_on_input,
     )
 
     if self.dp_size > 1:
@@ -480,7 +428,7 @@ def fused_moe_forward_rbln(
     return final_hidden_states
 
 
-def fused_moe_naive_multicast_rbln(self, x: torch.Tensor):
+def fused_moe_naive_multicast_rbln(self: FusedMoE, x: torch.Tensor):
     # as-is : [num_tokens, hidden_size]
     # to-be : buffer = [data_parallel_size*batch, seq, hidden_size], broadcast
     #         hidden = [batch, seq, hidden_size]
