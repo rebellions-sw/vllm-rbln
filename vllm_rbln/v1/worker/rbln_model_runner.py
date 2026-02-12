@@ -2587,28 +2587,27 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         logits = self.logits_processor._gather_logits(logits)
                     logits = logits.view(-1, logits.size(-1))
                 else:
-                    selected_token_indices = logits_indices
-                    assert selected_token_indices.dim() == 1
+                    assert logits_indices.dim() == 1
                     if is_prefills[0]:  # prefill
-                        assert selected_token_indices.size(0) == 1
+                        assert logits_indices.size(0) == 1
                         num_computed = self.input_batch.num_computed_tokens_cpu
                         num_prompted = self.input_batch.num_prompt_tokens
                         is_last_prefill = (num_computed +
                                            self.max_num_tokens) >= num_prompted
                         if not is_last_prefill[0]:
-                            selected_token_indices = torch.tensor(
-                                [], dtype=selected_token_indices.dtype)
                             # chunked prefill(#0~#N-1, intermediate)
                             # token_indices = torch.tensor([max_num_seqs-1])
                             # selected = torch.tensor([])
-                            logits = logits[selected_token_indices]
+                            logits = logits[:0]
                         else:
                             # chunked prefill(#N, final)
                             # token_indices = torch.tensor([last_seq_idx-1])
-                            # selected_token_indices == token_indices
+                            # logits_indices == token_indices
                             logits = logits
                     else:  # decode
-                        # selected_token_indices is for valid decode tokens
+                        # logits_indices is for valid decode tokens,
+                        # which should be 0..num_input_tokens-1
+                        assert logits_indices[-1].item() == num_input_tokens - 1
                         # token_indices == None, selected = torch.tensor([0])
                         batch_indices = torch.arange(self.input_batch.num_reqs,
                                                      device=self.device)
@@ -2616,7 +2615,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                             sample_hidden_states = hidden_states[
                                 batch_indices, :self.speculative_config.
                                 num_speculative_tokens + 1]
-                        logits = logits[selected_token_indices]
+                        logits = logits[:num_input_tokens]
 
             if broadcast_pp_output:
                 model_output_broadcast_data = {
