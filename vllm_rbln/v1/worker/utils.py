@@ -172,7 +172,7 @@ def set_cpu_affinity(
             # For x86 SMT-2, use 1 CPU per core
             local_omp_cpuid = get_autobind_cpu_ids(rank, local_rank,
                                                    parallel_config,
-                                                   lambda cpus: cpus[-1:])
+                                                   lambda cpus: cpus[:1])
         else:
             local_omp_cpuid = "nobind"
     else:
