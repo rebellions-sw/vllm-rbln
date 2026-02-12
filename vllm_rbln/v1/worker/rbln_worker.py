@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """A RBLN worker class."""
+
 import copy
 import os
 from types import NoneType
@@ -39,6 +40,7 @@ from vllm.v1.worker.worker_base import WorkerBase
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
+from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
 from vllm_rbln.worker.utils import estimate_available_memory
 
 logger = init_logger(__name__)
@@ -85,8 +87,10 @@ class RBLNWorker(WorkerBase):
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
             torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: %s",
-                        torch_profiler_trace_dir)
+            logger.info(
+                "Profiling enabled. Traces will be saved to: %s",
+                torch_profiler_trace_dir,
+            )
             logger.debug(
                 "Profiler config: record_shapes=%s,"
                 "profile_memory=%s,with_stack=%s,with_flops=%s",
@@ -104,7 +108,8 @@ class RBLNWorker(WorkerBase):
                 with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
                 with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
+                    torch_profiler_trace_dir, use_gzip=True),
+            )
         else:
             self.profiler = None
 
@@ -161,11 +166,28 @@ class RBLNWorker(WorkerBase):
         )
 
     def init_device(self) -> None:
+        set_cpu_affinity(
+            self.rank,
+            self.local_rank,
+            self.parallel_config,
+        )
+
+        # Only set OMP_NUM_THREADS when TP > 1 or DP > 1
+        if (self.parallel_config.tensor_parallel_size > 1
+                or self.parallel_config.data_parallel_size > 1):
+            set_omp_num_threads(
+                self.rank,
+                self.local_rank,
+            )
+
         # Initialize the distributed environment.
-        init_worker_distributed_environment(self.vllm_config, self.rank,
-                                            self.distributed_init_method,
-                                            self.local_rank,
-                                            current_platform.dist_backend)
+        init_worker_distributed_environment(
+            self.vllm_config,
+            self.rank,
+            self.distributed_init_method,
+            self.local_rank,
+            current_platform.dist_backend,
+        )
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -266,7 +288,6 @@ class RBLNWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        estimated_kernel_bytes = self._estimate_kernel_bytes()
         params_dict = dict(self.model_runner.model.named_parameters())
         n_model_attentions = 0
         n_model_experts = 0
@@ -282,17 +303,8 @@ class RBLNWorker(WorkerBase):
             assert False, "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
 
         if self.model_config.quantization is not None:
-            logger.info("model quantization scheme = %s", self.model_config.quantization)
-            # gpt-oss mxfp4 quantization - only applied to expert
-            # minimax fp8 quantization - applied into linear & expert
-            quantization = self.model_config.quantization
-
-            if quantization == "fp8":
-                return 32 * 2**30
-
-            assert quantization == "mxfp4"
-            device_name = current_platform.get_device_name().lower()
-            assert "rbln" in device_name
+            # FIXME(RBLN) - for now, mxfp4 quantization is only supported
+            assert self.model_config.quantization == "mxfp4"
             if "ca" in device_name:
                 # ATOM DOES NOT support mxfp4 quantization, handled by bf16
                 nbits_per_param = 16
@@ -399,8 +411,8 @@ class RBLNWorker(WorkerBase):
 
         assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
-        assert parallel_config.distributed_executor_backend != (
-            "external_launcher") and not get_pp_group().is_last_rank
+        assert (parallel_config.distributed_executor_backend
+                != ("external_launcher") and not get_pp_group().is_last_rank)
 
         # NOTE - DO NOT all_gather_group for RBLN pp
         get_pp_group().send_tensor_dict(output.tensors)
@@ -471,8 +483,8 @@ def init_worker_distributed_environment(
     world_size = parallel_config.world_size
 
     # Set envs for RCCL
-    os.environ['LOCAL_RANK'] = str(rank)
-    os.environ['WORLD_SIZE'] = str(world_size)
+    os.environ["LOCAL_RANK"] = str(rank)
+    os.environ["WORLD_SIZE"] = str(world_size)
 
     set_custom_all_reduce(not parallel_config.disable_custom_all_reduce)
 
@@ -481,11 +493,14 @@ def init_worker_distributed_environment(
         dp_rank = parallel_config.data_parallel_rank
         rank_across_dp = dp_rank * world_size
         rank_across_dp += rank
-        logger.info("world_size_across_dp = %s, rank_across_dp = %s",
-                    world_size_across_dp, rank_across_dp)
+        logger.info(
+            "world_size_across_dp = %s, rank_across_dp = %s",
+            world_size_across_dp,
+            rank_across_dp,
+        )
         # consider across_dp
-        os.environ['LOCAL_RANK'] = str(rank_across_dp)
-        os.environ['WORLD_SIZE'] = str(world_size_across_dp)
+        os.environ["LOCAL_RANK"] = str(rank_across_dp)
+        os.environ["WORLD_SIZE"] = str(world_size_across_dp)
 
     init_distributed_environment(
         world_size,

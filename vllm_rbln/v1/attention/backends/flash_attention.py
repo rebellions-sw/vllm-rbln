@@ -15,7 +15,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 import torch
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
@@ -649,6 +649,7 @@ def sliding_window_attention_naive_decode_impl(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    attn_mask: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     if envs.VLLM_RBLN_COMPILE_MODEL:
@@ -748,6 +749,7 @@ def _(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
+    attn_mask: torch.Tensor,
     sinks: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
@@ -851,6 +853,7 @@ class RBLNFlashAttentionMetadata:
     cache_seq_lens: Optional[torch.Tensor] = None
     cache_offsets: Optional[torch.Tensor] = None
     local_block_tables: Optional[torch.Tensor] = None
+    swa_attn_masks: Optional[torch.Tensor] = None
 
 
 class RBLNFlashAttentionMetadataBuilder(
@@ -997,7 +1000,7 @@ class RBLNFlashAttentionMetadataBuilder(
                 attn_masks = decode_attention_mask
                 attn_masks = attn_masks.to(self.device)
 
-        cache_seq_lens, cache_offsets, local_block_tables = None, None, None
+        cache_seq_lens, cache_offsets, local_block_tables, swa_attn_masks = None, None, None, None
         if sliding_window := getattr(self.kv_cache_spec, "sliding_window",
                                      None):
             num_computed_tokens = (
@@ -1012,17 +1015,27 @@ class RBLNFlashAttentionMetadataBuilder(
             if not is_prefills[0]:
                 cache_seq_lens = rbln_utils.pad(cache_seq_lens, 0, batch_pad)
                 cache_offsets = rbln_utils.pad(cache_offsets, 0, batch_pad)
+                # Generate sliding window attention mask for decode
+                # mask[b, s] = 1.0 if s <= cache_seq_lens[b] else 0.0
+                positions = torch.arange(sliding_window)[None, :]
+                swa_attn_masks = torch.where(
+                    positions - cache_seq_lens > 0, 0.0, 1.0
+                )[:, None, None, :]
+                    
             local_block_tables = block_tables_tensor[..., :1]
 
-        # seq_idx(batch attention opt decode) - [B, 1], for each batch, have sequence offset
-        # seq_lens_tensor(otherwise)      - [B, P], have dynamic size for each partition
+        # * seq_idx(batch attention opt decode) - [B, 1],
+        #   for each batch, have sequence offset
+        # * seq_lens_tensor(otherwise)      - [B, P],
+        #   have dynamic size for each partition
         attn_metadata = RBLNFlashAttentionMetadata(
             num_actual_tokens=num_actual_tokens,
             max_query_len=max_query_len,
             query_start_loc=query_start_loc,
             max_seq_len=query_max_seq_len,
             seq_lens=seq_lens_tensor.to(self.device)
-            if not self.is_batch_attention_opt or is_prefills[0] else seq_idx.to(self.device),
+            if not self.is_batch_attention_opt or is_prefills[0] else
+            seq_idx.to(self.device),
             block_tables=block_tables_tensor.to(self.device),
             slot_mapping=slot_mapping,
             use_cascade=False,
@@ -1039,6 +1052,8 @@ class RBLNFlashAttentionMetadataBuilder(
             if cache_offsets is not None else None,
             local_block_tables=local_block_tables.to(self.device)
             if local_block_tables is not None else None,
+            swa_attn_masks=swa_attn_masks.to(self.device)
+            if swa_attn_masks is not None else None,
         )
 
         return attn_metadata
@@ -1058,7 +1073,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
         alibi_slopes: Optional[list[float]],
         sliding_window: Optional[int],
         kv_cache_dtype: str,
-        blocksparse_params: Optional[dict[str, Any]] = None,
         logits_soft_cap: Optional[float] = None,
         attn_type: str = AttentionType.DECODER,
         kv_sharing_target_layer_name: Optional[str] = None,
@@ -1070,9 +1084,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
 
         if kv_sharing_target_layer_name is not None:
             raise NotImplementedError("KV sharing is not supported in RBLN.")
-        if blocksparse_params is not None:
-            raise ValueError("RBLN Attention Backend does not "
-                             "support block-sparse attention.")
         if logits_soft_cap is not None:
             logger.warning_once(
                 "RBLN Attention Backend does not support logits soft cap. "
@@ -1209,21 +1220,46 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 "SWA kernel_block_size must match window_size")
             assert attn_metadata.cache_seq_lens is not None
             assert attn_metadata.cache_offsets is not None
+            if envs.VLLM_RBLN_COMPILE_MODEL:
+                if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
+                    sliding_window_attention_naive_prefill = (
+                        torch.ops.rbln_triton_ops.
+                        sliding_window_attention_naive_prefill)
+                    sliding_window_attention_naive_decode = (
+                        torch.ops.rbln_triton_ops.
+                        sliding_window_attention_naive_decode)
+                elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                    sliding_window_attention_naive_prefill = (
+                        torch.ops.rbln_custom_ops.
+                        sliding_window_attention_naive_prefill)
+                    sliding_window_attention_naive_decode = (
+                        torch.ops.rbln_custom_ops.
+                        sliding_window_attention_naive_decode)
+                else:
+                    raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                     f"{envs.VLLM_RBLN_KERNEL_MODE}")
+            else:
+                sliding_window_attention_naive_prefill = (
+                    sliding_window_attention_naive_prefill_impl)
+                sliding_window_attention_naive_decode = (
+                    sliding_window_attention_naive_decode_impl)
+
             if q_len == 1:
-                attn_output = torch.ops.rbln_custom_ops.sliding_window_attention_naive_decode(  # noqa: E501
+                attn_output = sliding_window_attention_naive_decode(  # noqa: E501
                     query,
                     key,
                     value,
                     kv_cache,
-                    attn_metadata.cache_seq_lens,
+                    attn_metadata.cache_seq_lens.to(torch.int32),
                     attn_metadata.cache_offsets,
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
+                    attn_metadata.swa_attn_masks,
                     self.sinks,
                 )
             else:
-                attn_output = torch.ops.rbln_custom_ops.sliding_window_attention_naive_prefill(  # noqa: E501
+                attn_output = sliding_window_attention_naive_prefill(  # noqa: E501
                     query,
                     key,
                     value,
@@ -1237,10 +1273,36 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 )
         # actually non-flash paged attention DOES NOT use slot_mapping
         elif self.is_causal:
-            # batched attention - seq_lens[B, 1] == seq_idx, original sequence index
-            # otherwise         - seq_lens[B, P] == dyn_size_for_partitions, dynamic size for each partition
+            if envs.VLLM_RBLN_COMPILE_MODEL:
+                if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
+                    flash_causal_attention_naive_prefill = (
+                        torch.ops.rbln_triton_ops.
+                        flash_causal_attention_naive_prefill)
+                    flash_causal_attention_naive_decode = (
+                        torch.ops.rbln_triton_ops.
+                        flash_causal_attention_naive_decode)
+                elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                    flash_causal_attention_naive_decode = (
+                        torch.ops.rbln_custom_ops.
+                        flash_causal_attention_naive_decode)
+                    flash_causal_attention_naive_prefill = (
+                        torch.ops.rbln_custom_ops.
+                        flash_causal_attention_naive_prefill)
+                else:
+                    raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                     f"{envs.VLLM_RBLN_KERNEL_MODE}")
+            else:
+                flash_causal_attention_naive_prefill = (
+                    flash_causal_attention_naive_prefill_impl)
+                flash_causal_attention_naive_decode = (
+                    flash_causal_attention_naive_decode_impl)
+
+            # * batched attention - seq_lens[B, 1] == seq_idx,
+            #   original sequence index
+            # * otherwise         - seq_lens[B, P] == dyn_size_for_partitions,
+            #   dynamic size for each partition
             if q_len == 1:
-                attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_decode(  # noqa: E501
+                attn_output = flash_causal_attention_naive_decode(  # noqa: E501
                     query,
                     key,
                     value,
@@ -1252,7 +1314,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.sinks,
                 )
             else:
-                attn_output = torch.ops.rbln_custom_ops.flash_causal_attention_naive_prefill(  # noqa: E501
+                attn_output = flash_causal_attention_naive_prefill(  # noqa: E501
                     query,
                     key,
                     value,
@@ -1264,8 +1326,30 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.sinks,
                 )
         else:
+            if envs.VLLM_RBLN_COMPILE_MODEL:
+                if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton":
+                    flash_attention_naive_prefill = (
+                        torch.ops.rbln_triton_ops.flash_attention_naive_prefill
+                    )
+                    flash_attention_naive_decode = (
+                        torch.ops.rbln_triton_ops.flash_attention_naive_decode)
+                elif envs.VLLM_RBLN_KERNEL_MODE == "triton":
+                    flash_attention_naive_prefill = (
+                        torch.ops.rbln_custom_ops.flash_attention_naive_prefill
+                    )
+                    flash_attention_naive_decode = (
+                        torch.ops.rbln_custom_ops.flash_attention_naive_decode)
+                else:
+                    raise ValueError(f"Invalid VLLM_RBLN_KERNEL_MODE: "
+                                     f"{envs.VLLM_RBLN_KERNEL_MODE}")
+            else:
+                flash_attention_naive_prefill = (
+                    flash_attention_naive_prefill_impl)
+                flash_attention_naive_decode = (
+                    flash_attention_naive_decode_impl)
+
             if q_len == 1:
-                attn_output = torch.ops.rbln_custom_ops.flash_attention_naive_decode(  # noqa: E501
+                attn_output = flash_attention_naive_decode(  # noqa: E501
                     query,
                     key,
                     value,
@@ -1278,7 +1362,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.sinks,
                 )
             else:
-                attn_output = torch.ops.rbln_custom_ops.flash_attention_naive_prefill(  # noqa: E501
+                attn_output = flash_attention_naive_prefill(  # noqa: E501
                     query,
                     key,
                     value,

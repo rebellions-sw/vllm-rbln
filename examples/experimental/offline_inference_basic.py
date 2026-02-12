@@ -26,6 +26,7 @@ def parse_args():
     parser.add_argument("--max-model-len", type=int, default=40 * 1024)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--block-size", type=int, default=1024)
+    parser.add_argument("--enable-expert-parallel", action="store_true")
     return parser.parse_args()
 
 
@@ -50,6 +51,7 @@ def main():
         enable_chunked_prefill=True,
         max_num_batched_tokens=128,
         gpu_memory_utilization=1,
+        enable_expert_parallel=args.enable_expert_parallel,
     )
 
     # Generate texts from the prompts. The output is a list of RequestOutput

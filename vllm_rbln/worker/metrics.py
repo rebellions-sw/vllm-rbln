@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import atexit
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -112,12 +113,46 @@ class StepMetrics:
         return len(self.latencies)
 
 
+class PrefillMetricsByRequestID:
+    """Metrics for prefill step by request id."""
+
+    def __init__(self):
+        self.metrics = defaultdict(StepMetrics)
+
+    def add_measurement(
+        self,
+        request_id: str,
+        latency: float,
+        token_count: int,
+        host_time: Optional[int] = None,
+        device_time: Optional[int] = None,
+        ccl_time: Optional[int] = None,
+    ):
+        """Add a latency and token count measurement."""
+        self.metrics[request_id].add_measurement(latency, token_count,
+                                                 host_time, device_time,
+                                                 ccl_time)
+
+    def get_avg_latency_per_request(self) -> dict[str, float]:
+        """Get average latency per request."""
+        return {
+            request_id: metric.get_avg_latency()
+            for request_id, metric in self.metrics.items()
+        }
+
+    def get_num_request_ids(self) -> int:
+        """Get total number of request ids processed."""
+        return len(self.metrics)
+
+
 class PerformanceTracker:
     """Tracks performance metrics for prefill and decode steps."""
 
     def __init__(self):
         self.prefill_metrics = StepMetrics()
         self.decode_metrics = StepMetrics()
+        self.prefill_metrics_by_request_id = PrefillMetricsByRequestID()
+        self.padded_decode_metrics = StepMetrics()
         self._registered_cleanup = False
 
     def register_cleanup(self):
@@ -126,6 +161,13 @@ class PerformanceTracker:
             atexit.register(self.print_final_stats)
             self._registered_cleanup = True
 
+    def check_dummy_request(self, request_ids: Optional[list[str]]) -> bool:
+        if request_ids:
+            request_id = request_ids[0]
+            if request_id.startswith("dummy_request_"):
+                return True
+        return False
+
     def record_prefill(
         self,
         latency: float,
@@ -133,10 +175,22 @@ class PerformanceTracker:
         host_time: Optional[int] = None,
         device_time: Optional[int] = None,
         ccl_time: Optional[int] = None,
+        request_ids: Optional[list[str]] = None,
     ):
         """Record prefill step metrics."""
-        self.prefill_metrics.add_measurement(latency, token_count, host_time,
-                                             device_time, ccl_time)
+        if self.check_dummy_request(request_ids):
+            return
+        request_id = None
+        if request_ids is not None:
+            assert len(request_ids) == 1, (
+                f"Expected exactly one request_id during prefill, "
+                f"got {len(request_ids)}: {request_ids}")
+            request_id = request_ids[0]
+        self.prefill_metrics.add_measurement(latency, token_count)
+        if request_id:
+            self.prefill_metrics_by_request_id.add_measurement(
+                request_id, latency, token_count, host_time, device_time,
+                ccl_time)
 
     def record_decode(
         self,
@@ -145,10 +199,16 @@ class PerformanceTracker:
         host_time: Optional[int] = None,
         device_time: Optional[int] = None,
         ccl_time: Optional[int] = None,
+        padded_decode: bool = False,
+        request_ids: Optional[list[str]] = None,
     ):
         """Record decode step metrics."""
-        self.decode_metrics.add_measurement(latency, token_count, host_time,
-                                            device_time, ccl_time)
+        if self.check_dummy_request(request_ids):
+            return
+        metrics = self.padded_decode_metrics if padded_decode \
+            else self.decode_metrics
+        metrics.add_measurement(latency, token_count, host_time, device_time,
+                                ccl_time)
 
     def print_final_stats(self):
         logger.info("=" * 80)
@@ -166,6 +226,13 @@ class PerformanceTracker:
                         self.prefill_metrics.get_avg_latency())
             logger.info("  Average throughput: %.2f tokens/sec",
                         self.prefill_metrics.get_avg_throughput())
+            if self.prefill_metrics_by_request_id.get_num_request_ids() > 0:
+                avg_latency_by_request_id = \
+                    self.prefill_metrics_by_request_id.get_avg_latency_per_request()
+                logger.info("  Average latency per request:")
+                for request_id, latency in \
+                    avg_latency_by_request_id.items():
+                    logger.info("    %s: %.2f ms", request_id, latency)
             if self.prefill_metrics.host_times:
                 logger.info("  Average host time: %.2f us",
                             self.prefill_metrics.get_avg_host_time())
@@ -204,5 +271,31 @@ class PerformanceTracker:
 
         else:
             logger.info("DECODE METRICS: No data recorded")
+
+        logger.info("-" * 40)
+
+        # Padded decode stats
+        if self.padded_decode_metrics.get_call_counts() > 0:
+            logger.info("PADDED DECODE METRICS:")
+            logger.info("  Total call counts: %d",
+                        self.padded_decode_metrics.get_call_counts())
+            logger.info("  Total tokens processed: %d",
+                        sum(self.padded_decode_metrics.token_counts))
+            logger.info("  Average latency: %.2f ms",
+                        self.padded_decode_metrics.get_avg_latency())
+            logger.info("  Average throughput: %.2f tokens/sec",
+                        self.padded_decode_metrics.get_avg_throughput())
+            if self.padded_decode_metrics.host_times:
+                logger.info("  Average host time: %.2f us",
+                            self.padded_decode_metrics.get_avg_host_time())
+            if self.padded_decode_metrics.device_times:
+                logger.info("  Average device time: %.2f us",
+                            self.padded_decode_metrics.get_avg_device_time())
+            if self.padded_decode_metrics.ccl_times:
+                logger.info("  Average ccl time: %.2f us",
+                            self.padded_decode_metrics.get_avg_ccl_time())
+
+        else:
+            logger.info("PADDED DECODE METRICS: No data recorded")
 
         logger.info("=" * 80)

@@ -127,7 +127,8 @@ def estimate_available_memory(
             lm_heads_params * default_bits_per_param // 8 / tp_size) * tp_size)
         word_embedding_params = lm_heads_params
         params = n_model_params - lm_heads_params - word_embedding_params
-        layer_nbytes = (align_2MB(params * nbits_per_param // 8 / num_layers) * num_layers)
+        layer_nbytes = (align_2MB(params * nbits_per_param // 8 / num_layers) *
+                        num_layers)
         kernel_size = layer_nbytes + lm_heads_nbytes
     elif n_model_params is not None:
         raise ValueError(

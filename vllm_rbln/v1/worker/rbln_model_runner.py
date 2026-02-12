@@ -1598,6 +1598,18 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self, logits: Optional[torch.Tensor],
             spec_decode_metadata: Optional[SpecDecodeMetadata]
     ) -> SamplerOutput:
+        # Logits can be empty during intermediate chunked prefill. This breaks
+        # MinTokensLogitsProcessor. So we skip logit processing and sampling,
+        # and return empty tensor with expected shape. The output is discarded
+        # anyway (discard_sampled_tokens_req_indices).
+        if logits is not None and logits.shape[0] == 0:
+            return SamplerOutput(
+                sampled_token_ids=torch.empty(0,
+                                              1,
+                                              dtype=torch.int32,
+                                              device=logits.device),
+                logprobs_tensors=None,
+            )
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
         if spec_decode_metadata is None:
@@ -1702,12 +1714,13 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         sampling_params: Optional[SamplingParams] = None,
         pooling_params: Optional[PoolingParams] = None,
         num_speculative_tokens: int = 0,
-        block_id: int = 0,
     ) -> None:
         num_blocks = round_up(
             total_tokens,
             self.cache_config.block_size) // self.cache_config.block_size
         prompt_token_ids = list(range(total_tokens))
+        # the dummy block maintained by BlockPool (null_block)
+        null_block_id = 0
 
         req = NewRequestData(
             req_id=f"dummy_request_{len(requests)}",
@@ -1715,7 +1728,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             mm_features=[],
             sampling_params=sampling_params,
             pooling_params=pooling_params,
-            block_ids=([block_id] * num_blocks, ) * num_kv_cache_groups,
+            block_ids=([null_block_id] * num_blocks, ) * num_kv_cache_groups,
             num_computed_tokens=num_computed_tokens,
             lora_request=None,
         )
@@ -2086,7 +2099,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pooling_params=PoolingParams(
                 task=self.get_supported_pooling_tasks()[0])
             if self.is_pooling_model else None,
-            block_id=self.cache_config.num_gpu_blocks - 1,
         )
         dummy_run_scheduler_output, _ = self._make_dummy_scheduler_outputs(
             dummy_run_requests, dummy_run_num_scheduled_tokens,
@@ -2457,14 +2469,21 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         num_scheduled_tokens,
                         host_time=host_time,
                         device_time=device_time,
-                        ccl_time=ccl_time)
+                        ccl_time=ccl_time,
+                        request_ids=self.input_batch.req_ids,
+                    )
                 else:
+                    padded_decode = num_padded_tokens and \
+                        num_padded_tokens != batch_bucket_size
                     self.performance_tracker.record_decode(
                         execution_time,
                         num_scheduled_tokens,
                         host_time=host_time,
                         device_time=device_time,
-                        ccl_time=ccl_time)
+                        ccl_time=ccl_time,
+                        padded_decode=padded_decode,
+                        request_ids=self.input_batch.req_ids,
+                    )
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
@@ -3618,7 +3637,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.kv_caches,
             num_attn_module,
         )
-
         if not self.model_config.enforce_eager and envs.VLLM_RBLN_COMPILE_MODEL:
             for kv_cache in self.kv_caches:
                 self.compile_context.mark_static_address(kv_cache)

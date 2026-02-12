@@ -9,7 +9,7 @@ on:
 
 jobs:
   get-rebel-version:
-    runs-on: ubuntu-latest-rbln
+    runs-on: rbln-sw-k8s-general
     outputs:
       compiler_version: ${{ steps.get-compiler-version.outputs.COMPILER_VERSION }}
     steps:
@@ -18,18 +18,23 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GIT_PAT }}
       run: |
-        RUN_ID=$(gh run list \
-          --repo rebellions-sw/vllm-rbln \
-          --workflow "rbln_utils_set_compiler_version_ci.yaml" \
-          --limit 1 \
-          --json databaseId | jq -r '.[0].databaseId')
+        RUN_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/rbln-sw/vllm-rbln/actions/workflows/rbln_utils_set_compiler_version_ci.yaml/runs?status=success&per_page=1" \
+          | jq -r '.workflow_runs[0].id')
+        echo "Selected RUN_ID=${RUN_ID}"
+        
+        if [ "$RUN_ID" = "null" ] || [ -z "$RUN_ID" ]; then
+          echo "Error: No successful run found"
+          exit 1
+        fi
         echo "RUN_ID=${RUN_ID}" >> $GITHUB_OUTPUT
 
     - name: Restore compiler-version-for-vllm-rbln
       uses: actions/download-artifact@v4
       with:
         name: compiler-version-for-vllm-rbln
-        repository: rebellions-sw/vllm-rbln
+        repository: rbln-sw/vllm-rbln
         github-token: ${{ secrets.GIT_PAT }}
         run-id: ${{ steps.get-run-id.outputs.RUN_ID }}
 
