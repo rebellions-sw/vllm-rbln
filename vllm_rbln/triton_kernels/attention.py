@@ -386,9 +386,10 @@ def attention_naive_decode(
         tl.store(output_ptr, attn_out)  # (1,h,4,l,d)
 
 __triton_op_files__ = rblib.collect_triton_op_files()
-def warmup(func, *args):
 
-    kernel = func.warmup(*args, grid=(1, ), host_layout="1:2:3")
+def warmup(func, *args):
+    host_layout = ":".join(map(str, kernel_conf["host_layout"]))
+    kernel = func.warmup(*args, grid=(1, ), host_layout=host_layout)
     rblib.write_kernel(kernel)
     return kernel
 
@@ -538,7 +539,6 @@ def attention_naive_decode_wrapper(
     warmup(attention_naive_decode, *params)
 
     return output
-
 
 kernel_conf = {
     "vector_inputs":5,
