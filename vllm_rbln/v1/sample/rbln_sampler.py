@@ -94,7 +94,10 @@ class RBLNSampler(VLLMSampler):
         super().__init__()
         rebel.manual_seed(seed)
 
-        options = {"compile_context": rebel.CompileContext()}
+        options = {
+            "compile_context": rebel.CompileContext(),
+            "zero_copy": True,
+        }
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
         self._compiled_rbln_topk_topp_sampler = torch.compile(

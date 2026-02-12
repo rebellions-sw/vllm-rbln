@@ -1259,11 +1259,15 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
-        # compile compute_logits
+        torch_compile_options = copy(options)
+        torch_compile_options["zero_copy"] = True
+        
+        self._compute_logits_runtimes: list = []
+        torch_compile_options["_runtime_holder"] = self._compute_logits_runtimes
         self.compute_logits = torch.compile(
             self.compute_logits,
             backend="rbln",
-            options=copy(options),
+            options=torch_compile_options,
             dynamic=False,
         )
 
@@ -1273,6 +1277,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             options=copy(options),
             dynamic=False,
         )
+
+        self._logits_buffers: dict[int, torch.Tensor] = {}
 
         return compiled_model
 
@@ -2583,6 +2589,16 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     else:  # decode
                         logits = self.compute_logits(hidden_states)
                         logits = logits[logits_indices]
+
+                        batch_size = logits.shape[0]
+                        if batch_size not in self._logits_buffers:
+                            self._logits_buffers[batch_size] = \
+                                torch.empty_like(logits)
+
+                            if self._compute_logits_runtimes:
+                                self._compute_logits_runtimes[-1] \
+                                    .set_cpu_output_buffer(
+                                        0, self._logits_buffers[batch_size])
                     if not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
                         logits = self.logits_processor._gather_logits(logits)
                     logits = logits.view(-1, logits.size(-1))
