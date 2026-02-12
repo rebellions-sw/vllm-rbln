@@ -2616,7 +2616,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                             sample_hidden_states = hidden_states[
                                 batch_indices, :self.speculative_config.
                                 num_speculative_tokens + 1]
-                        logits = logits[selected_token_indices]
+                        logits = logits[:num_input_tokens]
 
             if broadcast_pp_output:
                 model_output_broadcast_data = {
