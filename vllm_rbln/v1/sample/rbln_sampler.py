@@ -22,6 +22,7 @@ from vllm.config.model import LogprobsMode
 from vllm_rbln.v1.sample.ops.penalties import (
     apply_all_penalties as rbln_apply_all_penalties,
 )
+import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
 
@@ -68,7 +69,6 @@ def apply_top_k_top_p(
     """
 
     logits_sort, logits_idx = logits.sort(dim=-1, descending=False, stable=True)
-
     if k is not None:
         # Apply top-k.
         top_k_mask = logits_sort.size(1) - k.to(torch.long)  # shape: B
@@ -134,6 +134,8 @@ class RBLNTopKTopPSampler(nn.Module):
 
         rebel.manual_seed(seed)
         options = {"compile_context": rebel.CompileContext()}
+        if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
+            options["mode"] = "strict"
         self._compiled_rbln_topk_topp_sampler = torch.compile(
             rbln_top_k_top_p_sample,
             dynamic=False,
@@ -203,6 +205,19 @@ class RBLNSampler(VLLMSampler):
         # this function works as a greedy sampler.
         sampled, _ = self.topk_topp_sampler(logits, dict(), None, None)
         return sampled
+
+    def apply_temperature(
+        self,
+        logits: torch.Tensor,
+        temp: torch.Tensor,
+        all_random: bool,
+    ) -> torch.Tensor:
+        # NOTE:
+        # in-place division triggers buffer key error
+        # in torchinductor
+        if not all_random:
+            temp = torch.where(temp < _SAMPLING_EPS, 1.0, temp)
+        return logits.div(temp.unsqueeze(dim=1))
 
 
 WARM_UP_CONFIGS = [
