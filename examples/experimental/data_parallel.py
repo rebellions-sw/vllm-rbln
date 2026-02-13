@@ -124,6 +124,7 @@ def main(
         trust_remote_code=True,
         tensor_parallel_size=tp_size,
         enable_expert_parallel=enable_ep,
+        gpu_memory_utilization=0.8,
         # data_parallel_size=dp_size,
         # enforce_eager=True,
     )
