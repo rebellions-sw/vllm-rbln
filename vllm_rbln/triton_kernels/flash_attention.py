@@ -19,7 +19,9 @@ from rebel.triton import language as tl
 from rebel.triton.language.extra.rbln import libdevice as rblib
 from torch.library import register_fake, triton_op
 
+__triton_op_files__ = rblib.collect_triton_op_files()
 
+################################################################################
 @triton.jit
 def flash_attention_naive_prefill(
     query,
@@ -346,13 +348,6 @@ def flash_attention_naive_decode(
         attn_out = attn_out_i / row_sum_i
         tl.store(O_block_ptr, attn_out)
 
-__triton_op_files__ = rblib.collect_triton_op_files()
-
-def warmup(func, *args):
-    host_layout = ":".join(map(str, kernel_conf["host_layout"]))
-    kernel = func.warmup(*args, grid=(1, ), host_layout=host_layout)
-    rblib.write_kernel(kernel)
-    return kernel
 
 
 @triton_op("rbln_triton_ops::flash_attention_naive_prefill", mutates_args=())
@@ -457,7 +452,7 @@ def flash_attention_naive_prefill_wrapper(
         NUM_BLOCK,
         DIM_BLOCK_TABLE,
     ]
-    warmup(flash_attention_naive_prefill, *params)
+    rblib.warmup(flash_attention_naive_prefill, kernel_conf, *params)
 
     return output
 
@@ -507,7 +502,7 @@ def flash_attention_naive_decode_wrapper(
         DIM_BLOCK_TABLE,
     ]
 
-    warmup(flash_attention_naive_decode, *params)
+    rblib.warmup(flash_attention_naive_decode, kernel_conf, *params)
 
     return output
 

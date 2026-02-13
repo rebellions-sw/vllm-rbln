@@ -19,6 +19,9 @@ from rebel.triton import language as tl
 from rebel.triton.language.extra.rbln import libdevice as rblib
 from torch.library import register_fake, triton_op
 
+__triton_op_files__ = rblib.collect_triton_op_files()
+
+################################################################################
 @triton.jit
 def attention_naive_prefill(
     query_base,
@@ -385,13 +388,6 @@ def attention_naive_decode(
         attn_out = tl.dot(softmax_masked_qk_scaled, v)  # (1,h,g,l,p) x (1,h,g,p,d) = (1,h,g,l,d)
         tl.store(output_ptr, attn_out)  # (1,h,4,l,d)
 
-__triton_op_files__ = rblib.collect_triton_op_files()
-
-def warmup(func, *args):
-    host_layout = ":".join(map(str, kernel_conf["host_layout"]))
-    kernel = func.warmup(*args, grid=(1, ), host_layout=host_layout)
-    rblib.write_kernel(kernel)
-    return kernel
 
 @triton_op("rbln_triton_ops::attention_naive_prefill", mutates_args=())
 def _(
@@ -490,7 +486,7 @@ def attention_naive_prefill_wrapper(
         NUM_BATCH,
         DIM_BLOCK_TABLE,
     ]
-    warmup(attention_naive_prefill, *params)
+    rblib.warmup(attention_naive_prefill, kernel_conf, *params)
 
     return output
 
@@ -536,7 +532,7 @@ def attention_naive_decode_wrapper(
         DIM_BLOCK_TABLE,
     ]
 
-    warmup(attention_naive_decode, *params)
+    rblib.warmup(attention_naive_decode, kernel_conf, *params)
 
     return output
 
