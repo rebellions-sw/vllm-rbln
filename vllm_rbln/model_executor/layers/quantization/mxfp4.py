@@ -12,9 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Callable
-from typing import Union
-
 import torch
 import vllm.model_executor.layers.quantization.mxfp4 as upstream
 from vllm.model_executor.layers.fused_moe import (
@@ -391,27 +388,10 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
     def apply(
         self,
-        layer: torch.nn.Module,
+        layer: FusedMoE,
         x: torch.Tensor,
         router_logits: torch.Tensor,
-        top_k: int,
-        renormalize: bool,
-        use_grouped_topk: bool = False,
-        topk_group: int | None = None,
-        num_expert_group: int | None = None,
-        global_num_experts: int = -1,
-        expert_map: torch.Tensor | None = None,
-        custom_routing_function: Callable | None = None,
-        scoring_func: str = "softmax",
-        routed_scaling_factor: float = 1.0,
-        e_score_correction_bias: torch.Tensor | None = None,
-        apply_router_weight_on_input: bool = False,
-        activation: str = "silu",
-        enable_eplb: bool = False,
-        expert_load_view: torch.Tensor | None = None,
-        logical_to_physical_map: torch.Tensor | None = None,
-        logical_replica_count: torch.Tensor | None = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         # refer to custom_moe_glu
         orig_shape = x.shape  # noqa: F841
         num_tokens = orig_shape[:-1].numel()  # noqa: F841
@@ -421,13 +401,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         # router_logits = router_logits.view(-1, self.num_experts)
         # router_logits = router_logits.view(-1, self.moe.num_experts)
 
-        if activation == "swigluoai":
-            # TODO: use expert_map
-            # FIXME(RBLN) - expert_map SHOULD be processed
+        if layer.activation == "swigluoai":
             expert_map_const = None
-            if expert_map is not None:
+            if layer.expert_map is not None:
                 # Extract numpy array and create a fresh constant tensor
-                expert_map_list = expert_map.tolist()
+                expert_map_list = layer.expert_map.tolist()
                 expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
 
             use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
@@ -449,12 +427,12 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 router_logits,
                 self.swiglu_alpha,
                 self.swiglu_limit,
-                top_k,
-                renormalize,
+                layer.top_k,
+                layer.renormalize,
                 expert_map_const,
             )
         else:
-            raise NotImplementedError(activation)
+            raise NotImplementedError(layer.activation)
 
         return final_hidden_states.reshape(orig_shape)
 
