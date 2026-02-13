@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Optional, Union, cast
 
 import numpy as np
 import rebel
+from rebel.sync_runtime import DynamoRuntime
 import torch
 import torch.nn as nn
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionType,
@@ -1261,9 +1262,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         torch_compile_options = copy(options)
         torch_compile_options["zero_copy"] = True
-        
-        self._compute_logits_runtimes: list = []
-        torch_compile_options["_runtime_holder"] = self._compute_logits_runtimes
         self.compute_logits = torch.compile(
             self.compute_logits,
             backend="rbln",
@@ -1278,7 +1276,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             dynamic=False,
         )
 
-        self._logits_buffers: dict[int, torch.Tensor] = {}
+        self._logits_rt_registered: set[str] = set()
 
         return compiled_model
 
@@ -2590,15 +2588,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         logits = self.compute_logits(hidden_states)
                         logits = logits[logits_indices]
 
-                        batch_size = logits.shape[0]
-                        if batch_size not in self._logits_buffers:
-                            self._logits_buffers[batch_size] = \
-                                torch.empty_like(logits)
-
-                            if self._compute_logits_runtimes:
-                                self._compute_logits_runtimes[-1] \
-                                    .set_cpu_output_buffer(
-                                        0, self._logits_buffers[batch_size])
+                    rt = DynamoRuntime._last_used_instance
+                    if rt is not None:
+                        h = getattr(rt, "_compile_hash", None)
+                        if h is not None and h not in self._logits_rt_registered:
+                            for oidx in range(rt._num_outputs):
+                                shape = rt._output_profile[oidx].shape
+                                dtype = rt._output_profile[oidx].dtype
+                                buf = torch.empty(shape, dtype=dtype,
+                                                  device="cpu")
+                                rt.set_cpu_output_buffer(oidx, buf)
+                            self._logits_rt_registered.add(h)
                     if not envs.VLLM_RBLN_LOGITS_ALL_GATHER:
                         logits = self.logits_processor._gather_logits(logits)
                     logits = logits.view(-1, logits.size(-1))
