@@ -25,7 +25,6 @@ from vllm.model_executor.models.gemma3_mm import (
 )
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.interfaces_base import VllmModelForTextGeneration
-from vllm.model_executor.models.utils import flatten_bn
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
@@ -252,7 +251,7 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         self, **kwargs: Any
     ) -> Gemma3ImageInputs | None:
         pixel_values = kwargs.pop("pixel_values", None)
-        num_crops = kwargs.pop("num_crops", None)
+        num_patches = kwargs.pop("num_patches", None)
         image_embeds = kwargs.pop("image_embeds", None)
         config = self.vllm_config.model_config.hf_config
 
@@ -260,21 +259,10 @@ class RBLNOptimumGemma3ForConditionalGeneration(
         if pixel_values is None:
             return None
 
-        if not isinstance(pixel_values, torch.Tensor | list):
-            raise ValueError(
-                f"Incorrect type of pixel values. Got type: {type(pixel_values)}"
-            )
-
-        if not isinstance(num_crops, torch.Tensor | list):
-            raise ValueError(
-                f"Incorrect type of num_crops. Got type: {type(num_crops)}"
-            )
-
         image_size = config.vision_config.image_size
-
         return Gemma3ImagePixelInputs(
-            pixel_values=flatten_bn(pixel_values, concat=True),
-            num_patches=flatten_bn(num_crops, concat=True) + 1,
+            pixel_values=pixel_values,
+            num_patches=num_patches,
             resolve_bindings={"h": image_size, "w": image_size},
         )
 

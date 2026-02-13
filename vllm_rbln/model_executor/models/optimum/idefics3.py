@@ -127,35 +127,14 @@ class RBLNOptimumIdefics3ForConditionalGeneration(
             return None
 
         if image_embeds is not None:
-            if not isinstance(image_embeds, torch.Tensor | list):
-                raise ValueError(
-                    "Incorrect type of image embeddings. "
-                    f"Got type: {type(image_embeds)}"
-                )
-
             return Idefics3ImageEmbeddingInputs(
                 type="image_embeds",
                 data=image_embeds,
             )
 
         if pixel_values is not None:
-            if not isinstance(pixel_values, torch.Tensor | list):
-                raise ValueError(
-                    f"Incorrect type of pixel values. Got type: {type(pixel_values)}"
-                )
-
             pixel_attention_mask = kwargs.pop("pixel_attention_mask")
-            if not isinstance(pixel_attention_mask, torch.Tensor | list):
-                raise ValueError(
-                    "Incorrect type of pixel_attention_mask. "
-                    f"Got type: {type(pixel_attention_mask)}"
-                )
-
             num_patches = kwargs.pop("num_patches")
-            if not isinstance(num_patches, torch.Tensor | list):
-                raise ValueError(
-                    f"Incorrect type of num_patches. Got type: {type(num_patches)}"
-                )
 
             expected_h = expected_w = config.vision_config.image_size
             return Idefics3ImagePixelInputs(

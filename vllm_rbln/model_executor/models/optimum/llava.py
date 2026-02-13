@@ -147,11 +147,6 @@ class RBLNOptimumLlavaForConditionalGeneration(
             return None
 
         if pixel_values is not None:
-            if not isinstance(pixel_values, torch.Tensor | list):
-                raise ValueError(
-                    f"Incorrect type of pixel values. Got type: {type(pixel_values)}"
-                )
-
             if config.vision_config.model_type == "pixtral":
                 return PixtralHFImagePixelInputs(
                     type="pixel_values_pixtral",
