@@ -48,7 +48,8 @@ Multi-node:
 """
 import os
 from time import sleep
-
+import json
+from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 from vllm.utils import get_open_port
 
@@ -57,7 +58,7 @@ os.environ['VLLM_TORCH_PROFILER_DIR'] = './profile'
 
 def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
          dp_master_port, tp_size, enable_ep, max_model_len, block_size,
-         decode_batch, num_hidden_layers):
+         decode_batch, num_hidden_layers, use_chat_template):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     # paralle_config.data_parallel_size = envs.sVLLM_DP_SIZE
@@ -65,25 +66,38 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     os.environ["VLLM_DP_MASTER_IP"] = dp_master_ip
     os.environ["VLLM_DP_MASTER_PORT"] = str(dp_master_port)
 
+
+    sample_prompts = json.load(open("/mnt/shared_data/.cache/dataset/simple_prompts/simple_prompts.json", "r"))
+    raw_prompts = sample_prompts[:4] * dp_size
     # Sample prompts.
-    prompts = [
-        "Hello, my name is",
-        "The vLLM is",
-        "The president of the United States is",
-        "The future of AI is",
-    ] * dp_size
+    # raw_prompts = [
+    #     "Hello, my name is",
+    #     "The vLLM is",
+    #     "The president of the United States is",
+    #     "The future of AI is",
+    # ] * dp_size
 
     # with DP, each rank should process different prompts.
     # usually all the DP ranks process a full dataset,
     # and each rank processes a different part of the dataset.
-    prompts_per_rank = (len(prompts) // dp_size)
+    prompts_per_rank = (len(raw_prompts) // dp_size)
     start = global_dp_rank * prompts_per_rank
     end = start + prompts_per_rank
-    prompts = prompts[start:end]
-    if len(prompts) == 0:
+    raw_prompts = raw_prompts[start:end]
+    if len(raw_prompts) == 0:
         # if any rank has no prompts to process,
         # we need to set a placeholder prompt
-        prompts = ["Placeholder"]
+        raw_prompts = ["Placeholder"]
+
+    # Apply chat template if enabled
+    if use_chat_template:
+        tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+        chats = [[{"role": "user", "content": text}] for text in raw_prompts]
+        prompts = [tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True) for chat in chats]
+        print(f"DP rank {global_dp_rank} using chat template, example prompt:\n{prompts[0][:200]}...")
+    else:
+        prompts = raw_prompts
+
     print(f"DP rank {global_dp_rank} needs to process {len(prompts)} prompts")
 
     # Create a sampling params object.
@@ -98,6 +112,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     else:
         hf_overrides_kw = {
             "num_hidden_layers": num_hidden_layers,
+            "_rbln_load_last_n_layers": False,
         }
 
     # Create an LLM.
@@ -112,6 +127,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
         trust_remote_code=True,
         tensor_parallel_size=tp_size,
         enable_expert_parallel=enable_ep,
+        num_gpu_blocks_override=4,
         #data_parallel_size=dp_size,
         #enforce_eager=True,
     )
@@ -163,6 +179,9 @@ if __name__ == "__main__":
                         type=int,
                         default=0,
                         help="num hidden layers")
+    parser.add_argument("--use-chat-template",
+                        action='store_true',
+                        help="Apply chat template to prompts")
     parser.add_argument("--node-size",
                         type=int,
                         default=1,
@@ -190,6 +209,7 @@ if __name__ == "__main__":
     block_size = args.block_size
     decode_batch = args.decode_batch
     num_hidden_layers = args.num_hidden_layers
+    use_chat_template = args.use_chat_template
 
     if node_size == 1:
         dp_master_ip = "127.0.0.1"
@@ -209,7 +229,7 @@ if __name__ == "__main__":
                        args=(args.model, dp_size, local_dp_rank,
                              global_dp_rank, dp_master_ip, dp_master_port,
                              tp_size, enable_ep, max_model_len, block_size,
-                             decode_batch, num_hidden_layers))
+                             decode_batch, num_hidden_layers, use_chat_template))
         proc.start()
         procs.append(proc)
     exit_code = 0
