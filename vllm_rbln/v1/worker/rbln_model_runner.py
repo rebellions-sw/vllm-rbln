@@ -2699,6 +2699,13 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                 batch_indices,
                                 : self.speculative_config.num_speculative_tokens + 1,
                             ]
+                            max_tok = self.speculative_config.num_speculative_tokens + 1
+                            logits_2d = logits.view(-1, max_tok, logits.size(-1))
+                            unpadded = []
+                            for i in range(num_reqs):
+                                n_tok = num_scheduled_tokens_per_req[i].item()
+                                unpadded.append(logits_2d[i, :n_tok])
+                            logits = torch.cat(unpadded, dim=0)
                         logits = logits[selected_token_indices]
 
             if broadcast_pp_output:
