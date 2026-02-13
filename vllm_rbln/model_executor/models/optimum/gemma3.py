@@ -25,7 +25,6 @@ from vllm.model_executor.models.gemma3_mm import (
 )
 from vllm.model_executor.models.interfaces import SupportsMultiModal
 from vllm.model_executor.models.interfaces_base import VllmModelForTextGeneration
-from vllm.model_executor.models.utils import flatten_bn
 from vllm.multimodal import MULTIMODAL_REGISTRY
 
 from .base import ModelInputForRBLN, version_error
@@ -261,7 +260,6 @@ class RBLNOptimumGemma3ForConditionalGeneration(
             return None
 
         image_size = config.vision_config.image_size
-
         return Gemma3ImagePixelInputs(
             pixel_values=pixel_values,
             num_patches=num_patches,
