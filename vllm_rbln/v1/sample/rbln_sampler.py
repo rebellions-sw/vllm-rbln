@@ -175,7 +175,8 @@ class RBLNSampler(VLLMSampler):
             )
         else:
             logger.warning_once(
-                f"RBLN Sampling does not support logprobs_mode: {logprobs_mode}. Using native sampler instead."
+                f"RBLN Sampling does not support logprobs_mode: {logprobs_mode}. "
+                "Using native sampler instead."
             )
 
     def apply_penalties(
