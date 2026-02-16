@@ -67,7 +67,7 @@ def apply_top_k_top_p(
     a dual-pivot algorithm is implemented in rebel and
     it will be used to avoid the sorting step and improve efficiency.
     """
-    # NOTE This function is used in case of fallback to eager execution
+    # NOTE This function is used when falling back to eager execution
     # due to RBLN compilation failure.
     # If both k and p are None, return the argmax (greedy sampling).
     if k is None and p is None:
