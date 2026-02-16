@@ -76,6 +76,7 @@ from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.worker.metrics import PerformanceTracker
 from vllm_rbln.v1.worker.optimum_input_batch import RBLNInputBatch
+from vllm_rbln.utils.optimum.configuration import is_qwen3_pooling
 
 if TYPE_CHECKING:
     import xgrammar as xgr
@@ -107,10 +108,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
         # it’s important to set the is_encoder_decoder flag to False.
         # This prevents the scheduler from applying text generation settings.
         _, model_cls_name = get_rbln_model_info(vllm_config.model_config)
-        if (
-            model_cls_name in ["RBLNQwen3ForCausalLM"]
-            and vllm_config.model_config.task == "embed"
-        ):
+        if is_qwen3_pooling(vllm_config):
             # NOTE The architecture of Qwen3-Embedding model in huggingface
             # is `Qwen3ForCausalLM`. But it have to be mapped to `Qwen3Model`
             # for optimum-rbln.
