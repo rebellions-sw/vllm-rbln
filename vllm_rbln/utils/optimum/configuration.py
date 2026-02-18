@@ -194,7 +194,7 @@ def is_qwen3_pooling(
     _, model_cls_name = get_rbln_model_info(vllm_config.model_config)
     return (
         model_cls_name in ["RBLNQwen3ForCausalLM"]
-        and vllm_config.model_config.task == "embed"
+        and vllm_config.model_config.runner_type == "pooling"
     )
 
 
