@@ -130,6 +130,24 @@ def set_block_size_for_prefix_caching(
     vllm_config.additional_config["attn_block_size"] = kvcache_block_size
 
 
+def update_vllm_block_size_for_prefix_caching(
+    vllm_config: VllmConfig, kvcache_block_size: int, prefill_chunk_size: int
+) -> None:
+    if vllm_config.cache_config.enable_prefix_caching:
+        set_block_size_for_prefix_caching(
+            vllm_config, kvcache_block_size, prefill_chunk_size
+        )
+    else:
+        if vllm_config.cache_config.block_size != kvcache_block_size:
+            logger.info(
+                "Updating model_cache_config.block_size from %s to %s "
+                "based on rbln_config.json",
+                vllm_config.cache_config.block_size,
+                kvcache_block_size,
+            )
+            vllm_config.cache_config.block_size = kvcache_block_size
+
+
 def update_vllm_config_with_rbln_params(
     vllm_config: VllmConfig,
     batch_size: int,
@@ -157,29 +175,16 @@ def update_vllm_config_with_rbln_params(
 
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.info(
-            "Updating model_config.max_model_len and "
-            "scheduler_config.max_model_len "
+            "Updating model_config.max_model_len "
             "from %s to %s "
             "based on rbln_config.json",
             vllm_config.model_config.max_model_len,
             max_model_len,
         )
         vllm_config.model_config.max_model_len = max_model_len
-        vllm_config.scheduler_config.max_model_len = max_model_len
-
-    if vllm_config.cache_config.enable_prefix_caching:
-        set_block_size_for_prefix_caching(
-            vllm_config, kvcache_block_size, prefill_chunk_size
-        )
-    else:
-        if vllm_config.cache_config.block_size != kvcache_block_size:
-            logger.info(
-                "Updating model_cache_config.block_size from %s to %s "
-                "based on rbln_config.json",
-                vllm_config.cache_config.block_size,
-                kvcache_block_size,
-            )
-            vllm_config.cache_config.block_size = kvcache_block_size
+    update_vllm_block_size_for_prefix_caching(
+        vllm_config, kvcache_block_size, prefill_chunk_size
+    )
 
 
 def is_qwen3_pooling(
@@ -208,6 +213,30 @@ def get_rbln_config(vllm_config: VllmConfig) -> dict | None:
     return rbln_config
 
 
+def validate_vllm_config(vllm_config: VllmConfig) -> None:
+    print("@@ validate_vllm_config, block_size", vllm_config.cache_config.block_size)
+    assert vllm_config.scheduler_config.max_num_seqs > 0, (
+        "scheduler_config.max_num_seqs must be greater than 0"
+    )
+    assert vllm_config.model_config.max_model_len >= 4096, (
+        "model_config.max_model_len must be greater than 4096"
+    )
+    assert vllm_config.cache_config.block_size is not None, (
+        "cache_config.block_size must be specified in vllm_config"
+    )
+    assert vllm_config.cache_config.block_size >= 4096, (
+        "cache_config.block_size must be greater than 4096"
+    )
+
+    vllm_config.scheduler_config.max_num_batched_tokens = (
+        vllm_config.model_config.max_model_len
+    )
+    kvcache_block_size = vllm_config.cache_config.block_size
+    update_vllm_block_size_for_prefix_caching(
+        vllm_config, kvcache_block_size, prefill_chunk_size=128
+    )
+
+
 def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
     try:
         rbln_config = get_rbln_config(vllm_config)
@@ -225,3 +254,5 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
             kvcache_block_size,
             prefill_chunk_size,
         )
+    else:
+        validate_vllm_config(vllm_config)
