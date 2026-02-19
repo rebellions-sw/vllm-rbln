@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT: int = 1
     VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS: list[int] = []
     VLLM_RBLN_NUMA: bool = True
-
+    VLLM_RBLN_USE_CUSTOM_KERNEL: bool = False
 
 def get_dp_impl() -> str:
     dp_impl = os.environ.get("VLLM_RBLN_DP_IMPL")
@@ -223,6 +223,10 @@ environment_variables = {
     # Enable NUMA-based CPU affinity binding for OpenMP threads
     "VLLM_RBLN_NUMA": (
         lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in ("true", "1")
+    ),
+    "VLLM_RBLN_USE_CUSTOM_KERNEL": (
+        lambda: os.environ.get("RBLN_USE_CUSTOM_KERNEL", "False").lower()
+        in ("true", "1")
     ),
 }
 
