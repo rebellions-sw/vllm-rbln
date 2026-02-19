@@ -155,7 +155,8 @@ environment_variables = {
         lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in ("true", "1")
     ),
     "VLLM_RBLN_USE_CUSTOM_KERNEL": (
-        lambda: os.environ.get("RBLN_USE_CUSTOM_KERNEL", "False").lower() in ("true", "1")
+        lambda: os.environ.get("RBLN_USE_CUSTOM_KERNEL", "False").lower()
+        in ("true", "1")
     ),
     "VLLM_RBLN_SORT_BATCH": (
         lambda: os.environ.get("VLLM_RBLN_SORT_BATCH", "False").lower() in ("true", "1")
