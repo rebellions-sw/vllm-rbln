@@ -47,8 +47,10 @@ class RBLNBucketingManager(ABC):
             if bucket >= batch_size:
                 return bucket
         raise ValueError(
-            "No batch bucket found for batch size %d, "
-            "batch buckets: %s", batch_size, self.batch_buckets)
+            "No batch bucket found for batch size %d, batch buckets: %s",
+            batch_size,
+            self.batch_buckets,
+        )
 
     @staticmethod
     def check_config(
@@ -62,13 +64,14 @@ class RBLNBucketingManager(ABC):
             raise ValueError(
                 "max_batch_size must be >= min_batch_size, "
                 f"max_batch_size: {max_batch_size}, "
-                f"min_batch_size: {min_batch_size}", )
+                f"min_batch_size: {min_batch_size}",
+            )
         if limit <= 0:
-            raise ValueError(
-                f"limit must be greater than 0, limit: {limit}")
+            raise ValueError(f"limit must be greater than 0, limit: {limit}")
         if step <= 0:
             raise ValueError(f"step must be greater than 0, step: {step}")
         if min_batch_size <= 0:
             raise ValueError(
                 "min_batch_size must be greater than 0, "
-                f"min_batch_size: {min_batch_size}", )
+                f"min_batch_size: {min_batch_size}",
+            )

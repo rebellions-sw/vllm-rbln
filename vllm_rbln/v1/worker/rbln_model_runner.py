@@ -113,8 +113,9 @@ from vllm_rbln.v1.attention.backends.flash_attention import (
 )
 from vllm_rbln.v1.kv_cache import RBLNSlidingWindowSpec
 from vllm_rbln.v1.sample import RBLNSampler
+from vllm_rbln.v1.sample.rbln_rejection_sampler import RBLNRejectionSampler
 from vllm_rbln.v1.worker.bucketing import get_bucketing_manager
-from vllm_rbln.worker.metrics import PerformanceTracker
+from vllm_rbln.v1.worker.metrics import PerformanceTracker
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.tensorizer import TensorizerConfig
@@ -500,10 +501,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             limit=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT,
             manual_buckets=envs.VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS,
         )
-        logger.info("Using %s bucketing manager",
-                    type(self.bucketing_manager).__name__)
-        logger.info("decode batch buckets: %s",
-                    self.bucketing_manager.decode_batch_buckets)
+        logger.info("Using %s bucketing manager", type(self.bucketing_manager).__name__)
+        logger.info(
+            "decode batch buckets: %s", self.bucketing_manager.decode_batch_buckets
+        )
 
         self.performance_tracker = None
         self.sampler_performance_tracker = None
@@ -518,9 +519,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker("MODEL")
-            self.performance_tracker.register_cleanup()
+            if self.performance_tracker:
+                self.performance_tracker.register_cleanup()
             self.sampler_performance_tracker = PerformanceTracker("SAMPLER")
-            self.sampler_performance_tracker.register_cleanup()
+            if self.sampler_performance_tracker:
+                self.sampler_performance_tracker.register_cleanup()
 
     def _get_positions(self, num_tokens: Any):
         if isinstance(num_tokens, int):
@@ -1808,37 +1811,42 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # compile sampler for all possible decode batches
         max_decode_batch = self.bucketing_manager.decode_batch_buckets[-1]
-        for decode_batch in range(1, max_decode_batch+1):
+        for decode_batch in range(1, max_decode_batch + 1):
             decode_max_seq_len = self.max_model_len
             dummy_decode_requests = []
             dummy_decode_num_scheduled_tokens = {}
-            num_speculative_tokens = \
-            self.speculative_config.num_speculative_tokens \
-                if self.speculative_config is not None else 0
+            num_speculative_tokens = (
+                self.speculative_config.num_speculative_tokens
+                if self.speculative_config is not None
+                else 0
+            )
             for _ in range(decode_batch):
                 self._add_dummy_requests(
                     requests=dummy_decode_requests,
                     num_scheduled_tokens=dummy_decode_num_scheduled_tokens,
-                    total_tokens=decode_max_seq_len - 1 -
-                    num_speculative_tokens,
-                    num_computed_tokens=decode_max_seq_len - 1 -
-                    num_speculative_tokens,
+                    total_tokens=decode_max_seq_len - 1 - num_speculative_tokens,
+                    num_computed_tokens=decode_max_seq_len - 1 - num_speculative_tokens,
                     num_kv_cache_groups=num_kv_cache_groups,
-                    sampling_params=None if self.is_pooling_model else
-                    SamplingParams(temperature=0.0),
+                    sampling_params=None
+                    if self.is_pooling_model
+                    else SamplingParams(temperature=0.0),
                     pooling_params=PoolingParams(
-                        task=self.get_supported_pooling_tasks()[0])
-                    if self.is_pooling_model else None,
+                        task=self.get_supported_pooling_tasks()[0]
+                    )
+                    if self.is_pooling_model
+                    else None,
                     num_speculative_tokens=num_speculative_tokens,
                 )
             so, cso = self._make_dummy_scheduler_outputs(
-                dummy_decode_requests, dummy_decode_num_scheduled_tokens,
-                num_kv_cache_groups)
-            current_intermediate_tensors = \
-                self.decode_intermediate_tensors.get(decode_batch)
+                dummy_decode_requests,
+                dummy_decode_num_scheduled_tokens,
+                num_kv_cache_groups,
+            )
+            current_intermediate_tensors = self.decode_intermediate_tensors.get(
+                decode_batch
+            )
             assert current_intermediate_tensors is not None
             self._execute_dummy_requests(so, cso, current_intermediate_tensors)
-
 
     def _add_dummy_requests(
         self,
@@ -2711,16 +2719,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         is_last_prefill = (
                             num_computed + self.max_num_tokens
                         ) >= num_prompted
-                        if not is_last_prefill[0]:
-                            # chunked prefill(#0~#N-1, intermediate)
-                            # token_indices = torch.tensor([max_num_seqs-1])
-                            # selected = torch.tensor([])
-                            logits = logits[:0]
-                        else:
-                            # chunked prefill(#N, final)
-                            # token_indices = torch.tensor([last_seq_idx-1])
-                            # logits_indices == token_indices
-                            logits = logits
+                        logits = logits[:0] if not is_last_prefill[0] else logits
                     else:  # decode
                         # logits_indices is for valid decode tokens,
                         # which should be 0..num_input_tokens-1
@@ -2731,8 +2730,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         )
                         if self.speculative_config is not None:
                             sample_hidden_states = hidden_states[
-                                batch_indices, :self.speculative_config.
-                                num_speculative_tokens + 1]
+                                batch_indices,
+                                : self.speculative_config.num_speculative_tokens + 1,
+                            ]
                         logits = logits[:num_input_tokens]
 
             if broadcast_pp_output:
@@ -3183,16 +3183,14 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         )
         if distributed_executor_backend == "ray":
             self._prepare_prefill_intermediate_tensors()
-            for batch_bucket_size \
-                in self.bucketing_manager.decode_batch_buckets:
-                for decode_batch in range(1, batch_bucket_size+1):
+            for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
+                for decode_batch in range(1, batch_bucket_size + 1):
                     self._prepare_decode_intermediate_tensors(decode_batch)
         else:
             with torch.inference_mode():
                 self._prepare_prefill_intermediate_tensors()
-                for batch_bucket_size \
-                    in self.bucketing_manager.decode_batch_buckets:
-                    for decode_batch in range(1, batch_bucket_size+1):
+                for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
+                    for decode_batch in range(1, batch_bucket_size + 1):
                         self._prepare_decode_intermediate_tensors(decode_batch)
 
     def _prepare_prefill_intermediate_tensors(self) -> None:
@@ -4034,18 +4032,23 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
         )
 
-    def collect_metrics(self, performance_tracker: PerformanceTracker,
-                                is_prefill: bool, start_time: float,
-                                end_time: float, reports: list[dict],
-                                token_count: int) -> None:
+    def collect_metrics(
+        self,
+        performance_tracker: PerformanceTracker,
+        is_prefill: bool,
+        start_time: float,
+        end_time: float,
+        reports: list[dict],
+        token_count: int,
+    ) -> None:
         execution_time = end_time - start_time
         host_time = None
         device_time = None
         ccl_time = None
         if reports is not None and len(reports) > 0:
-            host_time = reports[0].get('total_host', None)
-            device_time = reports[0].get('total_device', None)
-            ccl_time = reports[0].get('total_ccl', None)
+            host_time = reports[0].get("total_host", None)
+            device_time = reports[0].get("total_device", None)
+            ccl_time = reports[0].get("total_ccl", None)
         if is_prefill:
             performance_tracker.record_prefill(
                 execution_time,

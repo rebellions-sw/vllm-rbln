@@ -33,13 +33,15 @@ def get_bucketing_manager(
     min_batch_size: int = 1,
     limit: int = 1,
     step: int = 2,
-    manual_buckets: list[int] = [],
-) -> type[RBLNBucketingManager]:
+    manual_buckets: list[int] | None = None,
+) -> ExponentialBucketingManager | LinearBucketingManager | ManualBucketingManager:
     """Create a bucketing manager for the given strategy.
 
     Caller can pass all possible args; only the ones required by the
     selected strategy are forwarded to the manager class.
     """
+    if manual_buckets is None:
+        manual_buckets = []
     if strategy == "exponential":
         return ExponentialBucketingManager(
             max_batch_size=max_batch_size,

@@ -807,7 +807,7 @@ def sliding_window_attention_naive_decode_impl(
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
     attn_mask: torch.Tensor,
-    sinks: Optional[torch.Tensor] = None,
+    sinks: torch.Tensor | None = None,
 ) -> torch.Tensor:
     if envs.VLLM_RBLN_COMPILE_MODEL:
         return torch.empty_like(q)
@@ -1006,10 +1006,10 @@ class RBLNFlashAttentionMetadata:
     attn_masks: torch.Tensor | None = None
     kv_caches: list[torch.Tensor] | None = None
     # for sliding window attention
-    cache_seq_lens: Optional[torch.Tensor] = None
-    cache_offsets: Optional[torch.Tensor] = None
-    local_block_tables: Optional[torch.Tensor] = None
-    swa_attn_masks: Optional[torch.Tensor] = None
+    cache_seq_lens: torch.Tensor | None = None
+    cache_offsets: torch.Tensor | None = None
+    local_block_tables: torch.Tensor | None = None
+    swa_attn_masks: torch.Tensor | None = None
 
 
 class RBLNFlashAttentionMetadataBuilder(
@@ -1158,9 +1158,13 @@ class RBLNFlashAttentionMetadataBuilder(
                 attn_masks = decode_attention_mask
                 attn_masks = attn_masks.to(self.device)
 
-        cache_seq_lens, cache_offsets, local_block_tables, swa_attn_masks = None, None, None, None
-        if sliding_window := getattr(self.kv_cache_spec, "sliding_window",
-                                     None):
+        cache_seq_lens, cache_offsets, local_block_tables, swa_attn_masks = (
+            None,
+            None,
+            None,
+            None,
+        )
+        if sliding_window := getattr(self.kv_cache_spec, "sliding_window", None):
             num_computed_tokens = (
                 num_computed_tokens[:num_reqs].view(-1, 1).to(torch.int16)
             )
@@ -1174,10 +1178,10 @@ class RBLNFlashAttentionMetadataBuilder(
                 # Generate sliding window attention mask for decode
                 # mask[b, s] = 1.0 if s <= cache_seq_lens[b] else 0.0
                 positions = torch.arange(sliding_window)[None, :]
-                swa_attn_masks = torch.where(
-                    positions - cache_seq_lens > 0, 0.0, 1.0
-                )[:, None, None, :]
-                    
+                swa_attn_masks = torch.where(positions - cache_seq_lens > 0, 0.0, 1.0)[
+                    :, None, None, :
+                ]
+
             local_block_tables = block_tables_tensor[..., :1]
 
         # * seq_idx(batch attention opt decode) - [B, 1],
@@ -1209,9 +1213,11 @@ class RBLNFlashAttentionMetadataBuilder(
             if cache_offsets is not None
             else None,
             local_block_tables=local_block_tables.to(self.device)
-            if local_block_tables is not None else None,
+            if local_block_tables is not None
+            else None,
             swa_attn_masks=swa_attn_masks.to(self.device)
-            if swa_attn_masks is not None else None,
+            if swa_attn_masks is not None
+            else None,
         )
 
         return attn_metadata

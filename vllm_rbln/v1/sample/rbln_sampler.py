@@ -20,8 +20,9 @@ from vllm.v1.sample.sampler import Sampler as VLLMSampler
 import rebel
 from vllm.config.model import LogprobsMode
 from vllm.v1.outputs import LogprobsTensors, SamplerOutput
-from vllm_rbln.v1.sample.ops.penalties import (apply_all_penalties as
-                                               rbln_apply_all_penalties)
+from vllm_rbln.v1.sample.ops.penalties import (
+    apply_all_penalties as rbln_apply_all_penalties,
+)
 import vllm_rbln.rbln_envs as envs
 
 logger = init_logger(__name__)
@@ -210,7 +211,6 @@ class RBLNSampler(VLLMSampler):
         # this function works as a greedy sampler.
         sampled, _ = self.topk_topp_sampler(logits, dict(), None, None)
         return sampled
-
 
     def forward(
         self,
