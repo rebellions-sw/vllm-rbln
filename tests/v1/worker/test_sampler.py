@@ -226,13 +226,11 @@ def test_forward_sampling_parameters(
 
 
 def test_sampler_logits_reshape_prevents_torch_compile_recompile(monkeypatch):
-    """Regression test for `logits.reshape(1, -1)` in `sample_tokens`.
+    """
+    Test to ensure that the sampler does not recompile
+    when `compute_logits` returns logits with different strides.
 
-    When `num_reqs == 1`, some model implementations may return logits with
-    different ranks/strides across steps (e.g., [vocab] vs [1, vocab]).
-    Without normalizing logits, a `torch.compile`'d sampler can recompile.
-
-    This test forces `compute_logits` to alternate between 1D and 2D outputs
+    This test forces `compute_logits` to return logits with different strides 
     while keeping batch_size=1, and asserts the sampler compiles only once.
     """
 
