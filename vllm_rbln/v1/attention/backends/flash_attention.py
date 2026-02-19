@@ -1273,6 +1273,7 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             )
         self.attn_type = attn_type
 
+        # TODO(RBLN): We need to apply sinks attn kernel.
         self.sinks = sinks
         if self.sinks is not None:
             assert self.sinks.shape[0] == num_heads, (
@@ -1410,7 +1411,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
-                    self.sinks,
                 )
             else:
                 attn_output = sliding_window_attention_naive_prefill(  # noqa: E501
@@ -1423,7 +1423,6 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
-                    self.sinks,
                 )
         # actually non-flash paged attention DOES NOT use slot_mapping
         elif self.is_causal:
