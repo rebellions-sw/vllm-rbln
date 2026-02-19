@@ -30,7 +30,7 @@ jobs:
             feature
             model
             core
-            bug-fix
+            fix
             perf
             refactor
             docs
