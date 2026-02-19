@@ -848,6 +848,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             tokens_mask = get_tokens_mask(num_tokens)
             # TODO(RBLN) - do this job in custom converter
             # router_logits = router_logits * tokens_mask
+        else:
+            tokens_mask = None
 
         # TODO(RBLN) - Need this?
         gate_proj_bias = None
