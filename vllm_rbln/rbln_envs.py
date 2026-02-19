@@ -107,7 +107,7 @@ def get_decode_batch_bucket_manual_buckets() -> list[int]:
         raise ValueError(
             f"Invalid VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS: "
             f"{manual_buckets}, {e}"
-        )
+        ) from e
 
 
 # extended environments
@@ -248,7 +248,7 @@ environment_variables = {
         os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 1)
     ),
     # Decode batch bucket manual buckets
-    "VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS": get_decode_batch_bucket_manual_buckets,
+    "VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS": get_decode_batch_bucket_manual_buckets,  # noqa E501
 }
 
 

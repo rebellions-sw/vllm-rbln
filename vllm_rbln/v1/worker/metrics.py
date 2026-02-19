@@ -132,7 +132,7 @@ class StepMetrics:
 
     def show_stats(self, stat_type: str):
         if self.get_call_counts() > 0:
-            logger.info(f"{stat_type} METRICS:")
+            logger.info("%s METRICS:", stat_type)
             logger.info("  Total call counts: %d", self.get_call_counts())
             logger.info("  Average latency: %.2f ms", self.get_avg_latency())
             if sum(self.token_counts) > 0:
@@ -149,7 +149,7 @@ class StepMetrics:
             if self.ccl_times:
                 logger.info("  Average ccl time: %.2f us", self.get_avg_ccl_time())
         else:
-            logger.info(f"{stat_type} METRICS: No data recorded")
+            logger.info("%s METRICS: No data recorded", stat_type)
 
 
 class PrefillMetricsByRequestID:
