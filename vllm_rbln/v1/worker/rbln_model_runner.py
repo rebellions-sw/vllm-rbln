@@ -1690,6 +1690,17 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         logits: torch.Tensor | None,
         spec_decode_metadata: SpecDecodeMetadata | None,
     ) -> SamplerOutput:
+        # Logits can be empty during intermediate chunked prefill. This breaks
+        # MinTokensLogitsProcessor and RBLNSampler. So we skip logit processing
+        # and sampling, and return empty tensor with expected shape. The output
+        # is discarded anyway (discard_sampled_tokens_req_indices).
+        if logits is not None and logits.shape[0] == 0:
+            return SamplerOutput(
+                sampled_token_ids=torch.empty(
+                    0, 1, dtype=torch.int32, device=logits.device
+                ),
+                logprobs_tensors=None,
+            )
         # Sample the next token and get logprobs if needed.
         sampling_metadata = self.input_batch.sampling_metadata
         if spec_decode_metadata is None:
@@ -3576,7 +3587,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         """
         kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
-            device = "cpu" if envs.VLLM_RBLN_KERNEL_MODE == "torch_triton" else "meta"
+            device = "cpu" if envs.VLLM_RBLN_USE_CUSTOM_KERNEL else "meta"
             tensor = torch.zeros(kv_cache_tensor.size, dtype=torch.int8, device=device)
             for layer_name in kv_cache_tensor.shared_by:
                 kv_cache_raw_tensors[layer_name] = tensor
