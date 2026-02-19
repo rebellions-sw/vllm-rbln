@@ -230,7 +230,7 @@ def test_sampler_logits_reshape_prevents_torch_compile_recompile(monkeypatch):
     Test to ensure that the sampler does not recompile
     when `compute_logits` returns logits with different strides.
 
-    This test forces `compute_logits` to return logits with different strides 
+    This test forces `compute_logits` to return logits with different strides
     while keeping batch_size=1, and asserts the sampler compiles only once.
     """
 
