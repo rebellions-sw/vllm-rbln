@@ -25,6 +25,7 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.utils.optimum.registry import (
     get_rbln_model_info,
     is_enc_dec_arch,
+    is_generation_arch,
     is_multi_modal,
     is_pooling_arch,
 )
@@ -130,6 +131,24 @@ def set_block_size_for_prefix_caching(
     vllm_config.additional_config["attn_block_size"] = kvcache_block_size
 
 
+def update_vllm_block_size_for_prefix_caching(
+    vllm_config: VllmConfig, kvcache_block_size: int, prefill_chunk_size: int
+) -> None:
+    if vllm_config.cache_config.enable_prefix_caching:
+        set_block_size_for_prefix_caching(
+            vllm_config, kvcache_block_size, prefill_chunk_size
+        )
+    else:
+        if vllm_config.cache_config.block_size != kvcache_block_size:
+            logger.info(
+                "Updating model_cache_config.block_size from %s to %s "
+                "based on rbln_config.json",
+                vllm_config.cache_config.block_size,
+                kvcache_block_size,
+            )
+            vllm_config.cache_config.block_size = kvcache_block_size
+
+
 def update_vllm_config_with_rbln_params(
     vllm_config: VllmConfig,
     batch_size: int,
@@ -157,29 +176,16 @@ def update_vllm_config_with_rbln_params(
 
     if vllm_config.model_config.max_model_len != max_model_len:
         logger.info(
-            "Updating model_config.max_model_len and "
-            "scheduler_config.max_model_len "
+            "Updating model_config.max_model_len "
             "from %s to %s "
             "based on rbln_config.json",
             vllm_config.model_config.max_model_len,
             max_model_len,
         )
         vllm_config.model_config.max_model_len = max_model_len
-        vllm_config.scheduler_config.max_model_len = max_model_len
-
-    if vllm_config.cache_config.enable_prefix_caching:
-        set_block_size_for_prefix_caching(
-            vllm_config, kvcache_block_size, prefill_chunk_size
-        )
-    else:
-        if vllm_config.cache_config.block_size != kvcache_block_size:
-            logger.info(
-                "Updating model_cache_config.block_size from %s to %s "
-                "based on rbln_config.json",
-                vllm_config.cache_config.block_size,
-                kvcache_block_size,
-            )
-            vllm_config.cache_config.block_size = kvcache_block_size
+    update_vllm_block_size_for_prefix_caching(
+        vllm_config, kvcache_block_size, prefill_chunk_size
+    )
 
 
 def is_qwen3_pooling(
@@ -208,6 +214,35 @@ def get_rbln_config(vllm_config: VllmConfig) -> dict | None:
     return rbln_config
 
 
+def validate_vllm_config(vllm_config: VllmConfig) -> None:
+    # 1. block_size
+    hf_config = vllm_config.model_config.hf_config
+    if vllm_config.cache_config.block_size is None:
+        if is_multi_modal(hf_config) or is_generation_arch(hf_config):
+            vllm_config.cache_config.block_size = 4096
+        else:
+            vllm_config.cache_config.block_size = vllm_config.model_config.max_model_len
+    kvcache_block_size = vllm_config.cache_config.block_size
+
+    # 2. max_model_len
+    # FIXME:
+    # Currently, max_model_len is set to max_model_len of model
+    # But it takes so long to compile this model.
+    vllm_config.scheduler_config.max_num_batched_tokens = (
+        vllm_config.model_config.max_model_len
+    )
+    update_vllm_block_size_for_prefix_caching(
+        vllm_config, kvcache_block_size, prefill_chunk_size=128
+    )
+    # 3. tensor parallelism
+    if vllm_config.parallel_config.tensor_parallel_size > 1:
+        vllm_config.additional_config["tensor_parallel_size"] = (
+            vllm_config.parallel_config.tensor_parallel_size
+        )
+        vllm_config.parallel_config.tensor_parallel_size = 1
+        vllm_config.parallel_config.world_size = 1
+
+
 def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
     try:
         rbln_config = get_rbln_config(vllm_config)
@@ -215,6 +250,9 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
         raise RuntimeError("Failed to get RBLN config: %s", e) from e
 
     if rbln_config is not None:
+        assert vllm_config.parallel_config.tensor_parallel_size == 1, (
+            "Tensor parallelism is set when compiled in optimum-rbln."
+        )
         kvcache_block_size, batch_size, max_model_len, prefill_chunk_size = (
             get_rbln_params(vllm_config, rbln_config)
         )
@@ -225,3 +263,5 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
             kvcache_block_size,
             prefill_chunk_size,
         )
+    else:
+        validate_vllm_config(vllm_config)
