@@ -225,11 +225,6 @@ environment_variables = {
     "VLLM_RBLN_NUMA": (
         lambda: os.environ.get("VLLM_RBLN_NUMA", "True").lower() in ("true", "1")
     ),
-    "VLLM_RBLN_USE_CUSTOM_KERNEL": (
-        lambda: (
-            os.environ.get("RBLN_USE_CUSTOM_KERNEL", "False").lower() in ("true", "1")
-        )
-    ),
     "VLLM_RBLN_SORT_BATCH": (
         lambda: os.environ.get("VLLM_RBLN_SORT_BATCH", "False").lower() in ("true", "1")
     ),
@@ -249,6 +244,19 @@ environment_variables = {
     ),
     # Decode batch bucket manual buckets
     "VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS": get_decode_batch_bucket_manual_buckets,  # noqa E501
+    "VLLM_RBLN_USE_CUSTOM_KERNEL": (
+        lambda: os.environ.get("RBLN_USE_CUSTOM_KERNEL", "False").lower()
+        in ("true", "1")
+    ),
+    "VLLM_RBLN_CTX_STANDALONE": (
+        lambda: os.environ.get("RBLN_CTX_STANDALONE", "False").lower() in ("true", "1")
+    ),
+    "VLLM_RBLN_FORCE_CCL_ASYNC": (
+        lambda: os.environ.get("RBLN_FORCE_CCL_ASYNC", "False").lower() in ("true", "1")
+    ),
+    "VLLM_RBLN_PROFILER": (
+        lambda: os.environ.get("RBLN_PROFILER", "False").lower() in ("true", "1")
+    ),
 }
 
 
