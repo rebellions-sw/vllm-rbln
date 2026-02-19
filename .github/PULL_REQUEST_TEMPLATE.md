@@ -39,6 +39,7 @@ Use "Resolves/Fixes/Closes/Related to #<issue_number>" to auto-link or close the
 
 <!-- Mark all that apply using [x]. -->
 
+* [ ] 🚀 Release (`release`)
 * [ ] ✨ Feature (`feature`)
 * [ ] 🧠 Model support (`model`)
 * [ ] 🧬 Core engine changes (`core`)
