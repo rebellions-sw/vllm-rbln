@@ -13,9 +13,17 @@
 # limitations under the License.
 
 import pytest
+import torch
+from torch._dynamo.testing import CompileCounter
 from vllm.platforms import current_platform
 
-from .utils import create_model_runner, fake_load_model, forward_steps, make_request
+from .utils import (
+    _schedule_new_request_from_request,
+    create_model_runner,
+    fake_load_model,
+    forward_steps,
+    make_request,
+)
 
 DEVICE = current_platform.device_type
 
@@ -215,3 +223,62 @@ def test_forward_sampling_parameters(
 
 
 # TODO mix the requests with different sampling parameters
+
+
+def test_sampler_logits_reshape_prevents_torch_compile_recompile(monkeypatch):
+    """Regression test for `logits.reshape(1, -1)` in `sample_tokens`.
+
+    When `num_reqs == 1`, some model implementations may return logits with
+    different ranks/strides across steps (e.g., [vocab] vs [1, vocab]).
+    Without normalizing logits, a `torch.compile`'d sampler can recompile.
+
+    This test forces `compute_logits` to alternate between 1D and 2D outputs
+    while keeping batch_size=1, and asserts the sampler compiles only once.
+    """
+
+    monkeypatch.setenv("VLLM_RBLN_SAMPLER", "1")
+    monkeypatch.setenv("VLLM_RBLN_COMPILE_STRICT_MODE", "1")
+    monkeypatch.setenv("VLLM_RBLN_ENABLE_WARM_UP", "False")
+    monkeypatch.setenv("TORCH_LOGS", "recompiles")
+
+    compile_counter = CompileCounter()
+    real_torch_compile = torch.compile
+
+    def torch_compile_with_counter(fn, *args, **kwargs):
+        kwargs.setdefault("backend", compile_counter)
+        return real_torch_compile(fn, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "compile", torch_compile_with_counter)
+
+    # Keep max_num_seqs=1 so we always take the non-padding path.
+    runner = create_model_runner(max_num_seqs=1)
+
+    # Alternate logits rank across steps.
+    call_count = 0
+    real_compute_logits = runner.model.compute_logits
+
+    def compute_logits_flaky(hidden_states, sampling_metadata):
+        nonlocal call_count
+        call_count += 1
+        logits_2d = real_compute_logits(hidden_states, sampling_metadata)
+        if call_count % 2 == 1:
+            vocab_size = logits_2d.shape[-1]
+            # Change stride from (vocab_size, 1) to (vocab_size * 2, 1)
+            logits_2d = logits_2d.as_strided(
+                size=(1, vocab_size), stride=(2 * vocab_size, 1)
+            )
+        return logits_2d
+
+    runner.model.compute_logits = compute_logits_flaky
+
+    for i in range(2):
+        req = make_request(request_id=f"req_{i}", prompt_token_ids=[1, 2, 3])
+        scheduler_output = _schedule_new_request_from_request(
+            req, block_ids=([0],), outer_block_ids=[0]
+        )
+        runner.execute_model(scheduler_output)
+        _ = runner.sample_tokens(grammar_output=None)
+
+    # Should compile only one graph for the sampler.
+    # If recompilation happens, the counter will be more than 3 and fail the assertion.
+    assert compile_counter.frame_count == 3
