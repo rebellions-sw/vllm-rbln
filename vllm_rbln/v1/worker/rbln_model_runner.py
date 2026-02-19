@@ -1758,6 +1758,10 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         )
         self._execute_dummy_requests(so, cso, self.prefill_intermediate_tensors)
 
+        # reset the torch compile cache to avoid memory shortage
+        if not envs.VLLM_DISABLE_COMPILE_CACHE:
+            torch._dynamo.reset()
+
         # compile decode graph considering decode batch buckets
         for batch_bucket_size in self.bucketing_manager.decode_batch_buckets:
             decode_max_seq_len = self.max_model_len
@@ -1805,7 +1809,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 )
 
             self._execute_dummy_requests(so, cso, current_intermediate_tensors)
-
+        print("@@@@@@@@@@ warmup sampler @@@@@@@@@@")
         # compile sampler for all possible decode batches
         max_decode_batch = self.bucketing_manager.decode_batch_buckets[-1]
         for decode_batch in range(1, max_decode_batch+1):
