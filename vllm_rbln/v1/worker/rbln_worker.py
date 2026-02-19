@@ -46,8 +46,11 @@ from vllm.v1.worker.worker_base import WorkerBase
 import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.worker.rbln_model_runner import RBLNModelRunner
-from vllm_rbln.v1.worker.utils import set_cpu_affinity, set_omp_num_threads
-from vllm_rbln.v1.worker.utils import estimate_available_memory
+from vllm_rbln.v1.worker.utils import (
+    estimate_available_memory,
+    set_cpu_affinity,
+    set_omp_num_threads,
+)
 
 logger = init_logger(__name__)
 

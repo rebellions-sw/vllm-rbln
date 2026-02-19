@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_NUMA: bool = True
     VLLM_RBLN_USE_CUSTOM_KERNEL: bool = False
 
+
 def get_dp_impl() -> str:
     dp_impl = os.environ.get("VLLM_RBLN_DP_IMPL")
     if dp_impl is None:

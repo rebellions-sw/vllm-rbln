@@ -506,8 +506,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             "decode batch buckets: %s", self.bucketing_manager.decode_batch_buckets
         )
 
-        self.performance_tracker = None
-        self.sampler_performance_tracker = None
+        self.performance_tracker: PerformanceTracker | None = None
+        self.sampler_performance_tracker: PerformanceTracker | None = None
 
         self.dummy_run_state: DummyRunState | None = None
 
@@ -519,11 +519,9 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     def _enable_performance_tracker(self):
         if envs.VLLM_RBLN_METRICS:
             self.performance_tracker = PerformanceTracker("MODEL")
-            if self.performance_tracker:
-                self.performance_tracker.register_cleanup()
+            self.performance_tracker.register_cleanup()
             self.sampler_performance_tracker = PerformanceTracker("SAMPLER")
-            if self.sampler_performance_tracker:
-                self.sampler_performance_tracker.register_cleanup()
+            self.sampler_performance_tracker.register_cleanup()
 
     def _get_positions(self, num_tokens: Any):
         if isinstance(num_tokens, int):
