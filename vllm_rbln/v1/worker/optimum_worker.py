@@ -59,12 +59,6 @@ class RBLNOptimumWorker(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
 
-        if self.model_config.trust_remote_code:
-            # note: lazy import to avoid importing torch before initializing
-            from vllm.utils import init_cached_hf_modules
-
-            init_cached_hf_modules()
-
         # Torch profiler. Enabled and configured through env vars:
         # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
         if envs.VLLM_TORCH_PROFILER_DIR:
