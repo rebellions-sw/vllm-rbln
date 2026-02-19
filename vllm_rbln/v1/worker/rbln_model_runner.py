@@ -1722,7 +1722,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     num_padded_tokens=self.max_num_batched_tokens)
 
             self._execute_dummy_requests(so, cso, current_intermediate_tensors)
-        print("@@@@@@@@@@ warmup sampler @@@@@@@@@@")
+
         # compile sampler for all possible decode batches
         max_decode_batch = self.bucketing_manager.decode_batch_buckets[-1]
         for decode_batch in range(1, max_decode_batch+1):
