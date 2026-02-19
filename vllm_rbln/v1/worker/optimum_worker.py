@@ -67,6 +67,37 @@ class RBLNOptimumWorker(WorkerBase):
                 "Profiling enabled. Traces will be saved to: %s",
                 torch_profiler_trace_dir,
             )
+            # NOTE:
+            # Since v0.13.0 VLLM_TORCH_PROFILER_* env vars are set to None by default
+            # They will be deprecated in the next version.
+            if envs.VLLM_TORCH_PROFILER_RECORD_SHAPES is None:
+                logger.warning(
+                    "TORCH_PROFILER_RECORD_SHAPES is not set. "
+                    "Defaulting to False to reduce overhead. "
+                    "Set it to True to record tensor shapes in the profiler trace."
+                )
+                envs.VLLM_TORCH_PROFILER_RECORD_SHAPES = False
+            if envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY is None:
+                logger.warning(
+                    "TORCH_PROFILER_WITH_PROFILE_MEMORY is not set. "
+                    "Defaulting to False to reduce overhead. "
+                    "Set it to True to enable memory profiling in the profiler trace."
+                )
+                envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY = False
+            if envs.VLLM_TORCH_PROFILER_WITH_STACK is None:
+                logger.warning(
+                    "TORCH_PROFILER_WITH_STACK is not set. "
+                    "Defaulting to False to reduce overhead. "
+                    "Set it to True to record stack traces in the profiler trace."
+                )
+                envs.VLLM_TORCH_PROFILER_WITH_STACK = False
+            if envs.VLLM_TORCH_PROFILER_WITH_FLOPS is None:
+                logger.warning(
+                    "TORCH_PROFILER_WITH_FLOPS is not set. "
+                    "Defaulting to False to reduce overhead. "
+                    "Set it to True to estimate FLOPs in the profiler trace."
+                )
+                envs.VLLM_TORCH_PROFILER_WITH_FLOPS = False
             logger.debug(
                 "Profiler config: record_shapes=%s,"
                 "profile_memory=%s,with_stack=%s,with_flops=%s",
