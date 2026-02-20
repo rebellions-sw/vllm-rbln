@@ -65,7 +65,6 @@ class RblnPlatform(Platform):
     ray_device_key: str = "RBLN"
     simple_compile_backend = "bypass"
     device_control_env_var: str = "RBLN_DEVICES"
-    dist_backend: str = "rbln-ccl"
     current_stream = _StreamPlaceholder
 
     @classmethod

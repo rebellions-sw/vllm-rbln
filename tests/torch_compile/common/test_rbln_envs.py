@@ -91,3 +91,8 @@ def test_rbln_envs():
         f"Expected VLLM_RBLN_METRICS to be False, \
         got {rbln_envs.VLLM_RBLN_METRICS}"
     )
+
+    assert not rbln_envs.VLLM_RBLN_AUTO_PORT, (
+        f"Expected VLLM_RBLN_AUTO_PORT to be False, \
+        got {rbln_envs.VLLM_RBLN_AUTO_PORT}"
+    )
