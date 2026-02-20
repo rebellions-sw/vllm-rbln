@@ -172,7 +172,7 @@ def set_cpu_affinity(
             # For x86 SMT-2, use 1 CPU per core
             local_omp_cpuid = get_autobind_cpu_ids(rank, local_rank,
                                                    parallel_config,
-                                                   lambda cpus: cpus[-1:])
+                                                   lambda cpus: cpus[:1])
         else:
             local_omp_cpuid = "nobind"
     else:
@@ -228,28 +228,34 @@ def set_omp_num_threads(
     local_rank: int,
     default_num_threads: int = 2,
 ) -> None:
-    """Set OMP_NUM_THREADS environment variable if not already defined.
+    """Set the number of threads for intra-op parallelism in this process.
+
+    This function sets the thread count using torch.set_num_threads(),
+    which directly controls the OpenMP/MKL thread pool for the current
+    process only, regardless of when it's called.
 
     Args:
         rank: Global rank of the worker.
         local_rank: Local rank of the worker.
-        default_num_threads: Default number of threads to use if
-            OMP_NUM_THREADS is not set. Defaults to 2.
+        default_num_threads: Number of threads to use if OMP_NUM_THREADS
+            is not set. Defaults to 2.
     """
+    import torch
 
-    if "OMP_NUM_THREADS" not in os.environ:
-        os.environ["OMP_NUM_THREADS"] = str(default_num_threads)
-        logger.info(
-            "Set OMP_NUM_THREADS to %d for rank %d (local_rank %d)",
-            default_num_threads,
-            rank,
-            local_rank,
-        )
+    # Determine the number of threads to use
+    if "OMP_NUM_THREADS" in os.environ:
+        num_threads = int(os.environ["OMP_NUM_THREADS"])
     else:
-        logger.info(
-            "OMP_NUM_THREADS is already defined for rank %d "
-            "(local_rank %d): %s",
-            rank,
-            local_rank,
-            os.environ["OMP_NUM_THREADS"],
-        )
+        num_threads = default_num_threads
+        # Set env var for any future subprocesses
+        os.environ["OMP_NUM_THREADS"] = str(num_threads)
+
+    # Directly set PyTorch's thread count for this process
+    torch.set_num_threads(num_threads)
+
+    logger.info(
+        "Set torch.num_threads to %d for rank %d (local_rank %d)",
+        num_threads,
+        rank,
+        local_rank,
+    )
