@@ -459,6 +459,7 @@ def init_worker_distributed_environment(
     new_backend = backend
     if envs.VLLM_RBLN_AUTO_PORT and has_torch_rbln:
         new_backend = "rbln-ccl"
+        os.environ["RCCL_PORT_GEN"] = "1"
 
     init_distributed_environment(
         world_size,
