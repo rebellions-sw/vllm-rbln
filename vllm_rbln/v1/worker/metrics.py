@@ -130,6 +130,27 @@ class StepMetrics:
         """Get total number of requests processed."""
         return len(self.latencies)
 
+    def show_stats(self, stat_type: str):
+        if self.get_call_counts() > 0:
+            logger.info("%s METRICS:", stat_type)
+            logger.info("  Total call counts: %d", self.get_call_counts())
+            logger.info("  Average latency: %.2f ms", self.get_avg_latency())
+            if sum(self.token_counts) > 0:
+                logger.info("  Total tokens processed: %d", sum(self.token_counts))
+                logger.info(
+                    "  Average throughput: %.2f tokens/sec", self.get_avg_throughput()
+                )
+            if self.host_times:
+                logger.info("  Average host time: %.2f us", self.get_avg_host_time())
+            if self.device_times:
+                logger.info(
+                    "  Average device time: %.2f us", self.get_avg_device_time()
+                )
+            if self.ccl_times:
+                logger.info("  Average ccl time: %.2f us", self.get_avg_ccl_time())
+        else:
+            logger.info("%s METRICS: No data recorded", stat_type)
+
 
 class PrefillMetricsByRequestID:
     """Metrics for prefill step by request id."""
@@ -166,7 +187,8 @@ class PrefillMetricsByRequestID:
 class PerformanceTracker:
     """Tracks performance metrics for prefill and decode steps."""
 
-    def __init__(self):
+    def __init__(self, name: str | None = None):
+        self.name = name
         self.prefill_metrics = StepMetrics()
         self.decode_metrics = StepMetrics()
         self.prefill_metrics_by_request_id = PrefillMetricsByRequestID()
@@ -229,125 +251,20 @@ class PerformanceTracker:
 
     def print_final_stats(self):
         logger.info("=" * 80)
-        logger.info("FINAL PERFORMANCE STATISTICS")
+        if self.name:
+            logger.info("FINAL PERFORMANCE STATISTICS [%s]", self.name)
+        else:
+            logger.info("FINAL PERFORMANCE STATISTICS")
         logger.info("=" * 80)
 
         # Prefill stats
-        if self.prefill_metrics.get_call_counts() > 0:
-            logger.info("PREFILL METRICS:")
-            logger.info(
-                "  Total call counts: %d", self.prefill_metrics.get_call_counts()
-            )
-            logger.info(
-                "  Total tokens processed: %d", sum(self.prefill_metrics.token_counts)
-            )
-            logger.info(
-                "  Average latency: %.2f ms", self.prefill_metrics.get_avg_latency()
-            )
-            logger.info(
-                "  Average throughput: %.2f tokens/sec",
-                self.prefill_metrics.get_avg_throughput(),
-            )
-            if self.prefill_metrics_by_request_id.get_num_request_ids() > 0:
-                avg_latency_by_request_id = (
-                    self.prefill_metrics_by_request_id.get_avg_latency_per_request()
-                )
-                logger.info("  Average latency per request:")
-                for request_id, latency in avg_latency_by_request_id.items():
-                    logger.info("    %s: %.2f ms", request_id, latency)
-            if self.prefill_metrics.host_times:
-                logger.info(
-                    "  Average host time: %.2f us",
-                    self.prefill_metrics.get_avg_host_time(),
-                )
-            if self.prefill_metrics.device_times:
-                logger.info(
-                    "  Average device time: %.2f us",
-                    self.prefill_metrics.get_avg_device_time(),
-                )
-            if self.prefill_metrics.ccl_times:
-                logger.info(
-                    "  Average ccl time: %.2f us",
-                    self.prefill_metrics.get_avg_ccl_time(),
-                )
-
-        else:
-            logger.info("PREFILL METRICS: No data recorded")
-
+        self.prefill_metrics.show_stats("PREFILL")
         logger.info("-" * 40)
 
         # Decode stats
-        if self.decode_metrics.get_call_counts() > 0:
-            logger.info("DECODE METRICS:")
-            logger.info(
-                "  Total call counts: %d", self.decode_metrics.get_call_counts()
-            )
-            logger.info(
-                "  Total tokens processed: %d", sum(self.decode_metrics.token_counts)
-            )
-            logger.info(
-                "  Average latency: %.2f ms", self.decode_metrics.get_avg_latency()
-            )
-            logger.info(
-                "  Average throughput: %.2f tokens/sec",
-                self.decode_metrics.get_avg_throughput(),
-            )
-            if self.decode_metrics.host_times:
-                logger.info(
-                    "  Average host time: %.2f us",
-                    self.decode_metrics.get_avg_host_time(),
-                )
-            if self.decode_metrics.device_times:
-                logger.info(
-                    "  Average device time: %.2f us",
-                    self.decode_metrics.get_avg_device_time(),
-                )
-            if self.decode_metrics.ccl_times:
-                logger.info(
-                    "  Average ccl time: %.2f us",
-                    self.decode_metrics.get_avg_ccl_time(),
-                )
-
-        else:
-            logger.info("DECODE METRICS: No data recorded")
-
+        self.decode_metrics.show_stats("DECODE")
         logger.info("-" * 40)
 
         # Padded decode stats
-        if self.padded_decode_metrics.get_call_counts() > 0:
-            logger.info("PADDED DECODE METRICS:")
-            logger.info(
-                "  Total call counts: %d", self.padded_decode_metrics.get_call_counts()
-            )
-            logger.info(
-                "  Total tokens processed: %d",
-                sum(self.padded_decode_metrics.token_counts),
-            )
-            logger.info(
-                "  Average latency: %.2f ms",
-                self.padded_decode_metrics.get_avg_latency(),
-            )
-            logger.info(
-                "  Average throughput: %.2f tokens/sec",
-                self.padded_decode_metrics.get_avg_throughput(),
-            )
-            if self.padded_decode_metrics.host_times:
-                logger.info(
-                    "  Average host time: %.2f us",
-                    self.padded_decode_metrics.get_avg_host_time(),
-                )
-            if self.padded_decode_metrics.device_times:
-                logger.info(
-                    "  Average device time: %.2f us",
-                    self.padded_decode_metrics.get_avg_device_time(),
-                )
-            if self.padded_decode_metrics.ccl_times:
-                logger.info(
-                    "  Average ccl time: %.2f us",
-                    self.padded_decode_metrics.get_avg_ccl_time(),
-                )
-
-        else:
-            logger.info("PADDED DECODE METRICS: No data recorded")
-
+        self.padded_decode_metrics.show_stats("PADDED DECODE")
         logger.info("=" * 80)
