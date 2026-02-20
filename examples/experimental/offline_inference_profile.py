@@ -14,9 +14,6 @@
 
 import os
 
-# The profile results can be visualized using https://ui.perfetto.dev/
-os.environ["VLLM_TORCH_PROFILER_DIR"] = "./profile"
-
 from vllm import LLM, SamplingParams
 
 llm = LLM(
@@ -25,6 +22,11 @@ llm = LLM(
     enable_chunked_prefill=True,
     max_num_batched_tokens=128,
     max_num_seqs=1,
+    # The profile results can be visualized using https://ui.perfetto.dev/
+    profiler_config={
+        "profiler": "torch",
+        "torch_profiler_dir": "./profile",
+    },
 )
 
 # The first run initializes the compiled models.
