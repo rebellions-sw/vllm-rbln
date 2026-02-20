@@ -287,8 +287,7 @@ class RBLNWorker(WorkerBase):
         )
 
         logger.info(
-            "available_memory_estimate = %.2f GB",
-            available_memory_estimate / 10**9,
+            "available_memory_estimate = %.2f GB", available_memory_estimate / 10**9
         )
 
         return available_memory_estimate
@@ -457,9 +456,15 @@ def init_worker_distributed_environment(
         os.environ["WORLD_SIZE"] = str(world_size_across_dp)
 
     new_backend = backend
-    if envs.VLLM_RBLN_AUTO_PORT and has_torch_rbln:
-        new_backend = "rbln-ccl"
-        os.environ["RCCL_PORT_GEN"] = "1"
+    if envs.VLLM_RBLN_AUTO_PORT:
+        if has_torch_rbln:
+            new_backend = "rbln-ccl"
+            os.environ["RCCL_PORT_GEN"] = "1"
+        else:
+            logger.warning(
+                "Cannot use auto port because torch-rbln is not installed. "
+                "You may need to install torch-rbln to use auto port feature."
+            )
 
     init_distributed_environment(
         world_size,
