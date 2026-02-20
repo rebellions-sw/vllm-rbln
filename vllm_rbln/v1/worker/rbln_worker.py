@@ -19,11 +19,14 @@ from types import NoneType
 from typing import TYPE_CHECKING
 
 import torch
+
 try:
     import torch.rbln
+
     has_torch_rbln = True
 except ImportError:
     has_torch_rbln = False
+
 import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.distributed import (
@@ -139,7 +142,9 @@ class RBLNWorker(WorkerBase):
         logger.warning("sleep mode is not supported on RBLN, ignore it.")
         pass
 
-    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks: int) -> None:
+    def initialize_cache(
+        self, num_gpu_blocks: int, num_cpu_blocks: int
+    ) -> None:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
@@ -150,7 +155,9 @@ class RBLNWorker(WorkerBase):
         total_device_count = world_size * envs.VLLM_RBLN_TP_SIZE
 
         if env_var not in os.environ:
-            dev_begin = total_device_count * self.parallel_config.data_parallel_rank
+            dev_begin = (
+                total_device_count * self.parallel_config.data_parallel_rank
+            )
             dev_end = dev_begin + total_device_count
             device_ids = [str(i) for i in range(dev_begin, dev_end)]
             start_idx = self.local_rank * envs.VLLM_RBLN_TP_SIZE
@@ -284,7 +291,8 @@ class RBLNWorker(WorkerBase):
         )
 
         logger.info(
-            "available_memory_estimate = %.2f GB", available_memory_estimate / 10**9
+            "available_memory_estimate = %.2f GB",
+            available_memory_estimate / 10**9,
         )
 
         return available_memory_estimate
@@ -299,7 +307,9 @@ class RBLNWorker(WorkerBase):
     def compile_or_warm_up_model(self) -> None:
         if self.parallel_config.data_parallel_size > 1:
             if envs.VLLM_RBLN_DP_IMPL == "padded_decode":
-                max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
+                max_num_batched_tokens = (
+                    self.scheduler_config.max_num_batched_tokens
+                )
                 max_num_seqs = self.scheduler_config.max_num_seqs
                 # TODO: consider relaxing this constraint
                 assert max_num_batched_tokens % max_num_seqs == 0, (
@@ -349,14 +359,17 @@ class RBLNWorker(WorkerBase):
                 get_pp_group().recv_tensor_dict()
             )
 
-        output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)
+        output = self.model_runner.execute_model(
+            scheduler_output, intermediate_tensors
+        )
         if isinstance(output, ModelRunnerOutput | NoneType):
             return output
 
         assert isinstance(output, IntermediateTensors)
         parallel_config = self.vllm_config.parallel_config
         assert (
-            parallel_config.distributed_executor_backend != ("external_launcher")
+            parallel_config.distributed_executor_backend
+            != ("external_launcher")
             and not get_pp_group().is_last_rank
         )
 
@@ -391,7 +404,9 @@ class RBLNWorker(WorkerBase):
             # only print profiler results on rank 0
             if self.local_rank == 0:
                 print(
-                    self.profiler.key_averages().table(sort_by="self_cuda_time_total")
+                    self.profiler.key_averages().table(
+                        sort_by="self_cuda_time_total"
+                    )
                 )
 
     def execute_dummy_batch(self) -> None:
@@ -454,7 +469,7 @@ def init_worker_distributed_environment(
 
     new_backend = backend
     if envs.VLLM_RBLN_AUTO_PORT and has_torch_rbln:
-       new_backend = "rbln-ccl"
+        new_backend = "rbln-ccl"
 
     init_distributed_environment(
         world_size,

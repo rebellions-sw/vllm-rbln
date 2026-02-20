@@ -26,8 +26,10 @@ import numpy as np
 import rebel
 import torch
 import torch.nn as nn
+
 try:
-    import torch.rbln  # type: ignore[import]
+    import torch.rbln
+
     has_torch_rbln = True
 except ImportError:
     has_torch_rbln = False
