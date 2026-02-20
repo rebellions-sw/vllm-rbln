@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from typing import TYPE_CHECKING
 
 import torch
@@ -113,16 +114,38 @@ class RblnPlatform(Platform):
                 action.choices = None  # Override choices
 
     @classmethod
+    def validate_and_setup_prerequisite(cls, vllm_config: VllmConfig) -> None:
+        scheduler_config = vllm_config.scheduler_config
+        if not scheduler_config.enable_chunked_prefill:
+            raise ValueError(
+                "RBLN does not officially support disabling chunked prefill. "
+                "Please don't disable chunked prefill by yourself."
+            )
+
+        parallel_config = vllm_config.parallel_config
+        use_model_parallel = (
+            parallel_config.tensor_parallel_size > 1
+            or parallel_config.pipeline_parallel_size > 1
+            or parallel_config.data_parallel_size > 1
+            or parallel_config.enable_expert_parallel
+        )
+        if use_model_parallel:
+            if envs.VLLM_RBLN_PROFILER:
+                raise RuntimeError(
+                    "RBLN_PROFILER is not supported when using vLLM model parallel "
+                    "(TP, DP, EP, or PP)."
+                )
+            os.environ["RBLN_CTX_STANDALONE"] = "1"
+            os.environ["RBLN_FORCE_CCL_ASYNC"] = "1"
+
+    @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
         model_config = vllm_config.model_config
         parallel_config = vllm_config.parallel_config
         scheduler_config = vllm_config.scheduler_config
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
-            assert scheduler_config.enable_chunked_prefill, (
-                "RBLN does not officially support disabling chunked prefill. "
-                "Please don't disable chunked prefill by yourself."
-            )
+            cls.validate_and_setup_prerequisite(vllm_config)
             if envs.VLLM_RBLN_ENFORCE_MODEL_FP32:
                 logger.info("original model_config.dtype = %s", model_config.dtype)
                 if model_config.dtype == torch.bfloat16:
