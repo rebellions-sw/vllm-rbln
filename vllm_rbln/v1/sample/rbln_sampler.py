@@ -128,7 +128,12 @@ def rbln_top_k_top_p_sample(
 
 
 class RBLNTopKTopPSampler(nn.Module):
-    def __init__(self, logprobs_mode: LogprobsMode = "raw_logprobs", seed: int = 42):
+    def __init__(
+        self,
+        logprobs_mode: LogprobsMode = "raw_logprobs",
+        seed: int = 42,
+        compile_context: rebel.CompileContext = None,
+    ):
         # TODO(rbln): Merge more ops to rbln context.
         #       Currently, we only have softmax in rbln context.
         super().__init__()
@@ -139,7 +144,11 @@ class RBLNTopKTopPSampler(nn.Module):
         )
 
         rebel.manual_seed(seed)
-        options = {"compile_context": rebel.CompileContext()}
+        options = {
+            "compile_context": compile_context
+            if compile_context
+            else rebel.CompileContext()
+        }
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
         self._compiled_rbln_topk_topp_sampler = torch.compile(
@@ -175,11 +184,16 @@ class RBLNTopKTopPSampler(nn.Module):
 
 
 class RBLNSampler(VLLMSampler):
-    def __init__(self, logprobs_mode: LogprobsMode = "raw_logprobs", seed: int = 42):
+    def __init__(
+        self,
+        logprobs_mode: LogprobsMode = "raw_logprobs",
+        seed: int = 42,
+        compile_context: rebel.CompileContext = None,
+    ):
         super().__init__()
         if logprobs_mode in ("raw_logprobs", "raw_logits"):
             self.topk_topp_sampler = RBLNTopKTopPSampler(
-                logprobs_mode=logprobs_mode, seed=seed
+                logprobs_mode=logprobs_mode, seed=seed, compile_context=compile_context
             )
         else:
             logger.warning_once(
