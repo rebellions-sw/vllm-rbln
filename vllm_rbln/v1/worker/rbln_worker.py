@@ -19,6 +19,14 @@ from types import NoneType
 from typing import TYPE_CHECKING
 
 import torch
+
+try:
+    import torch.rbln
+
+    has_torch_rbln = True
+except ImportError:
+    has_torch_rbln = False
+
 import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.distributed import (
@@ -455,12 +463,23 @@ def init_worker_distributed_environment(
         os.environ["LOCAL_RANK"] = str(rank_across_dp)
         os.environ["WORLD_SIZE"] = str(world_size_across_dp)
 
+    new_backend = backend
+    if envs.VLLM_RBLN_AUTO_PORT:
+        if has_torch_rbln:
+            new_backend = "rbln-ccl"
+            os.environ["RCCL_PORT_GEN"] = "1"
+        else:
+            logger.warning(
+                "Cannot use auto port because torch-rbln is not installed. "
+                "You may need to install torch-rbln to use auto port feature."
+            )
+
     init_distributed_environment(
         world_size,
         rank,
         distributed_init_method,
         local_rank,
-        backend,
+        backend=new_backend,
     )
 
     ensure_model_parallel_initialized(

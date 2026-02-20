@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT: int = 1
     VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS: list[int] = []
     VLLM_RBLN_USE_CUSTOM_KERNEL: bool = False
+    VLLM_RBLN_AUTO_PORT: bool = True
 
 
 def get_dp_impl() -> str:
@@ -246,6 +247,10 @@ environment_variables = {
     # Decode batch bucket limit
     "VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT": lambda: int(
         os.environ.get("VLLM_RBLN_DECODE_BATCH_BUCKET_LIMIT", 1)
+    ),
+    # Auto port
+    "VLLM_RBLN_AUTO_PORT": (
+        lambda: os.environ.get("VLLM_RBLN_AUTO_PORT", "False").lower() in ("true", "1")
     ),
     # Decode batch bucket manual buckets
     "VLLM_RBLN_DECODE_BATCH_BUCKET_MANUAL_BUCKETS": get_decode_batch_bucket_manual_buckets,  # noqa E501

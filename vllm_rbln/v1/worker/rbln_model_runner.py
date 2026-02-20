@@ -26,6 +26,14 @@ import numpy as np
 import rebel
 import torch
 import torch.nn as nn
+
+try:
+    import torch.rbln
+
+    has_torch_rbln = True
+except ImportError:
+    has_torch_rbln = False
+
 from vllm.attention.backends.abstract import AttentionBackend, AttentionType, MultipleOf
 from vllm.attention.layer import Attention
 from vllm.config import VllmConfig, get_layers_from_vllm_config
@@ -1338,6 +1346,12 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             options["cache_dir"] = os.path.join(envs.VLLM_CACHE_ROOT, "rbln")
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
+
+        if envs.VLLM_RBLN_AUTO_PORT and has_torch_rbln:
+            options["use_global_ctx"] = True
+            # TODO(yunseong.kim): use device_id from current platform
+            # when vllm-rbln supports it
+            options["global_device_id"] = 0
 
         # compile compute_logits
         # FIXME(jiwoo.park): method assignment for torch.compile
