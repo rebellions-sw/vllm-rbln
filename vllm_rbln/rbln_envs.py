@@ -248,12 +248,6 @@ environment_variables = {
         lambda: os.environ.get("RBLN_USE_CUSTOM_KERNEL", "False").lower()
         in ("true", "1")
     ),
-    "VLLM_RBLN_CTX_STANDALONE": (
-        lambda: os.environ.get("RBLN_CTX_STANDALONE", "False").lower() in ("true", "1")
-    ),
-    "VLLM_RBLN_FORCE_CCL_ASYNC": (
-        lambda: os.environ.get("RBLN_FORCE_CCL_ASYNC", "False").lower() in ("true", "1")
-    ),
     "VLLM_RBLN_PROFILER": (
         lambda: os.environ.get("RBLN_PROFILER", "False").lower() in ("true", "1")
     ),

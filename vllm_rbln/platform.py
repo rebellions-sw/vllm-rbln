@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from typing import TYPE_CHECKING
 
 import torch
@@ -113,7 +114,7 @@ class RblnPlatform(Platform):
                 action.choices = None  # Override choices
 
     @classmethod
-    def check_vllm_native_prerequisite(cls, vllm_config: VllmConfig) -> None:
+    def validate_and_setup_prerequisite(cls, vllm_config: VllmConfig) -> None:
         scheduler_config = vllm_config.scheduler_config
         if not scheduler_config.enable_chunked_prefill:
             raise ValueError(
@@ -129,21 +130,13 @@ class RblnPlatform(Platform):
             or parallel_config.enable_expert_parallel
         )
         if use_model_parallel:
-            if not envs.VLLM_RBLN_CTX_STANDALONE:
-                raise ValueError(
-                    "When using vLLM model parallel (TP, DP, EP, or PP), "
-                    "RBLN_CTX_STANDALONE must be set to 1."
-                )
-            if not envs.VLLM_RBLN_FORCE_CCL_ASYNC:
-                raise ValueError(
-                    "When using vLLM model parallel (TP, DP, EP, or PP), "
-                    "RBLN_FORCE_CCL_ASYNC must be set to 1."
-                )
             if envs.VLLM_RBLN_PROFILER:
                 raise RuntimeError(
                     "RBLN_PROFILER is not supported when using vLLM model parallel "
                     "(TP, DP, EP, or PP)."
                 )
+            os.environ["RBLN_CTX_STANDALONE"] = "1"
+            os.environ["RBLN_FORCE_CCL_ASYNC"] = "1"
 
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
@@ -152,7 +145,7 @@ class RblnPlatform(Platform):
         scheduler_config = vllm_config.scheduler_config
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
-            cls.check_vllm_native_prerequisite(vllm_config)
+            cls.validate_and_setup_prerequisite(vllm_config)
             if envs.VLLM_RBLN_ENFORCE_MODEL_FP32:
                 logger.info("original model_config.dtype = %s", model_config.dtype)
                 if model_config.dtype == torch.bfloat16:
