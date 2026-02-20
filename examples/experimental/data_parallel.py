@@ -53,8 +53,6 @@ from time import sleep
 from vllm import LLM, SamplingParams
 from vllm.utils import get_open_port
 
-os.environ["VLLM_TORCH_PROFILER_DIR"] = "./profile"
-
 
 def main(
     model,
@@ -124,6 +122,10 @@ def main(
         trust_remote_code=True,
         tensor_parallel_size=tp_size,
         enable_expert_parallel=enable_ep,
+        profiler_config={
+            "profiler": "torch",
+            "torch_profiler_dir": "./profile",
+        },
         # data_parallel_size=dp_size,
         # enforce_eager=True,
     )

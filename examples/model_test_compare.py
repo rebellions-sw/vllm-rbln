@@ -221,6 +221,13 @@ def generate_llm_args(device: str):
         "trust_remote_code": args.trust_remote_code,
         "max_logprobs": args.max_logprobs_cap,
     }
+    if args.profile:
+        profile_dir = f"./profile/{device}_{model_id.replace('/', '_')}"
+        os.makedirs(profile_dir, exist_ok=True)
+        llm_args["profiler_config"] = {
+            "profiler": "torch",
+            "torch_profiler_dir": profile_dir,
+        }
     if device == "rbln":
         llm_args.update(
             {
@@ -256,7 +263,6 @@ def set_env_for_device(device: str):
         "USE_VLLM_MODEL",
         "VLLM_USE_V1",
         "VLLM_DISABLE_COMPILE_CACHE",
-        "VLLM_TORCH_PROFILER_DIR",
     ]:
         os.environ.pop(k, None)
 

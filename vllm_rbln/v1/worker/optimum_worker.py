@@ -59,32 +59,35 @@ class RBLNOptimumWorker(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
 
-        # Torch profiler. Enabled and configured through env vars:
-        # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
-        if envs.VLLM_TORCH_PROFILER_DIR:
-            torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
+        profiler_config = vllm_config.profiler_config
+        # Set up profiler if profiling is enabled
+        if profiler_config.torch_profiler_dir:
+            torch_profiler_trace_dir = profiler_config.torch_profiler_dir
             logger.info(
                 "Profiling enabled. Traces will be saved to: %s",
                 torch_profiler_trace_dir,
             )
             logger.debug(
                 "Profiler config: record_shapes=%s,"
-                "profile_memory=%s,with_stack=%s,with_flops=%s",
-                envs.VLLM_TORCH_PROFILER_RECORD_SHAPES,
-                envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-                envs.VLLM_TORCH_PROFILER_WITH_STACK,
-                envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
+                "profile_memory=%s,with_stack=%s,with_flops=%s,use_gzip=%s",
+                profiler_config.torch_profiler_record_shapes,
+                profiler_config.torch_profiler_with_memory,
+                profiler_config.torch_profiler_with_stack,
+                profiler_config.torch_profiler_with_flops,
+                profiler_config.torch_profiler_use_gzip,
             )
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
                 ],
-                record_shapes=envs.VLLM_TORCH_PROFILER_RECORD_SHAPES,
-                profile_memory=envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-                with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
-                with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
+                record_shapes=profiler_config.torch_profiler_record_shapes,
+                profile_memory=profiler_config.torch_profiler_with_memory,
+                with_stack=profiler_config.torch_profiler_with_stack,
+                with_flops=profiler_config.torch_profiler_with_flops,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True
+                    torch_profiler_trace_dir,
+                    worker_name=f"{vllm_config.instance_id}-rank-{self.rank}",
+                    use_gzip=profiler_config.torch_profiler_use_gzip,
                 ),
             )
         else:
