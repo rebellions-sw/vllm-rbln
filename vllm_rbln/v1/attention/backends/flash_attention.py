@@ -806,7 +806,7 @@ def sliding_window_attention_naive_decode_impl(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
-    attn_mask: torch.Tensor,
+    attn_mask: torch.Tensor | None = None,
     sinks: torch.Tensor | None = None,
 ) -> torch.Tensor:
     if envs.VLLM_RBLN_COMPILE_MODEL:
@@ -903,7 +903,7 @@ def _(
     scale: torch.Tensor,
     block_tables: torch.Tensor,
     dummy: torch.Tensor,
-    attn_mask: torch.Tensor,
+    attn_mask: torch.Tensor | None = None,
     sinks: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return torch.empty_like(q)
@@ -1417,18 +1417,26 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 )
 
             if q_len == 1:
-                attn_output = sliding_window_attention_naive_decode(  # noqa: E501
+                decode_args = [
                     query,
                     key,
                     value,
                     kv_cache,
-                    attn_metadata.cache_seq_lens.to(torch.int32),
+                    attn_metadata.cache_seq_lens.to(torch.int32)
+                    if self.is_batch_attention_opt
+                    else attn_metadata.cache_seq_lens,
                     attn_metadata.cache_offsets,
                     self.scale,
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
-                    attn_metadata.swa_attn_masks,
-                    self.sinks,
+                ]
+                if self.is_batch_attention_opt:
+                    decode_args.append(attn_metadata.swa_attn_masks)
+                else:
+                    decode_args.append(None)
+                decode_args.append(self.sinks)
+                attn_output = sliding_window_attention_naive_decode(  # noqa: E501
+                    *decode_args,
                 )
             else:
                 attn_output = sliding_window_attention_naive_prefill(  # noqa: E501
