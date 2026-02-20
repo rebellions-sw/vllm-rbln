@@ -113,8 +113,8 @@ class RBLNWorker(WorkerBase):
             for var in vllm_torch_profiler_env_vars:
                 if getattr(envs, var) is None:
                     logger.warning(
-                        "%s is not set. Defaulting to False to prevent error. "
-                        "Set it to True to enable it in the profiler trace.",
+                        "%s is not set and will default to False. "
+                        "Set it to True to enable this option in the profiler trace.",
                         var,
                     )
                     setattr(envs, var, False)
