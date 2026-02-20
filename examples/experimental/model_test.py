@@ -110,7 +110,6 @@ import os
 
 ## The profile results can be visualized using https://ui.perfetto.dev/
 profile_dir = "./profile/" + model_id.replace("/", "_")
-os.environ["VLLM_TORCH_PROFILER_DIR"] = profile_dir
 
 # Create a sampling params object.
 sampling_params = SamplingParams(temperature=0.0)
@@ -130,6 +129,10 @@ llm = LLM(
     pipeline_parallel_size=pipeline_parallel_size,
     data_parallel_size=data_parallel_size,
     enable_expert_parallel=enable_expert_parallel,
+    profiler_config={
+        "profiler": "torch",
+        "torch_profiler_dir": profile_dir,
+    },
 )
 
 # 1. warmup -  The first run initializes the compiled models.
