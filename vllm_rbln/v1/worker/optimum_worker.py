@@ -70,42 +70,20 @@ class RBLNOptimumWorker(WorkerBase):
             # NOTE:
             # Since v0.13.0 VLLM_TORCH_PROFILER_* env vars are set to None by default
             # They will be deprecated in the next version.
-            if envs.VLLM_TORCH_PROFILER_RECORD_SHAPES is None:
-                logger.warning(
-                    "TORCH_PROFILER_RECORD_SHAPES is not set. "
-                    "Defaulting to False to reduce overhead. "
-                    "Set it to True to record tensor shapes in the profiler trace."
-                )
-                envs.VLLM_TORCH_PROFILER_RECORD_SHAPES = False
-            if envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY is None:
-                logger.warning(
-                    "TORCH_PROFILER_WITH_PROFILE_MEMORY is not set. "
-                    "Defaulting to False to reduce overhead. "
-                    "Set it to True to enable memory profiling in the profiler trace."
-                )
-                envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY = False
-            if envs.VLLM_TORCH_PROFILER_WITH_STACK is None:
-                logger.warning(
-                    "TORCH_PROFILER_WITH_STACK is not set. "
-                    "Defaulting to False to reduce overhead. "
-                    "Set it to True to record stack traces in the profiler trace."
-                )
-                envs.VLLM_TORCH_PROFILER_WITH_STACK = False
-            if envs.VLLM_TORCH_PROFILER_WITH_FLOPS is None:
-                logger.warning(
-                    "TORCH_PROFILER_WITH_FLOPS is not set. "
-                    "Defaulting to False to reduce overhead. "
-                    "Set it to True to estimate FLOPs in the profiler trace."
-                )
-                envs.VLLM_TORCH_PROFILER_WITH_FLOPS = False
-            logger.debug(
-                "Profiler config: record_shapes=%s,"
-                "profile_memory=%s,with_stack=%s,with_flops=%s",
-                envs.VLLM_TORCH_PROFILER_RECORD_SHAPES,
-                envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-                envs.VLLM_TORCH_PROFILER_WITH_STACK,
-                envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
-            )
+            vllm_torch_profiler_env_vars = [
+                "VLLM_TORCH_PROFILER_RECORD_SHAPES",
+                "VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY",
+                "VLLM_TORCH_PROFILER_WITH_STACK",
+                "VLLM_TORCH_PROFILER_WITH_FLOPS",
+            ]
+            for var in vllm_torch_profiler_env_vars:
+                if getattr(envs, var) is None:
+                    logger.warning(
+                        "%s is not set. Defaulting to False to prevent error. "
+                        "Set it to True to enable it in the profiler trace.",
+                        var,
+                    )
+                    setattr(envs, var, False)
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,

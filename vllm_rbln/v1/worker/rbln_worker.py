@@ -101,6 +101,23 @@ class RBLNWorker(WorkerBase):
                 "Profiling enabled. Traces will be saved to: %s",
                 torch_profiler_trace_dir,
             )
+            # NOTE:
+            # Since v0.13.0 VLLM_TORCH_PROFILER_* env vars are set to None by default
+            # They will be deprecated in the next version.
+            vllm_torch_profiler_env_vars = [
+                "VLLM_TORCH_PROFILER_RECORD_SHAPES",
+                "VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY",
+                "VLLM_TORCH_PROFILER_WITH_STACK",
+                "VLLM_TORCH_PROFILER_WITH_FLOPS",
+            ]
+            for var in vllm_torch_profiler_env_vars:
+                if getattr(envs, var) is None:
+                    logger.warning(
+                        "%s is not set. Defaulting to False to prevent error. "
+                        "Set it to True to enable it in the profiler trace.",
+                        var,
+                    )
+                    setattr(envs, var, False)
             logger.debug(
                 "Profiler config: record_shapes=%s,"
                 "profile_memory=%s,with_stack=%s,with_flops=%s",
