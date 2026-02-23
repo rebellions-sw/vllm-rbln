@@ -23,15 +23,16 @@ def __qwen2_moe_forward_v10(self, hidden_states: torch.Tensor) -> torch.Tensor:
     if self.shared_expert is not None:
         shared_output = self.shared_expert(hidden_states)
         if self.shared_expert_gate is not None:
-            shared_output = F.sigmoid(
-                self.shared_expert_gate(hidden_states)) * shared_output
-    final_hidden_states = self.experts(hidden_states=hidden_states,
-                                       router=lambda x: self.gate(x)[0])
+            shared_output = (
+                F.sigmoid(self.shared_expert_gate(hidden_states)) * shared_output
+            )
+    final_hidden_states = self.experts(
+        hidden_states=hidden_states, router=lambda x: self.gate(x)[0]
+    )
     if shared_output is not None:
         final_hidden_states = final_hidden_states + shared_output
     if self.tp_size > 1:
-        final_hidden_states = tensor_model_parallel_all_reduce(
-            final_hidden_states)
+        final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
     return final_hidden_states
 
 
@@ -44,18 +45,20 @@ def __qwen2_moe_forward_v12(self, hidden_states: torch.Tensor) -> torch.Tensor:
     # hidden_states = hidden_states.view(-1, hidden_dim)
 
     # router_logits: (num_tokens, n_experts)
-    final_hidden_states = self.experts(hidden_states=hidden_states,
-                                       router=lambda x: self.gate(x)[0])
+    final_hidden_states = self.experts(
+        hidden_states=hidden_states, router=lambda x: self.gate(x)[0]
+    )
     if self.shared_expert is not None:
         final_hidden_states = final_hidden_states[0] + final_hidden_states[1]
     if self.tp_size > 1:
         final_hidden_states = self.experts.maybe_all_reduce_tensor_model_parallel(  # noqa E501
-            final_hidden_states)
+            final_hidden_states
+        )
     # FIXME(RBLN) - DO NOT reshape
-    #return final_hidden_states.view(orig_shape)
+    # return final_hidden_states.view(orig_shape)
     return final_hidden_states
 
 
 # FIXME(RBLN) - v10 -> v12 migration
-#Qwen2MoeSparseMoeBlock.forward = __qwen2_moe_forward_v10
+# Qwen2MoeSparseMoeBlock.forward = __qwen2_moe_forward_v10
 Qwen2MoeSparseMoeBlock.forward = __qwen2_moe_forward_v12

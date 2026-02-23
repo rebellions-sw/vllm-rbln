@@ -35,41 +35,50 @@ _RBLN_GENERATION_MODELS: dict[str, tuple[str, str]] = {
 }
 
 _RBLN_ENCODER_DECODER_MODELS: dict[str, tuple[str, str]] = {
-    "BartForConditionalGeneration":
-    ("bart", "RBLNBartForConditionalGeneration"),
-    "T5ForConditionalGeneration": ("t5", "RBLNT5ForConditionalGeneration"),
-    "T5WithLMHeadModel": ("t5", "RBLNT5ForConditionalGeneration"),
-    "WhisperForConditionalGeneration":
-    ("whisper", "RBLNWhisperForConditionalGeneration"),
+    "WhisperForConditionalGeneration": (
+        "whisper",
+        "RBLNWhisperForConditionalGeneration",
+    ),
 }
 
 _RBLN_MULTIMODAL_MODELS = {
-    "LlavaNextForConditionalGeneration":
-    ("llava_next", "RBLNLlavaNextForConditionalGeneration"),
-    "Qwen2VLForConditionalGeneration": ("qwen2_vl",
-                                        "RBLNQwen2VLForConditionalGeneration"),
-    "Qwen2_5_VLForConditionalGeneration":
-    ("qwen2_5_vl", "RBLNQwen2_5_VLForConditionalGeneration"),
-    "Idefics3ForConditionalGeneration":
-    ("idefics3", "RBLNIdefics3ForConditionalGeneration"),
-    "Blip2ForConditionalGeneration": ("blip2",
-                                      "RBLNBlip2ForConditionalGeneration"),
-    "Gemma3ForConditionalGeneration": ("gemma3",
-                                       "RBLNGemma3ForConditionalGeneration"),
-    "LlavaForConditionalGeneration": ("llava",
-                                      "RBLNLlavaForConditionalGeneration"),
-    "PaliGemmaForConditionalGeneration":
-    ("paligemma", "RBLNPaliGemmaForConditionalGeneration"),
+    "LlavaNextForConditionalGeneration": (
+        "llava_next",
+        "RBLNLlavaNextForConditionalGeneration",
+    ),
+    "Qwen2VLForConditionalGeneration": (
+        "qwen2_vl",
+        "RBLNQwen2VLForConditionalGeneration",
+    ),
+    "Qwen2_5_VLForConditionalGeneration": (
+        "qwen2_5_vl",
+        "RBLNQwen2_5_VLForConditionalGeneration",
+    ),
+    "Idefics3ForConditionalGeneration": (
+        "idefics3",
+        "RBLNIdefics3ForConditionalGeneration",
+    ),
+    "Blip2ForConditionalGeneration": ("blip2", "RBLNBlip2ForConditionalGeneration"),
+    "Gemma3ForConditionalGeneration": ("gemma3", "RBLNGemma3ForConditionalGeneration"),
+    "LlavaForConditionalGeneration": ("llava", "RBLNLlavaForConditionalGeneration"),
+    "PaliGemmaForConditionalGeneration": (
+        "paligemma",
+        "RBLNPaliGemmaForConditionalGeneration",
+    ),
 }
 
 _RBLN_EMBEDDING_MODELS = {
     "T5EncoderModel": ("t5_encoder", "RBLNT5EncoderModel"),
     "BertModel": ("bert_model", "RBLNBertModel"),
-    "RobertaForSequenceClassification":
-    ("roberta_classification", "RBLNRobertaForSequenceClassification"),
+    "RobertaForSequenceClassification": (
+        "roberta_classification",
+        "RBLNRobertaForSequenceClassification",
+    ),
     "RobertaModel": ("roberta", "RBLNRobertaModel"),
-    "XLMRobertaForSequenceClassification":
-    ("xlm_roberta_classification", "RBLNXLMRobertaForSequenceClassification"),
+    "XLMRobertaForSequenceClassification": (
+        "xlm_roberta_classification",
+        "RBLNXLMRobertaForSequenceClassification",
+    ),
     "XLMRobertaModel": ("xlm_roberta", "RBLNXLMRobertaModel"),
     "Qwen3Model": ("qwen3", "RBLNQwen3Model"),
 }
@@ -94,11 +103,13 @@ def is_enc_dec_arch(config: PretrainedConfig) -> bool:
     return is_arch_supported(config, _RBLN_ENCODER_DECODER_MODELS)
 
 
-def is_arch_supported(config: PretrainedConfig,
-                      model_set: dict[str, tuple[str, str]]) -> bool:
+def is_arch_supported(
+    config: PretrainedConfig, model_set: dict[str, tuple[str, str]]
+) -> bool:
     architectures = getattr(config, "architectures", [])
-    return any(arch in _RBLN_SUPPORTED_MODELS and arch in model_set
-               for arch in architectures)
+    return any(
+        arch in _RBLN_SUPPORTED_MODELS and arch in model_set for arch in architectures
+    )
 
 
 def get_rbln_model_info(config: PretrainedConfig) -> tuple[str, str]:
@@ -111,4 +122,5 @@ def get_rbln_model_info(config: PretrainedConfig) -> tuple[str, str]:
     raise ValueError(
         f"Model architectures {architectures} are not supported on RBLN "
         f"for now. Supported architectures: "
-        f"{list(_RBLN_SUPPORTED_MODELS.keys())}")
+        f"{list(_RBLN_SUPPORTED_MODELS.keys())}"
+    )

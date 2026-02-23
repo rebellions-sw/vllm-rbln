@@ -55,7 +55,7 @@ These issue types represent development tasks that are typically addressed throu
 - feature: Develop a new capability or functionality in the codebase. Should be scoped and accompanied by acceptance criteria or use cases if possible.
 - model: Issues related to adding, modifying, or improving support for specific ML models. Include model details (e.g., architecture).
 - core: Changes that impact core engine components such as worker, model runner, scheduler, memory management, or plugin infrastructure. These usually require in-depth review and testing.
-- bug-fix: Tracks the resolution of known bugs.
+- fix: Tracks the resolution of known bugs.
 - perf: Implement improvements focused on performance, such as latency reduction, memory usage, or throughput. Include benchmarks or measurement methodology if available.
 - refactor: Improve readability, maintainability, or consistency without altering external behavior. Includes renaming, code modularization, or dependency cleanup.
 - docs: Improve or add to documentation. Includes README, usage guides, code comments, and tutorial examples. Helpful for improving project onboarding and understanding.

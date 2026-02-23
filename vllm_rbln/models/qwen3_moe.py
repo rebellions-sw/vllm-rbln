@@ -20,12 +20,12 @@ from vllm.model_executor.models.qwen3_moe import Qwen3MoeSparseMoeBlock
 def __qwen3_moe_forward_rsd(self, hidden_states: torch.Tensor) -> torch.Tensor:
     # NOTE: hidden_states can have either 1D or 2D shape.
     # router_logits: (num_tokens, n_experts)
-    final_hidden_states = self.experts(hidden_states=hidden_states,
-                                       router=lambda x: self.gate(x)[0])
+    final_hidden_states = self.experts(
+        hidden_states=hidden_states, router=lambda x: self.gate(x)[0]
+    )
     final_hidden_states = final_hidden_states
     if self.tp_size > 1:
-        final_hidden_states = tensor_model_parallel_all_reduce(
-            final_hidden_states)
+        final_hidden_states = tensor_model_parallel_all_reduce(final_hidden_states)
 
     return final_hidden_states
 

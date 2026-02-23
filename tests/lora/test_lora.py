@@ -12,17 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from types import SimpleNamespace
-from typing import Optional
 
 import pytest
 import torch
 import torch.nn as nn
 from vllm import SamplingParams, TextPrompt
-from vllm.config import (CacheConfig, LoRAConfig, ModelConfig, SchedulerConfig,
-                         VllmConfig, set_current_vllm_config)
+from vllm.config import (
+    CacheConfig,
+    LoRAConfig,
+    ModelConfig,
+    SchedulerConfig,
+    VllmConfig,
+    set_current_vllm_config,
+)
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.entrypoints.openai.api_server import (
-    build_async_engine_client_from_engine_args)
+    build_async_engine_client_from_engine_args,
+)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
@@ -30,8 +36,7 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.utils import merge_async_iterators
 
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
-from vllm_rbln.model_executor.models.optimum.model_base import (
-    KVCacheBlockAdapter)
+from vllm_rbln.model_executor.models.optimum.model_base import KVCacheBlockAdapter
 
 NUM_LORAS = 5
 BLOCK_SIZE = 16
@@ -66,9 +71,9 @@ def get_vllm_config(async_scheduling=False):
         swap_space=0,
         cache_dtype="auto",
     )
-    lora_config = LoRAConfig(max_lora_rank=MAX_LORA_RANK,
-                             max_cpu_loras=NUM_LORAS,
-                             max_loras=NUM_LORAS)
+    lora_config = LoRAConfig(
+        max_lora_rank=MAX_LORA_RANK, max_cpu_loras=NUM_LORAS, max_loras=NUM_LORAS
+    )
     vllm_config = VllmConfig(
         model_config=model_config,
         scheduler_config=scheduler_config,
@@ -95,25 +100,23 @@ def parse_lora_int_ids(running_requests_ids):
 
 async def add_lora_request(llm, lora_int_ids):
     lora_requests = [
-        LoRARequest(str(lora_int_id), lora_int_id,
-                    "/path/adapter" + str(lora_int_id))
+        LoRARequest(str(lora_int_id), lora_int_id, "/path/adapter" + str(lora_int_id))
         for lora_int_id in lora_int_ids
     ]
-    sampling_params = SamplingParams(n=1,
-                                     temperature=0.0,
-                                     top_p=1.0,
-                                     ignore_eos=True,
-                                     max_tokens=2)
+    sampling_params = SamplingParams(
+        n=1, temperature=0.0, top_p=1.0, ignore_eos=True, max_tokens=2
+    )
 
     generators = []
 
     for i, lora_request in enumerate(lora_requests):
         lora_int_id = lora_request.lora_int_id
-        generator = llm.generate(prompt=TextPrompt(
-            prompt=f"hello {lora_int_id}", multi_modal_data=None),
-                                 sampling_params=sampling_params,
-                                 lora_request=lora_request,
-                                 request_id=f"REQ{i}:LORA-{lora_int_id}")
+        generator = llm.generate(
+            prompt=TextPrompt(prompt=f"hello {lora_int_id}", multi_modal_data=None),
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+            request_id=f"REQ{i}:LORA-{lora_int_id}",
+        )
         generators.append(generator)
 
     all_gens = merge_async_iterators(*generators)
@@ -122,15 +125,16 @@ async def add_lora_request(llm, lora_int_ids):
 
 
 class MockModelWrapper(nn.Module):
-
     class MockModel:
-
         def __init__(self):
-            self.rbln_config = SimpleNamespace(lora_config=SimpleNamespace(
-                adapters=[
-                    type("RBLNLoRAAdapterConfig", (), {"lora_int_id": i + 1})()
-                    for i in range(NUM_LORAS)
-                ]))
+            self.rbln_config = SimpleNamespace(
+                lora_config=SimpleNamespace(
+                    adapters=[
+                        type("RBLNLoRAAdapterConfig", (), {"lora_int_id": i + 1})()
+                        for i in range(NUM_LORAS)
+                    ]
+                )
+            )
 
         def set_lora_int_ids(self, lora_int_ids):
             self.lora_int_ids = lora_int_ids
@@ -138,12 +142,10 @@ class MockModelWrapper(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = self.MockModel()
-        self.logits_processor = LogitsProcessor(VOCAB_SIZE,
-                                                logits_as_input=True)
+        self.logits_processor = LogitsProcessor(VOCAB_SIZE, logits_as_input=True)
         self.sampler = Sampler()
 
-    def forward(self, model_input: ModelInputForRBLN,
-                **kwargs) -> torch.Tensor:
+    def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
         input_ids = model_input.input_tokens
         request_nums = input_ids.shape[0]
         fake_logits = torch.zeros(request_nums, 1, VOCAB_SIZE)
@@ -155,15 +157,16 @@ class MockModelWrapper(nn.Module):
 
         return fake_logits
 
-    def compute_logits(self, hidden_states: torch.Tensor,
-                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
+    def compute_logits(
+        self, hidden_states: torch.Tensor, sampling_metadata: SamplingMetadata
+    ) -> torch.Tensor:
         return self.logits_processor(None, hidden_states, sampling_metadata)
 
     def sample(
         self,
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> Optional[SamplerOutput]:
+    ) -> SamplerOutput | None:
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
@@ -204,7 +207,8 @@ async def add_lora():
     )
     lora_int_ids = [1, 2, 3, 0, 1, 2]
     async with build_async_engine_client_from_engine_args(
-            engine_args, disable_frontend_multiprocessing=True) as llm:
+        engine_args, disable_frontend_multiprocessing=True
+    ) as llm:
         await add_lora_request(llm, lora_int_ids)
 
 
@@ -221,7 +225,8 @@ async def list_loras():
     )
 
     async with build_async_engine_client_from_engine_args(
-            engine_args, disable_frontend_multiprocessing=True) as llm:
+        engine_args, disable_frontend_multiprocessing=True
+    ) as llm:
         lora_ids = await llm.list_loras()
 
     return lora_ids

@@ -1,9 +1,24 @@
-from typing import Callable, Optional, Union
+# Copyright 2025 Rebellions Inc. All rights reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import torch
 import vllm.model_executor.layers.quantization.mxfp4 as upstream
-from vllm.model_executor.layers.fused_moe import (FusedMoE, FusedMoEConfig,
-                                                  FusedMoEMethodBase)
+from vllm.model_executor.layers.fused_moe import (
+    FusedMoE,
+    FusedMoEConfig,
+    FusedMoEMethodBase,
+)
 from vllm.model_executor.layers.fused_moe import modular_kernel as mk
 from vllm.model_executor.layers.fused_moe.config import FusedMoEQuantConfig
 from vllm.model_executor.utils import set_weight_attrs
@@ -15,8 +30,9 @@ from vllm_rbln.model_executor.layers.fused_moe.layer import get_tokens_mask
 logger = init_logger(__name__)
 
 
-def _dequantize_mxfp4(blocks: torch.Tensor, scales: torch.Tensor,
-                      dtype: torch.dtype) -> torch.Tensor:
+def _dequantize_mxfp4(
+    blocks: torch.Tensor, scales: torch.Tensor, dtype: torch.dtype
+) -> torch.Tensor:
     """
     Args:
         blocks: uint8 [..., K // 2] containing packed FP4 values
@@ -58,13 +74,14 @@ def _dequantize_mxfp4(blocks: torch.Tensor, scales: torch.Tensor,
     exponents_expanded = exponents_expanded.reshape(*prefix_shape, -1)
 
     # ldexp: out * 2^exponents
-    out = torch.ldexp(out, exponents_expanded[..., :out.shape[-1]])
+    out = torch.ldexp(out, exponents_expanded[..., : out.shape[-1]])
 
     return out
 
 
-def _swigluoai(gate: torch.Tensor, up: torch.Tensor, alpha: float,
-               limit: float) -> torch.Tensor:
+def _swigluoai(
+    gate: torch.Tensor, up: torch.Tensor, alpha: float, limit: float
+) -> torch.Tensor:
     gate = gate.clamp(max=limit)
     up = up.clamp(min=-limit, max=limit)
     glu = gate * torch.sigmoid(gate * alpha)
@@ -92,7 +109,7 @@ def custom_moe_glu_mxfp4(
     limit: torch.Tensor,
     k: int,
     post_norm: bool = True,
-    expert_map: Optional[torch.Tensor] = None,
+    expert_map: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     MoE GLU operation for GPT-OSS with mxfp4 quantization and swigluoai activation.
@@ -142,32 +159,29 @@ def custom_moe_glu_mxfp4(
     else:
         # Pre-norm: softmax over all experts, then select top-k
         all_weights = torch.softmax(router_logits, dim=-1)
-        routing_weights = torch.gather(all_weights,
-                                       dim=-1,
-                                       index=top_k_indices)
+        routing_weights = torch.gather(all_weights, dim=-1, index=top_k_indices)
 
     # Initialize output
     output = torch.zeros(num_tokens, hidden_size, dtype=dtype)
 
     # Dequantize all expert weights once
     # gate_proj: [num_local_experts, intermediate_size, hidden_size]
-    gate_proj_weights = _dequantize_mxfp4(gate_proj_blocks,
-                                          gate_proj_scales,
-                                          dtype=dtype)
-    up_proj_weights = _dequantize_mxfp4(up_proj_blocks,
-                                        up_proj_scales,
-                                        dtype=dtype)
-    down_proj_weights = _dequantize_mxfp4(down_proj_blocks,
-                                          down_proj_scales,
-                                          dtype=dtype)
+    gate_proj_weights = _dequantize_mxfp4(
+        gate_proj_blocks, gate_proj_scales, dtype=dtype
+    )
+    up_proj_weights = _dequantize_mxfp4(up_proj_blocks, up_proj_scales, dtype=dtype)
+    down_proj_weights = _dequantize_mxfp4(
+        down_proj_blocks, down_proj_scales, dtype=dtype
+    )
 
     # Process each local expert
     for local_expert_idx in range(num_local_experts):
         # Determine which global expert this local expert corresponds to
         if expert_map is not None:
             # Find global expert index that maps to this local expert
-            global_expert_idx = (expert_map == local_expert_idx).nonzero(
-                as_tuple=True)[0]
+            global_expert_idx = (expert_map == local_expert_idx).nonzero(as_tuple=True)[
+                0
+            ]
             if len(global_expert_idx) == 0:
                 continue
             global_expert_idx = global_expert_idx[0].item()
@@ -176,19 +190,17 @@ def custom_moe_glu_mxfp4(
 
         # Find tokens routed to this expert
         # top_k_indices: [num_tokens, k]
-        expert_mask = (top_k_indices == global_expert_idx)  # [num_tokens, k]
+        expert_mask = top_k_indices == global_expert_idx  # [num_tokens, k]
         token_indices, k_indices = expert_mask.nonzero(as_tuple=True)
 
         if len(token_indices) == 0:
             continue
 
         # Get routing weights for these tokens
-        weights = routing_weights[token_indices,
-                                  k_indices]  # [num_selected_tokens]
+        weights = routing_weights[token_indices, k_indices]  # [num_selected_tokens]
 
         # Get hidden states for selected tokens
-        selected_hidden = hidden_states[
-            token_indices]  # [num_selected, hidden_size]
+        selected_hidden = hidden_states[token_indices]  # [num_selected, hidden_size]
 
         # Get expert weights
         gate_w = gate_proj_weights[local_expert_idx]
@@ -228,13 +240,12 @@ def custom_moe_glu_mxfp4_fake(
     limit: torch.Tensor,
     k: int,
     post_norm: bool = True,
-    expert_map: Optional[torch.Tensor] = None,
+    expert_map: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
 
 class Mxfp4MoEMethod(FusedMoEMethodBase):
-
     def __init__(self, moe: FusedMoEConfig):
         super().__init__(moe)
         self.moe = moe
@@ -247,9 +258,15 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         # gemm1_clamp_limit = 7.0
         self.swiglu_limit = torch.tensor(7.0, dtype=torch.float32)
 
-    def create_weights(self, layer: torch.nn.Module, num_experts: int,
-                       hidden_size: int, intermediate_size_per_partition: int,
-                       params_dtype: torch.dtype, **extra_weight_attrs):
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        num_experts: int,
+        hidden_size: int,
+        intermediate_size_per_partition: int,
+        params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ):
         assert isinstance(layer, FusedMoE)
 
         self.num_experts = num_experts
@@ -258,8 +275,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
         mxfp4_block = 32
 
-        intermediate_size_per_partition_after_pad = \
-            intermediate_size_per_partition
+        intermediate_size_per_partition_after_pad = intermediate_size_per_partition
 
         # NOTE: upstream rounds up intermediate_size_per_partition/hidden_size
         assert intermediate_size_per_partition % 64 == 0
@@ -342,16 +358,13 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         assert isinstance(layer, FusedMoE)
 
         # w1
-        layer.register_buffer("gate_proj_blocks",
-                              layer.w13_weight.data[:, ::2])
-        layer.register_buffer("gate_proj_scales",
-                              layer.w13_weight_scale.data[:, ::2])
+        layer.register_buffer("gate_proj_blocks", layer.w13_weight.data[:, ::2])
+        layer.register_buffer("gate_proj_scales", layer.w13_weight_scale.data[:, ::2])
         layer.register_buffer("gate_proj_bias", layer.w13_bias.data[:, ::2])
 
         # w3
         layer.register_buffer("up_proj_blocks", layer.w13_weight.data[:, 1::2])
-        layer.register_buffer("up_proj_scales",
-                              layer.w13_weight_scale.data[:, 1::2])
+        layer.register_buffer("up_proj_scales", layer.w13_weight_scale.data[:, 1::2])
         layer.register_buffer("up_proj_bias", layer.w13_bias.data[:, 1::2])
 
         # w2
@@ -368,34 +381,17 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         raise NotImplementedError()
 
     def get_fused_moe_quant_config(
-            self, layer: torch.nn.Module) -> FusedMoEQuantConfig | None:
+        self, layer: torch.nn.Module
+    ) -> FusedMoEQuantConfig | None:
         # NOTE(RBLN): this is used only for "modular kernel"
         raise NotImplementedError
 
     def apply(
         self,
-        layer: torch.nn.Module,
+        layer: FusedMoE,
         x: torch.Tensor,
         router_logits: torch.Tensor,
-        top_k: int,
-        renormalize: bool,
-        use_grouped_topk: bool = False,
-        topk_group: Optional[int] = None,
-        num_expert_group: Optional[int] = None,
-        global_num_experts: int = -1,
-        expert_map: Optional[torch.Tensor] = None,
-        custom_routing_function: Optional[Callable] = None,
-        scoring_func: str = "softmax",
-        routed_scaling_factor: float = 1.0,
-        e_score_correction_bias: Optional[torch.Tensor] = None,
-        apply_router_weight_on_input: bool = False,
-        activation: str = "silu",
-        enable_eplb: bool = False,
-        expert_load_view: Optional[torch.Tensor] = None,
-        logical_to_physical_map: Optional[torch.Tensor] = None,
-        logical_replica_count: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         # refer to custom_moe_glu
         orig_shape = x.shape  # noqa: F841
         num_tokens = orig_shape[:-1].numel()  # noqa: F841
@@ -405,15 +401,12 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         # router_logits = router_logits.view(-1, self.num_experts)
         # router_logits = router_logits.view(-1, self.moe.num_experts)
 
-        if activation == "swigluoai":
-            # TODO: use expert_map
-            # FIXME(RBLN) - expert_map SHOULD be processed
+        if layer.activation == "swigluoai":
             expert_map_const = None
-            if expert_map is not None:
+            if layer.expert_map is not None:
                 # Extract numpy array and create a fresh constant tensor
-                expert_map_list = expert_map.tolist()
-                expert_map_const = torch.tensor(expert_map_list,
-                                                dtype=torch.int32)
+                expert_map_list = layer.expert_map.tolist()
+                expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
 
             use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
             if use_moe_tokens_mask:
@@ -434,12 +427,12 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 router_logits,
                 self.swiglu_alpha,
                 self.swiglu_limit,
-                top_k,
-                renormalize,
+                layer.top_k,
+                layer.renormalize,
                 expert_map_const,
             )
         else:
-            raise NotImplementedError(activation)
+            raise NotImplementedError(layer.activation)
 
         return final_hidden_states.reshape(orig_shape)
 

@@ -19,14 +19,14 @@ from vllm_rbln.lora.mask import LoRAMask
 from vllm_rbln.v1.worker.rbln_model_runner import create_lora_mask
 
 
-def get_random_id_to_index(num_loras: int,
-                           num_slots: int,
-                           log: bool = True) -> list[int | None]:
+def get_random_id_to_index(
+    num_loras: int, num_slots: int, log: bool = True
+) -> list[int | None]:
     """Creates a random lora_id_to_index mapping.
-    
+
     Args:
         num_loras: The number of active loras in the mapping.
-        num_slots: The number of slots in the mapping. 
+        num_slots: The number of slots in the mapping.
                    Must be larger than num_loras.
         log: Whether to log the output.
     """
@@ -34,7 +34,8 @@ def get_random_id_to_index(num_loras: int,
     if num_loras > num_slots:
         raise ValueError(
             f"num_loras is higher than num_slots: {num_loras} > {num_slots}. "
-            "num_loras must be less than or equal to num_slots.")
+            "num_loras must be less than or equal to num_slots."
+        )
 
     slots: list[int | None] = [None] * num_slots
     random_slot_selections = (torch.randperm(num_slots)[:num_loras]).tolist()
@@ -65,15 +66,17 @@ def test_create_lora_mask(num_seqs, seq_len, num_loras):
 
     input_ids = torch.randint(0, 6000, (num_seqs, seq_len), dtype=torch.int64)
     id_to_index = get_random_id_to_index(num_loras, max_loras)
-    lora_ids = torch.randint(0, num_loras + 1, (num_seqs, )).tolist()
+    lora_ids = torch.randint(0, num_loras + 1, (num_seqs,)).tolist()
 
-    lora_mask = create_lora_mask(input_ids,
-                                 lora_ids,
-                                 id_to_index,
-                                 max_loras,
-                                 max_lora_rank,
-                                 lora_dtype=lora_dtype,
-                                 device=input_ids.device)
+    lora_mask = create_lora_mask(
+        input_ids,
+        lora_ids,
+        id_to_index,
+        max_loras,
+        max_lora_rank,
+        lora_dtype=lora_dtype,
+        device=input_ids.device,
+    )
 
     expected_shape = (num_seqs * seq_len, max_loras * max_lora_rank)
     assert lora_mask.shape == expected_shape
@@ -87,6 +90,7 @@ def test_create_lora_mask(num_seqs, seq_len, num_loras):
         start_row = i * seq_len
         start_col = lora_index * max_lora_rank
 
-        mask_section = lora_mask[start_row:start_row + seq_len,
-                                 start_col:start_col + max_lora_rank]
+        mask_section = lora_mask[
+            start_row : start_row + seq_len, start_col : start_col + max_lora_rank
+        ]
         assert torch.all(mask_section == 1.0)

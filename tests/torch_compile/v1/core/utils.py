@@ -17,21 +17,30 @@
 # Copied from https://github.com/vllm-project/vllm/blob/v0.12.0/tests/v1/core/utils.py
 # Search for NOTE(RBLN) or TODO(RBLN) for changes
 
-from typing import Optional
 
 import torch
-from vllm.config import ECTransferConfig  # KVTransferConfig,
-from vllm.config import (CacheConfig, ModelConfig, SchedulerConfig,
-                         SpeculativeConfig, VllmConfig)
-from vllm.multimodal.inputs import (MultiModalFeatureSpec,
-                                    MultiModalKwargsItem, PlaceholderRange)
+from vllm.config import (
+    CacheConfig,
+    ECTransferConfig,  # KVTransferConfig,
+    ModelConfig,
+    SchedulerConfig,
+    SpeculativeConfig,
+    VllmConfig,
+)
+from vllm.multimodal.inputs import (
+    MultiModalFeatureSpec,
+    MultiModalKwargsItem,
+    PlaceholderRange,
+)
 from vllm.sampling_params import SamplingParams
 from vllm.utils.hashing import sha256
-from vllm.v1.core.kv_cache_utils import (get_request_block_hasher,
-                                         init_none_hash)
+from vllm.v1.core.kv_cache_utils import get_request_block_hasher, init_none_hash
 from vllm.v1.core.sched.output import SchedulerOutput
-from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
-                                        KVCacheGroupSpec)
+from vllm.v1.kv_cache_interface import (
+    FullAttentionSpec,
+    KVCacheConfig,
+    KVCacheGroupSpec,
+)
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request
 from vllm.v1.structured_output import StructuredOutputManager
@@ -130,13 +139,18 @@ def create_scheduler(
     speculative_config: SpeculativeConfig | None = None
     if num_speculative_tokens is not None:
         speculative_config = SpeculativeConfig(
-            model="ngram", num_speculative_tokens=num_speculative_tokens)
+            model="ngram", num_speculative_tokens=num_speculative_tokens
+        )
 
-    ec_transfer_config = (ECTransferConfig(
-        ec_connector="ECSharedStorageConnector",
-        ec_role=ec_role,
-        ec_connector_extra_config={"shared_storage_path": "/tmp/ec_test"},
-    ) if use_ec_connector else None)
+    ec_transfer_config = (
+        ECTransferConfig(
+            ec_connector="ECSharedStorageConnector",
+            ec_role=ec_role,
+            ec_connector_extra_config={"shared_storage_path": "/tmp/ec_test"},
+        )
+        if use_ec_connector
+        else None
+    )
 
     vllm_config = VllmConfig(
         scheduler_config=scheduler_config,
@@ -150,9 +164,9 @@ def create_scheduler(
         num_blocks=num_blocks,  # A large number of blocks to hold all requests
         kv_cache_tensors=[],
         kv_cache_groups=[
-            KVCacheGroupSpec(["layer"],
-                             FullAttentionSpec(block_size, 1, 1, torch.float32,
-                                               False))
+            KVCacheGroupSpec(
+                ["layer"], FullAttentionSpec(block_size, 1, 1, torch.float32, False)
+            )
         ],
     )
     cache_config.num_gpu_blocks = num_blocks
@@ -206,10 +220,10 @@ def create_requests(
         # no. of mm_hashes and mm_positions for each request should be
         # identical
         assert mm_positions is not None, (
-            "mm_positions must be provided when mm_hashes_list is provided")
+            "mm_positions must be provided when mm_hashes_list is provided"
+        )
         assert len(mm_hashes_list) == len(mm_positions) == num_requests
-        assert [len(h)
-                for h in mm_hashes_list] == [len(p) for p in mm_positions]
+        assert [len(h) for h in mm_hashes_list] == [len(p) for p in mm_positions]
 
         # Since same identifier would imply they are identical encoder output
         # Verify mm items with identical identifier are having
@@ -225,7 +239,8 @@ def create_requests(
         mm_features = []
 
         for j, position in enumerate(
-                mm_positions[i] if mm_positions is not None else []):
+            mm_positions[i] if mm_positions is not None else []
+        ):
             if mm_hashes_list is not None:
                 identifier = mm_hashes_list[i][j]
 
@@ -235,7 +250,8 @@ def create_requests(
                     assert seen_hashes[identifier] == position_length, (
                         f"mm_hash '{identifier}' has inconsistent position "
                         f"lengths: previously {seen_hashes[identifier]}, now "
-                        f"{position_length} at request {i}, position {j}")
+                        f"{position_length} at request {i}, position {j}"
+                    )
                 else:
                     seen_hashes[identifier] = position_length
             else:
@@ -249,8 +265,7 @@ def create_requests(
             )
             mm_features.append(mm_feature)
 
-        prompt_token_ids = [0] * num_tokens if same_prompt else \
-            [i] * num_tokens
+        prompt_token_ids = [0] * num_tokens if same_prompt else [i] * num_tokens
         request = Request(
             request_id=req_ids[i],
             prompt_token_ids=prompt_token_ids,
@@ -265,17 +280,14 @@ def create_requests(
 
 
 def create_runner_output(
-        scheduler_output: SchedulerOutput,
-        sampled_token_id: Optional[int] = None) -> ModelRunnerOutput:
+    scheduler_output: SchedulerOutput, sampled_token_id: int | None = None
+) -> ModelRunnerOutput:
     req_ids = list(scheduler_output.num_scheduled_tokens.keys())
     return ModelRunnerOutput(
         req_ids=req_ids,
-        req_id_to_index={
-            req_id: i
-            for i, req_id in enumerate(req_ids)
-        },
-        sampled_token_ids=[[sampled_token_id] if sampled_token_id is not None
-                           else []] * len(req_ids),
+        req_id_to_index={req_id: i for i, req_id in enumerate(req_ids)},
+        sampled_token_ids=[[sampled_token_id] if sampled_token_id is not None else []]
+        * len(req_ids),
         logprobs=None,
         prompt_logprobs_dict={},
         pooler_output=[],

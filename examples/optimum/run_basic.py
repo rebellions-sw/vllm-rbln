@@ -26,7 +26,9 @@ prompts = [
 sampling_params = SamplingParams(temperature=0, top_p=1.0)
 
 
-def main(model_id: str, ):
+def main(
+    model_id: str,
+):
     # Create an LLM.
     llm = LLM(model=model_id)
     # Generate texts from the prompts.

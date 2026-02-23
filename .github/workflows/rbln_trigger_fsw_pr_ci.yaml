@@ -25,15 +25,19 @@ jobs:
     runs-on: fsw-r18s-atom-ext-rbln-sw-general-c1m12
     steps:
       - name: Dispatch to fsw-integration
-        uses: peter-evans/repository-dispatch@v4
+        uses: Wandalen/wretry.action@v3
         with:
-          token: ${{ secrets.GIT_PAT }}
-          repository: rebellions-sw/fsw-integration
-          event-type: ${{ github.event.pull_request.base.ref == 'dev-0.12' && 'vllm-rbln-pr-event-for-0.12' || 'vllm-rbln-pr-event' }}
-          client-payload: |
-            {
-              "ref": "${{ github.event.pull_request.head.ref }}",
-              "sha": "${{ github.event.pull_request.head.sha }}",
-              "pr_number": "${{ github.event.number }}",
-              "actor": "${{ github.actor }}"
-            }
+          action: peter-evans/repository-dispatch@v4
+          attempt_limit: 5
+          attempt_delay: 2000
+          with: |
+            token: ${{ secrets.GIT_PAT }}
+            repository: rebellions-sw/fsw-integration
+            event-type: ${{ github.event.pull_request.base.ref == 'dev-0.12' && 'vllm-rbln-pr-event-for-0.12' || 'vllm-rbln-pr-event' }}
+            client-payload: |
+              {
+                "ref": "${{ github.event.pull_request.head.ref }}",
+                "sha": "${{ github.event.pull_request.head.sha }}",
+                "pr_number": "${{ github.event.number }}",
+                "actor": "${{ github.actor }}"
+              }
