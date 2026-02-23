@@ -1430,11 +1430,12 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     attn_metadata.local_block_tables,
                     self.scale,  # dummy
                 ]
-                if self.is_batch_attention_opt:
-                    decode_args.append(attn_metadata.swa_attn_masks)
-                else:
-                    decode_args.append(None)
-                decode_args.append(self.sinks)
+                if not envs.VLLM_RBLN_USE_CUSTOM_KERNEL:
+                    if self.is_batch_attention_opt:
+                        decode_args.append(attn_metadata.swa_attn_masks)
+                    else:
+                        decode_args.append(None)
+                    decode_args.append(self.sinks)
                 attn_output = sliding_window_attention_naive_decode(  # noqa: E501
                     *decode_args,
                 )
