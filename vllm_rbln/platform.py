@@ -135,7 +135,7 @@ class RblnPlatform(Platform):
                     "RBLN_PROFILER is not supported when using vLLM model parallel "
                     "(TP, DP, EP, or PP)."
                 )
-            os.environ["RBLN_CTX_STANDALONE"] = "1"
+            os.environ["RBLN_CTX_STANDALONE"] = "0"
             os.environ["RBLN_FORCE_CCL_ASYNC"] = "1"
 
     @classmethod
