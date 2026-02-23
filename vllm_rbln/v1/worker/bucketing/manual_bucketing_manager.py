@@ -40,8 +40,3 @@ class ManualBucketingManager(RBLNBucketingManager):
                 f"last manual bucket: {buckets[-1]}"
             )
         self.decode_batch_buckets = buckets
-<<<<<<< HEAD
-
-
-=======
->>>>>>> 4e97fb80e5ddbb3a0b433bc3b740c51fd5d50050

@@ -58,7 +58,7 @@ from vllm.utils import get_open_port
 
 def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
          dp_master_port, tp_size, enable_ep, max_model_len, block_size,
-         decode_batch, num_hidden_layers, use_chat_template):
+         decode_batch, num_hidden_layers):
     os.environ["VLLM_DP_RANK"] = str(global_dp_rank)
     os.environ["VLLM_DP_RANK_LOCAL"] = str(local_dp_rank)
     # paralle_config.data_parallel_size = envs.sVLLM_DP_SIZE
@@ -80,7 +80,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
     # with DP, each rank should process different prompts.
     # usually all the DP ranks process a full dataset,
     # and each rank processes a different part of the dataset.
-    prompts_per_rank = len(prompts) // dp_size
+    prompts_per_rank = (len(raw_prompts) // dp_size)
     start = global_dp_rank * prompts_per_rank
     end = start + prompts_per_rank
     raw_prompts = raw_prompts[start:end]
@@ -90,10 +90,7 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
         raw_prompts = ["Placeholder"]
 
     # Apply chat template if enabled
-    if use_chat_template:
-        tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
-        chats = [[{"role": "user", "content": text}] for text in raw_prompts]
-        prompts = raw_prompts
+    prompts = raw_prompts
     print(f"DP rank {global_dp_rank} needs to process {len(prompts)} prompts")
 
     # Create a sampling params object.
@@ -139,12 +136,18 @@ def main(model, dp_size, local_dp_rank, global_dp_rank, dp_master_ip,
         prompt = output.prompt
         generated_text = output.outputs[0].text
         print(
+            f"DP rank {global_dp_rank}, Prompt: {prompt!r}, "
+            f"Generated text: {generated_text!r}"
+        )
+
+    # Give engines time to pause their processing loops before exiting.
     sleep(1)
 
 
 if __name__ == "__main__":
     import argparse
 
+    parser = argparse.ArgumentParser(description="Data Parallel Inference")
     parser.add_argument(
         "--model",
         type=str,
@@ -185,7 +188,6 @@ if __name__ == "__main__":
     block_size = args.block_size
     decode_batch = args.decode_batch
     num_hidden_layers = args.num_hidden_layers
-    use_chat_template = args.use_chat_template
 
     if node_size == 1:
         dp_master_ip = "127.0.0.1"
