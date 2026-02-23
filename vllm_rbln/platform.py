@@ -140,6 +140,14 @@ class RblnPlatform(Platform):
         scheduler_config = vllm_config.scheduler_config
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            # Use RBLN device tensors for torch.compile/runtime on the
+            # native vLLM model path.
+            RblnPlatform.device_name = "rbln"
+            RblnPlatform.device_type = "rbln"
+            vllm_config.device_config.device_type = RblnPlatform.device_type
+            vllm_config.device_config.device = torch.device(
+                RblnPlatform.device_type)
+
             if envs.VLLM_RBLN_ENFORCE_MODEL_FP32:
                 logger.info("original model_config.dtype = %s",
                             model_config.dtype)
