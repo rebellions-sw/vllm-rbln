@@ -77,13 +77,14 @@ class RBLNW8A16BlockFp8LinearOp:
     ) -> torch.Tensor:
         _input_dtype = input.dtype
         out_features, in_features = weight.shape
-        weight_scale = weight_scale.repeat_interleave(block_size[0],
-                                                      0).unsqueeze(-1)
-        weight_scale = weight_scale.to(_input_dtype)
-        weight = weight.view(out_features, in_features // block_size[1],
-                             block_size[1])
-        weight = weight.to(_input_dtype)
-        scaled_weight = (weight * weight_scale).view(out_features, in_features)
+        bs0, bs1 = int(block_size[0]), int(block_size[1])
+        out_blocks = out_features // bs0
+        in_blocks = in_features // bs1
+
+        weight = weight.view(out_blocks, bs0, in_blocks, bs1).to(_input_dtype)
+        weight_scale = weight_scale.view(out_blocks, in_blocks).to(_input_dtype)
+        scaled_weight = (weight * weight_scale[:, None, :, None]).reshape(
+            out_features, in_features)
         output = torch.nn.functional.linear(input, scaled_weight, bias)
         return output
 
