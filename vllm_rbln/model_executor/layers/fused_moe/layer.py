@@ -413,6 +413,8 @@ def fused_moe_forward_rbln(
         layer=self,
         x=hidden_states,
         router_logits=router_logits,
+        top_k=self.top_k,
+        renormalize=self.renormalize,
     )
 
     if self.dp_size > 1:
