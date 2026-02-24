@@ -334,8 +334,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
             hidden_states = hidden_states.squeeze(1)
             logits = self.model.compute_logits(hidden_states, None)
-        print("@@ logits", logits.shape)
-        print("@@ sample_hidden_states", sample_hidden_states.shape)
         self.execute_model_state = ExecuteModelState(
             scheduler_output=scheduler_output,
             logits=logits,
