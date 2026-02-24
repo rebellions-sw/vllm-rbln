@@ -25,7 +25,7 @@ os.environ["VLLM_RBLN_SAMPLER"] = "0"
 from vllm import LLM, SamplingParams
 from vllm.v1.metrics.reader import Counter, Vector
 
-MODEL_ID = "meta-llama/Llama-3.2-1B"
+MODEL_ID = "meta-llama/Llama-3.2-1B-Instruct"
 NUM_SPECULATIVE_TOKENS = 4
 NUM_PROMPT_LOOKUP_MAX = 5
 NUM_PROMPT_LOOKUP_MIN = 2

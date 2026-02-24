@@ -25,7 +25,7 @@ os.environ.setdefault("VLLM_RBLN_ENABLE_WARM_UP", "0")
 from vllm import LLM, SamplingParams
 from vllm.v1.metrics.reader import Counter, Vector
 
-MODEL_ID = "meta-llama/Llama-3.2-1B"
+MODEL_ID = "meta-llama/Llama-3.2-1B-Instruct"
 NUM_SPECULATIVE_TOKENS = 4
 MAX_MODEL_LEN = 2048
 MAX_NUM_BATCHED_TOKENS = 256

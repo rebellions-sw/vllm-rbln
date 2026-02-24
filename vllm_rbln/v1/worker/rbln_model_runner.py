@@ -2772,7 +2772,7 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         is_last_prefill = (
                             num_computed + self.max_num_tokens
                         ) >= num_prompted
-                        if not is_last_prefill[0]:
+                        if not is_last_prefill[0]:  # noqa: SIM108
                             # chunked prefill(#0~#N-1, intermediate)
                             # token_indices = torch.tensor([max_num_seqs-1])
                             # selected = torch.tensor([])
