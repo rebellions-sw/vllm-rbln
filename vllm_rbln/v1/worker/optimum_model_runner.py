@@ -334,6 +334,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
             # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
             hidden_states = hidden_states.squeeze(1)
             logits = self.model.compute_logits(hidden_states, None)
+        print("@@ logits", logits.shape)
+        print("@@ sample_hidden_states", sample_hidden_states.shape)
         self.execute_model_state = ExecuteModelState(
             scheduler_output=scheduler_output,
             logits=logits,
@@ -1295,8 +1297,13 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 num_reqs = self.input_batch.num_reqs
                 padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
-            else:
+            elif is_prompt:
+                # Sometimes the logits in prompt stage can have different strides in case of multimodal models.
+                # To prevent excessive recompile caused by various stride of logits in prompt stage,
+                # we reshape the logits to 2D tensor with shape (1, -1)
                 padded_logits = logits.reshape(1, -1)
+            else:
+                padded_logits = logits
             sampler_output = self._sample(padded_logits, spec_decode_metadata=None)
         self.input_batch.prev_sampled_token_ids = None
 
