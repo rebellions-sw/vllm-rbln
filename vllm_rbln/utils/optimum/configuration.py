@@ -13,8 +13,8 @@
 # limitations under the License.
 
 import json
-import os
 import math
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,6 +40,7 @@ logger = init_logger(__name__)
 #         or vllm_config.scheduler_config.max_num_seqs
 #     )
 
+
 def is_full_block_available(num_blocks: int, vllm_config: VllmConfig) -> bool:
     if vllm_config.cache_config.enable_prefix_caching:
         block_size = vllm_config.additional_config["attn_block_size"]
@@ -54,6 +55,7 @@ def is_full_block_available(num_blocks: int, vllm_config: VllmConfig) -> bool:
     ideal_total = max_num_seqs * blocks_per_seq
     return num_blocks >= ideal_total
 
+
 def get_block_ratio(vllm_config: VllmConfig) -> int:
     if vllm_config.cache_config.enable_prefix_caching:
         ob_size = vllm_config.additional_config["attn_block_size"]
@@ -62,6 +64,7 @@ def get_block_ratio(vllm_config: VllmConfig) -> int:
     else:
         blk_ratio = 1
     return blk_ratio
+
 
 def get_rbln_params(
     vllm_config: VllmConfig, rbln_config: dict
@@ -234,6 +237,7 @@ def update_vllm_config_with_rbln_params(
     if vllm_config.cache_config.num_gpu_blocks_override is not None:
         vllm_config.cache_config.num_gpu_blocks_override = adjusted_num_blocks
 
+
 def is_qwen3_pooling(
     vllm_config: VllmConfig,
 ) -> bool:
@@ -267,9 +271,13 @@ def sync_with_rbln_config(vllm_config: VllmConfig) -> None:
         raise RuntimeError("Failed to get RBLN config: %s", e) from e
 
     if rbln_config is not None:
-        num_blocks, batch_size, max_model_len, kvcache_block_size, prefill_chunk_size = (
-            get_rbln_params(vllm_config, rbln_config)
-        )
+        (
+            num_blocks,
+            batch_size,
+            max_model_len,
+            kvcache_block_size,
+            prefill_chunk_size,
+        ) = get_rbln_params(vllm_config, rbln_config)
         update_vllm_config_with_rbln_params(
             vllm_config,
             num_blocks,
