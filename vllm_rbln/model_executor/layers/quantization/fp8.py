@@ -381,11 +381,6 @@ def custom_moe_swiglu_group_dequantize(
         Tensor: [batch * seq_len, hidden_size]
     """
 
-    def _to_int(value: torch.Tensor | int) -> int:
-        if isinstance(value, torch.Tensor):
-            return int(value.item())
-        return int(value)
-
     def _dequantize_blockwise_weight(
         weight: torch.Tensor,
         scale: torch.Tensor,
@@ -406,7 +401,7 @@ def custom_moe_swiglu_group_dequantize(
         expanded = expanded[:, :out_features, :in_features]
         return weight.to(hidden_states.dtype) * expanded.to(hidden_states.dtype)
 
-    in_block_size = _to_int(group_size)
+    in_block_size = int(group_size.item())
     gate_out_block = ((gate_proj_weight.shape[1] + gate_proj_scale.shape[1] - 1)
                       // gate_proj_scale.shape[1])
     down_out_block = ((down_proj_weight.shape[1] + down_proj_scale.shape[1] - 1)
@@ -780,7 +775,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
     def get_fused_moe_quant_config(
             self, layer: torch.nn.Module) -> FusedMoEQuantConfig | None:
-        return None
+
         # NOTE(RBLN): this is used only for "modular kernel"
         raise NotImplementedError()
 
