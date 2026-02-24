@@ -32,14 +32,6 @@ from vllm_rbln.utils.optimum.registry import (
 
 logger = init_logger(__name__)
 
-# def resolve_kvcache_num_blocks(vllm_config: VllmConfig, rbln_config: dict) -> int:
-#     """Prefer model-provided KV-cache block count; else fall back to config."""
-#     return (
-#         vllm_config.cache_config.num_gpu_blocks_override
-#         or rbln_config.get("num_kvcache_blocks")
-#         or vllm_config.scheduler_config.max_num_seqs
-#     )
-
 
 def is_full_block_available(num_blocks: int, vllm_config: VllmConfig) -> bool:
     if vllm_config.cache_config.enable_prefix_caching:
