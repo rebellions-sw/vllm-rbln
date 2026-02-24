@@ -200,17 +200,27 @@ class RblnPlatform(Platform):
                 if (lora_config := vllm_config.lora_config) is not None:
                     lora_config.lora_dtype = torch.float16
 
-            # FIXME(RBLN): remove block size constraint from spec-dec
             if vllm_config.speculative_config is not None:
+                # FIXME(RBLN): remove block size constraint from spec-dec
                 assert model_config.max_model_len == cache_config.block_size, (
                     "block_size must be set to max_model_len with speculative decoding."
                 )
+
                 # FIXME(RBLN): make RBLNSampler compatible with speculative decoding
                 if envs.VLLM_RBLN_SAMPLER:
                     logger.warning(
-                        "Using RBLNSampler with speculative decoding is not supported yet."
+                        "Using RBLNSampler with speculative decoding "
+                        "is not supported yet."
                     )
                     envs.VLLM_RBLN_SAMPLER = False
+
+                # FIXME(RBLN): temporarily block warm up with spec-dec
+                if envs.VLLM_RBLN_ENABLE_WARM_UP:
+                    logger.warning(
+                        "Using warm up with speculative decoding is not supported yet."
+                    )
+                    envs.VLLM_RBLN_ENABLE_WARM_UP = False
+
         else:
             # NOTE(eunji.lee):
             # It is for multimodal models
