@@ -78,14 +78,8 @@ def estimate_available_memory(
     num_layers = model_config.get_num_layers(parallel_config)
     vocab_size = model_config.get_vocab_size()
     hidden_size = model_config.get_hidden_size()
+    num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
     tp_size = parallel_config.tensor_parallel_size
-    rsd_size = envs.VLLM_RBLN_TP_SIZE
-
-    # FIXME: Do we need to account for these configs?
-    # head_dim = model_config.get_head_size()
-    # num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
-    # dp_size = parallel_config.data_parallel_size
-    # ep = parallel_config.enable_expert_parallel
 
     # TODO(jongho): Update if target npu is REBEL.
 
@@ -96,16 +90,21 @@ def estimate_available_memory(
         # ATOM DRAM - 16GB (single chip)
         ATOM_DRAM_NBYTES = 16 * 2**30
         ATOM_SYS_DRAM_NBYTES = 288 * 2**20
+        # consider RSD size for ATOM
+        rsd_size = envs.VLLM_RBLN_TP_SIZE
         available_dram_bytes = rsd_size * (ATOM_DRAM_NBYTES - ATOM_SYS_DRAM_NBYTES)
         # ATOM - basic data type fp16
         default_bits_per_param = 16
     elif "cr" in device_name:
-        assert rsd_size == 1
+        assert envs.VLLM_RBLN_TP_SIZE == 1
         # REBEL - RBLN-CR[xxx]
         # REBEL DRAM - 144GB (quad chips, chiplet) - system(4G) = 140GB
         REBEL_DRAM_NBYTES = 144 * 2**30
         REBEL_SYS_DRAM_NBYTES = 4 * 2**30
         REBEL_DRAM_NBYTES -= REBEL_SYS_DRAM_NBYTES
+        REBEL_CHIPLET_SIZE = 4
+        # single device == Quad chiplet
+        rsd_size = REBEL_CHIPLET_SIZE
         available_dram_bytes = REBEL_DRAM_NBYTES
         # FIXME(RBLN) - basic data type fp8 for REBEL, for now fp16
         default_bits_per_param = 16
@@ -114,6 +113,7 @@ def estimate_available_memory(
             "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
         )
 
+    num_runtimes = num_runtimes * rsd_size
     available_dram_bytes = int(available_dram_bytes * gpu_memory_utilization)
 
     def check_oom(available_dram_bytes: int) -> None:
@@ -131,13 +131,12 @@ def estimate_available_memory(
             )
         # Get estimated kernel size (approximated)
         # kernel_size
-        # - QKV params     - model parallel (tp) sharded
-        # - MLP or expert  - model parallel (ep) sharded
-        # - word embedding - non sharded,
-        #                    not included into device,
-        #                    hidden_size * vocab_size
-        # - lm head        - model parallel (tp) sharded,
-        #                    hidden_size * vocab_size
+        # - QKV params    - model parallel (tp) sharded
+        # - MLP or expert - model parallel (ep) sharded
+        # - word embedding- non sharded,  not included into device,
+        #                   hidden_size * vocab_size
+        # - lm head       - model parallel (tp) sharded,
+        #                   hidden_size * vocab_size
         lm_heads_params = align(vocab_size, 64) * hidden_size
         lm_heads_nbytes = (
             align_2MB(lm_heads_params * default_bits_per_param // 8 / tp_size) * tp_size
@@ -159,6 +158,9 @@ def estimate_available_memory(
         # 1 for prefill, 1 for decoder
         buffer = buffer_per_runtime_per_core * num_runtimes
     available_dram_bytes -= buffer
+
+    rsd_replicas = (rsd_size // num_key_value_heads) or 1
+    available_dram_bytes = available_dram_bytes // rsd_replicas
 
     check_oom(available_dram_bytes)
 
