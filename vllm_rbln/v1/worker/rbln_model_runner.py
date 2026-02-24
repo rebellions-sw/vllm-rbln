@@ -322,8 +322,8 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
             if self.speculative_config.method == "ngram":
                 self.drafter = NgramProposer(self.vllm_config)
-            # elif self.speculative_config.method == "suffix":
-            #     self.drafter = SuffixDecodingProposer(self.vllm_config)
+            elif self.speculative_config.method == "suffix":
+                self.drafter = SuffixDecodingProposer(self.vllm_config)
             elif self.speculative_config.use_eagle():
                 self.drafter = EagleProposer(self.vllm_config, self.device, self)  # type: ignore
                 if self.speculative_config.method == "eagle3":
