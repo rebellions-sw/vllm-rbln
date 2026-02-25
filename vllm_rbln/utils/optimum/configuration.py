@@ -98,6 +98,8 @@ def get_rbln_params(
         kvcache_block_size = max_seq_len
         batch_size = rbln_config.get("batch_size")
         num_blocks = rbln_config.get("kvcache_num_blocks")
+        if num_blocks is None:
+            num_blocks = batch_size  # for pooling models, each sequence is one block
     else:
         # decoder
         kvcache_block_size = rbln_config.get("kvcache_block_size")
