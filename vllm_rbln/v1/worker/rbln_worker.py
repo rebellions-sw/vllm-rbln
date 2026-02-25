@@ -336,27 +336,46 @@ class RBLNWorker(WorkerBase):
             # gpt-oss mxfp4 quantization - only applied to expert
             # minimax fp8 quantization - applied into linear & expert
             quantization = self.model_config.quantization
-
-            if quantization == "fp8":
-                return 32 * 2**30
-
-            assert quantization == "mxfp4"
             device_name = current_platform.get_device_name().lower()
             assert "rbln" in device_name
-            if "ca" in device_name:
-                # ATOM DOES NOT support mxfp4 quantization, handled by bf16
-                nbits_per_param = 16
-                # mlp weight scale is merged into params
-                # FIXME(RBLN) - expert scale merged into expert weight param
-                # ratio scale vs weight = 1 : 16
-                ratio = 16 / 17
-            elif "cr" in device_name:
-                # REBEL can support mxfp4 quantization
-                nbits_per_param = 4
-                ratio = 1
+
+            # FIXME It is temporary code.
+            # It requires validation.
+            if quantization == "fp8":
+                if "ca" in device_name:
+                    # ATOM DOES NOT support mxfp4 quantization, handled by bf16
+                    nbits_per_param = 16
+                    # mlp weight scale is merged into params
+                    # FIXME(RBLN) - expert scale merged into expert weight param
+                    # ratio scale vs weight = 1 : 16
+                    ratio = 16 / 17
+                elif "cr" in device_name:
+                    # REBEL can support mxfp4 quantization
+                    nbits_per_param = 8
+                    ratio = 1
+                else:
+                    raise ValueError(
+                        "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+                    )
+            elif quantization == "mxfp4":
+                if "ca" in device_name:
+                    # ATOM DOES NOT support mxfp4 quantization, handled by bf16
+                    nbits_per_param = 16
+                    # mlp weight scale is merged into params
+                    # FIXME(RBLN) - expert scale merged into expert weight param
+                    # ratio scale vs weight = 1 : 16
+                    ratio = 16 / 17
+                elif "cr" in device_name:
+                    # REBEL can support mxfp4 quantization
+                    nbits_per_param = 4
+                    ratio = 1
+                else:
+                    raise ValueError(
+                        "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+                    )
             else:
                 raise ValueError(
-                    "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+                        "invalid quantization scheme, candidates = [fp8, mxfp4]"
                 )
 
             # pack 2 mxfp4 elems into single uint8 elem
