@@ -58,27 +58,6 @@ def get_block_ratio(vllm_config: VllmConfig) -> int:
     return blk_ratio
 
 
-# def get_num_blocks(vllm_config: VllmConfig, rbln_config: dict) -> int:
-#     num_blocks: int | None = None
-
-#     getter = getattr(self.model, "get_kvcache_num_blocks", None)
-#     if callable(getter):
-#         num_blocks = getter()
-#     elif hasattr(rbln_config, "kvcache_num_blocks"):
-#         num_blocks = rbln_config["kvcache_num_blocks"]
-#     else:
-#         logger.warning(
-#             "kvcache_num_blocks is not specified in rbln_config.json and "
-#             "model does not implement get_kvcache_num_blocks()."
-#             "Using default value (max_num_seqs)."
-#         )
-#         num_blocks = vllm_config.scheduler_config.max_num_seqs
-#     assert num_blocks is not None, (
-#         "num_blocks must be determined from rbln_config or model method."
-#     )
-#     return num_blocks
-
-
 def get_rbln_params(
     vllm_config: VllmConfig, rbln_config: dict
 ) -> tuple[int, int, int, int, int]:
