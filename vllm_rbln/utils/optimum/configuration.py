@@ -58,6 +58,27 @@ def get_block_ratio(vllm_config: VllmConfig) -> int:
     return blk_ratio
 
 
+# def get_num_blocks(vllm_config: VllmConfig, rbln_config: dict) -> int:
+#     num_blocks: int | None = None
+
+#     getter = getattr(self.model, "get_kvcache_num_blocks", None)
+#     if callable(getter):
+#         num_blocks = getter()
+#     elif hasattr(rbln_config, "kvcache_num_blocks"):
+#         num_blocks = rbln_config["kvcache_num_blocks"]
+#     else:
+#         logger.warning(
+#             "kvcache_num_blocks is not specified in rbln_config.json and "
+#             "model does not implement get_kvcache_num_blocks()."
+#             "Using default value (max_num_seqs)."
+#         )
+#         num_blocks = vllm_config.scheduler_config.max_num_seqs
+#     assert num_blocks is not None, (
+#         "num_blocks must be determined from rbln_config or model method."
+#     )
+#     return num_blocks
+
+
 def get_rbln_params(
     vllm_config: VllmConfig, rbln_config: dict
 ) -> tuple[int, int, int, int, int]:
@@ -66,19 +87,19 @@ def get_rbln_params(
     batch_size = None
     max_seq_len = None
 
-    num_blocks = rbln_config.get("kvcache_num_blocks")
-    if num_blocks is None:
-        raise ValueError("kvcache_num_blocks must be specified in rbln_config.json")
+    # num_blocks = get_num_blocks(vllm_config, rbln_config)
 
     if is_enc_dec_arch(vllm_config.model_config.hf_config):
         max_seq_len = rbln_config.get("dec_max_seq_len")
         kvcache_block_size = max_seq_len
         batch_size = rbln_config.get("batch_size")
+        num_blocks = rbln_config.get("kvcache_num_blocks")
     elif is_multi_modal(vllm_config.model_config.hf_config):
         # Get configurations from main module (e.g. Qwen2.5-VL, Whisper)
         kvcache_block_size = rbln_config.get("kvcache_block_size")
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
+        num_blocks = rbln_config.get("kvcache_num_blocks")
         if max_seq_len is None:  # Whisper FIXME to be moved to enc-dec
             max_seq_len = rbln_config.get("dec_max_seq_len")
         # Get configurations from submodule
@@ -91,6 +112,7 @@ def get_rbln_params(
                     )
                     batch_size = rbln_config[submodule].get("batch_size", None)
                     max_seq_len = rbln_config[submodule].get("max_seq_len", None)
+                    num_blocks = rbln_config[submodule].get("kvcache_num_blocks", None)
                     if kvcache_block_size is not None:
                         break
 
@@ -98,12 +120,16 @@ def get_rbln_params(
         max_seq_len = rbln_config.get("max_seq_len")
         kvcache_block_size = max_seq_len
         batch_size = rbln_config.get("batch_size")
+        num_blocks = rbln_config.get("kvcache_num_blocks")
     else:
         # decoder
         kvcache_block_size = rbln_config.get("kvcache_block_size")
         prefill_chunk_size = rbln_config.get("prefill_chunk_size", 128)
         batch_size = rbln_config.get("batch_size")
         max_seq_len = rbln_config.get("max_seq_len")
+        num_blocks = rbln_config.get("kvcache_num_blocks")
+
+    assert num_blocks is not None, "num_blocks must be specified in rbln_config.json"
 
     assert kvcache_block_size is not None, (
         "kvcache_block_size must be specified in rbln_config.json"
