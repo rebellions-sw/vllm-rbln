@@ -833,9 +833,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
         expert_map_const = None
         if layer.expert_map is not None:
-            # Extract numpy array and create a fresh constant tensor
-            expert_map_list = layer.expert_map.tolist()
-            expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
+            expert_map_const = layer.expert_map
+            if expert_map_const.dtype != torch.int32:
+                expert_map_const = expert_map_const.to(dtype=torch.int32)
+            expert_map_const = expert_map_const.detach().clone()
 
         use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
         if use_moe_tokens_mask:
