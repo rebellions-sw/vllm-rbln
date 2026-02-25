@@ -421,6 +421,61 @@ def unquantized_fused_optimize_moe_method_custom(
     return final_hidden_states.reshape(orig_shape)
 
 
+# NOTE - in v0.13, quant_method.apply interface changed
+def unquantized_fused_optimize_moe_method_custom_v13(
+    self,
+    layer: torch.nn.Module,
+    x: torch.Tensor,
+    router_logits: torch.Tensor,
+):
+    # layer.use_grouped_topk
+    # selected_experts
+    # w1 : gate_proj, w2 : down_proj, w3 : up_proj
+    orig_shape = x.shape  # noqa: F841
+    num_tokens = orig_shape[:-1].numel()  # noqa: F841
+    intermediate_size = layer.w2_weight.shape[-1]
+
+    # w13_weight- merged weight for gate_proj(w1_weight) and up_proj (w3_weight)
+    # w2_weight - down_proj
+    # gate_proj_weight - first half, layer.w13_weight[:intermediate_size]
+    # up_proj_weight - second half, layer.w13_weight[intermediate_size:]
+    # down_proj_weights = layer.w2_weight
+    gate_proj_weight = layer.w13_weight[:, :intermediate_size, :]
+    up_proj_weight = layer.w13_weight[:, intermediate_size:, :]
+    down_proj_weight = layer.w2_weight
+
+    # expected tensor shape - [num_tokens, -1]
+    hidden_states = x.reshape(num_tokens, -1)
+    router_logits = router_logits.reshape(num_tokens, -1)
+
+    expert_map_const = None
+    expert_map = layer.expert_map
+    if expert_map is not None:
+        # Extract numpy array and create a fresh constant tensor
+        expert_map_list = expert_map.tolist()
+        expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
+
+    use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
+    if use_moe_tokens_mask:
+        tokens_mask = get_tokens_mask(num_tokens)
+        router_logits = router_logits + tokens_mask
+
+    # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/
+    # qwen3_moe_architecture.py
+    final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_glu(
+        hidden_states,
+        gate_proj_weight,
+        up_proj_weight,
+        down_proj_weight,
+        router_logits,
+        layer.top_k,
+        layer.renormalize,
+        expert_map_const,
+    )
+    return final_hidden_states.reshape(orig_shape)
+
+
+
 def fused_moe_forward_rbln(
     self, hidden_states: torch.Tensor, router_logits: torch.Tensor
 ):
@@ -449,18 +504,6 @@ def fused_moe_forward_rbln(
         layer=self,
         x=hidden_states,
         router_logits=router_logits,
-        top_k=self.top_k,
-        renormalize=self.renormalize,
-        use_grouped_topk=self.use_grouped_topk,
-        global_num_experts=self.global_num_experts,
-        expert_map=self.expert_map,
-        topk_group=self.topk_group,
-        num_expert_group=self.num_expert_group,
-        custom_routing_function=self.custom_routing_function,
-        scoring_func=self.scoring_func,
-        e_score_correction_bias=self.e_score_correction_bias,
-        activation=self.activation,
-        apply_router_weight_on_input=self.apply_router_weight_on_input,
     )
 
     if self.dp_size > 1:
@@ -519,7 +562,7 @@ FusedMoE.forward_oot = fused_moe_forward_rbln
 
 if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
     logger.info("[RBLN] fused moe, RBLN optimize moe custom kernel")
-    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_optimize_moe_method_custom
+    UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_optimize_moe_method_custom_v13
 elif envs.VLLM_RBLN_MOE_CUSTOM_KERNEL:
     logger.info("[RBLN] fused moe, RBLN moe custom kernel")
     UnquantizedFusedMoEMethod.forward_oot = unquantized_fused_moe_method_custom
