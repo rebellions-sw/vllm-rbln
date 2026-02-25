@@ -840,6 +840,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
         if use_moe_tokens_mask:
             tokens_mask = get_tokens_mask(num_tokens)
+        else:
+            tokens_mask = None
 
         final_hidden_states = (
             torch.ops.rbln_custom_ops.custom_moe_swiglu_group_dequantize(
