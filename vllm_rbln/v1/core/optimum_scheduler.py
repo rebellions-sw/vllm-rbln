@@ -405,7 +405,6 @@ class RBLNOptimumScheduler(Scheduler):
                         new_blocks = self.kv_cache_manager.allocate_slots(
                             request, num_new_tokens
                         )
-
                         if new_blocks is not None:
                             break
 
