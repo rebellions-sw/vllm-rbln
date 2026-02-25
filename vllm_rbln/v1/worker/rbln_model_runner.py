@@ -1352,11 +1352,11 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if envs.VLLM_RBLN_COMPILE_STRICT_MODE:
             options["mode"] = "strict"
 
-        if envs.VLLM_RBLN_AUTO_PORT and has_torch_rbln:
-            options["use_global_ctx"] = True
-            # TODO(yunseong.kim): use device_id from current platform
-            # when vllm-rbln supports it
-            options["global_device_id"] = 0
+        # Force use_global_ctx as True in vLLM (quickfix)
+        # TODO(yunseong.kim): use device_id from current platform
+        # when vllm-rbln supports it
+        options["use_global_ctx"] = True
+        options["global_device_id"] = 0
 
         # compile compute_logits
         # FIXME(jiwoo.park): method assignment for torch.compile
