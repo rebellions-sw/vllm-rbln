@@ -1,28 +1,38 @@
-from typing import Callable, Optional, Union
 
 import torch
 import vllm.model_executor.layers.quantization.fp8 as upstream
 from torch.nn.parameter import Parameter
 from vllm.distributed import get_tensor_model_parallel_world_size
-from vllm.model_executor.layers.fused_moe import (FusedMoE, FusedMoEMethodBase,
-                                                  FusedMoeWeightScaleSupported)
+from vllm.model_executor.layers.fused_moe import (
+    FusedMoE,
+    FusedMoEMethodBase,
+    FusedMoeWeightScaleSupported,
+)
 from vllm.model_executor.layers.fused_moe import modular_kernel as mk
 from vllm.model_executor.layers.fused_moe.config import FusedMoEQuantConfig
 from vllm.model_executor.layers.linear import LinearMethodBase
 from vllm.model_executor.layers.quantization.fp8 import Fp8Config
 from vllm.model_executor.layers.quantization.utils.fp8_utils import (
-    create_fp8_input_scale, create_fp8_scale_parameter,
-    create_fp8_weight_parameter, maybe_post_process_fp8_weight_block,
-    process_fp8_weight_block_strategy, process_fp8_weight_tensor_strategy,
-    validate_fp8_block_shape)
-from vllm.model_executor.layers.quantization.utils.quant_utils import (
-    GroupShape)
+    create_fp8_input_scale,
+    create_fp8_scale_parameter,
+    create_fp8_weight_parameter,
+    maybe_post_process_fp8_weight_block,
+    process_fp8_weight_block_strategy,
+    process_fp8_weight_tensor_strategy,
+    validate_fp8_block_shape,
+)
+from vllm.model_executor.layers.quantization.utils.quant_utils import GroupShape
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
-    Fp8LinearOp, all_close_1d, maybe_create_device_identity,
-    per_tensor_dequantize)
-from vllm.model_executor.parameter import (BlockQuantScaleParameter,
-                                           ModelWeightParameter,
-                                           PerTensorScaleParameter)
+    Fp8LinearOp,
+    all_close_1d,
+    maybe_create_device_identity,
+    per_tensor_dequantize,
+)
+from vllm.model_executor.parameter import (
+    BlockQuantScaleParameter,
+    ModelWeightParameter,
+    PerTensorScaleParameter,
+)
 from vllm.model_executor.utils import set_weight_attrs
 
 import vllm_rbln.rbln_envs as envs
@@ -44,10 +54,13 @@ class RBLNW8A16BlockFp8LinearOp:
     ):
         self.weight_group_shape = weight_group_shape
         self.act_quant_group_shape = act_quant_group_shape
-        logger.info("RBLN W8A16 block fp8 weight group shape = %s",
-                    self.weight_group_shape)
-        logger.info("RBLN W8A16 block fp8 act quant group shape = %s",
-                    self.act_quant_group_shape)
+        logger.info(
+            "RBLN W8A16 block fp8 weight group shape = %s", self.weight_group_shape
+        )
+        logger.info(
+            "RBLN W8A16 block fp8 act quant group shape = %s",
+            self.act_quant_group_shape,
+        )
         assert self.act_quant_group_shape == GroupShape(1, 128)
 
     def apply(
@@ -62,9 +75,14 @@ class RBLNW8A16BlockFp8LinearOp:
         # current implementation is based on w8a16 (imported from optimum minimax2)
         # TODO(RBLN) - REBEL evt1 SHOULD support w8a8 fp8 linear operation
         # further implementation will be basedon on w8a8
-        return self._w8a16_block_fp8_matmul(input, weight, weight_scale,
-                                            list(self.weight_group_shape),
-                                            input_scale, bias)
+        return self._w8a16_block_fp8_matmul(
+            input,
+            weight,
+            weight_scale,
+            list(self.weight_group_shape),
+            input_scale,
+            bias,
+        )
 
     def _w8a16_block_fp8_matmul(
         self,
@@ -84,7 +102,8 @@ class RBLNW8A16BlockFp8LinearOp:
         weight = weight.view(out_blocks, bs0, in_blocks, bs1).to(_input_dtype)
         weight_scale = weight_scale.view(out_blocks, in_blocks).to(_input_dtype)
         scaled_weight = (weight * weight_scale[:, None, :, None]).reshape(
-            out_features, in_features)
+            out_features, in_features
+        )
         output = torch.nn.functional.linear(input, scaled_weight, bias)
         return output
 
@@ -172,9 +191,9 @@ class Fp8LinearMethod(LinearMethodBase):
 
         # WEIGHT
         if self.quant_config.is_checkpoint_fp8_serialized:
-            weight = create_fp8_weight_parameter(output_size_per_partition,
-                                                 input_size_per_partition,
-                                                 weight_loader)
+            weight = create_fp8_weight_parameter(
+                output_size_per_partition, input_size_per_partition, weight_loader
+            )
         else:
             # For non-serialized checkpoints, use original dtype
             weight = ModelWeightParameter(
@@ -219,31 +238,32 @@ class Fp8LinearMethod(LinearMethodBase):
 
             # INPUT ACTIVATION SCALE
             if self.act_q_static:
-                scale = create_fp8_input_scale(output_partition_sizes,
-                                               weight_loader)
+                scale = create_fp8_input_scale(output_partition_sizes, weight_loader)
                 set_weight_attrs(scale, {"scale_type": "input_scale"})
                 layer.register_parameter("input_scale", scale)
             else:
                 layer.register_parameter("input_scale", None)
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        size_k_first = True
+        # size_k_first = True
         input_scale = None
         # TODO(rob): refactor block quant into separate class.
         if self.block_quant:
             assert not self.act_q_static
-            size_k_first = False
+            # size_k_first = False
 
             weight, weight_scale = process_fp8_weight_block_strategy(
-                layer.weight, layer.weight_scale_inv)
+                layer.weight, layer.weight_scale_inv
+            )
             # Delete the weight_scale_inv parameter to avoid confusion
             # with the weight_scale parameter
             del layer.weight_scale_inv
 
         # If checkpoint not serialized fp8, quantize the weights.
         elif not self.quant_config.is_checkpoint_fp8_serialized:
-            qweight, weight_scale = ops.scaled_fp8_quant(layer.weight,
-                                                         scale=None)
+            qweight, weight_scale = upstream.ops.scaled_fp8_quant(
+                layer.weight, scale=None
+            )
             weight = qweight.t()
 
         # If checkpoint is fp8 per-tensor, handle that there are N scales for N
@@ -269,8 +289,11 @@ class Fp8LinearMethod(LinearMethodBase):
         # Update layer with new values.
         layer.weight = Parameter(weight.data, requires_grad=False)
         layer.weight_scale = Parameter(weight_scale.data, requires_grad=False)
-        layer.input_scale = (Parameter(input_scale, requires_grad=False)
-                             if input_scale is not None else None)
+        layer.input_scale = (
+            Parameter(input_scale, requires_grad=False)
+            if input_scale is not None
+            else None
+        )
 
         if self.block_quant:
             maybe_post_process_fp8_weight_block(layer)
@@ -306,8 +329,10 @@ class Fp8LinearMethod(LinearMethodBase):
                     # weight is [K, N], scale could be [num_logical_weights]
                     # Need to figure out how to broadcast - for now just try
                     # direct multiplication
-                    if (weight_scale.dim() == 1
-                            and weight_scale.shape[0] == weight_fp8.shape[0]):
+                    if (
+                        weight_scale.dim() == 1
+                        and weight_scale.shape[0] == weight_fp8.shape[0]
+                    ):
                         # Per-row scaling
                         weight_bf16 = weight_fp8 * weight_scale.unsqueeze(1)
                     else:
@@ -351,12 +376,12 @@ def custom_moe_swiglu_group_dequantize(
     router_logits: torch.Tensor,
     group_size: torch.Tensor,
     topk: int,
-    e_score_correction_bias: Optional[torch.Tensor] = None,
-    gate_proj_bias: Optional[torch.Tensor] = None,
-    up_proj_bias: Optional[torch.Tensor] = None,
-    down_proj_bias: Optional[torch.Tensor] = None,
-    expert_map: Optional[torch.Tensor] = None,
-    dp_mask: Optional[torch.Tensor] = None,
+    e_score_correction_bias: torch.Tensor | None = None,
+    gate_proj_bias: torch.Tensor | None = None,
+    up_proj_bias: torch.Tensor | None = None,
+    down_proj_bias: torch.Tensor | None = None,
+    expert_map: torch.Tensor | None = None,
+    dp_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Customized MoE SwiGLU operation.
@@ -372,7 +397,7 @@ def custom_moe_swiglu_group_dequantize(
     - router_logits: [batch*seq_len, num_experts]
     - group_size: group size for weight scale
     - topk: top k experts to select
-    - e_score_correction_bias: 
+    - e_score_correction_bias:
     - gate_proj_bias: [num_experts, intermediate_size]
     - up_proj_bias: [num_experts, intermediate_size]
     - down_proj_bias: [num_experts, hidden_size]
@@ -385,40 +410,40 @@ def custom_moe_swiglu_group_dequantize(
         weight: torch.Tensor,
         scale: torch.Tensor,
         in_block_size: int,
-        out_block_size: Optional[int] = None,
+        out_block_size: int | None = None,
     ) -> torch.Tensor:
         # `weight` is [num_experts, out_features, in_features].
         # `scale` is [num_experts, out_blocks, in_blocks].
         out_features = weight.shape[1]
         in_features = weight.shape[2]
         out_blocks = scale.shape[1]
-        out_block_size = out_block_size or ((out_features + out_blocks - 1) //
-                                            out_blocks)
+        out_block_size = out_block_size or (
+            (out_features + out_blocks - 1) // out_blocks
+        )
 
-        expanded = scale.repeat_interleave(out_block_size,
-                                           dim=1).repeat_interleave(
-                                               in_block_size, dim=2)
+        expanded = scale.repeat_interleave(out_block_size, dim=1).repeat_interleave(
+            in_block_size, dim=2
+        )
         expanded = expanded[:, :out_features, :in_features]
         return weight.to(hidden_states.dtype) * expanded.to(hidden_states.dtype)
 
     in_block_size = int(group_size.item())
-    gate_out_block = ((gate_proj_weight.shape[1] + gate_proj_scale.shape[1] - 1)
-                      // gate_proj_scale.shape[1])
-    down_out_block = ((down_proj_weight.shape[1] + down_proj_scale.shape[1] - 1)
-                      // down_proj_scale.shape[1])
+    gate_out_block = (
+        gate_proj_weight.shape[1] + gate_proj_scale.shape[1] - 1
+    ) // gate_proj_scale.shape[1]
+    down_out_block = (
+        down_proj_weight.shape[1] + down_proj_scale.shape[1] - 1
+    ) // down_proj_scale.shape[1]
 
-    gate_proj_weight_dq = _dequantize_blockwise_weight(gate_proj_weight,
-                                                       gate_proj_scale,
-                                                       in_block_size,
-                                                       gate_out_block)
-    up_proj_weight_dq = _dequantize_blockwise_weight(up_proj_weight,
-                                                     up_proj_scale,
-                                                     in_block_size,
-                                                     gate_out_block)
-    down_proj_weight_dq = _dequantize_blockwise_weight(down_proj_weight,
-                                                       down_proj_scale,
-                                                       in_block_size,
-                                                       down_out_block)
+    gate_proj_weight_dq = _dequantize_blockwise_weight(
+        gate_proj_weight, gate_proj_scale, in_block_size, gate_out_block
+    )
+    up_proj_weight_dq = _dequantize_blockwise_weight(
+        up_proj_weight, up_proj_scale, in_block_size, gate_out_block
+    )
+    down_proj_weight_dq = _dequantize_blockwise_weight(
+        down_proj_weight, down_proj_scale, in_block_size, down_out_block
+    )
 
     routing_weights = torch.sigmoid(router_logits.float())
     scores_for_choice = routing_weights
@@ -427,8 +452,9 @@ def custom_moe_swiglu_group_dequantize(
 
     _, topk_ids = torch.topk(scores_for_choice, topk, dim=-1, sorted=False)
     topk_weights = routing_weights.gather(1, topk_ids)
-    topk_weights = topk_weights / topk_weights.sum(dim=-1,
-                                                   keepdim=True).clamp_min(1e-20)
+    topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True).clamp_min(
+        1e-20
+    )
     topk_weights = topk_weights.to(hidden_states.dtype)
 
     if dp_mask is not None:
@@ -436,16 +462,16 @@ def custom_moe_swiglu_group_dequantize(
 
     num_experts = gate_proj_weight_dq.shape[0]
     if expert_map is not None:
-        safe_expert_map = torch.where(expert_map < 0, num_experts - 1,
-                                      expert_map).to(topk_ids.dtype)
+        safe_expert_map = torch.where(expert_map < 0, num_experts - 1, expert_map).to(
+            topk_ids.dtype
+        )
         topk_ids = safe_expert_map[topk_ids]
 
     final_hidden_states = torch.zeros_like(hidden_states)
-    expert_mask = torch.nn.functional.one_hot(topk_ids,
-                                              num_classes=num_experts).permute(
-                                                  2, 1, 0)
-    expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)),
-                               0).nonzero(as_tuple=False)
+    expert_mask = torch.nn.functional.one_hot(
+        topk_ids, num_classes=num_experts
+    ).permute(2, 1, 0)
+    expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero(as_tuple=False)
 
     for expert_idx_tensor in expert_hit:
         expert_idx = int(expert_idx_tensor.item())
@@ -471,9 +497,9 @@ def custom_moe_swiglu_group_dequantize(
             down_proj_bias[expert_idx] if down_proj_bias is not None else None,
         )
         current_hidden_states = down * topk_weights[token_idx, topk_slot, None]
-        final_hidden_states.index_add_(0, token_idx,
-                                       current_hidden_states.to(
-                                           final_hidden_states.dtype))
+        final_hidden_states.index_add_(
+            0, token_idx, current_hidden_states.to(final_hidden_states.dtype)
+        )
 
     return final_hidden_states
 
@@ -490,42 +516,24 @@ def custom_moe_swiglu_group_dequantize_fake(
     router_logits: torch.Tensor,
     group_size: torch.Tensor,
     topk: int,
-    e_score_correction_bias: Optional[torch.Tensor] = None,
-    gate_proj_bias: Optional[torch.Tensor] = None,
-    up_proj_bias: Optional[torch.Tensor] = None,
-    down_proj_bias: Optional[torch.Tensor] = None,
-    expert_map: Optional[torch.Tensor] = None,
-    dp_mask: Optional[torch.Tensor] = None,
+    e_score_correction_bias: torch.Tensor | None = None,
+    gate_proj_bias: torch.Tensor | None = None,
+    up_proj_bias: torch.Tensor | None = None,
+    down_proj_bias: torch.Tensor | None = None,
+    expert_map: torch.Tensor | None = None,
+    dp_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
 
 class Fp8MoEMethod(FusedMoEMethodBase):
-    """MoE method for FP8.
-    Supports loading FP8 checkpoints with static weight scale and
-    dynamic/static activation scale.
-
-    Also supports loading quantized FP16/BF16 model checkpoints with dynamic
-    activation scaling. The weight scaling factor will be initialized after
-    the model weights are loaded.
-
-    Args:
-        quant_config: The quantization config.
-    """
-
     def __init__(self, quant_config: Fp8Config, layer: torch.nn.Module):
         super().__init__(layer.moe_config)
-        self.layer = layer
+        self.moe = layer.moe_config
         self.quant_config = quant_config
-        self.weight_block_size = self.quant_config.weight_block_size
-        self.block_quant: bool = self.weight_block_size is not None
-        self.fp8_backend = None
 
-        self.marlin_input_dtype = None
-        self.use_marlin = False
-        self.flashinfer_moe_backend: FlashinferMoeBackend | None = None
-        self.allow_deep_gemm = False
-        self.allow_cutlass_block_scaled_grouped_gemm = False
+        self.weight_block_size = self.quant_config.weight_block_size
+        self.block_quant = self.weight_block_size is not None
 
     def create_weights(
         self,
@@ -560,13 +568,15 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 raise ValueError(
                     f"The output_size of gate's and up's weight = "
                     f"{intermediate_size_per_partition} is not divisible by "
-                    f"weight quantization block_n = {block_n}.")
+                    f"weight quantization block_n = {block_n}."
+                )
             if tp_size > 1 and intermediate_size_per_partition % block_k != 0:
                 # Required by row parallel
                 raise ValueError(
                     f"The input_size of down's weight = "
                     f"{intermediate_size_per_partition} is not divisible by "
-                    f"weight quantization block_k = {block_k}.")
+                    f"weight quantization block_k = {block_k}."
+                )
 
         # WEIGHTS
         w13_weight = torch.nn.Parameter(
@@ -597,20 +607,19 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         if not self.block_quant:
             # Allocate 2 scales for w1 and w3 respectively.
             # They will be combined to a single scale after weight loading.
-            w13_weight_scale = torch.nn.Parameter(torch.ones(
-                num_experts, 2, dtype=torch.float32),
-                                                  requires_grad=False)
-            w2_weight_scale = torch.nn.Parameter(torch.ones(
-                num_experts, dtype=torch.float32),
-                                                 requires_grad=False)
+            w13_weight_scale = torch.nn.Parameter(
+                torch.ones(num_experts, 2, dtype=torch.float32), requires_grad=False
+            )
+            w2_weight_scale = torch.nn.Parameter(
+                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+            )
             layer.register_parameter("w13_weight_scale", w13_weight_scale)
             layer.register_parameter("w2_weight_scale", w2_weight_scale)
         else:
             w13_weight_scale = torch.nn.Parameter(
                 torch.ones(
                     num_experts,
-                    2 * ((intermediate_size_per_partition + block_n - 1) //
-                         block_n),
+                    2 * ((intermediate_size_per_partition + block_n - 1) // block_n),
                     (hidden_size + block_k - 1) // block_k,
                     dtype=torch.float32,
                 ),
@@ -632,9 +641,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # Add the quantization method used (per tensor/grouped/channel)
         # to ensure the weight scales are loaded in properly
         extra_weight_attrs.update(
-            {"quant_method": FusedMoeWeightScaleSupported.BLOCK.
-             value} if self.block_quant else
-            {"quant_method": FusedMoeWeightScaleSupported.TENSOR.value})
+            {"quant_method": FusedMoeWeightScaleSupported.BLOCK.value}
+            if self.block_quant
+            else {"quant_method": FusedMoeWeightScaleSupported.TENSOR.value}
+        )
         # If loading fp8 checkpoint, pass the weight loaders.
         # If loading an fp16 checkpoint, do not (we will quantize in
         #   process_weights_after_loading()
@@ -647,17 +657,18 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             if not self.quant_config.is_checkpoint_fp8_serialized:
                 raise ValueError(
                     "Found static activation scheme for checkpoint that "
-                    "was not serialized fp8.")
+                    "was not serialized fp8."
+                )
 
-            w13_input_scale = torch.nn.Parameter(torch.ones(
-                num_experts, dtype=torch.float32),
-                                                 requires_grad=False)
+            w13_input_scale = torch.nn.Parameter(
+                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+            )
             layer.register_parameter("w13_input_scale", w13_input_scale)
             set_weight_attrs(w13_input_scale, extra_weight_attrs)
 
-            w2_input_scale = torch.nn.Parameter(torch.ones(
-                num_experts, dtype=torch.float32),
-                                                requires_grad=False)
+            w2_input_scale = torch.nn.Parameter(
+                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+            )
             layer.register_parameter("w2_input_scale", w2_input_scale)
             set_weight_attrs(w2_input_scale, extra_weight_attrs)
 
@@ -681,16 +692,17 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
             # torch.compile() cannot use Parameter subclasses.
             layer.w13_weight = Parameter(w13_weight, requires_grad=False)
-            layer.w13_weight_scale_inv = Parameter(w13_weight_scale_inv,
-                                                   requires_grad=False)
+            layer.w13_weight_scale_inv = Parameter(
+                w13_weight_scale_inv, requires_grad=False
+            )
             layer.w2_weight = Parameter(w2_weight, requires_grad=False)
-            layer.w2_weight_scale_inv = Parameter(w2_weight_scale_inv,
-                                                  requires_grad=False)
+            layer.w2_weight_scale_inv = Parameter(
+                w2_weight_scale_inv, requires_grad=False
+            )
         # If checkpoint is fp16, quantize in place.
         elif not self.quant_config.is_checkpoint_fp8_serialized:
-            fp8_dtype = current_platform.fp8_dtype()
-            w13_weight = torch.empty_like(layer.w13_weight.data,
-                                          dtype=fp8_dtype)
+            fp8_dtype = upstream.current_platform.fp8_dtype()
+            w13_weight = torch.empty_like(layer.w13_weight.data, dtype=fp8_dtype)
             w2_weight = torch.empty_like(layer.w2_weight.data, dtype=fp8_dtype)
 
             # Re-initialize w13_scale because we directly quantize
@@ -705,22 +717,21 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             )
             for expert in range(layer.local_num_experts):
                 w13_weight[expert, :, :], layer.w13_weight_scale[expert] = (
-                    ops.scaled_fp8_quant(layer.w13_weight.data[expert, :, :]))
+                    upstream.ops.scaled_fp8_quant(layer.w13_weight.data[expert, :, :])
+                )
                 w2_weight[expert, :, :], layer.w2_weight_scale[expert] = (
-                    ops.scaled_fp8_quant(layer.w2_weight.data[expert, :, :]))
-            layer.w13_weight = torch.nn.Parameter(w13_weight,
-                                                  requires_grad=False)
-            layer.w2_weight = torch.nn.Parameter(w2_weight,
-                                                 requires_grad=False)
+                    upstream.ops.scaled_fp8_quant(layer.w2_weight.data[expert, :, :])
+                )
+            layer.w13_weight = torch.nn.Parameter(w13_weight, requires_grad=False)
+            layer.w2_weight = torch.nn.Parameter(w2_weight, requires_grad=False)
             if self.rocm_aiter_moe_enabled:
                 # reshaping weights is required for aiter moe kernel.
-                shuffled_w13, shuffled_w2 = rocm_aiter_ops.shuffle_weights(
-                    layer.w13_weight, layer.w2_weight)
+                shuffled_w13, shuffled_w2 = upstream.rocm_aiter_ops.shuffle_weights(
+                    layer.w13_weight, layer.w2_weight
+                )
 
-                layer.w13_weight = torch.nn.Parameter(shuffled_w13,
-                                                      requires_grad=False)
-                layer.w2_weight = torch.nn.Parameter(shuffled_w2,
-                                                     requires_grad=False)
+                layer.w13_weight = torch.nn.Parameter(shuffled_w13, requires_grad=False)
+                layer.w2_weight = torch.nn.Parameter(shuffled_w2, requires_grad=False)
         # If checkpoint is fp8, we need to handle that the
         # MoE kernels require single activation scale and single weight
         # scale for w13 per expert.
@@ -731,17 +742,22 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 if layer.w13_input_scale is None or layer.w2_input_scale is None:
                     raise ValueError(
                         "QuantConfig has static quantization, but found "
-                        "activation scales are None.")
+                        "activation scales are None."
+                    )
                 if not all_close_1d(layer.w13_input_scale) or not all_close_1d(
-                        layer.w2_input_scale):
+                    layer.w2_input_scale
+                ):
                     logger.warning_once(
                         "Found input_scales that are not equal for "
                         "fp8 MoE layer. Using the maximum across experts "
-                        "for each layer.")
+                        "for each layer."
+                    )
                 layer.w13_input_scale = torch.nn.Parameter(
-                    layer.w13_input_scale.max(), requires_grad=False)
+                    layer.w13_input_scale.max(), requires_grad=False
+                )
                 layer.w2_input_scale = torch.nn.Parameter(
-                    layer.w2_input_scale.max(), requires_grad=False)
+                    layer.w2_input_scale.max(), requires_grad=False
+                )
 
             # Fp8 moe kernel needs single weight scale for w13 per expert.
             # We take the max then dequant and requant each expert.
@@ -752,18 +768,19 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 start = 0
                 for shard_id in range(2):
                     dq_weight = per_tensor_dequantize(
-                        layer.w13_weight[expert_id][start:start +
-                                                    shard_size, :],
+                        layer.w13_weight[expert_id][start : start + shard_size, :],
                         layer.w13_weight_scale[expert_id][shard_id],
                     )
-                    layer.w13_weight[expert_id][
-                        start:start +
-                        shard_size, :], _ = (ops.scaled_fp8_quant(
-                            dq_weight, max_w13_scales[expert_id]))
+                    layer.w13_weight[expert_id][start : start + shard_size, :], _ = (
+                        upstream.ops.scaled_fp8_quant(
+                            dq_weight, max_w13_scales[expert_id]
+                        )
+                    )
                     start += shard_size
 
-            layer.w13_weight_scale = torch.nn.Parameter(max_w13_scales,
-                                                        requires_grad=False)
+            layer.w13_weight_scale = torch.nn.Parameter(
+                max_w13_scales, requires_grad=False
+            )
 
     def select_gemm_impl(
         self,
@@ -774,101 +791,75 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         raise NotImplementedError()
 
     def get_fused_moe_quant_config(
-            self, layer: torch.nn.Module) -> FusedMoEQuantConfig | None:
-
+        self, layer: torch.nn.Module
+    ) -> FusedMoEQuantConfig | None:
         # NOTE(RBLN): this is used only for "modular kernel"
         raise NotImplementedError()
 
     def apply(
         self,
-        layer: torch.nn.Module,
+        layer: FusedMoE,
         x: torch.Tensor,
         router_logits: torch.Tensor,
-        top_k: int,
-        renormalize: bool,
-        use_grouped_topk: bool = False,
-        topk_group: Optional[int] = None,
-        num_expert_group: Optional[int] = None,
-        global_num_experts: int = -1,
-        expert_map: Optional[torch.Tensor] = None,
-        custom_routing_function: Optional[Callable] = None,
-        scoring_func: str = "softmax",
-        routed_scaling_factor: float = 1.0,
-        e_score_correction_bias: Optional[torch.Tensor] = None,
-        apply_router_weight_on_input: bool = False,
-        activation: str = "silu",
-        enable_eplb: bool = False,
-        expert_load_view: Optional[torch.Tensor] = None,
-        logical_to_physical_map: Optional[torch.Tensor] = None,
-        logical_replica_count: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        # NOTE - fp8 moe implementation is based on fused_moe custom_moe_glu
+        **kwargs: object,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        # NOTE(RBLN): fp8 MoE implementation uses custom op
         orig_shape = x.shape  # noqa: F841
         num_tokens = orig_shape[:-1].numel()  # noqa: F841
+        hidden_states = x.reshape(num_tokens, -1)
+        router_logits = router_logits.reshape(num_tokens, -1)
+
         intermediate_size = layer.w2_weight.shape[-1]
 
-        # w13_weight- merged weight for gate_proj(w1_weight) and up_proj (w3_weight)
-        # w2_weight - down_proj
-        # gate_proj_weight - first half, layer.w13_weight[:intermediate_size]
-        # up_proj_weight - second half, layer.w13_weight[intermediate_size:]
-        # down_proj_weights = layer.w2_weight
+        # w13_weight: merged gate(up) weights, w2_weight: down weights
         gate_proj_weight = layer.w13_weight[:, :intermediate_size, :]
         up_proj_weight = layer.w13_weight[:, intermediate_size:, :]
         down_proj_weight = layer.w2_weight
+
         down_proj_weight_scale = layer.w2_weight_scale_inv
 
-        # Scale is stored in block units, so we need to calculate scale_intermediate_size
-        # w13_weight_scale_inv shape: [num_experts, 2 * scale_intermediate_size, scale_hidden_size]
-        # where scale_intermediate_size = (intermediate_size + block_n - 1) // block_n
+        # w13_weight_scale_inv: [E, 2 * scale_intermediate, scale_hidden]
         scale_intermediate_size = layer.w13_weight_scale_inv.shape[1] // 2
-        gate_proj_weight_scale = layer.w13_weight_scale_inv[:, :
-                                                            scale_intermediate_size, :]
-        up_proj_weight_scale = layer.w13_weight_scale_inv[:,
-                                                          scale_intermediate_size:, :]
+        gate_proj_weight_scale = layer.w13_weight_scale_inv[
+            :, :scale_intermediate_size, :
+        ]
+        up_proj_weight_scale = layer.w13_weight_scale_inv[
+            :, scale_intermediate_size:, :
+        ]
 
-        # expected tensor shape - [num_tokens, dim]
-        hidden_states = x.reshape(num_tokens, -1)
-        # route_logits - selected routing & dp tokens mask
-        # expert_map - dp expert_map mask is handled in compiler
-        router_logits = router_logits.reshape(num_tokens, -1)
-        router_logits = torch.sigmoid(router_logits)
+        e_score_correction_bias = kwargs.get("e_score_correction_bias")
+        if e_score_correction_bias is None:
+            e_score_correction_bias = getattr(layer, "e_score_correction_bias", None)
 
         expert_map_const = None
-        if expert_map is not None:
+        if layer.expert_map is not None:
             # Extract numpy array and create a fresh constant tensor
-            expert_map_list = expert_map.tolist()
+            expert_map_list = layer.expert_map.tolist()
             expert_map_const = torch.tensor(expert_map_list, dtype=torch.int32)
 
         use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
         if use_moe_tokens_mask:
             tokens_mask = get_tokens_mask(num_tokens)
-            # TODO(RBLN) - do this job in custom converter
-            # router_logits = router_logits * tokens_mask
-        else:
-            tokens_mask = None
 
-        # TODO(RBLN) - Need this?
-        gate_proj_bias = None
-        up_proj_bias = None
-        down_proj_bias = None
-
-        final_hidden_states = torch.ops.rbln_custom_ops.custom_moe_swiglu_group_dequantize(
-            hidden_states,
-            gate_proj_weight,
-            gate_proj_weight_scale,
-            up_proj_weight,
-            up_proj_weight_scale,
-            down_proj_weight,
-            down_proj_weight_scale,
-            router_logits,
-            torch.tensor(self.weight_block_size[1], dtype=torch.int32),
-            top_k,
-            e_score_correction_bias,
-            gate_proj_bias,
-            up_proj_bias,
-            down_proj_bias,
-            expert_map_const,
-            tokens_mask,
+        final_hidden_states = (
+            torch.ops.rbln_custom_ops.custom_moe_swiglu_group_dequantize(
+                hidden_states,
+                gate_proj_weight,
+                gate_proj_weight_scale,
+                up_proj_weight,
+                up_proj_weight_scale,
+                down_proj_weight,
+                down_proj_weight_scale,
+                router_logits,
+                torch.tensor(self.weight_block_size[1], dtype=torch.int32),
+                layer.top_k,
+                e_score_correction_bias,
+                None,  # gate_proj_bias
+                None,  # up_proj_bias
+                None,  # down_proj_bias
+                expert_map_const,
+                tokens_mask,
+            )
         )
 
         return final_hidden_states.reshape(orig_shape)
