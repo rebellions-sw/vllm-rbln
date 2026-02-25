@@ -142,8 +142,8 @@ class RblnPlatform(Platform):
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
             # Use RBLN device tensors for torch.compile/runtime on the
             # native vLLM model path.
-            RblnPlatform.device_name = "rbln"
-            RblnPlatform.device_type = "rbln"
+            # RblnPlatform.device_name = "rbln"
+            # RblnPlatform.device_type = "rbln"
             vllm_config.device_config.device_type = RblnPlatform.device_type
             vllm_config.device_config.device = torch.device(
                 RblnPlatform.device_type)
