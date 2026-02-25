@@ -300,10 +300,6 @@ class RBLNOptimumScheduler(Scheduler):
                     request,
                     num_new_tokens,
                 )
-                # if new_blocks is not None:
-                #     print("@@ new_blocks", new_blocks.get_block_ids())
-                # else:
-                #     print("@@ new_blocks is None")
 
                 if new_blocks is None:
                     # The request cannot be scheduled.
