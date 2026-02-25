@@ -410,6 +410,18 @@ def fused_moe_forward_rbln(
         layer=self,
         x=hidden_states,
         router_logits=router_logits,
+        top_k=self.top_k,
+        renormalize=self.renormalize,
+        use_grouped_topk=self.use_grouped_topk,
+        global_num_experts=self.global_num_experts,
+        expert_map=self.expert_map,
+        topk_group=self.topk_group,
+        num_expert_group=self.num_expert_group,
+        custom_routing_function=self.custom_routing_function,
+        scoring_func=self.scoring_func,
+        e_score_correction_bias=self.e_score_correction_bias,
+        activation=self.activation,
+        apply_router_weight_on_input=self.apply_router_weight_on_input,
     )
 
     if self.dp_size > 1:
