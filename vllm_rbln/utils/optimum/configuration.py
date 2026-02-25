@@ -66,8 +66,6 @@ def get_rbln_params(
     batch_size = None
     max_seq_len = None
 
-    # num_blocks = get_num_blocks(vllm_config, rbln_config)
-
     if is_enc_dec_arch(vllm_config.model_config.hf_config):
         max_seq_len = rbln_config.get("dec_max_seq_len")
         kvcache_block_size = max_seq_len
