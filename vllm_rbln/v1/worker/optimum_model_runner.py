@@ -1296,7 +1296,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin):
                 padded_logits = self.pooled_tensors[self.bucket_size]
                 padded_logits[:num_reqs].copy_(logits)
             elif is_prompt:
-                # Multimodal models may produce logits
+                # Among self.input_batch.num_reqs > 1 cases,
+                # only the prefill stage of multimodal models produces logits
                 # with varying strides during the prefill stage.
                 # To avoid frequent recompilations caused by these stride variations,
                 # we flatten the logits into a 2D tensor with shape (1, -1).
