@@ -1355,8 +1355,6 @@ class RBLNModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # Force use_global_ctx as True in vLLM (quickfix)
         # TODO(yunseong.kim): use device_id from current platform
         # when vllm-rbln supports it
-        options["use_global_ctx"] = True
-        options["global_device_id"] = 0
 
         # compile compute_logits
         # FIXME(jiwoo.park): method assignment for torch.compile
