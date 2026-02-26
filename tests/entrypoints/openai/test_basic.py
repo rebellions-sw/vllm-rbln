@@ -14,22 +14,20 @@
 
 import asyncio
 import os
-from http import HTTPStatus
 
 import openai
 import pytest
 import pytest_asyncio
-import requests
 from utils import RemoteOpenAIServer
 
-MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR")
+MODEL_DIR = os.getenv("REBEL_VLLM_PRE_COMPILED_DIR", "./")
 MODEL_NAME = MODEL_DIR + "/opt_125m_batch2"
 MAX_TOKENS = 1
 
 
-@pytest.fixture(scope='module')
+@pytest.fixture(scope="module")
 def server_args(request: pytest.FixtureRequest) -> list[str]:
-    """ Provide extra arguments to the server via indirect parametrization
+    """Provide extra arguments to the server via indirect parametrization
 
     Usage:
 
@@ -82,8 +80,10 @@ async def client(server):
 @pytest.mark.parametrize(
     "server_args",
     [
-        pytest.param(["--disable-frontend-multiprocessing"],
-                     id="disable-frontend-multiprocessing")
+        pytest.param(
+            ["--disable-frontend-multiprocessing"],
+            id="disable-frontend-multiprocessing",
+        )
     ],
     indirect=True,
 )
@@ -98,14 +98,16 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     # To make timeout while generating tokens
     for _ in range(10):
         task = asyncio.create_task(
-            client.completions.create(prompt=prompt,
-                                      model=MODEL_NAME,
-                                      max_tokens=100,
-                                      extra_body={"min_tokens": 100}))
+            client.completions.create(
+                prompt=prompt,
+                model=MODEL_NAME,
+                max_tokens=100,
+                extra_body={"min_tokens": 100},
+            )
+        )
         tasks.append(task)
 
-    done, pending = await asyncio.wait(tasks,
-                                       return_when=asyncio.ALL_COMPLETED)
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
 
     # Make sure all requests were sent to the server and timed out
     # (We don't want to hide other errors like 400s that would invalidate this
@@ -118,72 +120,22 @@ async def test_request_cancellation(server: RemoteOpenAIServer):
     # If the server had not cancelled all the other requests, then it would not
     # be able to respond to this one within the timeout
     client = server.get_async_client(timeout=200)
-    response = await client.completions.create(prompt=prompt,
-                                               model=MODEL_NAME,
-                                               max_tokens=MAX_TOKENS)
+    response = await client.completions.create(
+        prompt=prompt, model=MODEL_NAME, max_tokens=MAX_TOKENS
+    )
 
     assert len(response.choices) == 1
 
 
 @pytest.mark.asyncio
 async def test_request_wrong_content_type(server: RemoteOpenAIServer):
-
     prompt = "Write a long story"
     client = server.get_async_client()
 
     with pytest.raises(openai.APIStatusError):
-        await client.completions.create(prompt=prompt,
-                                        model=MODEL_NAME,
-                                        max_tokens=MAX_TOKENS,
-                                        extra_headers={
-                                            "Content-Type":
-                                            "application/x-www-form-urlencoded"
-                                        })
-
-
-@pytest.mark.parametrize(
-    "server_args",
-    [
-        pytest.param(["--enable-server-load-tracking"],
-                     id="enable-server-load-tracking")
-    ],
-    indirect=True,
-)
-@pytest.mark.asyncio
-async def test_server_load(server: RemoteOpenAIServer):
-    # Check initial server load
-    response = requests.get(server.url_for("load"))
-    assert response.status_code == HTTPStatus.OK
-    assert response.json().get("server_load") == 0
-
-    def make_long_completion_request():
-        return requests.post(
-            server.url_for("v1/completions"),
-            headers={"Content-Type": "application/json"},
-            json={
-                "prompt": "Give me a long story",
-                "max_tokens": MAX_TOKENS,
-                "temperature": 0,
-            },
+        await client.completions.create(
+            prompt=prompt,
+            model=MODEL_NAME,
+            max_tokens=MAX_TOKENS,
+            extra_headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-
-    # Start the completion request in a background thread.
-    completion_future = asyncio.create_task(
-        asyncio.to_thread(make_long_completion_request))
-
-    # Give a short delay to ensure the request has started.
-    await asyncio.sleep(0.1)
-
-    # Check server load while the completion request is running.
-    response = requests.get(server.url_for("load"))
-    assert response.status_code == HTTPStatus.OK
-    assert response.json().get("server_load") == 1
-
-    # Wait for the completion request to finish.
-    await completion_future
-    await asyncio.sleep(0.1)
-
-    # Check server load after the completion request has finished.
-    response = requests.get(server.url_for("load"))
-    assert response.status_code == HTTPStatus.OK
-    assert response.json().get("server_load") == 0

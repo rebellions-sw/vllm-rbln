@@ -12,12 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple
 
 import torch
 from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
-from vllm.model_executor.layers.rotary_embedding.common import (rotate_gptj,
-                                                                rotate_neox)
+from vllm.model_executor.layers.rotary_embedding.common import rotate_gptj, rotate_neox
 
 rope_original__init__ = RotaryEmbedding.__init__
 
@@ -58,8 +56,8 @@ def rope_forward_oot(
     positions: torch.Tensor,
     query: torch.Tensor,
     key: torch.Tensor,
-    offsets: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    offsets: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Args:
         positions: [batch_size, seq_len]
@@ -78,14 +76,20 @@ def rope_forward_oot(
     rotate_fn = rotate_neox if self.is_neox_style else rotate_gptj
 
     positions_flat = positions.flatten()
-    cos = self.cos_cache.index_select(0, positions_flat).view(
-        batch_size, 1, seq_len, -1)
-    sin = self.sin_cache.index_select(0, positions_flat).view(
-        batch_size, 1, seq_len, -1)
+    cos = (
+        self.cos_cache.index_select(0, positions_flat)
+        .view(batch_size, 1, seq_len, -1)
+        .to(query.dtype)
+    )
+    sin = (
+        self.sin_cache.index_select(0, positions_flat)
+        .view(batch_size, 1, seq_len, -1)
+        .to(query.dtype)
+    )
 
     query_shape = query.shape
     query = query.view(batch_size, seq_len, -1, self.head_size)
-    query_rot = query[..., :self.rotary_dim]
+    query_rot = query[..., : self.rotary_dim]
     query_rot = query_rot.transpose(1, 2)
     query_rot = query_rot * cos + rotate_fn(query_rot) * sin
     query_rot = query_rot.transpose(1, 2)
@@ -93,12 +97,12 @@ def rope_forward_oot(
     if self.head_size == self.rotary_dim:
         query = query_rot.reshape(query_shape)
     else:
-        query_pass = query[..., self.rotary_dim:]
+        query_pass = query[..., self.rotary_dim :]
         query = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
     key_shape = key.shape
     key = key.view(batch_size, seq_len, -1, self.head_size)
-    key_rot = key[..., :self.rotary_dim]
+    key_rot = key[..., : self.rotary_dim]
     key_rot = key_rot.transpose(1, 2)
     key_rot = key_rot * cos + rotate_fn(key_rot) * sin
     key_rot = key_rot.transpose(1, 2)
@@ -106,7 +110,7 @@ def rope_forward_oot(
     if self.head_size == self.rotary_dim:
         key = key_rot.reshape(key_shape)
     else:
-        key_pass = key[..., self.rotary_dim:]
+        key_pass = key[..., self.rotary_dim :]
         key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
 
     return query, key
