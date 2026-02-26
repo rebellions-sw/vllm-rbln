@@ -342,21 +342,8 @@ class RBLNWorker(WorkerBase):
             # FIXME It is temporary code.
             # It requires validation.
             if quantization == "fp8":
-                if "ca" in device_name:
-                    # ATOM DOES NOT support mxfp4 quantization, handled by bf16
-                    nbits_per_param = 16
-                    # mlp weight scale is merged into params
-                    # FIXME(RBLN) - expert scale merged into expert weight param
-                    # ratio scale vs weight = 1 : 16
-                    ratio = 16 / 17
-                elif "cr" in device_name:
-                    # REBEL can support mxfp4 quantization
-                    nbits_per_param = 8
-                    ratio = 1
-                else:
-                    raise ValueError(
-                        "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
-                    )
+                nbits_per_param = 8
+                ratio = 1
             elif quantization == "mxfp4":
                 if "ca" in device_name:
                     # ATOM DOES NOT support mxfp4 quantization, handled by bf16
