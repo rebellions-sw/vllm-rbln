@@ -127,15 +127,6 @@ required-environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'"
 ]
 
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
 [tool.typos.default]
 binary = false
 check-filename = false
