@@ -1473,7 +1473,14 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                             torch.ops.rbln_custom_ops.causal_attention_naive_decode
                         )
 
-                extra_args = (self.sinks,) if (envs.VLLM_RBLN_COMPILE_MODEL and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL) else ()
+                extra_args = (
+                    (self.sinks,)
+                    if (
+                        envs.VLLM_RBLN_COMPILE_MODEL
+                        and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL
+                    )
+                    else ()
+                )
 
                 if q_len == 1:
                     attn_output = causal_attention_naive_decode(  # noqa: E501
@@ -1527,7 +1534,14 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 #   original sequence index
                 # * otherwise         - seq_lens[B, P] == dyn_size_for_partitions,
                 #   dynamic size for each partition
-                extra_args = (self.sinks,) if (envs.VLLM_RBLN_COMPILE_MODEL and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL) else ()
+                extra_args = (
+                    (self.sinks,)
+                    if (
+                        envs.VLLM_RBLN_COMPILE_MODEL
+                        and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL
+                    )
+                    else ()
+                )
 
                 if q_len == 1:
                     attn_output = flash_causal_attention_naive_decode(  # noqa: E501
@@ -1575,7 +1589,14 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                             torch.ops.rbln_custom_ops.attention_naive_decode
                         )
 
-                extra_args = (self.sinks,) if (envs.VLLM_RBLN_COMPILE_MODEL and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL) else ()
+                extra_args = (
+                    (self.sinks,)
+                    if (
+                        envs.VLLM_RBLN_COMPILE_MODEL
+                        and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL
+                    )
+                    else ()
+                )
 
                 if q_len == 1:
                     attn_output = attention_naive_decode(  # noqa: E501
@@ -1623,7 +1644,14 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                     flash_attention_naive_prefill = flash_attention_naive_prefill_impl
                     flash_attention_naive_decode = flash_attention_naive_decode_impl
 
-                extra_args = (self.sinks,) if (envs.VLLM_RBLN_COMPILE_MODEL and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL) else ()
+                extra_args = (
+                    (self.sinks,)
+                    if (
+                        envs.VLLM_RBLN_COMPILE_MODEL
+                        and not envs.VLLM_RBLN_USE_CUSTOM_KERNEL
+                    )
+                    else ()
+                )
 
                 if q_len == 1:
                     attn_output = flash_attention_naive_decode(  # noqa: E501
