@@ -65,9 +65,9 @@ def rope_forward_oot(
         key: [batch_size, seq_len, num_kv_heads * head_size]
     """
     # NOTE(RBLN): For best compatibility with rbln,
-    # tensors are reshaped/transposed as follows:
-    # - cos, sin: (batch_size, 1, seq_len, rotary_dim * 2)
-    # - query, key: (batch_size, num_heads, seq_len, head_size)
+    # tensors are reshaped as follows:
+    # - cos, sin: (batch_size, seq_len, 1, rotary_dim) for broadcast with (B, S, H, R)
+    # - query, key: (batch_size, seq_len, num_heads, head_size)
 
     if offsets is not None:
         positions = positions + offsets
@@ -78,21 +78,19 @@ def rope_forward_oot(
     positions_flat = positions.flatten()
     cos = (
         self.cos_cache.index_select(0, positions_flat)
-        .view(batch_size, 1, seq_len, -1)
+        .view(batch_size, seq_len, 1, -1)
         .to(query.dtype)
     )
     sin = (
         self.sin_cache.index_select(0, positions_flat)
-        .view(batch_size, 1, seq_len, -1)
+        .view(batch_size, seq_len, 1, -1)
         .to(query.dtype)
     )
 
     query_shape = query.shape
     query = query.view(batch_size, seq_len, -1, self.head_size)
     query_rot = query[..., : self.rotary_dim]
-    query_rot = query_rot.transpose(1, 2)
     query_rot = query_rot * cos + rotate_fn(query_rot) * sin
-    query_rot = query_rot.transpose(1, 2)
     # FIXME(RBLN) - if slice size is zero, DO NOT slice
     if self.head_size == self.rotary_dim:
         query = query_rot.reshape(query_shape)
@@ -103,9 +101,7 @@ def rope_forward_oot(
     key_shape = key.shape
     key = key.view(batch_size, seq_len, -1, self.head_size)
     key_rot = key[..., : self.rotary_dim]
-    key_rot = key_rot.transpose(1, 2)
     key_rot = key_rot * cos + rotate_fn(key_rot) * sin
-    key_rot = key_rot.transpose(1, 2)
     # FIXME(RBLN) - if slice size is zero, DO NOT slice
     if self.head_size == self.rotary_dim:
         key = key_rot.reshape(key_shape)
