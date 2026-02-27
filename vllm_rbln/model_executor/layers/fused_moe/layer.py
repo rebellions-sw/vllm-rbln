@@ -367,7 +367,6 @@ def unquantized_fused_optimize_moe_method_custom(
     use_moe_tokens_mask = envs.VLLM_RBLN_USE_MOE_TOKENS_MASK
     if use_moe_tokens_mask:
         tokens_mask = get_tokens_mask(num_tokens)
-        router_logits = router_logits + tokens_mask
 
     # optimum-rbln/src/optimum/rbln/transformers/models/qwen3_moe/
     # qwen3_moe_architecture.py
