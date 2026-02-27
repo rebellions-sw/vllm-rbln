@@ -12,23 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import vllm.v1.core.single_type_kv_cache_manager as single_type_kv_cache_manager
 from vllm.config import VllmConfig
 from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.core.single_type_kv_cache_manager import SingleTypeKVCacheManager
-from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.kv_cache_interface import SlidingWindowSpec
 from vllm.v1.request import Request
 
 
 @dataclass(frozen=True)
-class RBLNSlidingWindowSpec(AttentionSpec):
-    sliding_window: int
-
+class RBLNSlidingWindowSpec(SlidingWindowSpec):
     def __post_init__(self):
-        assert self.block_size == self.sliding_window
-        assert not self.use_mla, "MLA is not supported for sliding window"
+        # NOTE: The block size here means to be the physical block size. The
+        # logical kernel_block_size that the kernel actually uses is equal to
+        # sliding_window. The physical block is split into logical blocks.
+        assert self.block_size % self.sliding_window == 0
 
     def max_memory_usage_bytes(self, vllm_config: VllmConfig) -> int:
         return self.page_size_bytes
@@ -45,12 +46,16 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
     """
 
     def get_num_blocks_to_allocate(
-            self, request_id: str, num_tokens: int,
-            new_computed_blocks: list[KVCacheBlock]) -> int:
+        self,
+        request_id: str,
+        num_tokens: int,
+        new_computed_blocks: Sequence[KVCacheBlock],
+    ) -> int:
         return 0 if self.req_to_blocks[request_id] else 1
 
-    def allocate_new_blocks(self, request_id: str,
-                            num_tokens: int) -> list[KVCacheBlock]:
+    def allocate_new_blocks(
+        self, request_id: str, num_tokens: int
+    ) -> list[KVCacheBlock]:
         if self.req_to_blocks[request_id]:
             return []
         new_blocks = self.block_pool.get_new_blocks(1)
@@ -66,23 +71,24 @@ class RBLNSlidingWindowManager(SingleTypeKVCacheManager):
         block_pool,
         kv_cache_spec,
         use_eagle,
+        alignment_tokens,
         dcp_world_size: int = 1,
+        pcp_world_size: int = 1,
     ) -> tuple[list[KVCacheBlock], ...]:
         return tuple([] for _ in kv_cache_group_ids)
 
     def cache_blocks(self, request: Request, num_tokens: int) -> None:
         pass
 
-    def remove_skipped_blocks(self, request_id: str,
-                              num_computed_tokens: int) -> None:
+    def remove_skipped_blocks(self, request_id: str, num_computed_tokens: int) -> None:
         pass
 
-    def get_num_common_prefix_blocks(self, request_id: str,
-                                     num_running_requests: int) -> int:
+    def get_num_common_prefix_blocks(self, running_request_id: str) -> int:
         return 0
 
 
-single_type_kv_cache_manager.spec_manager_map.update({
-    RBLNSlidingWindowSpec:
-    RBLNSlidingWindowManager,
-})
+single_type_kv_cache_manager.spec_manager_map.update(
+    {
+        RBLNSlidingWindowSpec: RBLNSlidingWindowManager,
+    }
+)

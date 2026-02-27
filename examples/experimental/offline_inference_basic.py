@@ -19,9 +19,7 @@ from vllm import LLM, SamplingParams
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model",
-                        type=str,
-                        default="meta-llama/Llama-3.2-1B-instruct")
+    parser.add_argument("--model", type=str, default="meta-llama/Llama-3.2-1B-instruct")
     parser.add_argument("--max-num-seqs", type=int, default=8)
     parser.add_argument("--max-model-len", type=int, default=40 * 1024)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
@@ -50,7 +48,7 @@ def main():
         block_size=args.block_size,
         enable_chunked_prefill=True,
         max_num_batched_tokens=128,
-        gpu_memory_utilization=1,
+        gpu_memory_utilization=0.9,
         enable_expert_parallel=args.enable_expert_parallel,
     )
 

@@ -18,4 +18,5 @@ from vllm_rbln.logger import init_logger
 def test_logger():
     logger = init_logger(__name__)
     assert logger.name.strip().startswith("vllm"), (
-        f"Expected logger name to start with 'vllm', got {logger.name}")
+        f"Expected logger name to start with 'vllm', got {logger.name}"
+    )

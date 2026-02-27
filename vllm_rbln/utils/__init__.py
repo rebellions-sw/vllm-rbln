@@ -17,10 +17,9 @@ from typing import Union
 import torch
 
 
-def pad(x: torch.Tensor,
-        dim: int,
-        target_len: int,
-        pad_value: Union[int, float] = 0) -> torch.Tensor:
+def pad(
+    x: torch.Tensor, dim: int, target_len: int, pad_value: Union[int, float] = 0
+) -> torch.Tensor:
     """Pad along the given dimension to target_len using pad_value."""
     current = x.size(dim)
     if current >= target_len:
@@ -32,3 +31,65 @@ def pad(x: torch.Tensor,
     pad_shape[dim] = target_len - current
     pad = torch.full(pad_shape, pad_value, dtype=x.dtype, device=x.device)
     return torch.cat([x, pad], dim=dim)
+
+
+def pad_speculative_draft_tokens(
+    input_ids: torch.Tensor,
+    num_scheduled_tokens: torch.Tensor,
+    max_len: int | None = None,
+) -> torch.Tensor:
+    """
+    Pad per-request draft tokens to a uniform length (max across requests)
+    by inserting zeros.
+
+    Assumes `input_ids` is a 1D concatenation of per-request draft tokens
+    in request order.
+    Example 1:
+      input_ids = [3925, 3823, 1694, 477] or [13, 18, 19, 20]
+      num_scheduled_tokens = [1, 3]
+    returns:
+      [3925, 0, 0, 3823, 1694, 477] or [13, 0, 0, 18, 19, 20]
+
+    Example 2:
+      input_ids = [3363, 315, 11]
+      num_scheduled_tokens = [2, 1]
+      max_len = 3
+    returns:
+      [3363, 315, 0, 11, 0, 0]
+    """
+    if input_ids.ndim != 1:
+        raise ValueError(f"input_ids must be 1D, got shape={tuple(input_ids.shape)}")
+
+    if num_scheduled_tokens.ndim != 1:
+        raise ValueError(
+            f"num_scheduled_tokens must be 1D, got shape={num_scheduled_tokens.shape}"
+        )
+
+    num_reqs = num_scheduled_tokens.numel()
+    max_sched = num_scheduled_tokens.max().item()
+
+    if max_len is not None:
+        if max_len < max_sched:
+            raise ValueError(
+                f"max_len({max_len}) must be >= max(num_scheduled_tokens)({max_sched})"
+            )
+        max_sched = max_len
+
+    # Create flattened destination indices
+    req_indices = torch.repeat_interleave(
+        torch.arange(num_reqs, device=num_scheduled_tokens.device), num_scheduled_tokens
+    )
+    token_offsets = (
+        torch.arange(input_ids.numel(), device=num_scheduled_tokens.device)
+        - num_scheduled_tokens.cumsum(0)[req_indices]
+        + num_scheduled_tokens[req_indices]
+    )
+    dest_indices = req_indices * max_sched + token_offsets
+
+    # Scatter input tokens into padded output
+    out = torch.zeros(
+        num_reqs * max_sched, device=input_ids.device, dtype=input_ids.dtype
+    )
+    out.index_copy_(0, dest_indices, input_ids)
+
+    return out

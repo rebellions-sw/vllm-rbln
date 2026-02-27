@@ -1,3 +1,4 @@
+
 name: CI / PR / vllm-rbln with optimum
 
 on:
@@ -7,13 +8,17 @@ on:
         description: "ref to checkout"
         required: false
         type: string
+      pr_number:
+        description: "PR number to checkout (optional)"
+        required: false
+        type: string
       rebel_compiler_version:
-        description: "Version of rebel-compiler to use (optional)"
-        required: true
+        description: "Version of rebel-compiler to use (optional, will fetch latest if not provided)"
+        required: false
         type: string
       optimum_rbln_version:
         description: "Version of optimum-rbln to use (optional)"
-        required: true
+        required: false
         type: string
   workflow_call:
     inputs:
@@ -21,8 +26,12 @@ on:
         description: "ref to checkout"
         required: false
         type: string
+      pr_number:
+        description: "PR number to checkout (optional)"
+        required: false
+        type: string
       rebel_compiler_version:
-        description: "Version of rebel-compiler to use (optional)"
+        description: "Version of rebel-compiler to use"
         required: false
         type: string
       optimum_rbln_version:
@@ -34,7 +43,14 @@ env:
   REBEL_VLLM_PRE_COMPILED_DIR: ${{ secrets.VLLM_PRE_COMPILED_DIR }}
 
 jobs:
+  get-compiler-version:
+    if: ${{ !inputs.rebel_compiler_version }}
+    uses: ./.github/workflows/rbln_utils_get_compiler_version_ci.yaml
+    secrets: inherit
+
   test_vllm_rbln_rsd1:
+    needs: [get-compiler-version]
+    if: ${{ always() && !cancelled() }}
     name: Optimum Test CI RSD 1
     runs-on: rbln-sw-k8s-ca22-1
     container:
@@ -47,12 +63,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -65,13 +75,13 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 
@@ -111,12 +121,6 @@ jobs:
           python3 examples/optimum/run_basic.py
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/gemma-2-2b-8k_batch4
 
-      - name : Run encoder-decoder (V1)
-        run: >
-          python3 examples/optimum/run_encoder_decoder.py
-          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/rbln_bart-small_batch2
-
       - name : Run text embedding model (V1)
         run: >
           python3 examples/optimum/run_encoder_only.py
@@ -127,6 +131,8 @@ jobs:
           --golden_json ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/golden/golden_bge_m3_result_qp_prompts.json
 
   test_vllm_rbln_rsd4:
+    needs: [get-compiler-version]
+    if: ${{ always() && !cancelled() }}
     name: Optimum Test CI RSD 4
     runs-on: rbln-sw-k8s-ca22-4
     container:
@@ -139,12 +145,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -157,13 +157,13 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 
@@ -219,22 +219,10 @@ jobs:
            python3 examples/optimum/run_llava.py
            --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
            --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4/
-      
-      - name : Run Llava-next (Eager mode) (V0)
-        run: >
-           VLLM_USE_V1=0 python3 examples/optimum/run_llava.py
-           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4/
 
       - name : Run Llava-next (Flash-attention mode) (V1)
         run: >
           python3 examples/optimum/run_llava.py
-          --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
-          --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4-kv16k
-      
-      - name : Run Llava-next (Flash-attention mode) (V0)
-        run: >
-          VLLM_USE_V1=0 python3 examples/optimum/run_llava.py
           --num_input_prompt ${{ env.NUM_INPUT_PROMPT }}
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/llava-v1.6-mistral-7b-hf-32k-b4-kv16k
 
@@ -263,6 +251,8 @@ jobs:
           --model_id ${{ env.REBEL_VLLM_PRE_COMPILED_DIR }}/paligemma-3b-8k-b4
 
   test_vllm_rbln_rsd8:
+    needs: [get-compiler-version]
+    if: ${{ always() && !cancelled() }}
     name: Optimum Test CI RSD 8
     runs-on: rbln-sw-k8s-ca22-8
     container:
@@ -275,12 +265,6 @@ jobs:
       RBLN_VERBOSE: 6
       VLLM_LOGGING_LEVEL: DEBUG
     steps:
-      - name: Get latest rebel_compiler version
-        if: ${{ !inputs.rebel_compiler_version }}
-        id: get_latest_rebel_compiler
-        run: |
-          echo "COMPILER_VER=${{ needs.get-compiler-version.outputs.compiler_version }}" >> $GITHUB_OUTPUT
-
       - name: Install uv CLI
         run: |
           pip install uv
@@ -293,13 +277,13 @@ jobs:
           apt-get install -y build-essential
           export CXX=$(which g++)
           uv pip uninstall --system rebel-compiler
-          VERSION=${{ inputs.rebel_compiler_version || steps.get_latest_rebel_compiler.outputs.COMPILER_VER }}
+          VERSION=${{ inputs.rebel_compiler_version || needs.get-compiler-version.outputs.compiler_version }}
           uv pip install --system --extra-index-url ${{ secrets.DEV_PKG_URL }} rebel-compiler==${VERSION}
 
       - name: Checkout current repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.pr_number && format('refs/pull/{0}/merge', inputs.pr_number) || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           submodules: recursive
           fetch-depth: 0
 

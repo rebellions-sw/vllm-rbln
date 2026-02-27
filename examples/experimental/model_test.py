@@ -21,25 +21,11 @@ from vllm.transformers_utils.config import get_hf_text_config
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--model',
-                    type=str,
-                    default="llama3.2-1b",
-                    help="model name")
-parser.add_argument('--tp',
-                    type=int,
-                    default=1,
-                    help="vLLM tensor_parallel_size")
-parser.add_argument('--pp',
-                    type=int,
-                    default=1,
-                    help="vLLM pipeline_parallel_size")
-parser.add_argument('--dp',
-                    type=int,
-                    default=1,
-                    help="vLLM data_parallel_size")
-parser.add_argument('--ep',
-                    action='store_true',
-                    help="vLLM enable_expert_parallel")
+parser.add_argument("--model", type=str, default="llama3.2-1b", help="model name")
+parser.add_argument("--tp", type=int, default=1, help="vLLM tensor_parallel_size")
+parser.add_argument("--pp", type=int, default=1, help="vLLM pipeline_parallel_size")
+parser.add_argument("--dp", type=int, default=1, help="vLLM data_parallel_size")
+parser.add_argument("--ep", action="store_true", help="vLLM enable_expert_parallel")
 args = parser.parse_args()
 
 # dense model
@@ -112,27 +98,26 @@ def custom_hf_overrides_kw(hf_config):
 
 
 prompts = [
-    #"Hello, my name is",
-    #"The president of the United States is",
-    #"The financial minister of the United States is",
-    #"The future of AI is",
+    # "Hello, my name is",
+    # "The president of the United States is",
+    # "The financial minister of the United States is",
+    # "The future of AI is",
     "The capital of France is",
-    #"The capital of UK is",
+    # "The capital of UK is",
 ]
 
 import os
 
 ## The profile results can be visualized using https://ui.perfetto.dev/
-profile_dir = './profile/' + model_id.replace('/', '_')
-os.environ['VLLM_TORCH_PROFILER_DIR'] = profile_dir
+profile_dir = "./profile/" + model_id.replace("/", "_")
 
 # Create a sampling params object.
 sampling_params = SamplingParams(temperature=0.0)
 warmup_sampling_params = SamplingParams(temperature=0.0, max_tokens=2)
 llm = LLM(
     model=model_id,
-    #hf_overrides=hf_overrides_kw,
-    #hf_overrides=custom_hf_overrides_kw,
+    # hf_overrides=hf_overrides_kw,
+    # hf_overrides=custom_hf_overrides_kw,
     # max_model_len=40 * 1024,
     max_model_len=8 * 1024,
     block_size=1024,
@@ -144,6 +129,10 @@ llm = LLM(
     pipeline_parallel_size=pipeline_parallel_size,
     data_parallel_size=data_parallel_size,
     enable_expert_parallel=enable_expert_parallel,
+    profiler_config={
+        "profiler": "torch",
+        "torch_profiler_dir": profile_dir,
+    },
 )
 
 # 1. warmup -  The first run initializes the compiled models.

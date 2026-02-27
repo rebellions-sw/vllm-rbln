@@ -13,11 +13,12 @@
 # limitations under the License.
 """CPU affinity utilities for RBLN worker."""
 
+import math
 import os
 import platform
 from collections.abc import Callable
 
-from vllm.config import ParallelConfig
+from vllm.config import ModelConfig, ParallelConfig
 from vllm.platforms import CpuArchEnum, current_platform
 from vllm.platforms.cpu import CpuPlatform, LogicalCPUInfo
 
@@ -25,6 +26,145 @@ import vllm_rbln.rbln_envs as envs
 from vllm_rbln.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+# NOTE: This function comes from optimum-rbln. Keep in sync.
+def estimate_available_memory(
+    model_config: ModelConfig,
+    parallel_config: ParallelConfig,
+    nbits_per_param: int | None = None,
+    n_model_params: int | None = None,
+    kernel_size: int | None = None,
+    buffer: int | None = None,
+    num_runtimes: int = 2,
+    gpu_memory_utilization: float = 0.9,
+) -> int:
+    # We are finding max_num_blocks(x) that satisfies the following equation:
+
+    # available_dram - kernel_size - buffer
+    #     - num_layers * 2 * tensor_parallel_size
+    #     * align_2MB(
+    #         x
+    #         * block_size
+    #         * align_64(head_dim)
+    #         * math.ceil(num_key_value_heads / tensor_parallel_size)
+    #         * 2
+    #     ) > 0
+
+    # This inequality can be rewritten as follows:
+
+    # a - c * align_2MB(b * x) > 0
+    # where
+    #    a = available_dram - kernel_size - buffer
+    #    b = block_size
+    #         * align_64(head_dim)
+    #         * math.ceil(num_key_value_heads / tensor_parallel_size) * 2
+    #    c = num_layers * 2 * tensor_parallel_size
+
+    # We can rewrite the inequality as follows:
+    # k > align_2MB(b*x)
+    # where
+    #    k = a / c
+
+    # After that, we can derive the following equation:
+    # x = floor(2**21 / b * floor((k - 1) / 2**21))
+
+    def align(x: int, nbytes: int) -> int:
+        return int(math.ceil(x / nbytes) * nbytes)
+
+    def align_2MB(x: int) -> int:
+        return align(x, 2**21)
+
+    num_layers = model_config.get_num_layers(parallel_config)
+    vocab_size = model_config.get_vocab_size()
+    hidden_size = model_config.get_hidden_size()
+    num_key_value_heads = model_config.get_num_kv_heads(parallel_config)
+    tp_size = parallel_config.tensor_parallel_size
+
+    # TODO(jongho): Update if target npu is REBEL.
+
+    device_name = current_platform.get_device_name().lower()
+    assert "rbln" in device_name
+    if "ca" in device_name:
+        # ATOM - RBLN-CA[xxx]
+        # ATOM DRAM - 16GB (single chip)
+        ATOM_DRAM_NBYTES = 16 * 2**30
+        ATOM_SYS_DRAM_NBYTES = 288 * 2**20
+        # consider RSD size for ATOM
+        rsd_size = envs.VLLM_RBLN_TP_SIZE
+        available_dram_bytes = rsd_size * (ATOM_DRAM_NBYTES - ATOM_SYS_DRAM_NBYTES)
+        # ATOM - basic data type fp16
+        default_bits_per_param = 16
+    elif "cr" in device_name:
+        assert envs.VLLM_RBLN_TP_SIZE == 1
+        # REBEL - RBLN-CR[xxx]
+        # REBEL DRAM - 144GB (quad chips, chiplet) - system(4G) = 140GB
+        REBEL_DRAM_NBYTES = 144 * 2**30
+        REBEL_SYS_DRAM_NBYTES = 4 * 2**30
+        REBEL_DRAM_NBYTES -= REBEL_SYS_DRAM_NBYTES
+        REBEL_CHIPLET_SIZE = 4
+        # single device == Quad chiplet
+        rsd_size = REBEL_CHIPLET_SIZE
+        available_dram_bytes = REBEL_DRAM_NBYTES
+        # FIXME(RBLN) - basic data type fp8 for REBEL, for now fp16
+        default_bits_per_param = 16
+    else:
+        raise ValueError(
+            "invalid RBLN architecture, candidates = [ATOM(ca), REBEL(cr)]"
+        )
+
+    num_runtimes = num_runtimes * rsd_size
+    available_dram_bytes = int(available_dram_bytes * gpu_memory_utilization)
+
+    def check_oom(available_dram_bytes: int) -> None:
+        if available_dram_bytes <= 0:
+            raise MemoryError(
+                "Insufficient DRAM during block calculation. "
+                "Try reducing gpu_memory_utilization."
+            )
+
+    if kernel_size is None:
+        if n_model_params is None:
+            raise ValueError(
+                "`n_model_params` should be specified \
+                to estimate the kernel memory."
+            )
+        # Get estimated kernel size (approximated)
+        # kernel_size
+        # - QKV params    - model parallel (tp) sharded
+        # - MLP or expert - model parallel (ep) sharded
+        # - word embedding- non sharded,  not included into device,
+        #                   hidden_size * vocab_size
+        # - lm head       - model parallel (tp) sharded,
+        #                   hidden_size * vocab_size
+        lm_heads_params = align(vocab_size, 64) * hidden_size
+        lm_heads_nbytes = (
+            align_2MB(lm_heads_params * default_bits_per_param // 8 / tp_size) * tp_size
+        )
+        word_embedding_params = lm_heads_params
+        params = n_model_params - lm_heads_params - word_embedding_params
+        layer_nbytes = (
+            align_2MB(params * nbits_per_param // 8 / num_layers) * num_layers
+        )
+        kernel_size = layer_nbytes + lm_heads_nbytes
+    elif n_model_params is not None:
+        raise ValueError("Both `n_model_params` and `kernel_size` cannot be specified.")
+
+    available_dram_bytes -= kernel_size
+
+    if buffer is None:
+        # TODO: Accurate buffer estimation
+        buffer_per_runtime_per_core = 2**28  # 256MB per runtime
+        # 1 for prefill, 1 for decoder
+        buffer = buffer_per_runtime_per_core * num_runtimes
+    available_dram_bytes -= buffer
+
+    rsd_replicas = (rsd_size // num_key_value_heads) or 1
+    available_dram_bytes = available_dram_bytes // rsd_replicas
+
+    check_oom(available_dram_bytes)
+
+    return available_dram_bytes
 
 
 def get_autobind_cpu_ids(
@@ -44,8 +184,7 @@ def get_autobind_cpu_ids(
     Returns:
         Comma-separated string of CPU IDs, or "all" or "nobind".
     """
-    allowed_numa_nodes, logical_cpu_list = (
-        CpuPlatform.get_allowed_cpu_core_node_list())
+    allowed_numa_nodes, logical_cpu_list = CpuPlatform.get_allowed_cpu_core_node_list()
 
     # Calculate rank_across_dp for CPU binding
     # This ensures different DP groups get different CPU allocations
@@ -67,20 +206,21 @@ def get_autobind_cpu_ids(
         numa_node_to_cpus[numa_node].append(cpu_info)
 
     # Filter to only allowed NUMA nodes
-    available_numa_nodes = [
-        n for n in allowed_numa_nodes if n in numa_node_to_cpus
-    ]
+    available_numa_nodes = [n for n in allowed_numa_nodes if n in numa_node_to_cpus]
 
     if not available_numa_nodes:
-        logger.error("Auto thread-binding failed: no available NUMA nodes "
-                     "with allowed CPUs. Please try to bind threads manually.")
+        logger.error(
+            "Auto thread-binding failed: no available NUMA nodes "
+            "with allowed CPUs. Please try to bind threads manually."
+        )
         return "all"
 
     numa_node_idx = rank_across_dp % len(available_numa_nodes)
     selected_numa_node = available_numa_nodes[numa_node_idx]
     numa_node_cpu_list = numa_node_to_cpus[selected_numa_node]
     ranks_in_same_numa = [
-        r for r in range(world_size_across_dp)
+        r
+        for r in range(world_size_across_dp)
         if r % len(available_numa_nodes) == numa_node_idx
     ]
 
@@ -103,10 +243,8 @@ def get_autobind_cpu_ids(
         remainder = len(selected_cpu_list) % len(ranks_in_same_numa)
 
         rank_position = ranks_in_same_numa.index(rank_across_dp)
-        start_idx = rank_position * cpus_per_rank + min(
-            rank_position, remainder)
-        end_idx = (start_idx + cpus_per_rank +
-                   (1 if rank_position < remainder else 0))
+        start_idx = rank_position * cpus_per_rank + min(rank_position, remainder)
+        end_idx = start_idx + cpus_per_rank + (1 if rank_position < remainder else 0)
         logical_cpu_list = selected_cpu_list[start_idx:end_idx]
     else:
         logical_cpu_list = selected_cpu_list
@@ -166,13 +304,16 @@ def set_cpu_affinity(
         if cpu_arch in (CpuArchEnum.POWERPC, CpuArchEnum.S390X):
             # For S390X/POWERPC SMT-8/4/2
             local_omp_cpuid = get_autobind_cpu_ids(
-                rank, local_rank, parallel_config,
-                lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4])
+                rank,
+                local_rank,
+                parallel_config,
+                lambda cpus: [cpu for cpu in cpus if cpu.id % 8 < 4],
+            )
         elif cpu_arch == CpuArchEnum.X86:
             # For x86 SMT-2, use 1 CPU per core
-            local_omp_cpuid = get_autobind_cpu_ids(rank, local_rank,
-                                                   parallel_config,
-                                                   lambda cpus: cpus[-1:])
+            local_omp_cpuid = get_autobind_cpu_ids(
+                rank, local_rank, parallel_config, lambda cpus: cpus[:1]
+            )
         else:
             local_omp_cpuid = "nobind"
     else:
@@ -180,9 +321,7 @@ def set_cpu_affinity(
 
     if local_omp_cpuid not in ("all", "nobind"):
         # Parse CPU IDs from string (e.g., "0,1,2,3" -> [0, 1, 2, 3])
-        cpu_ids = [
-            int(cpu_id.strip()) for cpu_id in local_omp_cpuid.split(",")
-        ]
+        cpu_ids = [int(cpu_id.strip()) for cpu_id in local_omp_cpuid.split(",")]
         # Set CPU affinity for current process
         try:
             os.sched_setaffinity(0, cpu_ids)
@@ -207,8 +346,7 @@ def set_cpu_affinity(
                 )
         except OSError as e:
             logger.error(
-                "Failed to set CPU affinity for rank %d (local_rank %d): "
-                "%s",
+                "Failed to set CPU affinity for rank %d (local_rank %d): %s",
                 rank,
                 local_rank,
                 str(e),
@@ -216,8 +354,7 @@ def set_cpu_affinity(
             raise
     elif local_omp_cpuid == "nobind":
         logger.info(
-            "Skipping CPU affinity binding for rank %d (local_rank %d): "
-            "nobind",
+            "Skipping CPU affinity binding for rank %d (local_rank %d): nobind",
             rank,
             local_rank,
         )
@@ -228,28 +365,34 @@ def set_omp_num_threads(
     local_rank: int,
     default_num_threads: int = 2,
 ) -> None:
-    """Set OMP_NUM_THREADS environment variable if not already defined.
+    """Set the number of threads for intra-op parallelism in this process.
+
+    This function sets the thread count using torch.set_num_threads(),
+    which directly controls the OpenMP/MKL thread pool for the current
+    process only, regardless of when it's called.
 
     Args:
         rank: Global rank of the worker.
         local_rank: Local rank of the worker.
-        default_num_threads: Default number of threads to use if
-            OMP_NUM_THREADS is not set. Defaults to 2.
+        default_num_threads: Number of threads to use if OMP_NUM_THREADS
+            is not set. Defaults to 2.
     """
+    import torch
 
-    if "OMP_NUM_THREADS" not in os.environ:
-        os.environ["OMP_NUM_THREADS"] = str(default_num_threads)
-        logger.info(
-            "Set OMP_NUM_THREADS to %d for rank %d (local_rank %d)",
-            default_num_threads,
-            rank,
-            local_rank,
-        )
+    # Determine the number of threads to use
+    if "OMP_NUM_THREADS" in os.environ:
+        num_threads = int(os.environ["OMP_NUM_THREADS"])
     else:
-        logger.info(
-            "OMP_NUM_THREADS is already defined for rank %d "
-            "(local_rank %d): %s",
-            rank,
-            local_rank,
-            os.environ["OMP_NUM_THREADS"],
-        )
+        num_threads = default_num_threads
+        # Set env var for any future subprocesses
+        os.environ["OMP_NUM_THREADS"] = str(num_threads)
+
+    # Directly set PyTorch's thread count for this process
+    torch.set_num_threads(num_threads)
+
+    logger.info(
+        "Set torch.num_threads to %d for rank %d (local_rank %d)",
+        num_threads,
+        rank,
+        local_rank,
+    )
