@@ -110,6 +110,7 @@ def custom_moe_glu_mxfp4(
     k: int,
     post_norm: bool = True,
     expert_map: torch.Tensor | None = None,
+    dp_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     MoE GLU operation for GPT-OSS with mxfp4 quantization and swigluoai activation.
@@ -241,6 +242,7 @@ def custom_moe_glu_mxfp4_fake(
     k: int,
     post_norm: bool = True,
     expert_map: torch.Tensor | None = None,
+    dp_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     return torch.empty_like(hidden_states)
 
