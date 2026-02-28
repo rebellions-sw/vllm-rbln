@@ -82,7 +82,7 @@ if envs.VLLM_RBLN_MOE_USE_OPT_KERNEL:
         topk: int,
         post_norm: bool,
         expert_map: torch.Tensor | None = None,
-        dp_mask: torch.Tensor | None = None
+        dp_mask: torch.Tensor | None = None,
         gate_proj_bias: torch.Tensor | None = None,
         up_proj_bias: torch.Tensor | None = None,
         down_proj_bias: torch.Tensor | None = None,
