@@ -400,7 +400,7 @@ class RBLNOptimumModelRunner(
                     capture_ctx = contextlib.nullcontext()
                 model_start_time = time.perf_counter()
                 with capture_ctx as model_reports:
-                    model_input = self._build_forward_inputs(model_input)
+                    model_input = self._build_mm_forward_inputs(model_input)
                     self.reuse_prefix_cached_kv(model_input, scheduler_output)
                     hidden_states = self.model(model_input)
                 if (
@@ -452,7 +452,7 @@ class RBLNOptimumModelRunner(
             model_input.block_tables,
         )
 
-    def _build_forward_inputs(
+    def _build_mm_forward_inputs(
         self, model_input: ModelInputForRBLN
     ) -> ModelInputForRBLN:
         model = self.model
