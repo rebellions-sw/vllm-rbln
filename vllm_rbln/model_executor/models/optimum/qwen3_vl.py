@@ -84,129 +84,24 @@ class RBLNOptimumQwen3VLForConditionalGeneration(
                 result["second_per_grid_ts"] = second_per_grid_ts
         return result
 
-    def _build_full_prefill_forward_inputs(
+    def _assemble_prefill_inputs(
         self,
         model_input: ModelInputForRBLN,
+        multimodal_embeddings: Any,
         mrope_position_deltas: dict[str, float],
     ) -> ModelInputForRBLN:
-        """Whole-prompt prefill + Qwen3-VL deepstack: the partial path without
-        the tail slice.
-        """
-        mm = self.embed_multimodal(**(model_input.multi_modal_kwargs or {}))
-        inputs_embeds = self.embed_input_ids(model_input.input_tokens, mm)
-        visual_pos_mask, deepstack_embeds = self._pack_deepstack_from_mm(
-            model_input.input_tokens, mm
+        """Qwen-VL prefill inputs plus the packed deepstack side outputs."""
+        model_input = super()._assemble_prefill_inputs(
+            model_input, multimodal_embeddings, mrope_position_deltas
         )
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        mrope_position_deltas[model_input.running_requests_ids[0]] = rope_deltas.item()
+        visual_pos_mask, deepstack_embeds = self._pack_deepstack_from_mm(
+            model_input.input_tokens, multimodal_embeddings
+        )
         return replace(
             model_input,
-            inputs_embeds=inputs_embeds,
-            position_embed=position_embed,
             visual_pos_mask=visual_pos_mask,
             deepstack_embeds=deepstack_embeds,
         )
-
-    def _build_partial_prefill_forward_inputs(
-        self,
-        model_input: ModelInputForRBLN,
-        mrope_position_deltas: dict[str, float],
-    ) -> ModelInputForRBLN:
-        """Uncached-tail prefill + Qwen3-VL deepstack. Same flow as the base
-        ``RBLNOptimumQwenVLForConditionalGeneration`` plus the deepstack pack.
-        """
-        assert model_input.partial_prefix is not None
-        mm = self.embed_multimodal(**(model_input.multi_modal_kwargs or {}))
-        mm = self._build_partial_mm_embeds(model_input.partial_prefix, mm)
-        inputs_embeds = self.embed_input_ids(model_input.input_tokens, mm)
-        visual_pos_mask, deepstack_embeds = self._pack_deepstack_from_mm(
-            model_input.input_tokens, mm
-        )
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        mrope_position_deltas[model_input.running_requests_ids[0]] = rope_deltas.item()
-        return replace(
-            model_input,
-            inputs_embeds=inputs_embeds,
-            position_embed=position_embed,
-            visual_pos_mask=visual_pos_mask,
-            deepstack_embeds=deepstack_embeds,
-        )
-
-    def build_prefill_inputs_from_cache(
-        self,
-        input_ids: torch.Tensor,
-        cached_mm_outputs: list[dict],
-        *,
-        cache_position: torch.Tensor | None = None,
-        running_requests_ids: list[str] | None = None,
-        mrope_position_deltas: dict[str, float] | None = None,
-        model_input: ModelInputForRBLN | None = None,
-    ) -> dict:
-        """EC consumer + Qwen3-VL deepstack. Same flow as the base; the
-        whole-prompt features (incl. cached deepstack) come from
-        ``_cache_to_mm``. Partial hits additionally tail-slice.
-        """
-        assert model_input is not None
-        if model_input.partial_prefix is not None:
-            return self._build_partial_prefill_inputs_from_cache(
-                model_input,
-                cached_mm_outputs,
-                cache_position=cache_position,
-                running_requests_ids=running_requests_ids,
-                mrope_position_deltas=mrope_position_deltas,
-            )
-
-        mm = self._cache_to_mm(cached_mm_outputs)
-        inputs_embeds = self.embed_input_ids(input_ids, mm)
-        visual_pos_mask, deepstack_embeds = self._pack_deepstack_from_mm(input_ids, mm)
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        if running_requests_ids and mrope_position_deltas is not None:
-            mrope_position_deltas[running_requests_ids[0]] = rope_deltas.item()
-
-        params = {
-            "inputs_embeds": inputs_embeds,
-            "position_embed": position_embed,
-            "cache_position": cache_position,
-        }
-        if visual_pos_mask is not None:
-            params["visual_pos_mask"] = visual_pos_mask
-        if deepstack_embeds is not None:
-            params["deepstack_embeds"] = deepstack_embeds
-        return params
-
-    def _build_partial_prefill_inputs_from_cache(
-        self,
-        model_input: ModelInputForRBLN,
-        cached_mm_outputs: list[dict],
-        *,
-        cache_position: torch.Tensor | None,
-        running_requests_ids: list[str] | None,
-        mrope_position_deltas: dict[str, float] | None,
-    ) -> dict:
-        """EC-consumer partial prefill + Qwen3-VL deepstack. Same flow as the
-        base version; the tail features come from ``_cache_to_mm``.
-        """
-        assert model_input.partial_prefix is not None
-        mm = self._cache_to_mm(cached_mm_outputs)
-        mm = self._build_partial_mm_embeds(model_input.partial_prefix, mm)
-        inputs_embeds = self.embed_input_ids(model_input.input_tokens, mm)
-        visual_pos_mask, deepstack_embeds = self._pack_deepstack_from_mm(
-            model_input.input_tokens, mm
-        )
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        if running_requests_ids and mrope_position_deltas is not None:
-            mrope_position_deltas[running_requests_ids[0]] = rope_deltas.item()
-
-        params = {
-            "inputs_embeds": inputs_embeds,
-            "position_embed": position_embed,
-            "cache_position": cache_position,
-        }
-        if visual_pos_mask is not None:
-            params["visual_pos_mask"] = visual_pos_mask
-        if deepstack_embeds is not None:
-            params["deepstack_embeds"] = deepstack_embeds
-        return params
 
     def _cache_to_mm(self, cached_mm_outputs: list[dict]) -> dict:
         """Also carry the producer's cached per-layer deepstack."""

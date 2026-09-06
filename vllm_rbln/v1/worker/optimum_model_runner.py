@@ -281,7 +281,7 @@ class RBLNOptimumModelRunner(
             self.sampler_performance_tracker = PerformanceTracker("SAMPLER")
 
         # Encoder cache for EC disaggregation.
-        # Maps mm_hash → dict of prefill params (inputs_embeds, position_embed, etc.)
+        # Maps mm_hash → the producer's encoder output (embed_multimodal result).
         self.encoder_cache: dict[str, Any] = {}
 
         self.mrope_position_deltas: dict[str, float] = {}
@@ -399,22 +399,10 @@ class RBLNOptimumModelRunner(
                     # use a dummy context manager that does nothing
                     capture_ctx = contextlib.nullcontext()
                 model_start_time = time.perf_counter()
-                # EC consumer with cached encoder output: run the decoder
-                # with pre-computed embeddings instead of the full model
-                # forward (which would require the vision encoder runtime).
-
-                new_reqs = scheduler_output.scheduled_new_reqs
-                prefill_has_mm = bool(new_reqs) and bool(new_reqs[0].mm_features)
-                if self.is_ec_consumer and model_input.is_prompt and prefill_has_mm:
-                    with capture_ctx as model_reports:
-                        hidden_states = self._run_prefill_with_cached_encoder(
-                            model_input, scheduler_output
-                        )
-                else:
-                    with capture_ctx as model_reports:
-                        model_input = self._build_forward_inputs(model_input)
-                        self.reuse_prefix_cached_kv(model_input, scheduler_output)
-                        hidden_states = self.model(model_input)
+                with capture_ctx as model_reports:
+                    model_input = self._build_forward_inputs(model_input)
+                    self.reuse_prefix_cached_kv(model_input, scheduler_output)
+                    hidden_states = self.model(model_input)
                 if (
                     envs.VLLM_RBLN_METRICS
                     and self.model_performance_tracker is not None
@@ -651,6 +639,13 @@ class RBLNOptimumModelRunner(
         batched_mm_inputs, partial_prefix = self._extract_prefill_mm_inputs(
             scheduler_output, total_cached_length, full_prompt_tokens
         )
+        # The EC consumer has no vision encoder runtime: hand the model the
+        # producer's cached encoder outputs instead of letting it encode.
+        cached_mm_outputs = (
+            self._gather_cached_mm_outputs(scheduler_output, total_cached_length)
+            if self.is_ec_consumer
+            else None
+        )
 
         return ModelInputForRBLN(
             input_tokens=torch.tensor(prompt_tokens, dtype=torch.int64).unsqueeze(0),
@@ -662,6 +657,7 @@ class RBLNOptimumModelRunner(
             padded_batch_size=1,
             is_prompt=True,
             multi_modal_kwargs=batched_mm_inputs,
+            cached_mm_outputs=cached_mm_outputs,
             dummy_block=scheduler_output.dummy_block,
             cache_slot_ids=torch.tensor(
                 [scheduler_output.cache_slot_id_dict[req_id]], dtype=torch.int16

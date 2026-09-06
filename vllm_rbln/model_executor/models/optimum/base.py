@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from vllm.multimodal.inputs import BatchedTensorInputs
@@ -56,6 +57,11 @@ class ModelInputForRBLN:
     padded_batch_size: int
     is_prompt: bool = False
     multi_modal_kwargs: BatchedTensorInputs | None = None
+    # EC consumer prefill: the producer's cached encoder output of each
+    # multimodal item this prefill still needs, in kept order (the runner's
+    # _iter_kept_mm_features). None when the prefill builder should run the
+    # vision encoder over multi_modal_kwargs instead.
+    cached_mm_outputs: list[Any] | None = None
     # Block the scheduler set aside as scratch space for padding rows. None
     # when the scheduler did not set one aside; the runner then picks a block
     # no running request uses.

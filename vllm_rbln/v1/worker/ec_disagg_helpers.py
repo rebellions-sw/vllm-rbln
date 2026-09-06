@@ -18,9 +18,9 @@ surface (all call sites are `self._make_producer_output(...)` etc.) while
 the EC-specific logic lives in its own module.
 """
 
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-import torch
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
 
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
@@ -35,7 +35,7 @@ class ECDisaggHelpersMixin:
 
     Expects the host class to provide:
       - self.model, self.model_config, self.encoder_cache
-      - self.mrope_position_deltas
+      - self._iter_kept_mm_features (the runner's kept-item iteration)
       - self.maybe_save_ec_to_connector (from ECConnectorModelRunnerMixin)
     """
 
@@ -45,17 +45,14 @@ class ECDisaggHelpersMixin:
         model: Any
         model_config: "ModelConfig"
         encoder_cache: dict[str, Any]
-        mrope_position_deltas: dict[str, float]
 
         def maybe_save_ec_to_connector(
             self, encoder_cache: dict[str, Any], mm_hash: str
         ) -> None: ...
 
-        def reuse_prefix_cached_kv(
-            self,
-            model_input: ModelInputForRBLN,
-            scheduler_output: "SchedulerOutput",
-        ) -> None: ...
+        def _iter_kept_mm_features(
+            self, scheduler_output: "SchedulerOutput", num_cached_tokens: int
+        ) -> Iterator[Any]: ...
 
     def _make_producer_output(
         self, scheduler_output: "SchedulerOutput"
@@ -112,62 +109,30 @@ class ECDisaggHelpersMixin:
             self.encoder_cache[mm_hash] = encode_output
             self.maybe_save_ec_to_connector(self.encoder_cache, mm_hash)
 
-    def _run_prefill_with_cached_encoder(
+    def _gather_cached_mm_outputs(
         self,
-        model_input: ModelInputForRBLN,
         scheduler_output: "SchedulerOutput",
-    ) -> torch.Tensor:
-        """Consumer prefill path: gather the cached encoder outputs, let the
-        model merge them (model.build_prefill_inputs_from_cache), and run the prefill
-        decoder (optimum-rbln's prefill runtime)."""
-        if not scheduler_output.scheduled_new_reqs:
-            raise RuntimeError("EC consumer: no scheduled_new_reqs on prefill step.")
-        req = scheduler_output.scheduled_new_reqs[0]
-        if not req.mm_features:
-            raise RuntimeError("EC consumer: request has no mm_features.")
-        # On a partial prefix-cache hit, keep only the items not fully inside the
-        # cached prefix, matching the runner's _iter_kept_mm_features (and thus
-        # mm_embed_tail_starts). A fully-cached item's KV is reused and it has no
-        # placeholder in the uncached tail. num_cached == 0 keeps every item.
-        num_cached = (
-            model_input.partial_prefix.num_cached_tokens
-            if model_input.partial_prefix is not None
-            else 0
-        )
-        cached_mm_outputs: list = []
-        for feat in req.mm_features:
-            pos = feat.mm_position
-            if pos.offset + pos.length <= num_cached:
-                continue
+        num_cached_tokens: int,
+    ) -> list[Any]:
+        """Consumer prefill path: look up the producer's encoder output of every
+        multimodal item this prefill still needs.
+
+        The items come from the runner's ``_iter_kept_mm_features``, so the
+        list lines up with ``mm_embed_tail_starts`` on a partial prefix-cache
+        hit. The runner puts the list on ``ModelInputForRBLN.cached_mm_outputs``
+        and the model builds the prefill from it instead of running the vision
+        encoder (see ``build_prefill_forward_inputs``).
+        """
+        cached: list[Any] = []
+        for feat in self._iter_kept_mm_features(scheduler_output, num_cached_tokens):
             mm_hash = feat.identifier
             if mm_hash not in self.encoder_cache:
                 raise RuntimeError(
                     f"EC consumer cache miss: mm_hash={mm_hash}, "
-                    f"encoder_cache_keys={list(self.encoder_cache.keys())[:5]}, "
-                    f"mm_features={[f.identifier for f in req.mm_features]}"
+                    f"encoder_cache_keys={list(self.encoder_cache.keys())[:5]}"
                 )
-            cached_mm_outputs.append(self.encoder_cache[mm_hash])
-
-        prefill_params = self.model.build_prefill_inputs_from_cache(
-            model_input.input_tokens,
-            cached_mm_outputs,
-            cache_position=model_input.input_positions,
-            running_requests_ids=model_input.running_requests_ids,
-            mrope_position_deltas=self.mrope_position_deltas,
-            # Needed for partial prefix-cache hits: carries partial_prefix so the
-            # cached embeds are tail-sliced and MRoPE is recomputed over the full
-            # prompt (mirrors the non-EC partial prefill path).
-            model_input=model_input,
-        )
-
-        self.reuse_prefix_cached_kv(model_input, scheduler_output)
-
-        language_model = self.model.get_language_model()
-        logits = language_model.prefill_decoder(
-            **prefill_params,
-            block_tables=model_input.block_tables,
-        ).logits
-        return logits
+            cached.append(self.encoder_cache[mm_hash])
+        return cached
 
     @staticmethod
     def _get_mm_hash_for_request(

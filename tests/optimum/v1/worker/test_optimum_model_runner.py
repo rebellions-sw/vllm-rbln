@@ -337,3 +337,18 @@ def test_prepare_decode_pins_rows_the_model_names(model_runner):
     assert model_input.cache_slot_ids[3, 0] == 3
     assert model_input.cache_slot_ids[0, 0] == 0
     assert model_input.block_tables[3, 0] != model_input.block_tables[1, 0]
+
+
+def test_prepare_prefill_hands_the_ec_consumer_the_encoder_cache(model_runner):
+    scheduler_output = _schedule_new_request(
+        "r0", block_ids=([1],), outer_block_ids=[0]
+    )
+    model_runner._update_states(scheduler_output)
+
+    # Outside EC the model encodes its own multimodal inputs.
+    assert model_runner._prepare_prefill(scheduler_output).cached_mm_outputs is None
+
+    # The EC consumer has no vision runtime, so every prefill carries the cache
+    # list, an empty one for a text-only prompt, and the model never encodes.
+    model_runner.is_ec_consumer = True
+    assert model_runner._prepare_prefill(scheduler_output).cached_mm_outputs == []

@@ -218,36 +218,36 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         """Encode the vision inputs into the whole-prompt cacheable unit (per
         modality: features + grid, plus Qwen3-VL deepstack).
 
-        The single non-EC encode entry point: the EC producer
-        (``_run_encoder_and_save``, which caches the result) and both non-EC
-        prefill builders call it, then scatter (full) or tail-slice + scatter
-        (partial). EC-consumer prefill sources the same representation from the
-        cache via ``_cache_to_mm`` instead.
+        The single encode entry point: the prefill builder
+        (``build_prefill_forward_inputs``) calls it when no encoder cache is
+        supplied,
+        and the EC producer (``_run_encoder_and_save``) caches its result. The
+        EC consumer rebuilds the same representation from that cache via
+        ``_cache_to_mm``.
         """
         image_input = self._parse_and_validate_image_input(**kwargs)
         video_input = self._parse_and_validate_video_input(**kwargs)
         if image_input is None and video_input is None:
-            return []
+            return {}
 
         # Merge the per-modality encoder outputs into a single cacheable dict
-        # (consumed on the decode side by build_prefill_inputs_from_cache()).
+        # (rebuilt on the EC consumer by _cache_to_mm()).
         result = {}
         result.update(self._process_image_input(image_input))
         result.update(self._process_video_input(video_input))
         return result
 
-    def _build_full_prefill_forward_inputs(
+    def _assemble_prefill_inputs(
         self,
         model_input: ModelInputForRBLN,
+        multimodal_embeddings: Any,
         mrope_position_deltas: dict[str, float],
     ) -> ModelInputForRBLN:
-        """Whole-prompt prefill: the partial path without the tail slice
-        (encode the full prompt, then scatter). MRoPE positions come from the
-        shared ``_build_prefill_position_embed`` (num_cached == 0 keeps the
-        whole prompt).
-        """
-        mm = self.embed_multimodal(**(model_input.multi_modal_kwargs or {}))
-        inputs_embeds = self.embed_input_ids(model_input.input_tokens, mm)
+        """Scatter the features and add the MRoPE positions. The rope delta is
+        recorded per request for the decode steps."""
+        inputs_embeds = self.embed_input_ids(
+            model_input.input_tokens, multimodal_embeddings
+        )
         position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
         mrope_position_deltas[model_input.running_requests_ids[0]] = rope_deltas.item()
         return replace(
@@ -255,91 +255,6 @@ class RBLNOptimumQwenVLForConditionalGeneration(
             inputs_embeds=inputs_embeds,
             position_embed=position_embed,
         )
-
-    def _build_partial_prefill_forward_inputs(
-        self,
-        model_input: ModelInputForRBLN,
-        mrope_position_deltas: dict[str, float],
-    ) -> ModelInputForRBLN:
-        """Uncached-tail prefill. Mirrors the base
-        ``RBLNOptimumMultimodalMixin`` flow (encode → tail-slice → scatter),
-        plus the Qwen-VL MRoPE positions.
-        """
-        assert model_input.partial_prefix is not None
-        mm = self.embed_multimodal(**(model_input.multi_modal_kwargs or {}))
-        mm = self._build_partial_mm_embeds(model_input.partial_prefix, mm)
-        inputs_embeds = self.embed_input_ids(model_input.input_tokens, mm)
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        mrope_position_deltas[model_input.running_requests_ids[0]] = rope_deltas.item()
-        return replace(
-            model_input,
-            inputs_embeds=inputs_embeds,
-            position_embed=position_embed,
-        )
-
-    def build_prefill_inputs_from_cache(
-        self,
-        input_ids: torch.Tensor,
-        cached_mm_outputs: list[dict],
-        *,
-        cache_position: torch.Tensor | None = None,
-        running_requests_ids: list[str] | None = None,
-        mrope_position_deltas: dict[str, float] | None = None,
-        model_input: ModelInputForRBLN | None = None,
-    ) -> dict:
-        """Build prefill_decoder kwargs from cached encoder outputs (EC
-        consumer). Same flow as the non-EC prefill; the whole-prompt features
-        come from the encoder cache (``_cache_to_mm``) instead of the vision
-        encoder. A partial prefix-cache hit additionally tail-slices via
-        ``_build_partial_prefill_inputs_from_cache``.
-        """
-        assert model_input is not None
-        if model_input.partial_prefix is not None:
-            return self._build_partial_prefill_inputs_from_cache(
-                model_input,
-                cached_mm_outputs,
-                cache_position=cache_position,
-                running_requests_ids=running_requests_ids,
-                mrope_position_deltas=mrope_position_deltas,
-            )
-
-        mm = self._cache_to_mm(cached_mm_outputs)
-        inputs_embeds = self.embed_input_ids(input_ids, mm)
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        if running_requests_ids and mrope_position_deltas is not None:
-            mrope_position_deltas[running_requests_ids[0]] = rope_deltas.item()
-        return {
-            "inputs_embeds": inputs_embeds,
-            "position_embed": position_embed,
-            "cache_position": cache_position,
-        }
-
-    def _build_partial_prefill_inputs_from_cache(
-        self,
-        model_input: ModelInputForRBLN,
-        cached_mm_outputs: list[dict],
-        *,
-        cache_position: torch.Tensor | None,
-        running_requests_ids: list[str] | None,
-        mrope_position_deltas: dict[str, float] | None,
-    ) -> dict:
-        """EC-consumer partial prefill. Same flow as the non-EC
-        ``_build_partial_prefill_forward_inputs``; the tail features come from
-        the encoder cache (``_cache_to_mm``) instead of the vision encoder.
-        """
-        assert model_input.partial_prefix is not None
-        mm = self._cache_to_mm(cached_mm_outputs)
-        mm = self._build_partial_mm_embeds(model_input.partial_prefix, mm)
-        inputs_embeds = self.embed_input_ids(model_input.input_tokens, mm)
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        if running_requests_ids and mrope_position_deltas is not None:
-            mrope_position_deltas[running_requests_ids[0]] = rope_deltas.item()
-
-        return {
-            "inputs_embeds": inputs_embeds,
-            "position_embed": position_embed,
-            "cache_position": cache_position,
-        }
 
     def _cache_to_mm(self, cached_mm_outputs: list[dict]) -> dict:
         """Merge the producer's per-item cached encoder outputs into the same

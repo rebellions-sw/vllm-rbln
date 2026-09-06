@@ -16,6 +16,10 @@ import types
 
 import torch
 
+from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
+from vllm_rbln.model_executor.models.optimum.model_base import (
+    RBLNOptimumMultimodalMixin,
+)
 from vllm_rbln.model_executor.models.optimum.qwen2_vl import (
     RBLNOptimumQwenVLForConditionalGeneration as QwenVL,
 )
@@ -180,3 +184,73 @@ class TestBuildPartialMmEmbeds:
         assert all(layer.shape[0] == expected_rows for layer in tail_deepstack)
         # deepstack is sliced with the same boundaries as the main features.
         assert torch.equal(tail_deepstack[0][0], deepstack_layers[0][369])
+
+
+def _prefill_input(**overrides):
+    fields = dict(
+        input_tokens=torch.tensor([[1, 2, 3]]),
+        input_positions=torch.tensor([[0, 1, 2]], dtype=torch.int32),
+        block_tables=torch.tensor([0], dtype=torch.int16),
+        running_requests_ids=["r0"],
+        padded_batch_size=1,
+        is_prompt=True,
+        multi_modal_kwargs={"pixel_values": "px"},
+    )
+    fields.update(overrides)
+    return ModelInputForRBLN(**fields)
+
+
+class _RecordingMixin(RBLNOptimumMultimodalMixin):
+    """Records which feature source ``build_prefill_forward_inputs`` picked and
+    the features it scattered. The encoder and the cache return
+    distinguishable per-item feature lists."""
+
+    def __init__(self):
+        self.calls = []
+        self.scattered = None
+
+    def embed_multimodal(self, **kwargs):
+        self.calls.append(("encoder", kwargs))
+        return [torch.full((3, HIDDEN), 1.0), torch.full((2, HIDDEN), 2.0)]
+
+    def _cache_to_mm(self, cached_mm_outputs):
+        self.calls.append(("cache", cached_mm_outputs))
+        return [torch.full((3, HIDDEN), 10.0), torch.full((2, HIDDEN), 20.0)]
+
+    def embed_input_ids(self, input_ids, multimodal_embeddings=None, **kwargs):
+        self.scattered = multimodal_embeddings
+        return torch.zeros(input_ids.shape[1], HIDDEN)
+
+    def build(self, model_input):
+        self.build_prefill_forward_inputs(model_input, mrope_position_deltas={})
+        return self.scattered
+
+
+class TestBuildPrefillForwardInputs:
+    def test_without_a_cache_the_encoder_runs_over_the_mm_kwargs(self):
+        model = _RecordingMixin()
+        mm = model.build(_prefill_input())
+        assert model.calls == [("encoder", {"pixel_values": "px"})]
+        assert [t[0, 0].item() for t in mm] == [1.0, 2.0]
+
+    def test_the_ec_consumer_never_touches_the_encoder(self):
+        model = _RecordingMixin()
+        mm = model.build(_prefill_input(cached_mm_outputs=["encA", "encB"]))
+        assert model.calls == [("cache", ["encA", "encB"])]
+        assert [t[0, 0].item() for t in mm] == [10.0, 20.0]
+
+    def test_an_empty_cache_list_still_means_cache(self):
+        # A text-only prompt on the consumer carries [] rather than None: the
+        # consumer has no vision runtime, so the encoder must stay out even
+        # when there is nothing to look up.
+        model = _RecordingMixin()
+        model.build(_prefill_input(cached_mm_outputs=[]))
+        assert model.calls == [("cache", [])]
+
+    def test_a_partial_hit_keeps_only_each_items_tail(self):
+        model = _RecordingMixin()
+        partial = types.SimpleNamespace(mm_embed_tail_starts={"image": [1, 0]})
+        mm = model.build(
+            _prefill_input(cached_mm_outputs=["encA", "encB"], partial_prefix=partial)
+        )
+        assert [t.shape[0] for t in mm] == [3 - 1, 2 - 0]

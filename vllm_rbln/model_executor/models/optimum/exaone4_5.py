@@ -167,25 +167,6 @@ class RBLNOptimumExaone4_5_ForConditionalGeneration(
         result.update(self._process_video_input(video_input))
         return result
 
-    def build_prefill_inputs_from_cache(
-        self,
-        input_ids: torch.Tensor,
-        cached_mm_outputs: list,
-        *,
-        cache_position: torch.Tensor | None = None,
-        running_requests_ids: list[str] | None = None,
-        mrope_position_deltas: dict[str, float] | None = None,
-    ) -> dict:
-        # NOTE: this guard is currently unreachable — init_model() only enables
-        # the EC path for "RBLNQwen3VLForConditionalGeneration", so EXAONE-4.5
-        # never enters here today. It documents the contract for when EC is
-        # extended: the sliding-window/hybrid-cache prefill needs the cache
-        # slot ids from ModelInputForRBLN, which build_prefill_inputs_from_cache
-        # does not receive.
-        raise NotImplementedError(
-            "EC disaggregation is not implemented for EXAONE-4.5."
-        )
-
     def _create_image_pixel_inputs(self, pixel_values, image_grid_thw):
         return Qwen2_5_VLImagePixelInputs(
             type="pixel_values",
