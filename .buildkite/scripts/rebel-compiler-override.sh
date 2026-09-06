@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[ -n "${REBEL_COMPILER_VERSION:-}" ] || exit 0
+[[ -n "${REBEL_COMPILER_VERSION:-}" ]] || exit 0
 
 creds="${UV_INDEX_REBELLIONS_USERNAME}:${UV_INDEX_REBELLIONS_PASSWORD}"
 host="${REBEL_PYPI_ENDPOINT%/}"
 index="https://${creds}@${host#https://}/simple"
 
 echo "+++ :package: override rebel-compiler==${REBEL_COMPILER_VERSION}"
-# Install into the interpreter the tests run on: bare `uv pip` targets
-# VIRTUAL_ENV (/opt/venv in the devtools image), not the project env.
-py="$(uv run --no-sync python -c 'import sys; print(sys.executable)')"
-uv pip uninstall --python "$py" rebel-compiler
-uv pip install --python "$py" --extra-index-url "$index" "rebel-compiler==${REBEL_COMPILER_VERSION}"
+
+# `uv run` resolves the interpreter the tests use; bare `uv pip` would target VIRTUAL_ENV instead.
+python="$(uv run --no-sync python -c 'import sys; print(sys.executable)')"
+uv pip uninstall --python "${python}" rebel-compiler
+uv pip install --python "${python}" --extra-index-url "${index}" "rebel-compiler==${REBEL_COMPILER_VERSION}"
 
 installed="$(uv run --no-sync python -c 'import importlib.metadata as m; print(m.version("rebel-compiler"))')"
-test "${installed}" = "${REBEL_COMPILER_VERSION}"
+[[ "${installed}" == "${REBEL_COMPILER_VERSION}" ]]
+
 buildkite-agent annotate --style success --context rebel-compiler \
   "rebel-compiler overridden to \`${installed}\` (pypi.rebellions.in/simple)" || true
