@@ -168,10 +168,81 @@ def test_prefill_scatters_the_gathered_embeddings():
     mm_embeds = [_rows(2)]
     mask = [False, True, True]
     out = model.build_prefill_forward_inputs(
-        _prefill_input([1, IMAGE_TOKEN, IMAGE_TOKEN], mm_embeds, mask),
-        mrope_position_deltas={},
+        _prefill_input([1, IMAGE_TOKEN, IMAGE_TOKEN], mm_embeds, mask)
     )
     assert model.scattered is not None
     assert model.scattered[0] is mm_embeds
     assert model.scattered[1].tolist() == [mask]
     assert out.inputs_embeds.shape == (3, HIDDEN)
+
+
+def _feature(modality, offset, grid, second_per_grid_ts=None):
+    data = {f"{modality}_grid_thw": types.SimpleNamespace(data=torch.tensor(grid))}
+    if second_per_grid_ts is not None:
+        data["second_per_grid_ts"] = types.SimpleNamespace(
+            data=torch.tensor(second_per_grid_ts)
+        )
+    return types.SimpleNamespace(
+        modality=modality, mm_position=types.SimpleNamespace(offset=offset), data=data
+    )
+
+
+def _mrope_model(cls):
+    model = _qwen(cls, visual=None)
+    calls = []
+
+    def rope_index(input_ids, mm_token_type_ids, **kwargs):
+        calls.append((mm_token_type_ids, kwargs))
+        n = input_ids.shape[1]
+        return torch.arange(n).expand(3, 1, n), torch.tensor([[5]])
+
+    model.model._get_rope_index_func = rope_index
+    return model, calls
+
+
+class TestMropeInputPositions:
+    TOKENS = [1, 8, 8, 2, IMAGE_TOKEN, 3]  # a video item, then an image item
+
+    def test_grids_follow_prompt_order_and_token_types_mark_each_modality(self):
+        model, calls = _mrope_model(Qwen2_5VL)
+        features = [
+            _feature("image", 4, [1, 2, 2]),
+            _feature("video", 1, [2, 2, 2], second_per_grid_ts=0.5),
+        ]
+        positions, delta = model.get_mrope_input_positions(self.TOKENS, features)
+
+        assert positions.shape == (3, 6) and delta == 5
+        ((token_types, kwargs),) = calls
+        assert token_types.tolist() == [[0, 2, 2, 0, 1, 0]]
+        assert kwargs["image_grid_thw"].tolist() == [[1, 2, 2]]
+        assert kwargs["video_grid_thw"].tolist() == [[2, 2, 2]]
+        assert kwargs["second_per_grid_ts"].tolist() == [0.5]
+
+    def test_qwen3_passes_no_second_per_grid_ts(self):
+        model, calls = _mrope_model(Qwen3VL)
+        model.get_mrope_input_positions(
+            self.TOKENS, [_feature("video", 1, [2, 2, 2], second_per_grid_ts=0.5)]
+        )
+        ((_, kwargs),) = calls
+        assert "second_per_grid_ts" not in kwargs
+        assert kwargs["image_grid_thw"] is None
+
+
+def test_position_embed_zeroes_the_padding_rows():
+    model = _qwen(Qwen2_5VL, visual=None)
+    model.model._get_position_embeddings = lambda x, positions: torch.ones(
+        2, positions.shape[1], 1, positions.shape[2], HIDDEN
+    )
+    model_input = ModelInputForRBLN(
+        input_tokens=torch.zeros(4, 1, dtype=torch.int64),
+        input_positions=torch.zeros(4, 1, dtype=torch.int32),
+        block_tables=torch.zeros(4, 1, dtype=torch.int16),
+        running_requests_ids=["r0", "r1"],
+        padded_batch_size=4,
+        batch_rows=torch.tensor([3, 0]),
+        mrope_positions=torch.zeros(3, 4, 1, dtype=torch.int64),
+    )
+    embed = model._position_embed(model_input)
+    assert embed.shape == (2, 4, 1, 1, HIDDEN)
+    assert embed[:, [0, 3]].sum() == 2 * 2 * HIDDEN
+    assert embed[:, [1, 2]].sum() == 0

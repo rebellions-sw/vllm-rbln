@@ -26,6 +26,7 @@ import torch.nn as nn
 from vllm.config import VllmConfig, set_current_vllm_config
 from vllm.distributed.parallel_state import get_pp_group
 from vllm.model_executor.models.interfaces import (
+    supports_mrope,
     supports_transcription,
 )
 from vllm.model_executor.models.interfaces_base import (
@@ -76,10 +77,7 @@ from vllm.v1.worker.utils import sanity_check_mm_encoder_outputs
 from vllm_rbln import envs
 from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import get_optimum_model
-from vllm_rbln.model_executor.models.optimum import (
-    ModelInputForRBLN,
-    PartialPrefixInfo,
-)
+from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.model_executor.models.optimum.model_base import (
     RBLNOptimumDecoderMixin,
     RBLNOptimumMultimodalMixin,
@@ -176,7 +174,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         # # As a workaround, VLLM_WORKER_MULTIPROC_METHOD should be set "spawn"
         # # in case of multi-modal encoder-decoder models.
         self.mm_registry = MULTIMODAL_REGISTRY
-        # self.uses_mrope = model_config.uses_mrope
         self.supports_mm_inputs = self.mm_registry.supports_multimodal_inputs(
             model_config
         )
@@ -279,8 +276,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         # _gather_mm_embeddings; entries are freed when the scheduler reports
         # the request finished.
         self.encoder_cache: dict[str, Any] = {}
-
-        self.mrope_position_deltas: dict[str, float] = {}
 
         # Ephemeral state transferred
         # between execute_model() and sample_tokens().
@@ -460,16 +455,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             model_input = replace(
                 model_input, mm_embeds=mm_embeds, is_mm_embed=is_mm_embed
             )
-            return model.build_prefill_forward_inputs(
-                model_input, self.mrope_position_deltas
-            )
-
-        position_embed = model.compute_decode_position_embed(
-            model_input, self.mrope_position_deltas
-        )
-        if position_embed is None:
-            return model_input
-        return replace(model_input, position_embed=position_embed)
+            return model.build_prefill_forward_inputs(model_input)
+        return model.build_decode_forward_inputs(model_input)
 
     def mask_block_table(
         self,
@@ -604,9 +591,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
 
         seq_len = len(prompt_tokens)
         num_blocks = num_blocks_per_req[req_index]
-        # Full prompt tokens before any prefix-cache trim; needed by MRoPE
-        # models to recompute positions over the whole prompt on a partial hit.
-        full_prompt_tokens = prompt_tokens
         if self.enable_prefix_caching:
             logger.debug(
                 "Request %s is now scheduled. Prompt tokens: %s, "
@@ -636,12 +620,20 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 block_table.tolist(),
             )
 
-        batched_mm_inputs, partial_prefix = self._extract_prefill_mm_inputs(
-            self.requests[req_id].mm_features,
-            total_cached_length,
-            seq_len,
-            full_prompt_tokens,
-        )
+        req_state = self.requests[req_id]
+        # RBLNOptimumMultimodalMixin models take their encoder output from
+        # mm_embeds; the raw kwargs feed the models that still encode inside
+        # forward (Whisper).
+        multi_modal_kwargs = None
+        if self.supports_mm_inputs and not isinstance(
+            self.model, RBLNOptimumMultimodalMixin
+        ):
+            multi_modal_kwargs = self._extract_mm_kwargs(
+                req_state.mm_features, total_cached_length, seq_len
+            )
+        mrope_positions = self._mrope_positions(req_state, total_cached_length, seq_len)
+        if mrope_positions is not None:
+            mrope_positions = mrope_positions.unsqueeze(1)
 
         return ModelInputForRBLN(
             input_tokens=torch.tensor(prompt_tokens, dtype=torch.int64).unsqueeze(0),
@@ -652,12 +644,12 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             running_requests_ids=[req_id],
             padded_batch_size=1,
             is_prompt=True,
-            multi_modal_kwargs=batched_mm_inputs,
+            multi_modal_kwargs=multi_modal_kwargs,
+            mrope_positions=mrope_positions,
             dummy_block=scheduler_output.dummy_block,
             cache_slot_ids=torch.tensor(
                 [scheduler_output.cache_slot_id_dict[req_id]], dtype=torch.int16
             ),
-            partial_prefix=partial_prefix,
         )
 
     def _prepare_decode(
@@ -742,6 +734,15 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         )
         padded_cache_slot_ids[rows] = cache_slot_ids.unsqueeze(1)
 
+        mrope_positions = None
+        per_request = [
+            self._mrope_positions(self.requests[req_id], position, position + 1)
+            for req_id, position in zip(req_ids, positions)
+        ]
+        if per_request[0] is not None:
+            mrope_positions = torch.zeros(3, padded_batch_size, 1, dtype=torch.int64)
+            mrope_positions[:, rows] = torch.cat(per_request, dim=1).unsqueeze(-1)
+
         return ModelInputForRBLN(
             input_tokens=input_tokens,
             input_positions=input_positions,
@@ -752,33 +753,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             dummy_block=scheduler_output.dummy_block,
             batch_rows=batch_rows,
             cache_slot_ids=padded_cache_slot_ids,
+            mrope_positions=mrope_positions,
         )
-
-    def _extract_prefill_mm_inputs(
-        self,
-        mm_features: list[MultiModalFeatureSpec],
-        total_cached_length: int,
-        seq_len: int,
-        full_prompt_tokens: np.ndarray,
-    ) -> tuple[BatchedTensorInputs | None, PartialPrefixInfo | None]:
-        """Raw multimodal kwargs for the model (MRoPE reads the grids) and, on a
-        partial prefix-cache hit, the PartialPrefixInfo MRoPE needs to position
-        the whole prompt. The encoder itself runs on the runner's encoder cache,
-        see _execute_mm_encoder.
-        """
-        if not self.supports_mm_inputs:
-            return None, None
-        batched_mm_inputs = self._extract_mm_kwargs(
-            mm_features, total_cached_length, seq_len
-        )
-        if total_cached_length <= 0:
-            return batched_mm_inputs, None
-        partial_prefix = PartialPrefixInfo(
-            full_input_tokens=torch.tensor(full_prompt_tokens).unsqueeze(0),
-            num_cached_tokens=total_cached_length,
-            mrope_mm_kwargs=self._extract_mm_kwargs(mm_features, 0, seq_len),
-        )
-        return batched_mm_inputs, partial_prefix
 
     def _extract_mm_kwargs(
         self, mm_features: list[MultiModalFeatureSpec], start: int, end: int
@@ -797,6 +773,42 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         ):
             mm_kwargs_combined.update(mm_kwargs_batch)
         return mm_kwargs_combined
+
+    def _init_mrope_positions(self, req_state: CachedRequestState) -> None:
+        """Position the whole prompt once, when the request arrives (upstream's
+        _init_mrope_positions). The EC producer never runs the decoder and its
+        model proxy has no text config, so it skips this."""
+        if self.is_ec_producer or not supports_mrope(self.model):
+            return
+        assert req_state.prompt_token_ids is not None
+        req_state.mrope_positions, req_state.mrope_position_delta = (
+            self.model.get_mrope_input_positions(
+                req_state.prompt_token_ids, req_state.mm_features
+            )
+        )
+
+    @staticmethod
+    def _mrope_positions(
+        req_state: CachedRequestState, start: int, end: int
+    ) -> torch.Tensor | None:
+        """[3, end - start] MRoPE positions of the request's tokens [start, end):
+        the prompt's are precomputed, the completion's continue from the
+        request's delta (upstream's _calc_mrope_positions). None when the
+        request has no MRoPE positions."""
+        if req_state.mrope_positions is None:
+            return None
+        assert req_state.mrope_position_delta is not None
+        prompt_len = req_state.mrope_positions.shape[1]
+        parts = []
+        if start < prompt_len:
+            parts.append(req_state.mrope_positions[:, start : min(end, prompt_len)])
+        if end > prompt_len:
+            completion = (
+                torch.arange(max(start, prompt_len), end)
+                + req_state.mrope_position_delta
+            )
+            parts.append(completion.unsqueeze(0).expand(3, -1))
+        return torch.cat(parts, dim=1)
 
     @staticmethod
     def _prefill_window(model_input: ModelInputForRBLN) -> tuple[int, int]:
@@ -944,7 +956,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
 
             self.requests.pop(req_id, None)
             self.num_prompt_logprobs.pop(req_id, None)
-            self.mrope_position_deltas.pop(req_id, None)
 
             # Gemma3's attention manager still keeps per-request state the
             # model forward produces (attention mask, pad length); free it
@@ -1001,6 +1012,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             if req_id in self.requests:
                 # For streaming case only.
                 req_state = self._update_streaming_request(req_id, new_req_data)
+                self._init_mrope_positions(req_state)
                 reqs_to_add.append(req_state)
                 continue
 
@@ -1048,6 +1060,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 output_token_ids=[],
                 lora_request=new_req_data.lora_request,
             )
+            self._init_mrope_positions(req_state)
             self.requests[req_id] = req_state
 
             if sampling_params and sampling_params.prompt_logprobs is not None:
@@ -1056,10 +1069,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                     if sampling_params.prompt_logprobs == -1
                     else sampling_params.prompt_logprobs
                 )
-
-            # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
-            # if self.uses_mrope:
-            #     self._init_mrope_positions(req_state)
 
             # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
             # if self.uses_xdrope_dim > 0:

@@ -471,3 +471,28 @@ class TestExecuteMmEncoder:
         runner._execute_mm_encoder(_prefill_input(0, 12))
 
         assert runner.saved == []
+
+
+class TestMropePositions:
+    # A 4-token prompt whose positions were computed once; decode continues at
+    # the delta.
+    STATE = SimpleNamespace(
+        mrope_positions=torch.tensor([[0, 1, 1, 2], [0, 1, 1, 2], [0, 1, 2, 2]]),
+        mrope_position_delta=-1,
+    )
+
+    def test_prefill_window_slices_the_prompt_positions(self):
+        out = RBLNOptimumModelRunner._mrope_positions(self.STATE, 1, 4)
+        assert out.tolist() == [[1, 1, 2], [1, 1, 2], [1, 2, 2]]
+
+    def test_completion_positions_continue_from_the_delta(self):
+        out = RBLNOptimumModelRunner._mrope_positions(self.STATE, 5, 6)
+        assert out.tolist() == [[4], [4], [4]]
+
+    def test_a_resumed_prefill_spans_prompt_and_completion(self):
+        out = RBLNOptimumModelRunner._mrope_positions(self.STATE, 3, 6)
+        assert out.tolist() == [[2, 3, 4], [2, 3, 4], [2, 3, 4]]
+
+    def test_models_without_mrope_get_none(self):
+        state = SimpleNamespace(mrope_positions=None, mrope_position_delta=None)
+        assert RBLNOptimumModelRunner._mrope_positions(state, 0, 3) is None

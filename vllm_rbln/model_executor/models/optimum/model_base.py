@@ -387,17 +387,14 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
         return self.model.language_model.prefill_decoder
 
     def build_prefill_forward_inputs(
-        self,
-        model_input: ModelInputForRBLN,
-        mrope_position_deltas: dict[str, float],
+        self, model_input: ModelInputForRBLN
     ) -> ModelInputForRBLN:
         """Fill in the prefill inputs the compiled graph consumes.
 
         The runner has already run the vision encoder and gathered this
         prefill's multimodal embeddings (``mm_embeds``, ``is_mm_embed``); this
         scatters them over the text embeddings. Subclasses extend it with their
-        graph extras (MRoPE positions, deepstack). ``mrope_position_deltas`` is
-        unused here; MRoPE models record per-request rope deltas in it.
+        graph extras (MRoPE positions, deepstack).
         """
         inputs_embeds = self.embed_input_ids(
             model_input.input_tokens,
@@ -406,14 +403,12 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
         )
         return replace(model_input, inputs_embeds=inputs_embeds)
 
-    def compute_decode_position_embed(
-        self,
-        model_input: ModelInputForRBLN,
-        # Unused in the base (no decode-time position embed); MRoPE models
-        # (e.g. Qwen-VL) override this and consume the recorded rope deltas.
-        mrope_position_deltas: dict[str, float],
-    ) -> torch.Tensor | None:
-        return None
+    def build_decode_forward_inputs(
+        self, model_input: ModelInputForRBLN
+    ) -> ModelInputForRBLN:
+        """Decode-step counterpart of build_prefill_forward_inputs; the base
+        graphs take the token ids as they are, MRoPE models add position_embed."""
+        return model_input
 
     def embed_multimodal(self, **kwargs: object) -> MultiModalEmbeddings:
         # One 2D tensor per multimodal item, in the order the items appear in

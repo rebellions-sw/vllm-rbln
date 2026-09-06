@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any
 
 import torch
@@ -31,6 +31,7 @@ from vllm.model_executor.models.qwen2_vl import (
     Qwen2VLVideoEmbeddingInputs,
     Qwen2VLVideoPixelInputs,
 )
+from vllm.multimodal.inputs import MultiModalFeatureSpec
 
 from .base import ModelInputForRBLN
 from .model_base import (
@@ -40,22 +41,6 @@ from .model_base import (
 )
 
 logger = init_logger(__name__)
-
-
-@dataclass(frozen=True)
-class ModalitySpec:
-    """Per-modality kwarg keys and the config attribute for its placeholder id."""
-
-    name: str  # "image" | "video"
-    grid_key: str  # grid_thw kwarg key
-    pixel_key: str  # pixel-values kwarg key
-    token_attr: str  # config attribute holding the placeholder token id
-
-
-MODALITIES: tuple[ModalitySpec, ModalitySpec] = (
-    ModalitySpec("image", "image_grid_thw", "pixel_values", "image_token_id"),
-    ModalitySpec("video", "video_grid_thw", "pixel_values_videos", "video_token_id"),
-)
 
 
 def split_by_grid_thw(
@@ -82,6 +67,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(
     Unified class for both Qwen2-VL and Qwen2.5-VL models.
     Automatically detects model type based on the model configuration.
     """
+
+    supports_mrope = True
 
     @classmethod
     def get_placeholder_str(cls, modality: str, i: int) -> str | None:
@@ -115,17 +102,6 @@ class RBLNOptimumQwenVLForConditionalGeneration(
 
     def get_language_model(self):
         return self.model
-
-    @abstractmethod
-    def _add_model_specific_args(self, preprocess_args: dict, video_input: Any):
-        """
-        Add model-specific arguments to preprocessing args.
-
-        Args:
-            preprocess_args: Dictionary of preprocessing arguments to modify
-            video_input: Video input data
-        """
-        pass
 
     @abstractmethod
     def _create_image_pixel_inputs(
@@ -232,125 +208,69 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         return self.model.embed_tokens(input_ids)
 
     def build_prefill_forward_inputs(
-        self,
-        model_input: ModelInputForRBLN,
-        mrope_position_deltas: dict[str, float],
-    ) -> ModelInputForRBLN:
-        """Scatter the multimodal embeddings, then add the MRoPE positions and
-        record the request's rope delta for its decode steps."""
-        model_input = super().build_prefill_forward_inputs(
-            model_input, mrope_position_deltas
-        )
-        position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
-        mrope_position_deltas[model_input.running_requests_ids[0]] = rope_deltas.item()
-        return replace(model_input, position_embed=position_embed)
-
-    def _build_prefill_position_embed(
         self, model_input: ModelInputForRBLN
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """MRoPE ``(position_embed, rope_deltas)`` for prefill, unified across
-        full and partial prefix-cache hits.
+    ) -> ModelInputForRBLN:
+        model_input = super().build_prefill_forward_inputs(model_input)
+        return replace(model_input, position_embed=self._position_embed(model_input))
 
-        Each multimodal item shifts every later token's position, so MRoPE
-        positions depend on the whole prompt layout and cannot be computed from
-        the uncached tail alone. They are therefore always computed over the
-        full prompt with the encoder skipped (grids only), then sliced to the
-        uncached window ``[num_cached:]``:
+    def build_decode_forward_inputs(
+        self, model_input: ModelInputForRBLN
+    ) -> ModelInputForRBLN:
+        return replace(model_input, position_embed=self._position_embed(model_input))
 
-        - full prefill: ``num_cached == 0``, so the whole prompt is kept;
-        - partial hit: only the uncached tail is kept.
-
-        ``rope_deltas`` is over the full sequence (used for decode positions).
-        """
-        partial = model_input.partial_prefix
-        if partial is not None:
-            full_input_ids = partial.full_input_tokens
-            num_cached = partial.num_cached_tokens
-            mm_kwargs = partial.mrope_mm_kwargs
-        else:
-            full_input_ids = model_input.input_tokens
-            num_cached = 0
-            mm_kwargs = model_input.multi_modal_kwargs
-
-        image_input = None
-        video_input = None
-        if mm_kwargs:
-            image_input = self._parse_and_validate_image_input(**mm_kwargs)
-            video_input = self._parse_and_validate_video_input(**mm_kwargs)
-
-        attention_mask = torch.ones_like(full_input_ids)
-        params = self._compute_mrope_position(
-            full_input_ids, attention_mask, image_input, video_input
-        )
-        # position_embed: [2, batch, 1, N, head_dim]; slice the sequence (dim=-2)
-        # to the uncached window (whole prompt when num_cached == 0).
-        position_embed = params["position_embed"][..., num_cached:, :]
-        return position_embed, params["rope_deltas"]
-
-    def _compute_mrope_position(
-        self, input_ids, attention_mask, image_input, video_input
-    ) -> dict:
-        """MRoPE positions only: run ``get_rope_index`` with grids but no
-        ``pixel_values`` (encoder skipped). Returns ``{position_embed,
-        rope_deltas}``.
-        """
-        preprocess_args = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-        }
-        for spec, mm_input in zip(MODALITIES, (image_input, video_input)):
-            preprocess_args[spec.pixel_key] = None
-            preprocess_args[spec.grid_key] = (
-                mm_input[spec.grid_key] if mm_input is not None else None
-            )
-        # second_per_grid_ts (video, Qwen2.5-VL) feeds get_rope_index too.
-        self._add_model_specific_args(preprocess_args, video_input)
-
-        outputs = self.model._preprocess_prefill(**preprocess_args)
-        # outputs[1]/[2] = position_embed/rope_deltas across all variants; the
-        # rest of the tuple's arity differs, so don't unpack it.
-        return {"position_embed": outputs[1], "rope_deltas": outputs[2]}
-
-    def compute_decode_position_embed(
+    def get_mrope_input_positions(
         self,
-        model_input: ModelInputForRBLN,
-        mrope_position_deltas: dict[str, float],
-    ) -> torch.Tensor:
-        """Decode-step MRoPE: advance each request's position from its stored
-        delta (``cache_position + mrope_position_delta``) and return the position
-        embeddings (cos/sin) laid out like the decode batch: each request at its
-        row, zeros in the padding rows. Mirrors upstream vLLM's
-        ``get_next_input_positions_tensor``.
-        """
-        cache_position = model_input.input_positions
-        running_requests_ids = model_input.running_requests_ids
+        input_tokens: list[int],
+        mm_features: list[MultiModalFeatureSpec],
+    ) -> tuple[torch.Tensor, int]:
+        """MRoPE positions of the whole prompt, [3, len(input_tokens)], and the
+        delta decode positions continue from (SupportsMRoPE). Runs HF's
+        get_rope_index, which optimum-rbln exposes on the model."""
+        input_ids = torch.tensor([input_tokens])
+        config = self.model.config
+        mm_token_type_ids = torch.zeros_like(input_ids, dtype=torch.int)
+        mm_token_type_ids[input_ids == config.image_token_id] = 1
+        mm_token_type_ids[input_ids == config.video_token_id] = 2
+        features = sorted(mm_features, key=lambda f: f.mm_position.offset)
+        images = [f for f in features if f.modality == "image"]
+        videos = [f for f in features if f.modality == "video"]
+        position_ids, rope_deltas = self.model._get_rope_index_func(
+            input_ids,
+            mm_token_type_ids,
+            image_grid_thw=self._grid_thw(images, "image_grid_thw"),
+            video_grid_thw=self._grid_thw(videos, "video_grid_thw"),
+            **self._video_rope_kwargs(videos),
+        )
+        return position_ids[:, 0], int(rope_deltas)
+
+    @staticmethod
+    def _grid_thw(
+        features: list[MultiModalFeatureSpec], key: str
+    ) -> torch.Tensor | None:
+        if not features:
+            return None
+        return torch.stack([f.data[key].data for f in features]).to(torch.int64)
+
+    def _video_rope_kwargs(
+        self, video_features: list[MultiModalFeatureSpec]
+    ) -> dict[str, torch.Tensor]:
+        """Extra get_rope_index kwargs a variant needs for videos; none here."""
+        return {}
+
+    def _position_embed(self, model_input: ModelInputForRBLN) -> torch.Tensor:
+        """The cos/sin the compiled graph takes for the runner's MRoPE positions:
+        [2, padded_batch_size, 1, seq_len, head_dim], zero in the padding rows."""
+        assert model_input.mrope_positions is not None
+        embed = self.model._get_position_embeddings(
+            torch.zeros(1, dtype=self.dtype), model_input.mrope_positions
+        )
         rows: torch.Tensor | slice = (
-            slice(0, len(running_requests_ids))
+            slice(0, len(model_input.running_requests_ids))
             if model_input.batch_rows is None
             else model_input.batch_rows
         )
-        row_ids = (
-            range(len(running_requests_ids))
-            if model_input.batch_rows is None
-            else model_input.batch_rows.tolist()
-        )
-
-        position_embeds = []
-        for row, request_id in zip(row_ids, running_requests_ids):
-            delta = cache_position[row] + mrope_position_deltas[request_id]
-            position_ids = torch.arange(1).view(1, -1)
-            position_ids = position_ids.add(delta)
-            position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
-            position_embed = self.model._get_position_embeddings(
-                torch.zeros(1, dtype=self.dtype), position_ids
-            )
-            position_embeds.append(position_embed)
-        embeds = torch.cat(position_embeds, dim=1)
-
-        shape = list(embeds.shape)
-        shape[1] = model_input.padded_batch_size
-        out = embeds.new_zeros(shape)
-        out[:, rows] = embeds
+        out = torch.zeros_like(embed)
+        out[:, rows] = embed[:, rows]
         return out
 
     def forward(self, model_input: ModelInputForRBLN, **kwargs) -> torch.Tensor:
@@ -375,12 +295,16 @@ class RBLNOptimumQwenVLForConditionalGeneration(
 class RBLNOptimumQwen2_5_VLForConditionalGeneration(
     RBLNOptimumQwenVLForConditionalGeneration
 ):
-    def _add_model_specific_args(self, preprocess_args: dict, video_input: Any):
-        """Add second_per_grid_ts for Qwen2.5-VL"""
-        if video_input is not None:
-            second_per_grid_ts = video_input.get("second_per_grid_ts", None)
-            if second_per_grid_ts is not None:
-                preprocess_args["second_per_grid_ts"] = second_per_grid_ts
+    def _video_rope_kwargs(
+        self, video_features: list[MultiModalFeatureSpec]
+    ) -> dict[str, torch.Tensor]:
+        if not video_features:
+            return {}
+        return {
+            "second_per_grid_ts": torch.tensor(
+                [float(f.data["second_per_grid_ts"].data) for f in video_features]
+            )
+        }
 
     def _create_image_pixel_inputs(self, pixel_values, image_grid_thw):
         return Qwen2_5_VLImagePixelInputs(
@@ -424,10 +348,6 @@ class RBLNOptimumQwen2_5_VLForConditionalGeneration(
 class RBLNOptimumQwen2VLForConditionalGeneration(
     RBLNOptimumQwenVLForConditionalGeneration
 ):
-    def _add_model_specific_args(self, preprocess_args: dict, video_input: Any):
-        """Qwen2-VL doesn't need additional arguments"""
-        pass
-
     def _create_image_pixel_inputs(self, pixel_values, image_grid_thw):
         return Qwen2VLImagePixelInputs(
             type="pixel_values",

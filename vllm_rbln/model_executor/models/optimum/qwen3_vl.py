@@ -19,6 +19,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.models.qwen2_5_vl import (
     Qwen2_5_VLVideoPixelInputs,
 )
+from vllm.multimodal.inputs import MultiModalFeatureSpec
 
 from .base import ModelInputForRBLN
 from .qwen2_vl import RBLNOptimumQwen2_5_VLForConditionalGeneration, split_by_grid_thw
@@ -41,9 +42,11 @@ class RBLNOptimumQwen3VLForConditionalGeneration(
     lays them out for the prefill graph.
     """
 
-    def _add_model_specific_args(self, preprocess_args: dict, video_input: Any):
-        """Qwen3-VL doesn't need additional arguments"""
-        pass
+    def _video_rope_kwargs(
+        self, video_features: list[MultiModalFeatureSpec]
+    ) -> dict[str, torch.Tensor]:
+        # Qwen3-VL's get_rope_index takes no second_per_grid_ts.
+        return {}
 
     def _create_video_pixel_inputs(
         self,
@@ -98,13 +101,9 @@ class RBLNOptimumQwen3VLForConditionalGeneration(
         )
 
     def build_prefill_forward_inputs(
-        self,
-        model_input: ModelInputForRBLN,
-        mrope_position_deltas: dict[str, float],
+        self, model_input: ModelInputForRBLN
     ) -> ModelInputForRBLN:
-        model_input = super().build_prefill_forward_inputs(
-            model_input, mrope_position_deltas
-        )
+        model_input = super().build_prefill_forward_inputs(model_input)
         visual_pos_mask, deepstack_embeds = self._pack_deepstack(model_input)
         return replace(
             model_input,
@@ -181,8 +180,10 @@ class RBLNOptimumQwen3_5ForConditionalGeneration(
         # is pinned to its scheduler-assigned cache slot for its lifetime.
         return cache_slot_ids.to(torch.long)
 
-    def _add_model_specific_args(self, preprocess_args: dict, video_input: Any):
-        pass
+    def _video_rope_kwargs(
+        self, video_features: list[MultiModalFeatureSpec]
+    ) -> dict[str, torch.Tensor]:
+        return {}
 
     def _create_video_pixel_inputs(
         self,
