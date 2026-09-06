@@ -389,13 +389,8 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
     def build_prefill_forward_inputs(
         self, model_input: ModelInputForRBLN
     ) -> ModelInputForRBLN:
-        """Fill in the prefill inputs the compiled graph consumes.
-
-        The runner has already run the vision encoder and gathered this
-        prefill's multimodal embeddings (``mm_embeds``, ``is_mm_embed``); this
-        scatters them over the text embeddings. Subclasses extend it with their
-        graph extras (MRoPE positions, deepstack).
-        """
+        """Scatter the runner's gathered `mm_embeds` over the text embeddings.
+        Subclasses add their graph extras (MRoPE positions, deepstack)."""
         inputs_embeds = self.embed_input_ids(
             model_input.input_tokens,
             model_input.mm_embeds,
@@ -406,8 +401,8 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
     def build_decode_forward_inputs(
         self, model_input: ModelInputForRBLN
     ) -> ModelInputForRBLN:
-        """Decode-step counterpart of build_prefill_forward_inputs; the base
-        graphs take the token ids as they are, MRoPE models add position_embed."""
+        """Decode counterpart: the base graphs take the token ids as they are,
+        MRoPE models add `position_embed`."""
         return model_input
 
     def embed_multimodal(self, **kwargs: object) -> MultiModalEmbeddings:

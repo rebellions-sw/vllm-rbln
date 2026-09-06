@@ -35,11 +35,10 @@ class RBLNOptimumQwen3VLForConditionalGeneration(
     However, since Qwen3-VL does not require second_per_grid_ts,
     certain methods are overridden to exclude it from the model inputs.
 
-    Qwen3-VL also emits per-layer *deepstack* side outputs from the vision
-    encoder. ``embed_multimodal`` packs them after each item's embeddings along
-    the hidden axis, so the runner's per-item cache and window slice carry them
-    unchanged; ``embed_input_ids`` strips them again and ``_pack_deepstack``
-    lays them out for the prefill graph.
+    Qwen3-VL also emits per-layer deepstack features. `embed_multimodal` packs
+    them after each item's embeddings along the hidden axis, so the cache and
+    the window cut carry them unchanged; `embed_input_ids` strips them and
+    `_pack_deepstack` lays them out for the graph.
     """
 
     def _video_rope_kwargs(
@@ -89,8 +88,8 @@ class RBLNOptimumQwen3VLForConditionalGeneration(
         *,
         is_multimodal: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Scatter only each item's leading hidden block; the deepstack blocks
-        packed after it reach the graph through _pack_deepstack."""
+        """Scatter each item's leading hidden block; the deepstack blocks go
+        through _pack_deepstack."""
         if multimodal_embeddings:
             hidden = multimodal_embeddings[0].shape[-1] // (
                 1 + self._num_deepstack_layers()
@@ -114,10 +113,9 @@ class RBLNOptimumQwen3VLForConditionalGeneration(
     def _pack_deepstack(
         self, model_input: ModelInputForRBLN
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        """Lay the deepstack blocks out for the prefill graph: the [1, seq] mask
-        of multimodal positions and a [num_layers, seq, hidden] tensor holding
-        each item's layers at its positions (what optimum-rbln's
-        _prepare_deepstack builds when it encodes from raw pixels)."""
+        """The graph's deepstack inputs: the [1, seq] multimodal mask and a
+        [num_layers, seq, hidden] tensor with each item's layers at its
+        positions."""
         mm_embeds, mask = model_input.mm_embeds, model_input.is_mm_embed
         if not mm_embeds:
             return None, None

@@ -46,11 +46,10 @@ logger = init_logger(__name__)
 def split_by_grid_thw(
     embeds: torch.Tensor, grid_thw: torch.Tensor
 ) -> list[torch.Tensor]:
-    """Cut the vision encoder's concatenated output back into per-item tensors.
+    """Cut the encoder's concatenated output back into per-item tensors.
 
-    Each item covers ``t * h * w`` patches merged ``k x k`` into one token; the
-    merge unit ``k**2`` is read off the output itself so this also works on an
-    EC producer, which loads only the encoder and has no text config.
+    Item i has `t * h * w / k**2` tokens; `k**2` is read off the output so this
+    also works on an EC producer, which has no text config.
     """
     patches = grid_thw.prod(dim=-1)
     merge_unit = int(patches.sum()) // embeds.shape[0]
@@ -190,8 +189,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         return split_by_grid_thw(embeds, grid_thw)
 
     def embed_multimodal(self, **kwargs: object) -> MultiModalEmbeddings:
-        """One 2D tensor per image or video item, in kwargs order. The runner
-        batches one modality per call and caches each item by mm_hash."""
+        """One 2D tensor per item, in kwargs order; the runner caches each by
+        mm_hash."""
         image_input = self._parse_and_validate_image_input(**kwargs)
         video_input = self._parse_and_validate_video_input(**kwargs)
         return [
@@ -223,9 +222,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         input_tokens: list[int],
         mm_features: list[MultiModalFeatureSpec],
     ) -> tuple[torch.Tensor, int]:
-        """MRoPE positions of the whole prompt, [3, len(input_tokens)], and the
-        delta decode positions continue from (SupportsMRoPE). Runs HF's
-        get_rope_index, which optimum-rbln exposes on the model."""
+        """Whole-prompt MRoPE positions [3, N] and the decode delta, from HF's
+        get_rope_index that optimum-rbln exposes on the model."""
         input_ids = torch.tensor([input_tokens])
         config = self.model.config
         mm_token_type_ids = torch.zeros_like(input_ids, dtype=torch.int)
@@ -258,8 +256,8 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         return {}
 
     def _position_embed(self, model_input: ModelInputForRBLN) -> torch.Tensor:
-        """The cos/sin the compiled graph takes for the runner's MRoPE positions:
-        [2, padded_batch_size, 1, seq_len, head_dim], zero in the padding rows."""
+        """cos/sin for the runner's MRoPE positions, [2, padded_batch_size, 1,
+        seq_len, head_dim], zero in the padding rows."""
         assert model_input.mrope_positions is not None
         embed = self.model._get_position_embeddings(
             torch.zeros(1, dtype=self.dtype), model_input.mrope_positions

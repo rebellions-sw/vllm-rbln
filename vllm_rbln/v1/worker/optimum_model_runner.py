@@ -767,8 +767,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _extract_mm_kwargs(
         self, mm_features: list[MultiModalFeatureSpec], start: int, end: int
     ) -> BatchedTensorInputs:
-        """Batch the raw kwargs of the items overlapping prompt positions
-        [start, end)."""
+        """Raw kwargs of the items overlapping [start, end), batched."""
         lo, hi = get_mm_features_in_window(mm_features, start, end)
         mm_kwargs = [
             (feature.modality, feature.data)
@@ -783,9 +782,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         return mm_kwargs_combined
 
     def _init_mrope_positions(self, req_state: CachedRequestState) -> None:
-        """Position the whole prompt once, when the request arrives (upstream's
-        _init_mrope_positions). The EC producer never runs the decoder and its
-        model proxy has no text config, so it skips this."""
+        """Compute the prompt's MRoPE positions once, when the request arrives.
+        Skipped on the EC producer, whose model proxy has no text config."""
         if self.is_ec_producer or not supports_mrope(self.model):
             return
         assert req_state.prompt_token_ids is not None
@@ -799,10 +797,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _mrope_positions(
         req_state: CachedRequestState, start: int, end: int
     ) -> torch.Tensor | None:
-        """[3, end - start] MRoPE positions of the request's tokens [start, end):
-        the prompt's are precomputed, the completion's continue from the
-        request's delta (upstream's _calc_mrope_positions). None when the
-        request has no MRoPE positions."""
+        """MRoPE positions [3, end - start] of tokens [start, end): precomputed
+        for the prompt, continued from the delta for the completion. None for
+        requests without MRoPE."""
         if req_state.mrope_positions is None:
             return None
         assert req_state.mrope_position_delta is not None
@@ -821,13 +818,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _execute_mm_encoder(
         self, mm_features: list[MultiModalFeatureSpec], start: int, end: int
     ) -> None:
-        """Run the vision encoder over the items overlapping prompt positions
-        [start, end) that are not in the encoder cache yet and cache each item's
-        output under its mm_hash. Items fully inside the prefix-cache hit are
-        skipped: their KV is reused. The EC producer also publishes each item to
-        the connector; the EC consumer finds its items already loaded and
-        encodes nothing.
-        """
+        """Encode the items overlapping [start, end) that are not cached yet and
+        cache each under its mm_hash; the EC producer also publishes them. Items
+        fully inside the prefix-cache hit are skipped: their KV is reused."""
         lo, hi = get_mm_features_in_window(mm_features, start, end)
         mm_hashes: list[str] = []
         mm_kwargs = []
@@ -854,12 +847,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _gather_mm_embeddings(
         self, mm_features: list[MultiModalFeatureSpec], start: int, end: int
     ) -> tuple[list[torch.Tensor], torch.Tensor]:
-        """Collect the cached encoder output of every item overlapping prompt
-        positions [start, end), in prompt order and cut to those positions, plus
-        the [1, end - start] mask of the positions they fill (upstream's
-        _gather_mm_embeddings for one request). A prefix-cache hit that ends
-        inside an item keeps only the item's uncached tail.
-        """
+        """Cached encoder outputs of the items overlapping [start, end), in prompt
+        order and cut to that window, plus the [1, end - start] mask of the
+        positions they fill."""
         mm_embeds: list[torch.Tensor] = []
         is_mm_embed = torch.zeros(end - start, dtype=torch.bool)
         lo, hi = get_mm_features_in_window(mm_features, start, end)
