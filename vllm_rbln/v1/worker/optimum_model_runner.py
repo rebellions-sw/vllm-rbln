@@ -441,11 +441,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _preprocess(
         self, model_input: ModelInputForRBLN, scheduler_output: "SchedulerOutput"
     ) -> tuple[ModelInputForRBLN, "ECConnectorOutput | None"]:
-        """Multimodal models only (upstream's _preprocess): inside the EC
-        connector context, run the encoder over this prefill's items, gather
-        their embeddings, and let the model turn them into its graph inputs.
-        The EC consumer receives its encoder outputs when the context is
-        entered, so the gather has to happen inside it."""
+        """Encode and gather this prefill's multimodal items, then let the model
+        build its graph inputs. Runs inside the EC connector context, which
+        loads the consumer's encoder outputs on entry."""
         has_new_prefill = len(scheduler_output.scheduled_new_reqs) > 0
         with self.maybe_get_ec_connector_output(
             scheduler_output,
