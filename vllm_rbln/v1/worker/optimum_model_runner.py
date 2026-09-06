@@ -390,7 +390,8 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                     capture_ctx = contextlib.nullcontext()
                 model_start_time = time.perf_counter()
                 with capture_ctx as model_reports:
-                    model_input = self._build_mm_forward_inputs(model_input)
+                    if isinstance(self.model, RBLNOptimumMultimodalMixin):
+                        model_input = self._build_mm_forward_inputs(model_input)
                     self.reuse_prefix_cached_kv(model_input, scheduler_output)
                     hidden_states = self.model(model_input)
                 if (
@@ -445,10 +446,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _build_mm_forward_inputs(
         self, model_input: ModelInputForRBLN
     ) -> ModelInputForRBLN:
-        model = self.model
-        if not isinstance(model, RBLNOptimumMultimodalMixin):
-            return model_input
-
+        """Multimodal models only: encode and gather this prefill's items, then
+        let the model turn tokens and embeddings into its graph inputs."""
+        model = cast(RBLNOptimumMultimodalMixin, self.model)
         if model_input.is_prompt:
             self._execute_mm_encoder(model_input)
             mm_embeds, is_mm_embed = self._gather_mm_embeddings(model_input)
