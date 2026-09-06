@@ -36,14 +36,15 @@ logger = init_logger(__name__)
 
 class RBLNMinTokensLogitsProcessor(MinTokensLogitsProcessor):
     # index_put_ requires the value dtype and device to exactly match the
-    # logits, and two kinds of logits reach one instance within a single
-    # spec-decode step: apply() sees model-dtype logits on the device from the
-    # RBLN sampler, while apply_with_spec_decode() sees the float32-upcast
-    # target logits the rejection sampler works on (host tensors, see
-    # RBLNModelRunner._sample). The -inf constant is therefore synced to the
-    # incoming logits per call, with one cached tensor per (dtype, device),
-    # and the spec-decode path builds its index tensors on the logits device.
+    # logits, and two kinds of logits reach one instance: a step without drafts
+    # samples model-dtype logits on the device through the RBLN sampler, while
+    # a speculative step samples on the host (see RBLNModelRunner._sample) --
+    # float32-upcast target logits in apply_with_spec_decode() and the bonus
+    # logits in apply(). The -inf constant is therefore synced to the incoming
+    # logits per call, with one cached tensor per (dtype, device), and the
+    # index tensors are put on the logits device as well.
     neg_inf_tensor: torch.Tensor
+    device: torch.device
 
     def __init__(
         self, vllm_config: VllmConfig, device: torch.device, is_pin_memory: bool
@@ -65,8 +66,17 @@ class RBLNMinTokensLogitsProcessor(MinTokensLogitsProcessor):
         self.neg_inf_tensor = tensor
 
     def apply(self, logits: torch.Tensor) -> torch.Tensor:
-        if self.min_toks:
-            self._sync_neg_inf(logits)
+        if not self.min_toks:
+            return logits
+        self._sync_neg_inf(logits)
+        rows, toks = self.logits_slice
+        if rows.device != logits.device:
+            # update_state() built the slice on `self.device`; a speculative
+            # step's bonus logits are on the host.
+            logits.index_put_(
+                (rows.to(logits.device), toks.to(logits.device)), self.neg_inf_tensor
+            )
+            return logits
         return super().apply(logits)
 
     def apply_with_spec_decode(
@@ -78,7 +88,8 @@ class RBLNMinTokensLogitsProcessor(MinTokensLogitsProcessor):
         # Upstream allocates the row / token index tensors on `self.device`,
         # which is where update_state() keeps the non-spec `logits_slice`; the
         # spec-decode logits may live elsewhere, so point it at them for the call.
-        device, self.device = self.device, logits.device
+        device = self.device
+        self.device = logits.device
         try:
             return super().apply_with_spec_decode(logits, num_draft_tokens)
         finally:

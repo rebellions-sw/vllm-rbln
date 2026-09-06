@@ -58,18 +58,20 @@ class RBLNRejectionSampler(RejectionSampler):
         spec_config: "SpeculativeConfig | None" = None,
         device: torch.device | None = None,
     ):
-        if USE_DEVICE_TENSOR and isinstance(sampler, RBLNSampler):
+        if USE_DEVICE_TENSOR:
             # NOTE(RBLN): a speculative step samples on the host -- the runner
             # brings the logits over once (see RBLNModelRunner._sample), since
             # torch-rbln runs the int/bool/fp32 glue of rejection sampling through
-            # a CPU fallback op by op otherwise. The runner's RBLN sampler is
-            # compiled for device tensors, so the bonus token comes from the eager
-            # sampler instead; it is one row per request.
-            sampler = Sampler(
-                logprobs_mode=sampler.logprobs_mode,
-                use_fp64_gumbel=getattr(sampler, "use_fp64_gumbel", False),
-            )
+            # a CPU fallback op by op otherwise.
             device = torch.device("cpu")
+            if isinstance(sampler, RBLNSampler):
+                # The runner's RBLN sampler is compiled for device tensors, so
+                # the bonus token comes from the eager sampler instead; it is one
+                # row per request.
+                sampler = Sampler(
+                    logprobs_mode=sampler.logprobs_mode,
+                    use_fp64_gumbel=sampler.use_fp64_gumbel,
+                )
         super().__init__(sampler, spec_config, device)
 
         # NOTE(RBLN): Config-fixed spec length. The compiled rejection-sample op
@@ -341,7 +343,7 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
             fullgraph=True,
             compile_context=compile_context,
             num_devices=1 if HAS_TORCH_RBLN else None,
-            model_trace_method="",
+            model_trace_method="export",
             mode="strict" if envs.VLLM_RBLN_COMPILE_STRICT_MODE else "",
             use_global_ctx=True if HAS_TORCH_RBLN else None,
             global_device_id=0 if HAS_TORCH_RBLN else None,
