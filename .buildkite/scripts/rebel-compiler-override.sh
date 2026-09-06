@@ -7,10 +7,11 @@ host="${REBEL_PYPI_ENDPOINT%/}"
 index="https://${creds}@${host#https://}/simple"
 
 echo "+++ :package: override rebel-compiler==${REBEL_COMPILER_VERSION}"
-# --python .venv on both: bare `uv pip` targets VIRTUAL_ENV (/opt/venv in the
-# devtools image), not the .venv the tests run in.
-uv pip uninstall --python .venv rebel-compiler
-uv pip install --python .venv --extra-index-url "$index" "rebel-compiler==${REBEL_COMPILER_VERSION}"
+# Install into the interpreter the tests run on: bare `uv pip` targets
+# VIRTUAL_ENV (/opt/venv in the devtools image), not the project env.
+py="$(uv run --no-sync python -c 'import sys; print(sys.executable)')"
+uv pip uninstall --python "$py" rebel-compiler
+uv pip install --python "$py" --extra-index-url "$index" "rebel-compiler==${REBEL_COMPILER_VERSION}"
 
 installed="$(uv run --no-sync python -c 'import importlib.metadata as m; print(m.version("rebel-compiler"))')"
 test "${installed}" = "${REBEL_COMPILER_VERSION}"
