@@ -24,6 +24,15 @@ Use the narrowest test target that covers the change. Start by running the speci
 
 Run `pre-commit` through `uvx`, since it is not a project dependency. Pass `--files` explicitly to avoid depending on the current staging state.
 
+CI steps that inject a package version (the rebel-compiler override) install
+through the interpreter the tests use — `uv run --no-sync python -c 'import
+sys; print(sys.executable)'` — never through a bare `uv pip`: `uv pip` targets
+`VIRTUAL_ENV` (the CI image activates its own venv) while the tests run in the
+project env, so a bare install can land where no test reads. After installing,
+assert from inside the test env that the installed version equals the requested
+one; a green step whose label names an untested version is worse than a red
+one.
+
 A new `.py` file needs the Apache header that every other file carries; `check-license-header` rejects it otherwise. Copy the header from a neighbouring file.
 
 `tests/native/` defines three session options (see its `conftest.py`):
