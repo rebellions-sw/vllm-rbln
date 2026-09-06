@@ -359,64 +359,59 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 # Return empty ModelRunnerOutput if there's no work to do.
                 return EMPTY_MODEL_RUNNER_OUTPUT
 
-            # EC Producer early-exit: run vision encoder only,
-            # save results to EC connector, then return empty output.
+            # The EC producer has no decoder: encode the new requests' items,
+            # publish them, and report the requests done.
             if self.is_ec_producer:
-                model_input, _ = self._prepare_inputs(scheduler_output)
-                if model_input.is_prompt:
-                    with self.maybe_get_ec_connector_output(
-                        scheduler_output,
-                        encoder_cache=self.encoder_cache,
-                    ):
-                        self._execute_mm_encoder(model_input)
+                with self.maybe_get_ec_connector_output(
+                    scheduler_output, encoder_cache=self.encoder_cache
+                ):
+                    for new_req in scheduler_output.scheduled_new_reqs:
+                        self._execute_mm_encoder(
+                            self.requests[new_req.req_id].mm_features,
+                            0,
+                            len(new_req.prompt_token_ids),
+                        )
                 return self._make_producer_output(scheduler_output)
 
-            # Prepare the decoder inputs.
             model_input, num_scheduled_tokens_np = self._prepare_inputs(
                 scheduler_output
             )
+            ec_connector_output = None
+            if isinstance(self.model, RBLNOptimumMultimodalMixin):
+                model_input, ec_connector_output = self._preprocess(
+                    model_input, scheduler_output
+                )
 
-        has_new_prefill = len(scheduler_output.scheduled_new_reqs) > 0
-        with self.maybe_get_ec_connector_output(
-            scheduler_output,
-            encoder_cache=self.encoder_cache,
-            blocking=has_new_prefill,
-        ) as ec_connector_output:
-            with record_function_or_nullcontext("rbln_model_runner: forward"):
-                if hasattr(rebel, "capture_reports"):
-                    capture_ctx = rebel.capture_reports()
-                else:
-                    # use a dummy context manager that does nothing
-                    capture_ctx = contextlib.nullcontext()
-                model_start_time = time.perf_counter()
-                with capture_ctx as model_reports:
-                    if isinstance(self.model, RBLNOptimumMultimodalMixin):
-                        model_input = self._build_mm_forward_inputs(model_input)
-                    self.reuse_prefix_cached_kv(model_input, scheduler_output)
-                    hidden_states = self.model(model_input)
-                if (
-                    envs.VLLM_RBLN_METRICS
-                    and self.model_performance_tracker is not None
-                ):
-                    collect_metrics(
-                        self.model_performance_tracker,
-                        model_input.is_prompt,
-                        start_time=model_start_time,
-                        end_time=time.perf_counter(),
-                        reports=model_reports,
-                        token_count=0,
-                        # the performance of sampler doesn't depend on token count
-                    )
-                sample_hidden_states = hidden_states.clone()
+        with record_function_or_nullcontext("rbln_model_runner: forward"):
+            if hasattr(rebel, "capture_reports"):
+                capture_ctx = rebel.capture_reports()
+            else:
+                # use a dummy context manager that does nothing
+                capture_ctx = contextlib.nullcontext()
+            model_start_time = time.perf_counter()
+            with capture_ctx as model_reports:
+                self.reuse_prefix_cached_kv(model_input, scheduler_output)
+                hidden_states = self.model(model_input)
+            if envs.VLLM_RBLN_METRICS and self.model_performance_tracker is not None:
+                collect_metrics(
+                    self.model_performance_tracker,
+                    model_input.is_prompt,
+                    start_time=model_start_time,
+                    end_time=time.perf_counter(),
+                    reports=model_reports,
+                    token_count=0,
+                    # the performance of sampler doesn't depend on token count
+                )
+            sample_hidden_states = hidden_states.clone()
 
-            with record_function_or_nullcontext("rbln_model_runner: postprocess"):
-                if self.is_pooling_model:
-                    return self._pool(
-                        hidden_states, num_scheduled_tokens, num_scheduled_tokens_np
-                    )
-                # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
-                hidden_states = hidden_states.squeeze(1)
-                logits = self.model.compute_logits(hidden_states, None)
+        with record_function_or_nullcontext("rbln_model_runner: postprocess"):
+            if self.is_pooling_model:
+                return self._pool(
+                    hidden_states, num_scheduled_tokens, num_scheduled_tokens_np
+                )
+            # [batch_size, 1, vocab_size] -> [batch_size, vocab_size]
+            hidden_states = hidden_states.squeeze(1)
+            logits = self.model.compute_logits(hidden_states, None)
 
         self.execute_model_state = ExecuteModelState(
             scheduler_output=scheduler_output,
@@ -443,19 +438,35 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             model_input.block_tables,
         )
 
-    def _build_mm_forward_inputs(
-        self, model_input: ModelInputForRBLN
-    ) -> ModelInputForRBLN:
-        """Multimodal models only: encode and gather this prefill's items, then
-        let the model turn tokens and embeddings into its graph inputs."""
-        if model_input.is_prompt:
-            self._execute_mm_encoder(model_input)
-            mm_embeds, is_mm_embed = self._gather_mm_embeddings(model_input)
+    def _preprocess(
+        self, model_input: ModelInputForRBLN, scheduler_output: "SchedulerOutput"
+    ) -> tuple[ModelInputForRBLN, "ECConnectorOutput | None"]:
+        """Multimodal models only (upstream's _preprocess): inside the EC
+        connector context, run the encoder over this prefill's items, gather
+        their embeddings, and let the model turn them into its graph inputs.
+        The EC consumer receives its encoder outputs when the context is
+        entered, so the gather has to happen inside it."""
+        has_new_prefill = len(scheduler_output.scheduled_new_reqs) > 0
+        with self.maybe_get_ec_connector_output(
+            scheduler_output,
+            encoder_cache=self.encoder_cache,
+            blocking=has_new_prefill,
+        ) as ec_connector_output:
+            if not model_input.is_prompt:
+                return self.model.build_decode_forward_inputs(model_input), (
+                    ec_connector_output
+                )
+            mm_features = self.requests[model_input.running_requests_ids[0]].mm_features
+            start = int(model_input.input_positions[0, 0])
+            end = start + model_input.input_tokens.shape[1]
+            self._execute_mm_encoder(mm_features, start, end)
+            mm_embeds, is_mm_embed = self._gather_mm_embeddings(mm_features, start, end)
             model_input = replace(
                 model_input, mm_embeds=mm_embeds, is_mm_embed=is_mm_embed
             )
-            return self.model.build_prefill_forward_inputs(model_input)
-        return self.model.build_decode_forward_inputs(model_input)
+            return self.model.build_prefill_forward_inputs(model_input), (
+                ec_connector_output
+            )
 
     def mask_block_table(
         self,
@@ -809,22 +820,16 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             parts.append(completion.unsqueeze(0).expand(3, -1))
         return torch.cat(parts, dim=1)
 
-    @staticmethod
-    def _prefill_window(model_input: ModelInputForRBLN) -> tuple[int, int]:
-        """Prompt positions [start, end) this prefill computes."""
-        start = int(model_input.input_positions[0, 0])
-        return start, start + model_input.input_tokens.shape[1]
-
-    def _execute_mm_encoder(self, model_input: ModelInputForRBLN) -> None:
-        """Run the vision encoder over the multimodal items of this prefill that
-        are not in the encoder cache yet and cache each item's output under its
-        mm_hash. Items fully inside the prefix-cache hit are skipped: their KV is
-        reused. The EC producer also publishes each item to the connector; the EC
-        consumer finds its items already loaded and encodes nothing.
+    def _execute_mm_encoder(
+        self, mm_features: list[MultiModalFeatureSpec], start: int, end: int
+    ) -> None:
+        """Run the vision encoder over the items overlapping prompt positions
+        [start, end) that are not in the encoder cache yet and cache each item's
+        output under its mm_hash. Items fully inside the prefix-cache hit are
+        skipped: their KV is reused. The EC producer also publishes each item to
+        the connector; the EC consumer finds its items already loaded and
+        encodes nothing.
         """
-        req_id = model_input.running_requests_ids[0]
-        mm_features = self.requests[req_id].mm_features
-        start, end = self._prefill_window(model_input)
         lo, hi = get_mm_features_in_window(mm_features, start, end)
         mm_hashes: list[str] = []
         mm_kwargs = []
@@ -849,17 +854,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             self.maybe_save_ec_to_connector(self.encoder_cache, mm_hash)
 
     def _gather_mm_embeddings(
-        self, model_input: ModelInputForRBLN
+        self, mm_features: list[MultiModalFeatureSpec], start: int, end: int
     ) -> tuple[list[torch.Tensor], torch.Tensor]:
-        """Collect the cached encoder output of every item overlapping this
-        prefill, in prompt order and cut to the prefilled positions, plus the
-        [1, seq_len] mask of the positions they fill (upstream's
+        """Collect the cached encoder output of every item overlapping prompt
+        positions [start, end), in prompt order and cut to those positions, plus
+        the [1, end - start] mask of the positions they fill (upstream's
         _gather_mm_embeddings for one request). A prefix-cache hit that ends
         inside an item keeps only the item's uncached tail.
         """
-        req_id = model_input.running_requests_ids[0]
-        mm_features = self.requests[req_id].mm_features
-        start, end = self._prefill_window(model_input)
         mm_embeds: list[torch.Tensor] = []
         is_mm_embed = torch.zeros(end - start, dtype=torch.bool)
         lo, hi = get_mm_features_in_window(mm_features, start, end)

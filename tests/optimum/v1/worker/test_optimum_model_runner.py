@@ -34,7 +34,6 @@ from vllm.v1.core.sched.output import CachedRequestData
 from vllm.v1.sample.metadata import SamplingMetadata
 
 import vllm_rbln.v1.worker.optimum_model_runner as runner_module
-from vllm_rbln.model_executor.models.optimum.base import ModelInputForRBLN
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
@@ -353,28 +352,13 @@ def _feature(mm_hash, offset, length, is_embed=None):
     )
 
 
-def _prefill_input(start, end):
-    return ModelInputForRBLN(
-        input_tokens=torch.zeros(1, end - start, dtype=torch.int64),
-        input_positions=torch.arange(start, end, dtype=torch.int32).unsqueeze(0),
-        block_tables=torch.tensor([0], dtype=torch.int16),
-        running_requests_ids=["r0"],
-        padded_batch_size=1,
-        is_prompt=True,
-    )
-
-
 def _mm_runner(mm_features, encoder_cache):
     """The runner's encoder/gather steps on a fake self: they read only the
-    request's mm_features and the encoder cache."""
+    encoder cache (and the model, for encoding)."""
     fake = SimpleNamespace(
-        requests={"r0": SimpleNamespace(mm_features=mm_features)},
-        encoder_cache=encoder_cache,
-        device="cpu",
-        saved=[],
+        mm_features=mm_features, encoder_cache=encoder_cache, device="cpu", saved=[]
     )
     fake.maybe_save_ec_to_connector = lambda cache, mm_hash: fake.saved.append(mm_hash)
-    fake._prefill_window = RBLNOptimumModelRunner._prefill_window
     for name in ("_execute_mm_encoder", "_gather_mm_embeddings"):
         setattr(fake, name, MethodType(getattr(RBLNOptimumModelRunner, name), fake))
     return fake
@@ -393,7 +377,7 @@ CACHE = {"imgA": _rows(4, 100), "imgB": _rows(3, 200)}
 class TestGatherMmEmbeddings:
     def test_full_prefill_takes_every_item_in_prompt_order(self):
         runner = _mm_runner([IMG_A, IMG_B], CACHE)
-        mm_embeds, mask = runner._gather_mm_embeddings(_prefill_input(0, 12))
+        mm_embeds, mask = runner._gather_mm_embeddings(runner.mm_features, 0, 12)
         assert [t[0, 0].item() for t in mm_embeds] == [100, 200]
         assert mask.shape == (1, 12)
         assert mask[0].nonzero().flatten().tolist() == [2, 3, 4, 5, 8, 9, 10]
@@ -401,13 +385,13 @@ class TestGatherMmEmbeddings:
     def test_prefix_hit_inside_an_item_keeps_only_its_tail(self):
         runner = _mm_runner([IMG_A, IMG_B], CACHE)
         # 4 tokens are cached: the first two rows of imgA are already in KV.
-        mm_embeds, mask = runner._gather_mm_embeddings(_prefill_input(4, 12))
+        mm_embeds, mask = runner._gather_mm_embeddings(runner.mm_features, 4, 12)
         assert mm_embeds[0].shape[0] == 2 and mm_embeds[0][0, 0] == 102
         assert mask[0].nonzero().flatten().tolist() == [0, 1, 4, 5, 6]
 
     def test_fully_cached_item_is_dropped(self):
         runner = _mm_runner([IMG_A, IMG_B], CACHE)
-        mm_embeds, mask = runner._gather_mm_embeddings(_prefill_input(6, 12))
+        mm_embeds, mask = runner._gather_mm_embeddings(runner.mm_features, 6, 12)
         assert [t.shape[0] for t in mm_embeds] == [3]
         assert mask.shape == (1, 6)
 
@@ -415,14 +399,14 @@ class TestGatherMmEmbeddings:
         # idefics3-style block: only the T positions get an embedding row.
         block = _feature("blk", offset=1, length=5, is_embed=[0, 1, 1, 0, 1])
         runner = _mm_runner([block], {"blk": _rows(3, 300)})
-        mm_embeds, mask = runner._gather_mm_embeddings(_prefill_input(0, 6))
+        mm_embeds, mask = runner._gather_mm_embeddings(runner.mm_features, 0, 6)
         assert mm_embeds[0].shape[0] == 3
         assert mask[0].nonzero().flatten().tolist() == [2, 3, 5]
 
     def test_cache_miss_is_an_error(self):
         runner = _mm_runner([IMG_A], {})
         with pytest.raises(RuntimeError, match="Encoder cache miss for imgA"):
-            runner._gather_mm_embeddings(_prefill_input(0, 12))
+            runner._gather_mm_embeddings(runner.mm_features, 0, 12)
 
 
 class TestExecuteMmEncoder:
@@ -450,7 +434,7 @@ class TestExecuteMmEncoder:
         runner = _mm_runner([IMG_A, IMG_B], {"imgA": _rows(4, 100)})
         runner.model, calls = self._model()
 
-        runner._execute_mm_encoder(_prefill_input(0, 12))
+        runner._execute_mm_encoder(runner.mm_features, 0, 12)
 
         assert calls == ["pixels:imgB"]
         assert set(runner.encoder_cache) == {"imgA", "imgB"}
@@ -460,7 +444,7 @@ class TestExecuteMmEncoder:
         runner = _mm_runner([IMG_A, IMG_B], {})
         runner.model, calls = self._model()
 
-        runner._execute_mm_encoder(_prefill_input(6, 12))
+        runner._execute_mm_encoder(runner.mm_features, 6, 12)
 
         assert calls == ["pixels:imgB"]
 
@@ -468,7 +452,7 @@ class TestExecuteMmEncoder:
         runner = _mm_runner([IMG_A], {"imgA": _rows(4, 100)})
         runner.model = SimpleNamespace()  # no embed_multimodal at all
 
-        runner._execute_mm_encoder(_prefill_input(0, 12))
+        runner._execute_mm_encoder(runner.mm_features, 0, 12)
 
         assert runner.saved == []
 
