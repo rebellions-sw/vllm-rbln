@@ -448,15 +448,14 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     ) -> ModelInputForRBLN:
         """Multimodal models only: encode and gather this prefill's items, then
         let the model turn tokens and embeddings into its graph inputs."""
-        model = cast(RBLNOptimumMultimodalMixin, self.model)
         if model_input.is_prompt:
             self._execute_mm_encoder(model_input)
             mm_embeds, is_mm_embed = self._gather_mm_embeddings(model_input)
             model_input = replace(
                 model_input, mm_embeds=mm_embeds, is_mm_embed=is_mm_embed
             )
-            return model.build_prefill_forward_inputs(model_input)
-        return model.build_decode_forward_inputs(model_input)
+            return self.model.build_prefill_forward_inputs(model_input)
+        return self.model.build_decode_forward_inputs(model_input)
 
     def mask_block_table(
         self,
