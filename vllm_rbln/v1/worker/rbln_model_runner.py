@@ -1093,7 +1093,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         # Compute the draft token ids.
         # draft_token_indices:      [  1,   2,   3, 105, 106, 208]
-        # Stays on the host: the rejection sampler runs there (see `_sample`).
+        # Stays on the host: the rejection sampler runs there (see _sample).
         draft_token_ids = self.input_ids[logits_indices]
         draft_token_ids = draft_token_ids[target_logits_indices + 1]
 
@@ -1316,8 +1316,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     spec_decode_metadata, bucket
                 )
                 sampling_metadata = _pad_sampling_metadata(sampling_metadata, bucket)
-            # The logits came to the host in execute_model; the input batch keeps
-            # its sampling tensors on the device, so bring the few read here along.
+            # The logits are on the host (see execute_model); bring the sampling
+            # tensors along.
             sampling_metadata = _sampling_metadata_to_host(sampling_metadata)
             out = self.rejection_sampler(
                 spec_decode_metadata,
@@ -1737,10 +1737,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             assert self.use_wrapped_compute_logits
             if not self.is_prefill and spec_decode_metadata is not None:
                 # NOTE(RBLN): a speculative step samples on the host, and this is
-                # its one D2H. torch-rbln runs int/bool/fp32 eager ops through a
-                # CPU fallback, so the int64 gather below and everything the
-                # rejection sampler does would otherwise round-trip the host op
-                # by op. The step without drafts keeps the device sampler.
+                # its one D2H: torch-rbln runs the int/bool/fp32 ops of rejection
+                # sampling through a CPU fallback otherwise.
                 logits = logits.cpu()[logits_indices]
 
         self.execute_model_state = ExecuteModelState(
@@ -3286,7 +3284,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         batch_size = self.bucketing_manager.max_batch_size
         num_tokens = batch_size * num_spec
         num_draft_tokens = [num_spec] * batch_size
-        # The op is fed host tensors (see RBLNRejectionSampler).
+        # Fed host tensors (see RBLNRejectionSampler).
         device = torch.device("cpu")
         draft_token_ids = torch.zeros(num_tokens, dtype=torch.int32, device=device)
         target_probs = torch.zeros(
@@ -3479,11 +3477,7 @@ def _pad_spec_decode_metadata(
 
 
 def _sampling_metadata_to_host(md: SamplingMetadata) -> SamplingMetadata:
-    """Copy the tensor fields a rejection-sampling step reads to the host.
-
-    `logitsprocs` is left as is: a logits processor with device state is not
-    served by the host sampling path.
-    """
+    """Copy the tensor fields a rejection-sampling step reads to the host."""
 
     fields = (
         "temperature",
@@ -3500,7 +3494,7 @@ def _sampling_metadata_to_host(md: SamplingMetadata) -> SamplingMetadata:
         for name in fields
         if (t := getattr(md, name)) is not None and t.device.type != "cpu"
     }
-    # Already on the host (the host-tensor path): hand the metadata through.
+    # Already on the host: hand the metadata through.
     return dataclasses.replace(md, **moved) if moved else md
 
 

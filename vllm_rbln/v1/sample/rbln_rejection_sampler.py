@@ -59,15 +59,11 @@ class RBLNRejectionSampler(RejectionSampler):
         device: torch.device | None = None,
     ):
         if USE_DEVICE_TENSOR:
-            # NOTE(RBLN): a speculative step samples on the host -- the runner
-            # brings the logits over once (see RBLNModelRunner._sample), since
-            # torch-rbln runs the int/bool/fp32 glue of rejection sampling through
-            # a CPU fallback op by op otherwise.
+            # NOTE(RBLN): a speculative step samples on the host (see
+            # RBLNModelRunner._sample). The runner's RBLN sampler is compiled
+            # for device tensors, so the bonus token comes from the eager one.
             device = torch.device("cpu")
             if isinstance(sampler, RBLNSampler):
-                # The runner's RBLN sampler is compiled for device tensors, so
-                # the bonus token comes from the eager sampler instead; it is one
-                # row per request.
                 sampler = Sampler(
                     logprobs_mode=sampler.logprobs_mode,
                     use_fp64_gumbel=sampler.use_fp64_gumbel,
@@ -333,8 +329,7 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         super().__init__()
         self.num_spec_tokens = num_spec_tokens or self.max_spec_len
 
-        # The op is fed host tensors on both paths (see RBLNRejectionSampler), so
-        # it compiles with the host path's options either way.
+        # Fed host tensors on both paths (see RBLNRejectionSampler).
         compile_context = compile_context or create_compile_context(use_global_ctx=True)
 
         self._compiled_rejection_sample = compile(

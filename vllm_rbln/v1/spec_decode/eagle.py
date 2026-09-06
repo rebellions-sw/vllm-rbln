@@ -60,12 +60,10 @@ class RBLNEagleProposer(EagleProposer):
         device: torch.device,
         runner: "RBLNModelRunner",
     ):
-        # NOTE(RBLN): the drafter's own bookkeeping -- the token ids, positions,
-        # sample indices and backup ids it edits between graph launches -- lives
-        # on the host. torch-rbln runs int/bool eager ops through a CPU
-        # fallback, so editing them as device tensors round-trips the host op
-        # by op. The device is kept for the attention metadata builders and the
-        # input stager, which stage the compiled graph's inputs onto it.
+        # NOTE(RBLN): the drafter's bookkeeping (token ids, positions, backup
+        # ids) lives on the host: torch-rbln runs int/bool eager ops through a
+        # CPU fallback. The device is kept for the attention metadata builders
+        # and the input stager, which stage the graph inputs onto it.
         super().__init__(vllm_config, torch.device("cpu"), runner)
         self.device = device
 
@@ -290,9 +288,7 @@ class RBLNEagleProposer(EagleProposer):
         Equivalent to upstream's scatter-then-argmax for a monotonic mapping:
         both pick the same winner, and on an exact tie both pick the lowest id.
         """
-        # The ids are a graph output, so they arrive on the device: this is the
-        # one small D2H of a draft pass, and the mapping, the stack and `tolist`
-        # stay on the host after it.
+        # A graph output: the one D2H of a draft pass, the rest stays on the host.
         draft_token_ids = draft_token_ids.cpu()
         d2t = self.draft_id_to_target_id
         if d2t is None:
@@ -324,8 +320,8 @@ class RBLNEagleProposer(EagleProposer):
         assert backup_tokens_gpu.dtype == torch.int32
 
         batch_size = sampled_token_ids.shape[0]
-        # A step without drafts samples on the device; meet the backup ids where
-        # this proposer keeps them (the host here, the device for DFlash).
+        # A step without drafts samples on the device; meet the backup ids
+        # where this proposer keeps them.
         sampled_token_ids = sampled_token_ids.to(backup_tokens_gpu.device)
         return eagle_prepare_next_token_padded(
             sampled_token_ids,

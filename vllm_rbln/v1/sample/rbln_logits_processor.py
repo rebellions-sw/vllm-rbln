@@ -35,14 +35,11 @@ logger = init_logger(__name__)
 
 
 class RBLNMinTokensLogitsProcessor(MinTokensLogitsProcessor):
-    # index_put_ requires the value dtype and device to exactly match the
-    # logits, and two kinds of logits reach one instance: a step without drafts
-    # samples model-dtype logits on the device through the RBLN sampler, while
-    # a speculative step samples on the host (see RBLNModelRunner._sample) --
-    # float32-upcast target logits in apply_with_spec_decode() and the bonus
-    # logits in apply(). The -inf constant is therefore synced to the incoming
-    # logits per call, with one cached tensor per (dtype, device), and the
-    # index tensors are put on the logits device as well.
+    # index_put_ needs the value to match the logits in dtype and device, and
+    # one instance sees both kinds: model-dtype device logits from the RBLN
+    # sampler on a step without drafts, float32 host logits on a speculative
+    # step (see RBLNModelRunner._sample). The -inf constant is synced per call,
+    # one cached tensor per (dtype, device), and the indices follow the logits.
     neg_inf_tensor: torch.Tensor
     device: torch.device
 
@@ -58,8 +55,6 @@ class RBLNMinTokensLogitsProcessor(MinTokensLogitsProcessor):
         key = (logits.dtype, logits.device)
         tensor = self._neg_inf_tensors.get(key)
         if tensor is None:
-            # Built fresh rather than copied across from the original, which
-            # may sit on the other device.
             tensor = self._neg_inf_tensors[key] = torch.tensor(
                 -float("inf"), dtype=logits.dtype, device=logits.device
             )
@@ -71,8 +66,8 @@ class RBLNMinTokensLogitsProcessor(MinTokensLogitsProcessor):
         self._sync_neg_inf(logits)
         rows, toks = self.logits_slice
         if rows.device != logits.device:
-            # update_state() built the slice on `self.device`; a speculative
-            # step's bonus logits are on the host.
+            # update_state() built the slice on self.device; the bonus logits of
+            # a speculative step are on the host.
             logits.index_put_(
                 (rows.to(logits.device), toks.to(logits.device)), self.neg_inf_tensor
             )
@@ -85,9 +80,8 @@ class RBLNMinTokensLogitsProcessor(MinTokensLogitsProcessor):
         if not self.min_toks:
             return logits
         self._sync_neg_inf(logits)
-        # Upstream allocates the row / token index tensors on `self.device`,
-        # which is where update_state() keeps the non-spec `logits_slice`; the
-        # spec-decode logits may live elsewhere, so point it at them for the call.
+        # Upstream builds its index tensors on self.device; point it at the
+        # logits for the call.
         device = self.device
         self.device = logits.device
         try:
