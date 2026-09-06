@@ -49,22 +49,27 @@ class ModalitySpec:
     name: str  # "image" | "video"
     grid_key: str  # grid_thw kwarg key
     pixel_key: str  # pixel-values kwarg key
-    embeds_key: str  # cached-embeds kwarg key / input "type" marker
     token_attr: str  # config attribute holding the placeholder token id
 
 
 MODALITIES: tuple[ModalitySpec, ModalitySpec] = (
-    ModalitySpec(
-        "image", "image_grid_thw", "pixel_values", "image_embeds", "image_token_id"
-    ),
-    ModalitySpec(
-        "video",
-        "video_grid_thw",
-        "pixel_values_videos",
-        "video_embeds",
-        "video_token_id",
-    ),
+    ModalitySpec("image", "image_grid_thw", "pixel_values", "image_token_id"),
+    ModalitySpec("video", "video_grid_thw", "pixel_values_videos", "video_token_id"),
 )
+
+
+def split_by_grid_thw(
+    embeds: torch.Tensor, grid_thw: torch.Tensor
+) -> list[torch.Tensor]:
+    """Cut the vision encoder's concatenated output back into per-item tensors.
+
+    Each item covers ``t * h * w`` patches merged ``k x k`` into one token; the
+    merge unit ``k**2`` is read off the output itself so this also works on an
+    EC producer, which loads only the encoder and has no text config.
+    """
+    patches = grid_thw.prod(dim=-1)
+    merge_unit = int(patches.sum()) // embeds.shape[0]
+    return list(embeds.split((patches // merge_unit).tolist()))
 
 
 class RBLNOptimumQwenVLForConditionalGeneration(
@@ -192,135 +197,53 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         # fallback return if both are None
         return None
 
-    def _process_image_input(self, image_input) -> dict:
-        result = {}
-        if image_input is not None and image_input.get("type") == "pixel_values":
-            result["image_embeds"] = self.model.visual(
-                image_input["pixel_values"], grid_thw=image_input["image_grid_thw"]
-            )
-            result["image_grid_thw"] = image_input["image_grid_thw"]
-        return result
+    def _process_image_input(self, image_input) -> list[torch.Tensor]:
+        if image_input is None or image_input.get("type") != "pixel_values":
+            return []
+        grid_thw = image_input["image_grid_thw"]
+        embeds = self.model.visual(image_input["pixel_values"], grid_thw=grid_thw)
+        return split_by_grid_thw(embeds, grid_thw)
 
-    def _process_video_input(self, video_input) -> dict:
-        result = {}
-        if video_input is not None and video_input.get("type") == "pixel_values_videos":
-            result["video_embeds"] = self.model.visual(
-                video_input["pixel_values_videos"],
-                grid_thw=video_input["video_grid_thw"],
-            )
-            result["video_grid_thw"] = video_input["video_grid_thw"]
-            second_per_grid_ts = video_input.get("second_per_grid_ts", None)
-            if second_per_grid_ts is not None:
-                result["second_per_grid_ts"] = second_per_grid_ts
-        return result
+    def _process_video_input(self, video_input) -> list[torch.Tensor]:
+        if video_input is None or video_input.get("type") != "pixel_values_videos":
+            return []
+        grid_thw = video_input["video_grid_thw"]
+        embeds = self.model.visual(
+            video_input["pixel_values_videos"], grid_thw=grid_thw
+        )
+        return split_by_grid_thw(embeds, grid_thw)
 
-    def embed_multimodal(self, **kwargs: object) -> MultiModalEmbeddings | dict:
-        """Encode the vision inputs into the whole-prompt cacheable unit (per
-        modality: features + grid, plus Qwen3-VL deepstack).
-
-        The single encode entry point: the prefill builder
-        (``build_prefill_forward_inputs``) calls it when no encoder cache is
-        supplied,
-        and the EC producer (``_run_encoder_and_save``) caches its result. The
-        EC consumer rebuilds the same representation from that cache via
-        ``_cache_to_mm``.
-        """
+    def embed_multimodal(self, **kwargs: object) -> MultiModalEmbeddings:
+        """One 2D tensor per image or video item, in kwargs order. The runner
+        batches one modality per call and caches each item by mm_hash."""
         image_input = self._parse_and_validate_image_input(**kwargs)
         video_input = self._parse_and_validate_video_input(**kwargs)
-        if image_input is None and video_input is None:
-            return {}
+        return [
+            *self._process_image_input(image_input),
+            *self._process_video_input(video_input),
+        ]
 
-        # Merge the per-modality encoder outputs into a single cacheable dict
-        # (rebuilt on the EC consumer by _cache_to_mm()).
-        result = {}
-        result.update(self._process_image_input(image_input))
-        result.update(self._process_video_input(video_input))
-        return result
+    def _image_token_id(self) -> int:
+        return self.model.config.image_token_id
 
-    def _assemble_prefill_inputs(
+    def _embed_text_tokens(
+        self, input_ids: torch.Tensor, is_multimodal: torch.Tensor
+    ) -> torch.Tensor:
+        return self.model.embed_tokens(input_ids)
+
+    def build_prefill_forward_inputs(
         self,
         model_input: ModelInputForRBLN,
-        multimodal_embeddings: Any,
         mrope_position_deltas: dict[str, float],
     ) -> ModelInputForRBLN:
-        """Scatter the features and add the MRoPE positions. The rope delta is
-        recorded per request for the decode steps."""
-        inputs_embeds = self.embed_input_ids(
-            model_input.input_tokens, multimodal_embeddings
+        """Scatter the multimodal embeddings, then add the MRoPE positions and
+        record the request's rope delta for its decode steps."""
+        model_input = super().build_prefill_forward_inputs(
+            model_input, mrope_position_deltas
         )
         position_embed, rope_deltas = self._build_prefill_position_embed(model_input)
         mrope_position_deltas[model_input.running_requests_ids[0]] = rope_deltas.item()
-        return replace(
-            model_input,
-            inputs_embeds=inputs_embeds,
-            position_embed=position_embed,
-        )
-
-    def _cache_to_mm(self, cached_mm_outputs: list[dict]) -> dict:
-        """Merge the producer's per-item cached encoder outputs into the same
-        whole-prompt representation ``embed_multimodal`` produces (per-modality
-        features concatenated across items). Qwen3-VL overrides to also carry
-        the cached deepstack.
-        """
-        mm: dict = {}
-        for spec in MODALITIES:
-            caches = [c for c in cached_mm_outputs if spec.embeds_key in c]
-            if not caches:
-                continue
-            mm[spec.embeds_key] = torch.cat([c[spec.embeds_key] for c in caches], dim=0)
-            mm[spec.grid_key] = torch.cat(
-                [c[spec.grid_key].to(torch.int64) for c in caches], dim=0
-            )
-        return mm
-
-    def _build_partial_mm_embeds(
-        self, partial_prefix: Any, multimodal_embeddings: Any
-    ) -> dict:
-        """Slice each modality's whole-prompt features down to the uncached
-        tail (the encoder already ran over full items). Qwen3-VL overrides to
-        also slice its deepstack side outputs.
-        """
-        if not isinstance(multimodal_embeddings, dict) or not multimodal_embeddings:
-            return {}
-        mm = multimodal_embeddings
-        tail_starts = partial_prefix.mm_embed_tail_starts or {}
-        merge = self.model.config.vision_config.spatial_merge_size
-        sliced: dict = {}
-        for spec in MODALITIES:
-            if spec.embeds_key not in mm:
-                continue
-            counts = self._mm_feature_counts(mm[spec.grid_key], merge).tolist()
-            starts = tail_starts.get(spec.name, [])
-            assert len(counts) == len(starts), (
-                f"kept-item count mismatch: {len(counts)} grids vs "
-                f"{len(starts)} tail starts"
-            )
-            sliced[spec.embeds_key] = self._slice_to_tail(
-                mm[spec.embeds_key], counts, starts
-            )
-        return sliced
-
-    def embed_input_ids(
-        self,
-        input_ids: torch.Tensor,
-        multimodal_embeddings: Any = None,
-        *,
-        is_multimodal: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Embed the text tokens, then scatter each modality's features over
-        its placeholder positions.
-        """
-        inputs_embeds = self.model.embed_tokens(input_ids)
-        if not isinstance(multimodal_embeddings, dict) or not multimodal_embeddings:
-            return inputs_embeds
-        config = self.model.config
-        for spec in MODALITIES:
-            embeds = multimodal_embeddings.get(spec.embeds_key)
-            if embeds is None:
-                continue
-            mask = input_ids == getattr(config, spec.token_attr)
-            inputs_embeds[mask] = embeds.to(inputs_embeds.dtype)
-        return inputs_embeds
+        return replace(model_input, position_embed=position_embed)
 
     def _build_prefill_position_embed(
         self, model_input: ModelInputForRBLN
@@ -387,25 +310,6 @@ class RBLNOptimumQwenVLForConditionalGeneration(
         # outputs[1]/[2] = position_embed/rope_deltas across all variants; the
         # rest of the tuple's arity differs, so don't unpack it.
         return {"position_embed": outputs[1], "rope_deltas": outputs[2]}
-
-    @staticmethod
-    def _slice_to_tail(
-        feats: torch.Tensor, counts: list[int], tail_starts: list[int]
-    ) -> torch.Tensor:
-        """Concatenate each item's features cut to its tail: item ``i`` keeps
-        ``feats[item_i][tail_starts[i]:]`` (``feats`` = items concatenated)."""
-        parts = []
-        offset = 0
-        for count, tail_start in zip(counts, tail_starts):
-            parts.append(feats[offset : offset + count][tail_start:])
-            offset += count
-        return torch.cat(parts, dim=0)
-
-    @staticmethod
-    def _mm_feature_counts(grid_thw: torch.Tensor, merge_size: int) -> torch.Tensor:
-        """Per-item feature/placeholder count from ``grid_thw`` (patches merged
-        ``merge_size x merge_size``, 1:1 token<->feature)."""
-        return grid_thw.prod(dim=-1) // (merge_size**2)
 
     def compute_decode_position_embed(
         self,

@@ -39,7 +39,7 @@ from vllm_rbln.utils.optimum.bucket import select_bucket_size
 from vllm_rbln.utils.optimum.paths import is_compiled_dir
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 
-from .base import ModelInputForRBLN, PartialPrefixInfo
+from .base import ModelInputForRBLN
 from .compilation import RBLNCompileSpec
 
 logger = init_logger(__name__)
@@ -391,33 +391,18 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
         model_input: ModelInputForRBLN,
         mrope_position_deltas: dict[str, float],
     ) -> ModelInputForRBLN:
-        """Fill in the prefill inputs the compiled graph consumes:
-        ``inputs_embeds`` plus whatever extras the model adds.
+        """Fill in the prefill inputs the compiled graph consumes.
 
-        One flow for every prefill. The multimodal features come from the
-        encoder cache when the EC consumer supplied ``cached_mm_outputs`` and
-        from the vision encoder otherwise; on a partial prefix-cache hit only
-        the uncached tail of each item is kept. ``_assemble_prefill_inputs``
-        then scatters them into the model input, and subclasses override it to
-        add their extras.
+        The runner has already run the vision encoder and gathered this
+        prefill's multimodal embeddings (``mm_embeds``, ``is_mm_embed``); this
+        scatters them over the text embeddings. Subclasses extend it with their
+        graph extras (MRoPE positions, deepstack). ``mrope_position_deltas`` is
+        unused here; MRoPE models record per-request rope deltas in it.
         """
-        if model_input.cached_mm_outputs is not None:
-            mm = self._cache_to_mm(model_input.cached_mm_outputs)
-        else:
-            mm = self.embed_multimodal(**(model_input.multi_modal_kwargs or {}))
-        if model_input.partial_prefix is not None:
-            mm = self._build_partial_mm_embeds(model_input.partial_prefix, mm)
-        return self._assemble_prefill_inputs(model_input, mm, mrope_position_deltas)
-
-    def _assemble_prefill_inputs(
-        self,
-        model_input: ModelInputForRBLN,
-        multimodal_embeddings: Any,
-        # Unused here; MRoPE models (Qwen-VL) record per-request rope deltas.
-        mrope_position_deltas: dict[str, float],
-    ) -> ModelInputForRBLN:
         inputs_embeds = self.embed_input_ids(
-            model_input.input_tokens, multimodal_embeddings
+            model_input.input_tokens,
+            model_input.mm_embeds,
+            is_multimodal=model_input.is_mm_embed,
         )
         return replace(model_input, inputs_embeds=inputs_embeds)
 
@@ -430,22 +415,19 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
     ) -> torch.Tensor | None:
         return None
 
-    def embed_multimodal(self, **kwargs: object) -> MultiModalEmbeddings | dict:
-        # Default vision-only encode path shared by the simple MM models: parse
-        # the image input and return per-image token embeddings. Models with a
-        # richer cacheable unit (e.g. Qwen-VL, which also handles video) override
-        # this.
+    def embed_multimodal(self, **kwargs: object) -> MultiModalEmbeddings:
+        # One 2D tensor per multimodal item, in the order the items appear in
+        # the kwargs (upstream's SupportsMultiModal contract); the runner caches
+        # each item's tensor by mm_hash. Models that also take video (Qwen-VL)
+        # override this.
         image_input = self._parse_and_validate_image_input(**kwargs)
         if image_input is None:
             return []
 
         return self._process_image_input(image_input)
 
-    def _process_image_input(self, image_input: object) -> list[torch.Tensor] | dict:
-        # Encode a validated image input into the model's cacheable multimodal
-        # unit: per-image token embeddings (list[torch.Tensor]) for the simple
-        # models, or a richer dict (e.g. Qwen-VL). Consumed by the default
-        # embed_multimodal() above.
+    def _process_image_input(self, image_input: object) -> list[torch.Tensor]:
+        # Encode a validated image input into per-image token embeddings.
         raise NotImplementedError(
             "`_process_image_input` must be implemented for each model."
         )
@@ -497,48 +479,7 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
             return inputs_embeds
 
         # Flatten per-item embeddings into (num_mm_tokens, hidden_size).
-        mm_embeds = torch.cat(list(multimodal_embeddings))
+        mm_embeds = torch.cat(list(multimodal_embeddings)).to(inputs_embeds.dtype)
         self._assert_mm_tokens_match(int(is_multimodal.sum()), mm_embeds.shape[0])
         scatter_mask = is_multimodal.unsqueeze(-1).expand_as(inputs_embeds)
         return inputs_embeds.masked_scatter(scatter_mask, mm_embeds)
-
-    def _cache_to_mm(self, cached_mm_outputs: list) -> MultiModalEmbeddings | dict:
-        """Merge the producer's per-item cached encoder outputs into the
-        representation ``embed_multimodal`` returns, so the rest of the prefill
-        flow does not care which source the features came from. The default
-        flattens per-item embedding lists; Qwen-VL overrides this for its
-        per-modality dict.
-        """
-        return [t for out in cached_mm_outputs for t in out]
-
-    def _build_partial_mm_embeds(
-        self,
-        partial_prefix: PartialPrefixInfo,
-        multimodal_embeddings: MultiModalEmbeddings,
-    ) -> MultiModalEmbeddings:
-        tail_starts_by_modality = partial_prefix.mm_embed_tail_starts or {}
-        # Base MM models are single-modality (image); flatten to one start list
-        # kept-item order, matching the flat per-item embeddings list.
-        if len(tail_starts_by_modality) > 1:
-            raise NotImplementedError(
-                "Partial prefix tail slicing across multiple modalities needs a "
-                "model-specific _build_partial_mm_embeds override."
-            )
-        tail_starts = next(iter(tail_starts_by_modality.values()), [])
-
-        if not isinstance(multimodal_embeddings, (list, tuple)):
-            raise NotImplementedError(
-                "Base partial prefix slicing expects per-item embeddings "
-                f"(list/tuple), got {type(multimodal_embeddings).__name__}; "
-                "override _build_partial_mm_embeds for this representation."
-            )
-        if len(tail_starts) != len(multimodal_embeddings):
-            raise ValueError(
-                f"kept-item count mismatch: {len(multimodal_embeddings)} "
-                f"embeddings vs {len(tail_starts)} tail starts"
-            )
-
-        sliced = [
-            embeds[start:] for embeds, start in zip(multimodal_embeddings, tail_starts)
-        ]
-        return type(multimodal_embeddings)(sliced)

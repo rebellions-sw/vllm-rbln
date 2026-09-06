@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 from vllm.multimodal.inputs import BatchedTensorInputs
@@ -26,13 +25,11 @@ class PartialPrefixInfo:
     - `full_input_tokens`: untrimmed prompt (MRoPE positions computed over it).
     - `num_cached_tokens`: cache boundary in tokens (= tail start).
     - `mrope_mm_kwargs`: every item's grid (incl. cached) for get_rope_index.
-    - `mm_embed_tail_starts`: per kept item, first uncached feature index.
     """
 
     full_input_tokens: torch.Tensor
     num_cached_tokens: int
     mrope_mm_kwargs: BatchedTensorInputs | None
-    mm_embed_tail_starts: dict[str, list[int]] | None
 
 
 # FIXME(eunji): In original vLLM, this dataclasss is located in model_runner.
@@ -56,12 +53,15 @@ class ModelInputForRBLN:
     # Decode batch the tensors are padded to; 1 for prefill.
     padded_batch_size: int
     is_prompt: bool = False
+    # Raw multimodal kwargs of the items in this prefill; MRoPE models read the
+    # grids from it. The encoder itself runs in the runner, see mm_embeds.
     multi_modal_kwargs: BatchedTensorInputs | None = None
-    # EC consumer prefill: the producer's cached encoder output of each
-    # multimodal item this prefill still needs, in kept order (the runner's
-    # _iter_kept_mm_features). None when the prefill builder should run the
-    # vision encoder over multi_modal_kwargs instead.
-    cached_mm_outputs: list[Any] | None = None
+    # Prefill: encoder output of every multimodal item overlapping this
+    # prefill's tokens, one 2D tensor per item in prompt order and cut to the
+    # tokens being prefilled, plus the [1, seq_len] mask of the positions they
+    # fill (see the runner's _gather_mm_embeddings). None on decode.
+    mm_embeds: list[torch.Tensor] | None = None
+    is_mm_embed: torch.Tensor | None = None
     # Block the scheduler set aside as scratch space for padding rows. None
     # when the scheduler did not set one aside; the runner then picks a block
     # no running request uses.
