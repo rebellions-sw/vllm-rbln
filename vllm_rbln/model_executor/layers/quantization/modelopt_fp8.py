@@ -26,7 +26,14 @@ from vllm.model_executor.parameter import (
 
 @register_weight_loader_v2_supported_method
 class RBLNModelOptFp8LinearMethod(ModelOptFp8LinearMethod):
-    """Per-tensor ModelOpt FP8 linear for RBLN."""
+    """Per-tensor ModelOpt FP8 linear for RBLN.
+
+    Replaces `process_weights_after_loading`/`apply` rather than registering an
+    FP8 linear kernel: upstream requantises a fused layer's halves to one max
+    scale, which is lossy and needs an eager fp8 quant this platform cannot run
+    at load time. `create_weights` is upstream's minus its
+    `init_fp8_linear_kernel` call, which has no kernel to select here.
+    """
 
     def create_weights(
         self,
@@ -82,7 +89,6 @@ class RBLNModelOptFp8LinearMethod(ModelOptFp8LinearMethod):
         layer.weight = Parameter(layer.weight.data, requires_grad=False)
         weight_scale = layer.weight_scale.data.reshape(-1)
         if weight_scale.numel() == 1 or bool((weight_scale == weight_scale[0]).all()):
-            # One value for the whole tensor: hold it as a 0-dim scalar.
             weight_scale = weight_scale[0]
         layer.weight_scale = Parameter(weight_scale, requires_grad=False)
         if getattr(layer, "input_scale", None) is not None:

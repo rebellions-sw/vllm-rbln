@@ -33,17 +33,22 @@ class RBLNModelOptNvFp4FusedMoE(ModelOptNvFp4FusedMoE):
     def __init__(self, quant_config: ModelOptNvFp4Config, moe: FusedMoEConfig) -> None:
         FusedMoEMethodBase.__init__(self, moe)
         self.quant_config = quant_config
-        self.moe = moe
-        self.use_a16 = quant_config.quant_method == "W4A16_NVFP4"
+        self.nvfp4_backend = None
+        self.experts_cls = None
         self.use_global_sf = False
+
+        group_size = quant_config.group_size
+        if group_size not in (16, 32):
+            raise ValueError(
+                f"RBLN NVFP4 MoE requires {group_size=} in (16, 32); the packed "
+                f"FP4 kernel takes no other group size"
+            )
 
     @property
     def is_monolithic(self) -> bool:
-        # RBLNMoERunner.forward calls apply() directly;
+        # Prevent vLLM from trying to initialize modular-kernel plumbing.
+        # RBLNMoERunner.forward calls apply() directly.
         return True
-
-    def maybe_make_prepare_finalize(self, routing_tables=None):
-        raise RuntimeError
 
     def get_fused_moe_quant_config(self, layer: torch.nn.Module):
         return None
