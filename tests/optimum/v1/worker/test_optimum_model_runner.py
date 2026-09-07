@@ -32,7 +32,6 @@ from vllm.platforms import current_platform
 from vllm.v1.core.sched.output import CachedRequestData
 from vllm.v1.sample.metadata import SamplingMetadata
 
-import vllm_rbln.v1.worker.optimum_model_runner as optimum_model_runner
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
@@ -155,23 +154,18 @@ def test_should_sort_batch_by_length_checks_language_submodule(
 
 
 @pytest.mark.parametrize(
-    ("env_enabled", "sort_batch_by_length", "expected_req_ids", "expected_lengths"),
+    ("sort_batch_by_length", "expected_req_ids", "expected_lengths"),
     [
-        (False, False, ["short", "long"], [1, 2]),
-        (True, False, ["long", "short"], [2, 1]),
-        (False, True, ["long", "short"], [2, 1]),
-        (True, True, ["long", "short"], [2, 1]),
+        (False, ["short", "long"], [1, 2]),
+        (True, ["long", "short"], [2, 1]),
     ],
 )
-def test_may_reorder_batch_enabled_by_env_or_model_metadata(
-    monkeypatch,
+def test_may_reorder_batch_follows_model_metadata(
     model_runner,
-    env_enabled,
     sort_batch_by_length,
     expected_req_ids,
     expected_lengths,
 ):
-    monkeypatch.setattr(optimum_model_runner.envs, "VLLM_RBLN_SORT_BATCH", env_enabled)
     model_runner.sort_batch_by_length = sort_batch_by_length
     scheduler_output = _schedule_new_request(
         "short",

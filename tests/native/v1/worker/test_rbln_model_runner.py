@@ -874,6 +874,7 @@ class TestUpdateStates:
             requests=requests if requests is not None else {},
             num_prompt_logprobs={},
             is_pooling_model=False,
+            sort_batch_by_length=False,
             kv_cache_config=SimpleNamespace(kv_cache_groups=[]),
         )
 
@@ -981,11 +982,12 @@ class TestCalcSpecDecodeMetadata:
 class TestMayReorderBatch:
     # Stable descending sort by num_tokens_no_spec, applied in place. Uses a real
     # InputBatch; scheduler_output is unused by the sort path, so None is passed.
+    # sort_batch_by_length is what __init__ resolves from the device.
     @staticmethod
-    def _runner(monkeypatch, ib, *, sort=True, groups=1):
-        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SORT_BATCH", sort)
+    def _runner(ib, *, sort=True, groups=1):
         return _make_runner_stub(
             input_batch=ib,
+            sort_batch_by_length=sort,
             kv_cache_config=SimpleNamespace(kv_cache_groups=[object()] * groups),
         )
 
@@ -995,30 +997,30 @@ class TestMayReorderBatch:
         ib.num_tokens_no_spec[: len(tokens)] = tokens
         return ib
 
-    def test_noop_when_sort_disabled(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]), sort=False)
+    def test_noop_when_sort_disabled(self):
+        r = self._runner(self._batch([1, 3, 2, 4]), sort=False)
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r0", "r1", "r2", "r3"]
 
-    def test_noop_when_no_kv_cache_groups(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]), groups=0)
+    def test_noop_when_no_kv_cache_groups(self):
+        r = self._runner(self._batch([1, 3, 2, 4]), groups=0)
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r0", "r1", "r2", "r3"]
 
-    def test_already_sorted_skips(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([4, 3, 2, 1]))
+    def test_already_sorted_skips(self):
+        r = self._runner(self._batch([4, 3, 2, 1]))
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r0", "r1", "r2", "r3"]
         assert r.input_batch.batch_update_builder.moved == []
 
-    def test_sorts_descending_by_num_tokens(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]))
+    def test_sorts_descending_by_num_tokens(self):
+        r = self._runner(self._batch([1, 3, 2, 4]))
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r3", "r1", "r2", "r0"]
         assert r.input_batch.num_tokens_no_spec[:4].tolist() == [4, 3, 2, 1]
 
-    def test_emits_swap_records_for_non_pooling(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]))
+    def test_emits_swap_records_for_non_pooling(self):
+        r = self._runner(self._batch([1, 3, 2, 4]))
         assert not r.input_batch.is_pooling_model
         r._may_reorder_batch(None)
         # Non-pooling models replay pairwise swaps into the logits-proc builder.

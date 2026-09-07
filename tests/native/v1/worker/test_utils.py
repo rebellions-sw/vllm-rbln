@@ -42,6 +42,7 @@ from vllm_rbln.v1.worker.utils import (
     chiplet_replication_factor,
     compute_rbln_local_omp_cpuid,
     copy_host_device_kv_blocks,
+    device_requires_batch_sort,
     divide_by_chiplet_replication,
     estimate_available_memory,
     estimate_model_kernel_size,
@@ -339,6 +340,24 @@ def _input_batch(num_reqs=4):
             )
         )
     return ib
+
+
+class TestDeviceRequiresBatchSort:
+    # The native runner sorts the persistent batch only on REBEL CR13, whose
+    # batched dynamic decode kernel early-exits per partition; ATOM and other
+    # REBEL parts leave the scheduler's order alone.
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("RBLN-CR13", True),
+            ("rbln-cr13", True),
+            ("RBLN-CR03", False),
+            ("RBLN-CA25", False),
+        ],
+    )
+    def test_by_device_name(self, monkeypatch, name, expected):
+        monkeypatch.setattr(current_platform, "get_device_name", lambda: name)
+        assert device_requires_batch_sort() is expected
 
 
 class TestReorderInputBatch:

@@ -1116,15 +1116,8 @@ class RBLNOptimumModelRunner(
             self.input_batch.refresh_metadata()
 
     def _may_reorder_batch(self, scheduler_output: "RBLNSchedulerOutput") -> None:
-        """Reorder requests in the persistent batch by descending sequence length.
-
-        Enabled by `VLLM_RBLN_SORT_BATCH=1` or compiled-model metadata. Required
-        for the batched dynamic decode kernel (VLLM_RBLN_BATCH_ATTN_OPT) to
-        early-exit on shorter sequences per partition — the kernel processes the
-        first valid_batch[p] rows for partition p, which is only correct when rows
-        are sorted long→short.
-        """
-        if not (envs.VLLM_RBLN_SORT_BATCH or self.sort_batch_by_length):
+        """Reorder requests in the persistent batch by descending sequence length."""
+        if not self.sort_batch_by_length:
             return
         if self.input_batch.num_reqs <= 1:
             return

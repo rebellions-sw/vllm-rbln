@@ -20,7 +20,6 @@ from tests.native.model_specs import ATOM, REBEL, CompileModelSpec
 
 OPT_ENVS = {
     "VLLM_RBLN_BATCH_ATTN_OPT": "1",
-    "VLLM_RBLN_SORT_BATCH": "1",
 }
 
 _QWEN3_30B_A3B_BASE = CompileModelSpec(

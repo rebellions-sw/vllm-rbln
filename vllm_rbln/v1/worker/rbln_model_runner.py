@@ -159,6 +159,7 @@ from vllm_rbln.v1.worker.dp_utils import (
 from vllm_rbln.v1.worker.input_stager import InputLayout, InputStager, StagedModelInputs
 from vllm_rbln.v1.worker.utils import (
     copy_host_device_kv_blocks,
+    device_requires_batch_sort,
     get_kv_cache_names,
     prepare_kernel_block_sizes,
     reorder_input_batch,
@@ -479,6 +480,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             parallel_config.data_parallel_size > 1
             and envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE
         )
+        self.sort_batch_by_length = device_requires_batch_sort()
 
         # Static, so the per-step decision only has to supply this step's counts.
         self.shape_config = ShapeConfig(
@@ -542,9 +544,10 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         # into decode / extend / prefill regions here. The RBLN execution path assumes
         # a homogeneous batch phase and therefore does not use scheduler_output-based
         # phase classification. Instead, we perform a stable sort by current sequence
-        # length (num_tokens_no_spec, descending).
+        # length (num_tokens_no_spec, descending) on devices whose decode kernel
+        # needs it (device_requires_batch_sort).
         if (
-            not envs.VLLM_RBLN_SORT_BATCH
+            not self.sort_batch_by_length
             or len(self.kv_cache_config.kv_cache_groups) == 0
         ):
             return
