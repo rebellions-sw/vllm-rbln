@@ -241,6 +241,7 @@ class RblnPlatform(Platform):
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
         from vllm_rbln.utils.optimum.converter import sync_vllm_and_optimum
+        from vllm_rbln.utils.optimum.predicates import forces_fp32_dtype
         from vllm_rbln.utils.optimum.registry import is_pooling_arch
 
         if envs.VLLM_USE_V2_MODEL_RUNNER:
@@ -350,6 +351,24 @@ class RblnPlatform(Platform):
                     "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler"
                 )
 
+            if (
+                vllm_config.speculative_config is not None
+                and vllm_config.speculative_config.method == "dflash"
+                and scheduler_config.max_num_scheduled_tokens
+                != scheduler_config.max_num_batched_tokens
+            ):
+                # DFlash reserves no slots (see patches/speculative_config.py),
+                # so the auto-computed budget is the whole of
+                # max_num_batched_tokens and any other value was set explicitly.
+                raise ValueError(
+                    "DFlash needs max_num_scheduled_tokens left auto-computed "
+                    f"(expected {scheduler_config.max_num_batched_tokens}, got "
+                    f"{scheduler_config.max_num_scheduled_tokens}): the prefill "
+                    "chunk has to stay at max_num_batched_tokens, which is also "
+                    "the compiled prefill length and the sub-block cache's "
+                    "granularity."
+                )
+
             # Under PP the compiled per-stage decode batch is max_num_seqs // pp_size
             # (see decode_batch_size). Fail fast on an impossible config.
             pp_size = parallel_config.pipeline_parallel_size
@@ -426,12 +445,8 @@ class RblnPlatform(Platform):
                 model_config.disable_cascade_attn = True
 
         else:
-            # NOTE(eunji.lee):
-            # It is for multimodal models
-            # to generate inputs as fp32, not bfloat16
-            # even though the model is compiled with bfloat16
-            model_config.dtype = torch.float
-            assert model_config.dtype == torch.float
+            if forces_fp32_dtype(vllm_config.model_config):
+                model_config.dtype = torch.float32
 
             if parallel_config.worker_cls == "auto":
                 parallel_config.worker_cls = (
