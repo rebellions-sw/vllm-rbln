@@ -386,7 +386,7 @@ class RBLNOptimumModelRunner(
                 # an optimization, so the engine must not die here.
                 if not self.try_copy_prefix_cached_kv(model_input, scheduler_output):
                     model_input, _ = self._prepare_inputs(
-                        scheduler_output, trim_cached_prefix=False
+                        scheduler_output, use_cached_prefix=False
                     )
                 if self.is_ec_consumer and model_input.is_prompt and prefill_has_mm:
                     with capture_ctx as model_reports:
@@ -509,7 +509,7 @@ class RBLNOptimumModelRunner(
     def _prepare_inputs(
         self,
         scheduler_output: "SchedulerOutput",
-        trim_cached_prefix: bool = True,
+        use_cached_prefix: bool = True,
     ) -> tuple[ModelInputForRBLN, np.ndarray]:
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         assert total_num_scheduled_tokens > 0
@@ -545,7 +545,7 @@ class RBLNOptimumModelRunner(
                 multi_modal_kwargs,
                 running_request_ids,
                 partial_prefix,
-            ) = self._prepare_prefill(scheduler_output, trim_cached_prefix)
+            ) = self._prepare_prefill(scheduler_output, use_cached_prefix)
         else:
             input_ids, positions, block_tables, running_request_ids = (
                 self._prepare_decode(scheduler_output)
@@ -604,7 +604,7 @@ class RBLNOptimumModelRunner(
     def _prepare_prefill(
         self,
         scheduler_output: "RBLNSchedulerOutput",
-        trim_cached_prefix: bool = True,
+        use_cached_prefix: bool = True,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -658,7 +658,7 @@ class RBLNOptimumModelRunner(
                 block_ids,
             )
             block_table = scheduler_output.block_table_dict[req_id]
-            if trim_cached_prefix:
+            if use_cached_prefix:
                 cached_length = scheduler_output.cached_length
                 total_cached_length = sum(cached_length)
             if total_cached_length > 0:
