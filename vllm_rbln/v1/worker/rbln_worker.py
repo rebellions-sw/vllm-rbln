@@ -1172,19 +1172,23 @@ class RBLNWorker(WorkerBase):
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         return self.model_runner.sample_tokens(grammar_output)
 
+    def _send_handoff(self, tensors: dict) -> None:
+        """Hand this stage's output on; a seam the metrics patch wraps."""
+        # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
+        get_pp_group().send_tensor_dict(tensors)
+
     @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
     ) -> ModelRunnerOutput | None:
         intermediate_tensors = None
-        forward_pass = scheduler_output.total_num_scheduled_tokens > 0
 
-        if forward_pass and not get_pp_group().is_first_rank:
-            # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
-            intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict()
-            )
+        if (
+            scheduler_output.total_num_scheduled_tokens > 0
+            and not get_pp_group().is_first_rank
+        ):
+            intermediate_tensors = self.model_runner.recv_intermediate_tensors()
 
         output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)
         if isinstance(output, ModelRunnerOutput | NoneType):
@@ -1197,8 +1201,7 @@ class RBLNWorker(WorkerBase):
             and not get_pp_group().is_last_rank
         )
 
-        # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
-        get_pp_group().send_tensor_dict(output.tensors)
+        self._send_handoff(output.tensors)
 
         # Non-last PP rank: the model runner already surfaces this rank's
         # KV-connector output through the two-phase sample_tokens() path
