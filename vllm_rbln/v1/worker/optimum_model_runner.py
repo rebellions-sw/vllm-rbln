@@ -382,6 +382,11 @@ class RBLNOptimumModelRunner(
                 scheduler_output
             )
 
+            if not self.try_copy_prefix_cached_kv(model_input, scheduler_output):
+                model_input, _ = self._prepare_inputs(
+                    scheduler_output, use_cached_prefix=False
+                )
+
         has_new_prefill = len(scheduler_output.scheduled_new_reqs) > 0
         with self.maybe_get_ec_connector_output(
             scheduler_output,
@@ -401,14 +406,6 @@ class RBLNOptimumModelRunner(
 
                 new_reqs = scheduler_output.scheduled_new_reqs
                 prefill_has_mm = bool(new_reqs) and bool(new_reqs[0].mm_features)
-                # Copy prefix-cached KV before building the forward inputs.
-                # On failure (e.g. device OOM) rebuild the inputs without the
-                # cached-prefix trim and run a full prefill; the copy is only
-                # an optimization, so the engine must not die here.
-                if not self.try_copy_prefix_cached_kv(model_input, scheduler_output):
-                    model_input, _ = self._prepare_inputs(
-                        scheduler_output, use_cached_prefix=False
-                    )
                 if self.is_ec_consumer and model_input.is_prompt and prefill_has_mm:
                     with capture_ctx as model_reports:
                         hidden_states = self._run_prefill_with_cached_encoder(
