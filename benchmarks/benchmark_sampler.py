@@ -28,9 +28,6 @@ from vllm_rbln.v1.worker.metrics import PerformanceTracker, collect_metrics
 
 MAX_NUM_PROMPT_TOKENS = 64
 
-# Penalty configs are no longer part of WARM_UP_CONFIGS: penalties run eagerly
-# on the CPU, so they compile nothing and would only lengthen server warm-up.
-# As benchmark scenarios they still matter — they measure that eager cost.
 BENCHMARK_CONFIGS: list[dict] = [
     *WARM_UP_CONFIGS,
     {
