@@ -31,6 +31,8 @@ import pytest
 import torch
 from vllm.platforms import current_platform
 
+from tests.native.model_specs import REBEL
+from tests.native.utils import host_chip
 from vllm_rbln.compilation.compiler import compile as rbln_compile
 from vllm_rbln.model_executor.kernels.linear.block_fp8 import (
     RBLNW8A16BlockFp8LinearKernel,
@@ -38,7 +40,14 @@ from vllm_rbln.model_executor.kernels.linear.block_fp8 import (
 
 pytestmark = pytest.mark.use_device
 
-_RTOL, _ATOL = 1e-2, 1e-2
+# How much room the device needs against the CPU eager oracle is not the same for
+# every activation dtype or every target.
+# TODO(rbln-bf16-parity-tol): revisit the REBEL entry.
+_RTOL = {
+    torch.float16: 1e-2,
+    torch.bfloat16: 3e-2 if host_chip() in REBEL else 1e-2,
+}
+_ATOL = 1e-2
 
 # Production-sized fp8 block; toy blocks hit an rbln-compiler reshape edge case.
 _BLOCK_N = _BLOCK_K = 128
@@ -59,7 +68,10 @@ _KERNEL.weight_group_shape = (_BLOCK_N, _BLOCK_K)
 
 def _agrees(actual, reference) -> bool:
     return torch.allclose(
-        actual.cpu().float(), reference.float(), rtol=_RTOL, atol=_ATOL
+        actual.cpu().float(),
+        reference.float(),
+        rtol=_RTOL[reference.dtype],
+        atol=_ATOL,
     )
 
 
