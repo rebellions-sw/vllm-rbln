@@ -40,6 +40,7 @@ from . import (
     mla,
     models_utils,
     multi_connector,
+    multi_connector_kv_events,
     oot,
     profiler,
     qwen2_moe,
