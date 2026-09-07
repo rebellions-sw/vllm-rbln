@@ -19,6 +19,7 @@
 # only repeat itself -- it builds a real runner and carries its own device marker.
 
 import contextlib
+from collections import deque
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -28,8 +29,9 @@ import pytest
 import torch
 from vllm.sampling_params import SamplingParams
 from vllm.v1.kv_cache_interface import FullAttentionSpec
-from vllm.v1.outputs import SamplerOutput
+from vllm.v1.outputs import LogprobsTensors, SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
+from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.kv_connector_model_runner_mixin import (
     KVConnectorModelRunnerMixin,
@@ -39,6 +41,7 @@ import vllm_rbln.v1.worker.dp_utils as dp_utils
 import vllm_rbln.v1.worker.rbln_model_runner as mr
 from vllm_rbln.v1.core.rbln_kv_cache_manager import KVCacheCopyOp
 from vllm_rbln.v1.spec_decode.eagle import RBLNEagleProposer
+from vllm_rbln.v1.spec_decode.utils import eagle_prepare_inputs_padded
 from vllm_rbln.v1.worker.bucketing.exponential_bucketing_manager import (
     ExponentialBucketingManager,
 )
@@ -54,6 +57,7 @@ from vllm_rbln.v1.worker.rbln_model_runner import (
     _depad_sampler_output,
     _pad_rows,
     _pad_sampling_metadata,
+    _pad_spec_decode_metadata,
 )
 
 
@@ -84,7 +88,9 @@ def _make_runner_stub(**attrs):
     return runner
 
 
-def _sampling_metadata(n, *, no_penalties=True, spec_token_ids=None):
+def _sampling_metadata(
+    n, *, no_penalties=True, spec_token_ids=None, allowed_token_ids_mask=None
+):
     return SamplingMetadata(
         temperature=torch.ones(n),
         all_greedy=False,
@@ -99,12 +105,28 @@ def _sampling_metadata(n, *, no_penalties=True, spec_token_ids=None):
         presence_penalties=torch.zeros(n),
         repetition_penalties=torch.ones(n),
         output_token_ids=[[] for _ in range(n)],
-        allowed_token_ids_mask=None,
+        allowed_token_ids_mask=allowed_token_ids_mask,
         bad_words_token_ids={},
         logitsprocs=None,
         logprob_token_ids=None,
         spec_token_ids=spec_token_ids,
         thinking_budget_state_holder=None,
+    )
+
+
+def _spec_decode_metadata(num_draft_tokens: list[int]) -> SpecDecodeMetadata:
+    num_sampled_tokens = [n + 1 for n in num_draft_tokens]
+    cu_sampled = torch.tensor(num_sampled_tokens, dtype=torch.int32).cumsum(0)
+    cu_draft = torch.tensor(num_draft_tokens, dtype=torch.int32).cumsum(0)
+    total_draft = int(cu_draft[-1])
+    return SpecDecodeMetadata(
+        draft_token_ids=torch.zeros(total_draft, dtype=torch.int32),
+        num_draft_tokens=list(num_draft_tokens),
+        cu_num_draft_tokens=cu_draft,
+        cu_num_sampled_tokens=cu_sampled,
+        target_logits_indices=torch.arange(total_draft, dtype=torch.int32),
+        bonus_logits_indices=cu_sampled - 1,
+        logits_indices=torch.arange(int(cu_sampled[-1]), dtype=torch.int32),
     )
 
 
@@ -202,11 +224,137 @@ class TestPadDepad:
         assert len(p.output_token_ids) == 4
         assert p.output_token_ids[2] == []
 
+    def test_pad_sampling_metadata_pads_allowed_token_ids_mask(self):
+        mask = torch.zeros(2, 10, dtype=torch.bool)
+        mask[0, 3] = True
+        p = _pad_sampling_metadata(
+            _sampling_metadata(2, allowed_token_ids_mask=mask), 4
+        )
+        assert p.allowed_token_ids_mask.shape == (4, 10)
+        assert torch.equal(p.allowed_token_ids_mask[:2], mask)
+
     def test_depad_sampler_output_trims_to_num_reqs(self):
         out = SamplerOutput(
             sampled_token_ids=torch.arange(4).reshape(4, 1), logprobs_tensors=None
         )
         assert _depad_sampler_output(out, 2).sampled_token_ids.shape == (2, 1)
+
+    def test_depad_sampler_output_keeps_every_speculative_logprob_position(self):
+        batch_size = 4
+        output_width = 3
+        out = SamplerOutput(
+            sampled_token_ids=torch.zeros(
+                (batch_size, output_width), dtype=torch.int32
+            ),
+            logprobs_tensors=LogprobsTensors(
+                torch.zeros((batch_size * output_width, 2), dtype=torch.int32),
+                torch.zeros((batch_size * output_width, 2)),
+                torch.zeros(batch_size * output_width, dtype=torch.int32),
+            ),
+        )
+
+        depadded = _depad_sampler_output(out, 2)
+
+        assert depadded.sampled_token_ids.shape == (2, output_width)
+        assert depadded.logprobs_tensors is not None
+        assert depadded.logprobs_tensors.logprobs.shape[0] == 2 * output_width
+
+    def test_pad_spec_decode_metadata_preserves_packed_token_axes(self):
+        original = _spec_decode_metadata([1, 1])
+
+        padded = _pad_spec_decode_metadata(original, 4)
+
+        assert padded.num_draft_tokens == [1, 1, 0, 0]
+        assert padded.cu_num_draft_tokens.shape[0] == 4
+        assert padded.cu_num_sampled_tokens.shape[0] == 4
+        assert padded.bonus_logits_indices.shape[0] == 4
+        assert padded.max_spec_len == original.max_spec_len
+        assert torch.equal(padded.target_logits_indices, original.target_logits_indices)
+        assert torch.equal(padded.logits_indices, original.logits_indices)
+
+    def test_padded_metadata_breaks_the_eagle_reader_it_would_reach(self):
+        # Why the pad lives in _sample, not in the producer: this reader
+        # differences cu_num_draft_tokens against num_reqs-sized tensors.
+        padded = _pad_spec_decode_metadata(_spec_decode_metadata([1, 1]), 4)
+
+        with pytest.raises(RuntimeError):
+            eagle_prepare_inputs_padded(
+                padded.cu_num_draft_tokens,
+                torch.tensor([2, 2], dtype=torch.int32),
+                torch.tensor([0, 2, 4], dtype=torch.int32),
+            )
+
+
+class TestSamplePadding:
+    @staticmethod
+    def _runner(rejection_output: SamplerOutput):
+        rejection_sampler = MagicMock(return_value=rejection_output)
+        runner = _make_runner_stub(
+            _is_prefill_step=False,
+            use_async_scheduling=False,
+            input_batch=SimpleNamespace(
+                num_reqs=2,
+                sampling_metadata=_sampling_metadata(2, spec_token_ids=[[], []]),
+            ),
+            bucketing_manager=SimpleNamespace(
+                decode_batch_buckets=[2, 4], max_batch_size=4
+            ),
+            max_num_reqs=8,
+            rejection_sampler=rejection_sampler,
+        )
+        return runner, rejection_sampler
+
+    def test_compiled_rejection_sampler_uses_per_stage_batch_bound(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+        output = SamplerOutput(
+            sampled_token_ids=torch.zeros((4, 3), dtype=torch.int32),
+            logprobs_tensors=None,
+        )
+        runner, rejection_sampler = self._runner(output)
+
+        runner._sample(torch.zeros((4, 10)), _spec_decode_metadata([1, 1]))
+
+        padded_metadata = rejection_sampler.call_args.args[0]
+        assert len(padded_metadata.num_draft_tokens) == 4
+
+    def test_torch_rejection_sampler_keeps_live_batch_metadata(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", False)
+        output = SamplerOutput(
+            sampled_token_ids=torch.zeros((2, 3), dtype=torch.int32),
+            logprobs_tensors=None,
+        )
+        runner, rejection_sampler = self._runner(output)
+        spec_decode_metadata = _spec_decode_metadata([1, 1])
+        sampling_metadata = runner.input_batch.sampling_metadata
+
+        runner._sample(torch.zeros((4, 10)), spec_decode_metadata)
+
+        assert rejection_sampler.call_args.args[0] is spec_decode_metadata
+        assert rejection_sampler.call_args.args[3] is sampling_metadata
+
+
+def test_rejection_sampler_warmup_uses_per_stage_batch_bound(monkeypatch):
+    monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+    rejection_sample = MagicMock()
+    runner = _make_runner_stub(
+        speculative_config=object(),
+        num_spec_tokens=2,
+        is_pooling_model=False,
+        model_config=SimpleNamespace(get_vocab_size=lambda: 10),
+        device=torch.device("cpu"),
+        bucketing_manager=SimpleNamespace(
+            decode_batch_buckets=[2, 4], max_batch_size=4
+        ),
+        max_num_reqs=8,
+        rejection_sampler=SimpleNamespace(
+            impl=SimpleNamespace(rejection_sample=rejection_sample)
+        ),
+    )
+
+    runner._warmup_sampler_decode_batches()
+
+    assert rejection_sample.call_count == 1
+    assert len(rejection_sample.call_args.args[1]) == 4
 
 
 class TestPredicates:
@@ -920,6 +1068,197 @@ class TestAllocateKvCacheTensors:
         assert raw["l0"].device.type == "cpu"  # self.device is cpu here
 
 
+class TestRepairStagedInputIds:
+    # The scheduler stages -1 where this step's input token belongs; the real
+    # token is still on the device in the previous step's ring slot. The repair
+    # has to land each one on the row the request occupies *now*.
+    @staticmethod
+    def _runner(*, prev_index, prev_tokens, is_prefill=False):
+        return _make_runner_stub(
+            is_prefill=is_prefill,
+            _prev_token_host_buffer=None,
+            input_batch=SimpleNamespace(
+                prev_sampled_token_ids=(
+                    None
+                    if prev_tokens is None
+                    else torch.tensor(prev_tokens, dtype=torch.int32).unsqueeze(1)
+                ),
+                prev_req_id_to_index=prev_index,
+            ),
+        )
+
+    @staticmethod
+    def _staged(num_rows):
+        # -1 is what the scheduler left behind.
+        return SimpleNamespace(
+            input_ids=torch.full((num_rows, 1), -1, dtype=torch.int32)
+        )
+
+    def test_repairs_every_row_when_the_batch_is_unchanged(self):
+        r = self._runner(prev_index={"a": 0, "b": 1}, prev_tokens=[10, 11])
+        staged = self._staged(2)
+        r._repair_staged_input_ids(staged, ["a", "b"])
+        assert staged.input_ids[:, 0].tolist() == [10, 11]
+
+    def test_follows_the_request_when_rows_are_reordered(self):
+        r = self._runner(prev_index={"a": 0, "b": 1}, prev_tokens=[10, 11])
+        staged = self._staged(2)
+        r._repair_staged_input_ids(staged, ["b", "a"])
+        assert staged.input_ids[:, 0].tolist() == [11, 10]
+
+    def test_does_not_shift_rows_up_when_a_request_is_skipped(self):
+        # The row-crossing case: "new" has no previous row, so the requests that
+        # do have one sit at rows 1 and 2. Their previous rows are also 1 and 2,
+        # so the row lists match -- but writing contiguously would still start at
+        # row 0 and hand row 1 the token belonging to row 0.
+        r = self._runner(prev_index={"a": 0, "b": 1, "c": 2}, prev_tokens=[10, 11, 12])
+        staged = self._staged(3)
+        r._repair_staged_input_ids(staged, ["new", "b", "c"])
+        assert staged.input_ids[:, 0].tolist() == [-1, 11, 12]
+
+    def test_leaves_a_request_absent_from_the_previous_batch(self):
+        # _apply_pending_token_writeback repairs that one a step later.
+        r = self._runner(prev_index={"a": 0}, prev_tokens=[10])
+        staged = self._staged(2)
+        r._repair_staged_input_ids(staged, ["a", "new"])
+        assert staged.input_ids[:, 0].tolist() == [10, -1]
+
+    def test_does_nothing_when_no_request_carries_over(self):
+        r = self._runner(prev_index={"gone": 0}, prev_tokens=[10])
+        staged = self._staged(1)
+        r._repair_staged_input_ids(staged, ["new"])
+        assert staged.input_ids[:, 0].tolist() == [-1]
+
+    def test_does_nothing_on_a_prefill_step(self):
+        # Prefill has no previous sampled token to feed back.
+        r = self._runner(prev_index={"a": 0}, prev_tokens=[10], is_prefill=True)
+        staged = self._staged(1)
+        r._repair_staged_input_ids(staged, ["a"])
+        assert staged.input_ids[:, 0].tolist() == [-1]
+
+    def test_does_nothing_before_the_first_sampled_token_exists(self):
+        r = self._runner(prev_index={"a": 0}, prev_tokens=None)
+        staged = self._staged(1)
+        r._repair_staged_input_ids(staged, ["a"])
+        assert staged.input_ids[:, 0].tolist() == [-1]
+
+
+class TestRepairAsyncOutputTokenIds:
+    # The logits processors read output_token_ids in the same step, before
+    # _apply_pending_token_writeback runs, so the -1 tail has to go now.
+    @staticmethod
+    def _runner(*, req_ids, output_token_ids, prev_index, prev_tokens):
+        return _make_runner_stub(
+            input_batch=SimpleNamespace(
+                req_ids=req_ids,
+                sampling_metadata=SimpleNamespace(output_token_ids=output_token_ids),
+                prev_sampled_token_ids=(
+                    None
+                    if prev_tokens is None
+                    else torch.tensor(prev_tokens, dtype=torch.int32).unsqueeze(1)
+                ),
+                prev_req_id_to_index=prev_index,
+            ),
+        )
+
+    def test_replaces_the_placeholder_tail(self):
+        ids = [[7, -1], [8, -1]]
+        r = self._runner(
+            req_ids=["a", "b"],
+            output_token_ids=ids,
+            prev_index={"a": 0, "b": 1},
+            prev_tokens=[10, 11],
+        )
+        r._repair_async_output_token_ids()
+        assert ids == [[7, 10], [8, 11]]
+
+    def test_reads_the_row_the_request_had_last_step(self):
+        ids = [[7, -1], [8, -1]]
+        r = self._runner(
+            req_ids=["b", "a"],
+            output_token_ids=ids,
+            prev_index={"a": 0, "b": 1},
+            prev_tokens=[10, 11],
+        )
+        r._repair_async_output_token_ids()
+        assert ids == [[7, 11], [8, 10]]
+
+    def test_leaves_a_tail_that_is_not_a_placeholder(self):
+        ids = [[7, 9]]
+        r = self._runner(
+            req_ids=["a"],
+            output_token_ids=ids,
+            prev_index={"a": 0},
+            prev_tokens=[10],
+        )
+        r._repair_async_output_token_ids()
+        assert ids == [[7, 9]]
+
+    def test_leaves_a_request_absent_from_the_previous_batch(self):
+        ids = [[7, -1]]
+        r = self._runner(
+            req_ids=["new"],
+            output_token_ids=ids,
+            prev_index={"a": 0},
+            prev_tokens=[10],
+        )
+        r._repair_async_output_token_ids()
+        assert ids == [[7, -1]]
+
+    def test_leaves_a_request_with_no_output_yet(self):
+        ids = [[], [8, -1]]
+        r = self._runner(
+            req_ids=["a", "b"],
+            output_token_ids=ids,
+            prev_index={"a": 0, "b": 1},
+            prev_tokens=[10, 11],
+        )
+        r._repair_async_output_token_ids()
+        assert ids == [[], [8, 11]]
+
+
+class TestApplyPendingTokenWriteback:
+    # The async repair has to move both stores together. token_ids_cpu is rebuilt
+    # from output_token_ids when a request re-enters the batch, so writing the
+    # real token to one and not the other leaves a value that comes back wrong.
+    PROMPT_LEN = 3
+    START = PROMPT_LEN  # where staging put the placeholder
+
+    @classmethod
+    def _runner(cls, *, output_token_ids, keep_request_state=True):
+        ib = _input_batch(0)
+        state = _cached_state("r0", prompt_len=cls.PROMPT_LEN)
+        ib.add_request(state)
+        # What the async path left behind: a -1 in both stores.
+        state.output_token_ids[:] = output_token_ids
+        ib.token_ids_cpu[0, cls.START] = -1
+        runner = _make_runner_stub(
+            input_batch=ib,
+            requests={"r0": state} if keep_request_state else {},
+            _pending_token_writeback=deque([(["r0"], [[42]], {"r0": cls.START})]),
+        )
+        return runner, ib, state
+
+    def test_repairs_both_stores(self):
+        runner, ib, state = self._runner(output_token_ids=[-1])
+        runner._apply_pending_token_writeback()
+        assert state.output_token_ids == [42]
+        assert ib.token_ids_cpu[0, self.START] == 42
+
+    def test_leaves_both_stores_when_the_offset_is_out_of_bounds(self):
+        # The request rolled back past this step, so output_token_ids no longer
+        # has room for the placeholder.
+        runner, ib, state = self._runner(output_token_ids=[])
+        runner._apply_pending_token_writeback()
+        assert state.output_token_ids == []
+        assert ib.token_ids_cpu[0, self.START] == -1
+
+    def test_leaves_both_stores_when_the_request_state_is_gone(self):
+        runner, ib, _ = self._runner(output_token_ids=[-1], keep_request_state=False)
+        runner._apply_pending_token_writeback()
+        assert ib.token_ids_cpu[0, self.START] == -1
+
+
 class TestMixinConformance:
     def test_inherits_kv_connector_mixin(self):
         assert issubclass(RBLNModelRunner, KVConnectorModelRunnerMixin)
@@ -1063,6 +1402,7 @@ class TestDummyRunPPIntermediateTensors:
             vllm_config=SimpleNamespace(),
             input_stager=SimpleNamespace(stage=stage),
             model_executable=lambda **k: None,
+            intermediate_tensors_dict={},
         )
         monkeypatch.setattr(RBLNModelRunner, "use_wrapped_compute_logits", False)
         monkeypatch.setattr(

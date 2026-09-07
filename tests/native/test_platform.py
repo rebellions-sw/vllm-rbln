@@ -33,7 +33,10 @@ from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 import vllm_rbln.platform as platform
 from tests.native.vllm_config import local_model_path
-from vllm_rbln.platform import RBLN_DEFAULT_MAX_NUM_SEQS, RblnPlatform
+from vllm_rbln.platform import (
+    RBLN_DEFAULT_MAX_NUM_SEQS,
+    RblnPlatform,
+)
 
 # Small, non-gated and already needed by the spec-decode tests; a config build
 # never touches the device.
@@ -120,7 +123,7 @@ class TestPlatformIdentity:
             # Ops dispatch on CPU even when tensors live on the device.
             ("dispatch_key", "CPU"),
             # RBLNWorker._init_device_env narrows this var per rank.
-            ("device_control_env_var", "RBLN_DEVICES"),
+            ("device_control_env_var", "RBLN_VISIBLE_DEVICES"),
             ("simple_compile_backend", "bypass"),
         ],
     )
@@ -175,6 +178,24 @@ class TestRejectedConfigs:
                 )
             )
 
+    def test_eagle3_under_pp_needs_a_patched_target(self, reconfigure):
+        # The default model is a plain LlamaForCausalLM, whose forward still
+        # collects aux hidden states with a stage-local index. Asserting through
+        # the hook rather than on the validator directly is the point: it is what
+        # shows the guard is reached at all.
+        with pytest.raises(ValueError, match="EAGLE3 with pipeline_parallel_size"):
+            reconfigure(_eagle3_under_pp())
+
+    def test_eagle3_under_pp_accepts_a_patched_target(self, reconfigure):
+        reconfigure(_eagle3_under_pp(arch="MiniMaxM2ForCausalLM"))
+
+    def test_eagle3_under_pp_accepts_a_draft_with_aux_off(self, reconfigure):
+        # Nothing is captured anywhere then, so upstream's forward is harmless.
+        reconfigure(_eagle3_under_pp(eagle_config={"use_aux_hidden_state": False}))
+
+    def test_eagle3_at_pp1_is_not_gated(self, reconfigure):
+        reconfigure(_eagle3_under_pp(pp_size=1))
+
     def test_dp_needs_a_divisible_token_budget(self, reconfigure):
         with pytest.raises(ValueError, match="divisible"):
             reconfigure(_ranks(data_parallel_size=2, max_num_seqs=5))
@@ -194,6 +215,30 @@ class TestRejectedConfigs:
     def test_moe_tokens_mask_defaults_on(self):
         # The error above calls 1 the default; a flipped default breaks DP.
         assert platform.envs.VLLM_RBLN_USE_MOE_TOKENS_MASK is True
+
+
+def _eagle3_under_pp(*, arch: str | None = None, eagle_config=None, pp_size: int = 2):
+    """A mutator that puts an EAGLE3 draft on a pipeline-parallel target.
+
+    EngineArgs would have to resolve a real draft checkpoint to build this, so the
+    speculative config is a stand-in shaped like the fields the guard reads.
+    """
+
+    def mutate(config: VllmConfig) -> None:
+        config.parallel_config.pipeline_parallel_size = pp_size
+        # The guard runs after the per-stage decode batch check, which would
+        # otherwise raise first and mask it.
+        config.scheduler_config.max_num_seqs = pp_size * 2
+        if arch is not None:
+            config.model_config.hf_config.architectures = [arch]
+        config.speculative_config = SimpleNamespace(
+            method="eagle3",
+            draft_model_config=SimpleNamespace(
+                hf_config=SimpleNamespace(eagle_config=eagle_config)
+            ),
+        )
+
+    return mutate
 
 
 def _ranks(*, ep: bool = False, max_num_seqs: int | None = None, **parallel):
@@ -263,9 +308,12 @@ class TestWorkerAndScheduler:
             == "pkg.mod.MyWorker"
         )
 
-    def test_scheduler_is_replaced_unconditionally(self, reconfigure):
+    def test_scheduler_is_replaced_unconditionally(self, monkeypatch, reconfigure):
         # Unlike worker_cls there is no "auto" guard: whatever was asked for is
-        # overwritten.
+        # overwritten. Reading the expectation back off the config under test
+        # would agree with whatever the platform decided, so the carriers are
+        # pinned off and the sync scheduler named outright.
+        monkeypatch.setenv("VLLM_RBLN_SAMPLER", "0")
         config = reconfigure(
             lambda config: setattr(
                 config.scheduler_config, "scheduler_cls", "pkg.mod.MyScheduler"
@@ -274,6 +322,20 @@ class TestWorkerAndScheduler:
         assert (
             config.scheduler_config.scheduler_cls
             == "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler"
+        )
+
+    def test_a_plain_build_lands_on_the_async_scheduler(self, monkeypatch):
+        # Nobody passes --async-scheduling here: vLLM resolves the unset flag to
+        # True before this platform hook, and with both carriers on nothing
+        # refuses it, so the native path selects the async scheduler. This is
+        # what the async support changed, and it went unasserted.
+        for name in ("VLLM_RBLN_USE_DEVICE_TENSOR", "VLLM_RBLN_SAMPLER"):
+            monkeypatch.setenv(name, "1")
+        config = _build()
+        assert config.scheduler_config.async_scheduling is True
+        assert (
+            config.scheduler_config.scheduler_cls
+            == "vllm_rbln.v1.core.rbln_scheduler.RBLNAsyncScheduler"
         )
 
 
@@ -299,8 +361,73 @@ class TestCompilation:
 
 
 class TestSchedulerOverrides:
-    def test_async_scheduling_is_forced_off(self):
-        assert _build(async_scheduling=True).scheduler_config.async_scheduling is False
+    def test_async_scheduling_is_honored(self, monkeypatch):
+        # The platform used to force this off unconditionally. It now follows
+        # vLLM's --async-scheduling, as long as the device-side token path is
+        # available (see below). Both carriers are pinned on because
+        # --device-tensor 0 switches the first one off for the whole session,
+        # which would land this on the negative case below.
+        for name in ("VLLM_RBLN_USE_DEVICE_TENSOR", "VLLM_RBLN_SAMPLER"):
+            monkeypatch.setenv(name, "1")
+        assert _build(async_scheduling=True).scheduler_config.async_scheduling is True
+
+    @pytest.mark.parametrize(
+        "switched_off", ["VLLM_RBLN_USE_DEVICE_TENSOR", "VLLM_RBLN_SAMPLER"]
+    )
+    def test_async_scheduling_needs_the_device_token_carriers(
+        self, monkeypatch, switched_off
+    ):
+        """Either env var off means async has no way to carry its in-flight tokens.
+
+        VLLM_RBLN_USE_DEVICE_TENSOR gates the feedback scatter that replaces the
+        scheduler's -1 placeholders; VLLM_RBLN_SAMPLER gates the ring the output
+        thread reads. Without them the runner decodes from a token that was never
+        sampled and returns wrong text with no error raised, so the platform
+        downgrades to sync rather than run the combination.
+        """
+        # Both are set before one is switched off: the gate refuses on either,
+        # so leaving the other to the lane lets --device-tensor 0 satisfy this
+        # case with the sampler still on, and the parametrization proves nothing.
+        for name in ("VLLM_RBLN_USE_DEVICE_TENSOR", "VLLM_RBLN_SAMPLER"):
+            monkeypatch.setenv(name, "1")
+        monkeypatch.setenv(switched_off, "0")
+        config = _build(async_scheduling=True)
+        assert config.scheduler_config.async_scheduling is False
+        assert config.scheduler_config.scheduler_cls.endswith("RBLNScheduler")
+
+    def test_async_scheduling_is_refused_with_speculative_decoding(self, reconfigure):
+        """The async feedback carries one sampled token per step.
+
+        _bookkeeping_sync asserts a single sampled column, which a rejection
+        sampler output of shape (batch, num_spec + 1) cannot satisfy. vLLM allows
+        async with eagle / ngram / draft_model, so without this the combination
+        reaches the runner and dies on that assert mid-decode.
+        """
+
+        def mutate(config: VllmConfig) -> None:
+            config.scheduler_config.async_scheduling = True
+            # eagle is a method vLLM does allow async scheduling with.
+            config.speculative_config = SimpleNamespace(method="eagle")
+
+        config = reconfigure(mutate)
+        assert config.scheduler_config.async_scheduling is False
+        assert config.scheduler_config.scheduler_cls.endswith("RBLNScheduler")
+
+    def test_async_scheduling_is_refused_under_pipeline_parallelism(self, reconfigure):
+        """Under PP the scheduler stops shipping the sampled tokens.
+
+        It expects the runner to broadcast prev_sampled_token_ids from the last
+        stage instead, which this runner does not do, so a non-last rank reaches
+        _update_states with no token source and dies on its assert mid-decode.
+        """
+
+        def mutate(config: VllmConfig) -> None:
+            config.scheduler_config.async_scheduling = True
+            _ranks(pipeline_parallel_size=2, max_num_seqs=2)(config)
+
+        config = reconfigure(mutate)
+        assert config.scheduler_config.async_scheduling is False
+        assert config.scheduler_config.scheduler_cls.endswith("RBLNScheduler")
 
     def test_cascade_attention_is_disabled(self, configured):
         assert configured.model_config.disable_cascade_attn is True
@@ -433,6 +560,46 @@ class TestPreRegisterAndUpdate:
         before = EngineArgs.get_batch_defaults.__func__
         RblnPlatform.pre_register_and_update()
         assert EngineArgs.get_batch_defaults.__func__ is before
+
+
+class TestDeprecatedDeviceControlEnvVar:
+    """``RBLN_DEVICES`` is folded into ``device_control_env_var`` and unset.
+
+    Unsetting is the point: the runtime takes both names but prefers the
+    deprecated one, so one left behind would override the pool a worker
+    narrows itself to.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_env(self):
+        # patch.dict, not monkeypatch.delenv: the code under test creates the
+        # current name, and a key a test never held is not restored.
+        with patch.dict(os.environ):
+            os.environ.pop("RBLN_DEVICES", None)
+            os.environ.pop(RblnPlatform.device_control_env_var, None)
+            yield
+
+    def test_legacy_value_carries_over_and_the_name_goes(self):
+        os.environ["RBLN_DEVICES"] = "4,5"
+
+        RblnPlatform.pre_register_and_update()
+
+        assert os.environ[RblnPlatform.device_control_env_var] == "4,5"
+        assert "RBLN_DEVICES" not in os.environ
+
+    def test_the_current_name_wins_when_both_are_set(self):
+        os.environ["RBLN_DEVICES"] = "4,5"
+        os.environ[RblnPlatform.device_control_env_var] = "6,7"
+
+        RblnPlatform.pre_register_and_update()
+
+        assert os.environ[RblnPlatform.device_control_env_var] == "6,7"
+        assert "RBLN_DEVICES" not in os.environ
+
+    def test_nothing_is_invented_when_neither_is_set(self):
+        RblnPlatform.pre_register_and_update()
+
+        assert RblnPlatform.device_control_env_var not in os.environ
 
 
 class TestCustomKvCacheSpecs:
@@ -580,3 +747,34 @@ class TestDynamicKvConfig:
             monkeypatch.setenv("VLLM_RBLN_USE_DYNAMIC_KV_CACHE", "1")
             reconfigure(lambda config: None)
             assert len(seen) == 1
+
+
+class TestDflashTokenBudget:
+    """DFlash reserves no drafting slots, so the auto-computed budget is the
+    whole of `max_num_batched_tokens`; anything else was set explicitly, and no
+    other prefill chunk lands on a KV block boundary."""
+
+    def _mutate(self, scheduled):
+        def mutate(config: VllmConfig) -> None:
+            config.speculative_config = SimpleNamespace(method="dflash")
+            config.scheduler_config.max_num_scheduled_tokens = scheduled
+
+        return mutate
+
+    def test_the_auto_computed_budget_is_accepted(self, reconfigure, configured):
+        budget = configured.scheduler_config.max_num_batched_tokens
+        config = reconfigure(self._mutate(budget))
+        assert config.scheduler_config.max_num_scheduled_tokens == budget
+
+    @pytest.mark.parametrize("delta", [-1, -8, 1])
+    def test_any_other_budget_is_refused(self, reconfigure, configured, delta):
+        budget = configured.scheduler_config.max_num_batched_tokens
+        with pytest.raises(ValueError, match="auto-computed"):
+            reconfigure(self._mutate(budget + delta))
+
+    def test_only_dflash_is_gated(self, reconfigure, configured):
+        def mutate(config: VllmConfig) -> None:
+            config.speculative_config = SimpleNamespace(method="eagle3")
+            config.scheduler_config.max_num_scheduled_tokens = 8
+
+        assert reconfigure(mutate).scheduler_config.max_num_scheduled_tokens == 8
