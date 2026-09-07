@@ -1093,8 +1093,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
         # Compute the draft token ids.
         # draft_token_indices:      [  1,   2,   3, 105, 106, 208]
+        # Host tensor; the rejection sampler copies it into its graph inputs.
         draft_token_ids = self.input_ids[logits_indices]
-        draft_token_ids = draft_token_ids[target_logits_indices + 1].to(self.device)
+        draft_token_ids = draft_token_ids[target_logits_indices + 1]
 
         return SpecDecodeMetadata(
             draft_token_ids=draft_token_ids,
@@ -1732,7 +1733,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             sample_hidden_states = hidden_states
             assert self.use_wrapped_compute_logits
             if not self.is_prefill and spec_decode_metadata is not None:
-                logits = logits[logits_indices]
+                # NOTE(RBLN): with the indices on the logits' device; an index
+                # tensor on the host would route the gather through the host.
+                logits = logits.index_select(0, logits_indices.to(logits.device))
 
         self.execute_model_state = ExecuteModelState(
             scheduler_output,
