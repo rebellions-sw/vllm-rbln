@@ -152,7 +152,7 @@ def empty_rbln_device_caches() -> bool:
 
 
 class RblnProfilerWrapper(WorkerProfiler):
-    """Write the RBLN profiler trace at stop_profile instead of at process exit."""
+    """Write the RBLN profiler trace at stop_profile."""
 
     def _start(self) -> None:
         rbln_profiler.start()
