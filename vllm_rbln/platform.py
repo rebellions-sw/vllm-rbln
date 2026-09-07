@@ -427,9 +427,9 @@ class RblnPlatform(Platform):
             spec_config = vllm_config.speculative_config
             if (
                 spec_config is not None
-                and spec_config.enforce_eager
-                and not model_config.enforce_eager
                 and model_config.hf_text_config.model_type == "deepseek_v32"
+                and not model_config.enforce_eager
+                and spec_config.enforce_eager
             ):
                 spec_config.enforce_eager = False
 
