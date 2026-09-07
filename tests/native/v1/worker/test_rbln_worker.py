@@ -25,6 +25,7 @@ from unittest.mock import patch
 import pytest
 import torch
 from torch._dynamo.exc import BackendCompilerFailed
+from vllm.config import ProfilerConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorBase_V1
 from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 
@@ -1142,3 +1143,31 @@ class TestApplyResizesThenMaterializes:
         )
         RBLNWorker._materialize_kv_cache(worker)
         assert ran == [(4, 1, False)]
+
+
+class TestProfile:
+    def test_torch_profiler_keeps_the_rbln_session_to_itself(
+        self, make_worker, monkeypatch, tmp_path
+    ):
+        calls: list[str] = []
+        monkeypatch.setattr(
+            wm,
+            "rbln_profiler",
+            SimpleNamespace(
+                is_activated=lambda: True,
+                start=lambda: calls.append("start"),
+                done=lambda: calls.append("done"),
+            ),
+        )
+        vllm_config = _make_vllm_config()
+        vllm_config.profiler_config = ProfilerConfig(
+            profiler="torch",
+            torch_profiler_dir=str(tmp_path),
+            torch_profiler_dump_cuda_time_total=False,
+        )
+        worker = make_worker(vllm_config=vllm_config)
+
+        worker.profile(is_start=True)
+        worker.profile(is_start=False)
+
+        assert calls == []
