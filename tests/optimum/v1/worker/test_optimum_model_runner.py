@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -122,6 +123,35 @@ def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:
         block_table.block_table.np[req_index, :num_block_of_runner]
         == req_state.block_ids[0]
     ).all()
+
+
+@pytest.mark.parametrize(
+    (
+        "top_level_requires_sort",
+        "language_model_requires_sort",
+        "expected",
+    ),
+    [
+        (False, False, False),
+        (True, False, True),
+        (False, True, True),
+        (True, True, True),
+    ],
+)
+def test_should_sort_batch_by_length_checks_language_submodule(
+    top_level_requires_sort, language_model_requires_sort, expected
+):
+    rbln_config = SimpleNamespace(requires_batch_sort=top_level_requires_sort)
+    model = SimpleNamespace(
+        model=SimpleNamespace(rbln_config=rbln_config),
+        get_language_model=lambda: SimpleNamespace(
+            rbln_config=SimpleNamespace(
+                requires_batch_sort=language_model_requires_sort
+            )
+        ),
+    )
+
+    assert RBLNOptimumModelRunner._should_sort_batch_by_length(model) is expected
 
 
 @pytest.mark.parametrize(

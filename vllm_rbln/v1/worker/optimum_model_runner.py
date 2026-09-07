@@ -303,6 +303,18 @@ class RBLNOptimumModelRunner(
         ec = getattr(self.vllm_config, "ec_transfer_config", None)
         return ec is not None and ec.is_ec_producer and not ec.is_ec_consumer
 
+    @staticmethod
+    def _should_sort_batch_by_length(model: nn.Module) -> bool:
+        rbln_config = model.model.rbln_config
+        if getattr(rbln_config, "requires_batch_sort", False):
+            return True
+
+        get_language_model = getattr(model, "get_language_model", None)
+        if get_language_model is None:
+            return False
+        language_model = get_language_model()
+        return bool(getattr(language_model.rbln_config, "requires_batch_sort", False))
+
     @instrument(span_name="Loading (RBLN)")
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
@@ -314,9 +326,7 @@ class RBLNOptimumModelRunner(
             "during model conversion."
         )
         self.use_optimum_lora = getattr(self.model.model.rbln_config, "use_lora", None)
-        self.sort_batch_by_length = bool(
-            getattr(self.model.model.rbln_config, "requires_batch_sort", False)
-        )
+        self.sort_batch_by_length = self._should_sort_batch_by_length(self.model)
         if self.lora_config and not self.use_optimum_lora:
             raise RuntimeError(
                 "The compiled model is for LoRA."
