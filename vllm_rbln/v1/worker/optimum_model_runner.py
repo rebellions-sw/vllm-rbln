@@ -79,6 +79,7 @@ from vllm_rbln.model_executor.models.optimum import (
     PartialPrefixInfo,
 )
 from vllm_rbln.model_executor.models.optimum.model_base import (
+    KVCacheCopyError,
     RBLNOptimumDecoderMixin,
     RBLNOptimumMultimodalMixin,
 )
@@ -381,6 +382,11 @@ class RBLNOptimumModelRunner(
                 scheduler_output
             )
 
+            if not self.try_copy_prefix_cached_kv(model_input, scheduler_output):
+                model_input, _ = self._prepare_inputs(
+                    scheduler_output, use_cached_prefix=False
+                )
+
         has_new_prefill = len(scheduler_output.scheduled_new_reqs) > 0
         with self.maybe_get_ec_connector_output(
             scheduler_output,
@@ -408,7 +414,6 @@ class RBLNOptimumModelRunner(
                 else:
                     with capture_ctx as model_reports:
                         model_input = self._build_forward_inputs(model_input)
-                        self.reuse_prefix_cached_kv(model_input, scheduler_output)
                         hidden_states = self.model(model_input)
                 if (
                     envs.VLLM_RBLN_METRICS
@@ -444,20 +449,29 @@ class RBLNOptimumModelRunner(
         )
         return None
 
-    def reuse_prefix_cached_kv(
+    def try_copy_prefix_cached_kv(
         self,
         model_input: ModelInputForRBLN,
         scheduler_output: "SchedulerOutput",
-    ) -> None:
+    ) -> bool:
         if not (
             model_input.is_prompt and isinstance(self.model, RBLNOptimumDecoderMixin)
         ):
-            return
-        self.model.copy_cached_kv_blocks(
-            scheduler_output.cached_block_table,
-            scheduler_output.cached_length,
-            model_input.block_tables,
-        )
+            return True
+        try:
+            self.model.copy_cached_kv_blocks(
+                scheduler_output.cached_block_table,
+                scheduler_output.cached_length,
+                model_input.block_tables,
+            )
+        except KVCacheCopyError:
+            logger.exception(
+                "Copying prefix-cached KV failed for request(s) %s. "
+                "Falling back to a full prefill without prefix-cache reuse.",
+                model_input.running_requests_ids,
+            )
+            return False
+        return True
 
     def _build_forward_inputs(
         self, model_input: ModelInputForRBLN
@@ -510,18 +524,8 @@ class RBLNOptimumModelRunner(
     def _prepare_inputs(
         self,
         scheduler_output: "SchedulerOutput",
+        use_cached_prefix: bool = True,
     ) -> tuple[ModelInputForRBLN, np.ndarray]:
-        """
-        :return: ModelInputForRBLN[
-            input_tokens: Token IDs,
-            input_positions: Position IDs,
-            sampling_metadata, pooling_metadata: It is `None` in V1,
-            multi_modal_kwargs: Batched multi-modal data,
-            block_tables: [num_reqs, num_blocks_per_req] shaped tensor,
-            running_requests_ids: RUNNING request IDs,
-            is_prompt: It is used only in V1
-        ]
-        """
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
@@ -555,7 +559,7 @@ class RBLNOptimumModelRunner(
                 multi_modal_kwargs,
                 running_request_ids,
                 partial_prefix,
-            ) = self._prepare_prefill(scheduler_output)
+            ) = self._prepare_prefill(scheduler_output, use_cached_prefix)
         else:
             input_ids, positions, block_tables, running_request_ids = (
                 self._prepare_decode(scheduler_output)
@@ -622,6 +626,7 @@ class RBLNOptimumModelRunner(
     def _prepare_prefill(
         self,
         scheduler_output: "RBLNSchedulerOutput",
+        use_cached_prefix: bool = True,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -675,8 +680,9 @@ class RBLNOptimumModelRunner(
                 block_ids,
             )
             block_table = scheduler_output.block_table_dict[req_id]
-            cached_length = scheduler_output.cached_length
-            total_cached_length = sum(cached_length)
+            if use_cached_prefix:
+                cached_length = scheduler_output.cached_length
+                total_cached_length = sum(cached_length)
             if total_cached_length > 0:
                 prompt_tokens = prompt_tokens[total_cached_length:]
                 input_positions = input_positions[total_cached_length:]
