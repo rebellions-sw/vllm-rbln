@@ -13,10 +13,12 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 from vllm.config import VllmConfig, get_current_vllm_config
+from vllm.config.cache import CacheDType
+from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionImpl,
@@ -62,8 +64,27 @@ from ..ops.sliding_window_attention_naive import (
 logger = init_logger(__name__)
 
 
+def _fp8_cache_dtype(kv_cache_dtype: str) -> torch.dtype | None:
+    """Real element dtype the uint8 fp8 KV-cache container holds, or None on
+    the non-fp8 "auto" path (the cache tensor's own dtype is real). Upstream's
+    kv_cache_dtype_str_to_dtype gives the uint8 byte-container dtype instead,
+    so it cannot be used here. "fp8" is an alias of e4m3 upstream."""
+    return {
+        "fp8": torch.float8_e4m3fn,
+        "fp8_e4m3": torch.float8_e4m3fn,
+        "fp8_e5m2": torch.float8_e5m2,
+    }.get(kv_cache_dtype)
+
+
 @register_backend(AttentionBackendEnum.FLASH_ATTN)
 class RBLNFlashAttentionBackend(AttentionBackend):
+    supported_kv_cache_dtypes: ClassVar[list[CacheDType]] = [
+        "auto",
+        "fp8",
+        "fp8_e4m3",
+        "fp8_e5m2",
+    ]
+
     @staticmethod
     def get_name() -> str:
         return "FLASH_ATTN"
@@ -159,7 +180,14 @@ class RBLNFlashAttentionMetadataBuilder(
         self.block_size = kv_cache_spec.block_size
         self.chunked_prefill_size = self.scheduler_config.max_num_batched_tokens
         self.enforce_eager = get_current_vllm_config().model_config.enforce_eager
-        self.is_causal = envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
+        # Causality is per model, not per process: each model builds its
+        # attention under its own config, and upstream sets `use_non_causal` on
+        # the draft config only, so a non-causal drafter and a causal target
+        # coexist in one process.
+        self.is_causal = (
+            envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
+            and not vllm_config.attention_config.use_non_causal
+        )
 
         self._staged: dict[tuple, torch.Tensor] = {}
 
@@ -195,6 +223,7 @@ class RBLNFlashAttentionMetadataBuilder(
         positions: torch.Tensor,
         batch_pad: int,
         is_prefill: bool,
+        skip_attn_masks: bool = False,
     ) -> RBLNFlashAttentionMetadata:
         num_reqs = common_attn_metadata.num_reqs
         # NOTE(RBLN): vllm-rbln keeps attention metadata on the host and copies
@@ -209,11 +238,13 @@ class RBLNFlashAttentionMetadataBuilder(
         seq_idx = positions[query_start_loc_cpu[:num_reqs]].view(-1, 1)
         max_seq_len = self.model_config.max_model_len
 
+        # Masks are host-built at `max_model_len` width and staged every step,
+        # so a caller that replaces them opts out with `skip_attn_masks`.
         attn_masks = None
         if is_prefill:
             # NOTE(RBLN): block_tables_tensor for prefill must be a 1D tensor.
             block_tables_tensor = block_tables_tensor[0]
-            if not self.is_causal:
+            if not self.is_causal and not skip_attn_masks:
                 prefill_chunk_size = self.chunked_prefill_size
                 chunked_attention_mask = torch.zeros(
                     1,
@@ -237,7 +268,7 @@ class RBLNFlashAttentionMetadataBuilder(
         else:
             seq_idx = rbln_utils.pad(seq_idx, 0, batch_pad)
             block_tables_tensor = rbln_utils.pad(block_tables_tensor, 0, batch_pad)
-            if not self.is_causal:
+            if not self.is_causal and not skip_attn_masks:
                 decode_attention_mask = torch.zeros(
                     batch_pad,
                     1,
@@ -343,9 +374,17 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 f"Head size {head_size} is not supported by RBLNFlashAttention. "
                 f"Supported head sizes are: {supported_head_sizes}."
             )
-        if kv_cache_dtype.startswith("fp8"):
+        # supported_kv_cache_dtypes is not enforced upstream for out-of-tree
+        # platforms (validate_configuration is never called), so this is the
+        # gate.
+        if is_quantized_kv_cache(self.kv_cache_dtype) and (
+            self.kv_cache_dtype
+            not in RBLNFlashAttentionBackend.supported_kv_cache_dtypes
+        ):
             raise NotImplementedError(
-                "FP8 KV cache is not supported by RBLNFlashAttention."
+                "RBLNFlashAttention does not support "
+                f"kv_cache_dtype={self.kv_cache_dtype!r}; supported: "
+                f"{RBLNFlashAttentionBackend.supported_kv_cache_dtypes}"
             )
         self.attn_type = attn_type
 
@@ -359,11 +398,37 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
             if len(self.sinks.size()) == 1:
                 self.sinks = self.sinks[:, None]
 
-        self.is_causal = envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
+        self.is_causal = (
+            envs.VLLM_RBLN_FLASH_CAUSAL_ATTN
+            and not vllm_config.attention_config.use_non_causal
+        )
         self.is_batch_attention_opt = envs.VLLM_RBLN_BATCH_ATTN_OPT
         self.is_normal = (self.block_size == self.max_model_len) and (
             self.sinks is None
         )
+
+        # forward() dispatches on (sliding_window, is_causal, is_normal), and
+        # only the flash causal target hands the fp8 dequant scales and the
+        # real cache dtype to the compiled op -- and only on the
+        # rbln_custom_ops path (the rbln_triton_ops kernels take neither).
+        # Every other target would read the uint8 byte container as raw bytes
+        # with no scales, so reject those combinations here rather than
+        # producing garbage. All the dispatch inputs are fixed by __init__.
+        if self.kv_cache_dtype.startswith("fp8"):
+            if envs.VLLM_RBLN_USE_CUSTOM_KERNEL:
+                raise NotImplementedError(
+                    "fp8 KV cache is not supported with "
+                    "VLLM_RBLN_USE_CUSTOM_KERNEL=1: the rbln_triton_ops "
+                    "attention kernels take no dequant scales."
+                )
+            if self.sliding_window is not None or not self.is_causal or self.is_normal:
+                raise NotImplementedError(
+                    "fp8 KV cache is only supported by the flash causal "
+                    "attention path (VLLM_RBLN_FLASH_CAUSAL_ATTN=1, "
+                    "block_size != max_model_len, no sliding window); got "
+                    f"sliding_window={self.sliding_window}, "
+                    f"is_causal={self.is_causal}, is_normal={self.is_normal}."
+                )
 
     def forward(
         self,
@@ -517,6 +582,9 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                 #   original sequence index
                 # * otherwise         - seq_lens[B, P] == seq_lens_tensor,
                 #   dynamic size for each partition
+                k_quantize_scale = layer._k_scale
+                v_quantize_scale = layer._v_scale
+                cache_dtype = _fp8_cache_dtype(self.kv_cache_dtype)
                 if attn_metadata.is_prefill:
                     attn_output = flash_causal_attention_naive_prefill(
                         query,
@@ -527,6 +595,9 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         attn_metadata.seq_lens,
                         attn_metadata.block_tables,
                         self.sinks,
+                        k_quantize_scale,
+                        v_quantize_scale,
+                        cache_dtype,
                     )
                 else:
                     attn_output = flash_causal_attention_naive_decode(
@@ -538,6 +609,9 @@ class RBLNFlashAttentionImpl(AttentionImpl[RBLNFlashAttentionMetadata]):
                         attn_metadata.seq_lens,
                         attn_metadata.block_tables,
                         self.sinks,
+                        k_quantize_scale,
+                        v_quantize_scale,
+                        cache_dtype,
                     )
         else:
             if self.is_normal:
