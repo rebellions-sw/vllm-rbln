@@ -825,17 +825,6 @@ def prepare_kernel_block_sizes(
     return kernel_block_sizes
 
 
-def device_requires_batch_sort() -> bool:
-    """Whether the mounted NPU needs the persistent batch sorted long->short.
-
-    REBEL CR13 runs the batched dynamic decode kernel, which processes the first
-    valid_batch[p] rows of partition p and early-exits on the rest. That is only
-    correct when rows are ordered by descending sequence length, so the model
-    runner reorders every step on CR13 and leaves the batch alone elsewhere.
-    """
-    return "cr13" in current_platform.get_device_name().lower()
-
-
 def reorder_input_batch(input_batch: "InputBatch", perm: np.ndarray) -> None:
     """Permute every per-request field of ``input_batch`` in one vectorized
     pass (new slot ``k`` takes old index ``perm[k]``).

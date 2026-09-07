@@ -43,6 +43,7 @@ from vllm.model_executor.models.interfaces_base import (
     is_pooling_model,
     is_text_generation_model,
 )
+from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
@@ -159,7 +160,6 @@ from vllm_rbln.v1.worker.dp_utils import (
 from vllm_rbln.v1.worker.input_stager import InputLayout, InputStager, StagedModelInputs
 from vllm_rbln.v1.worker.utils import (
     copy_host_device_kv_blocks,
-    device_requires_batch_sort,
     get_kv_cache_names,
     prepare_kernel_block_sizes,
     reorder_input_batch,
@@ -480,7 +480,10 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             parallel_config.data_parallel_size > 1
             and envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE
         )
-        self.sort_batch_by_length = device_requires_batch_sort()
+        # REBEL CR13's batched dynamic decode kernel processes the first
+        # valid_batch[p] rows of partition p and early-exits on the rest, which is
+        # only correct when rows are sorted by descending sequence length.
+        self.sort_batch_by_length = "cr13" in current_platform.get_device_name().lower()
 
         # Static, so the per-step decision only has to supply this step's counts.
         self.shape_config = ShapeConfig(
@@ -545,7 +548,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         # a homogeneous batch phase and therefore does not use scheduler_output-based
         # phase classification. Instead, we perform a stable sort by current sequence
         # length (num_tokens_no_spec, descending) on devices whose decode kernel
-        # needs it (device_requires_batch_sort).
+        # needs it (sort_batch_by_length, resolved in __init__).
         if (
             not self.sort_batch_by_length
             or len(self.kv_cache_config.kv_cache_groups) == 0

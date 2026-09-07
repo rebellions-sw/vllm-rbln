@@ -27,6 +27,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.kv_cache_interface import FullAttentionSpec
 from vllm.v1.outputs import LogprobsTensors, SamplerOutput
@@ -977,6 +978,26 @@ class TestCalcSpecDecodeMetadata:
         assert md.logits_indices.tolist() == [0, 1]
         assert md.target_logits_indices.tolist() == []
         assert md.bonus_logits_indices.tolist() == [0, 1]
+
+
+class TestSortBatchByLength:
+    # __init__ enables the sort only on REBEL CR13; ATOM and other REBEL parts
+    # keep the scheduler's order.
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("RBLN-CR13", True),
+            ("rbln-cr13", True),
+            ("RBLN-CR03", False),
+            ("RBLN-CA25", False),
+        ],
+    )
+    def test_resolved_from_device_name(
+        self, monkeypatch, make_model_runner, name, expected
+    ):
+        monkeypatch.setattr(current_platform, "get_device_name", lambda: name)
+        runner = make_model_runner(init_kv_cache=False)
+        assert runner.sort_batch_by_length is expected
 
 
 class TestMayReorderBatch:
