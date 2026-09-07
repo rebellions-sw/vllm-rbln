@@ -120,18 +120,21 @@ class RBLNRejectionSampler(RejectionSampler):
         bonus_logits = logits[bonus_logits_indices]
         raw_target_logits = logits[target_logits_indices]
 
+        # The bonus logits are wanted back only to compute the accepted-token
+        # logprobs; asking for them widens the rows to float32, which on the
+        # device is a host round trip, so ask only when logprobs are requested.
+        wants_logprobs = sampling_metadata.max_num_logprobs is not None
         bonus_sampler_output = self.sampler(
             logits=bonus_logits,
-            sampling_metadata=replace(
-                sampling_metadata,
-                max_num_logprobs=-1,
-            ),
+            sampling_metadata=replace(sampling_metadata, max_num_logprobs=-1)
+            if wants_logprobs
+            else sampling_metadata,
             predict_bonus_token=True,
-            # Override the logprobs mode to return logits because they are
-            # needed later to compute the accepted token logprobs.
-            logprobs_mode_override="processed_logits"
-            if self.is_processed_logprobs_mode
-            else "raw_logits",
+            logprobs_mode_override=(
+                "processed_logits" if self.is_processed_logprobs_mode else "raw_logits"
+            )
+            if wants_logprobs
+            else None,
         )
         bonus_token_ids = bonus_sampler_output.sampled_token_ids
 
@@ -384,32 +387,42 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         # Pad the packed inputs to the fixed [B*K] length the op wants.
         N = num_tokens  # = sum(num_draft_tokens)
         padded_len = batch_size * max_spec_len
-        reshaped_draft_token_ids = torch.zeros(
-            padded_len,
-            dtype=torch.int32,
-            device=device,
-        )
-        reshaped_target_logits = torch.zeros(
-            padded_len,
-            vocab_size,
-            dtype=target_logits.dtype,
-            device=device,
-        )
-        reshaped_draft_token_ids[:N] = draft_token_ids
-        reshaped_target_logits[:N] = target_logits
+        if padded_len == N:
+            # Full K drafts everywhere: already packed and padded, and request
+            # r's draft c sits at r * K + c. Two graph inputs must not alias one
+            # buffer, so the per-batch view is its own copy.
+            reshaped_draft_token_ids = draft_token_ids.to(device)
+            reshaped_target_logits = target_logits
+            draft_per_batch = draft_token_ids.view(batch_size, max_spec_len).to(
+                device, copy=True
+            )
+        else:
+            reshaped_draft_token_ids = torch.zeros(
+                padded_len,
+                dtype=torch.int32,
+                device=device,
+            )
+            reshaped_target_logits = torch.zeros(
+                padded_len,
+                vocab_size,
+                dtype=target_logits.dtype,
+                device=device,
+            )
+            reshaped_draft_token_ids[:N] = draft_token_ids
+            reshaped_target_logits[:N] = target_logits
 
-        draft_per_batch = torch.full(
-            (batch_size, max_spec_len),
-            PLACEHOLDER_TOKEN_ID,
-            dtype=torch.int32,
-            device=device,
-        )
-        src_offset = 0
-        for i, n in enumerate(num_draft_tokens):
-            if n == 0:
-                continue
-            draft_per_batch[i, :n] = draft_token_ids[src_offset : src_offset + n]
-            src_offset += n
+            draft_per_batch = torch.full(
+                (batch_size, max_spec_len),
+                PLACEHOLDER_TOKEN_ID,
+                dtype=torch.int32,
+                device=device,
+            )
+            src_offset = 0
+            for i, n in enumerate(num_draft_tokens):
+                if n == 0:
+                    continue
+                draft_per_batch[i, :n] = draft_token_ids[src_offset : src_offset + n]
+                src_offset += n
 
         top_k, top_p = build_op_top_k_top_p(
             sampling_metadata,
