@@ -258,6 +258,7 @@ class RBLNOptimumModelRunner(
         self.use_async_scheduling = self.scheduler_config.async_scheduling
         self.enable_prefix_caching = cache_config.enable_prefix_caching
         self.seq_lens = np.zeros(self.max_num_reqs, dtype=np.int32)
+        self.sort_batch_by_length = False
 
         # self.uniform_decode_query_len = 1
 
@@ -313,6 +314,9 @@ class RBLNOptimumModelRunner(
             "during model conversion."
         )
         self.use_optimum_lora = getattr(self.model.model.rbln_config, "use_lora", None)
+        self.sort_batch_by_length = bool(
+            getattr(self.model.model.rbln_config, "requires_batch_sort", False)
+        )
         if self.lora_config and not self.use_optimum_lora:
             raise RuntimeError(
                 "The compiled model is for LoRA."
@@ -1104,12 +1108,13 @@ class RBLNOptimumModelRunner(
     def _may_reorder_batch(self, scheduler_output: "RBLNSchedulerOutput") -> None:
         """Reorder requests in the persistent batch by descending sequence length.
 
-        Enabled by `VLLM_RBLN_SORT_BATCH=1`. Required for the batched dynamic
-        decode kernel (VLLM_RBLN_BATCH_ATTN_OPT) to early-exit on shorter
-        sequences per partition — the kernel processes the first valid_batch[p]
-        rows for partition p, which is only correct when rows are sorted long→short.
+        Enabled by `VLLM_RBLN_SORT_BATCH=1` or compiled-model metadata. Required
+        for the batched dynamic decode kernel (VLLM_RBLN_BATCH_ATTN_OPT) to
+        early-exit on shorter sequences per partition — the kernel processes the
+        first valid_batch[p] rows for partition p, which is only correct when rows
+        are sorted long→short.
         """
-        if not envs.VLLM_RBLN_SORT_BATCH:
+        if not (envs.VLLM_RBLN_SORT_BATCH or self.sort_batch_by_length):
             return
         if self.input_batch.num_reqs <= 1:
             return

@@ -31,6 +31,7 @@ from vllm.platforms import current_platform
 from vllm.v1.core.sched.output import CachedRequestData
 from vllm.v1.sample.metadata import SamplingMetadata
 
+import vllm_rbln.v1.worker.optimum_model_runner as optimum_model_runner
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
@@ -121,6 +122,39 @@ def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:
         block_table.block_table.np[req_index, :num_block_of_runner]
         == req_state.block_ids[0]
     ).all()
+
+
+@pytest.mark.parametrize(
+    ("env_enabled", "sort_batch_by_length", "expected_req_ids", "expected_lengths"),
+    [
+        (False, False, ["short", "long"], [1, 2]),
+        (True, False, ["long", "short"], [2, 1]),
+        (False, True, ["long", "short"], [2, 1]),
+        (True, True, ["long", "short"], [2, 1]),
+    ],
+)
+def test_may_reorder_batch_enabled_by_env_or_model_metadata(
+    monkeypatch,
+    model_runner,
+    env_enabled,
+    sort_batch_by_length,
+    expected_req_ids,
+    expected_lengths,
+):
+    monkeypatch.setattr(optimum_model_runner.envs, "VLLM_RBLN_SORT_BATCH", env_enabled)
+    model_runner.sort_batch_by_length = sort_batch_by_length
+    scheduler_output = _schedule_new_request(
+        "short",
+        "long",
+        block_ids=([0],),
+        outer_block_ids=[0],
+        token_ids_by_req={"short": [1], "long": [1, 2]},
+    )
+
+    model_runner._update_states(scheduler_output)
+
+    assert model_runner.input_batch.req_ids == expected_req_ids
+    assert model_runner.input_batch.num_tokens_no_spec[:2].tolist() == expected_lengths
 
 
 def test_update_states_new_request(model_runner):
