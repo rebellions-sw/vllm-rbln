@@ -2779,11 +2779,13 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         """
         kv_cache_raw_tensors: dict[str, torch.Tensor] = {}
         for kv_cache_tensor in kv_cache_config.kv_cache_tensors:
+            # Eager mode keeps the cache where the model runs: on the device
+            # under device-tensor mode, on the host otherwise.
             device = (
-                "cpu"
-                if not envs.VLLM_RBLN_COMPILE_MODEL
-                else self.device
+                self.device
                 if USE_DEVICE_TENSOR
+                else "cpu"
+                if not envs.VLLM_RBLN_COMPILE_MODEL
                 else "meta"
             )
             tensor = torch.zeros(kv_cache_tensor.size, dtype=torch.int8, device=device)
