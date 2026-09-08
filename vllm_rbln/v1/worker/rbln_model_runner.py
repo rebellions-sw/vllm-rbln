@@ -3289,8 +3289,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             dtype=torch.int32,
             device=self.device,
         )
-        bonus_token_ids = torch.zeros(
-            batch_size, 1, dtype=torch.int64, device=self.device
+        bonus_logits = torch.zeros(
+            batch_size, vocab_size, dtype=self.dtype, device=self.device
         )
         dummy_sampling_metadata = SamplingMetadata(
             temperature=None,
@@ -3311,17 +3311,28 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             logitsprocs=LogitsProcessors(),
             spec_token_ids=[[] for _ in range(batch_size)],
         )
-        logger.info("Warm-up: rejection sampler (decode_batch=%d)", batch_size)
-        self.rejection_sampler.impl.rejection_sample(
-            draft_token_ids,
-            num_draft_tokens,
-            num_spec,
-            cu_num_draft_tokens,
-            None,
-            target_logits,
-            bonus_token_ids,
-            dummy_sampling_metadata,
+        bonus_token_ids = torch.zeros(
+            batch_size, 1, dtype=torch.int64, device=self.device
         )
+        logger.info("Warm-up: rejection sampler (decode_batch=%d)", batch_size)
+        # Two graphs: one takes the bonus rows' logits and argmaxes them (an
+        # all-greedy step without logprobs), the other takes the ids the bonus
+        # sampler already produced. Either can come first at run time.
+        for bonus_kwargs in (
+            {"bonus_logits": bonus_logits},
+            {"bonus_token_ids": bonus_token_ids},
+        ):
+            self.rejection_sampler.impl.rejection_sample(
+                draft_token_ids,
+                num_draft_tokens,
+                num_spec,
+                cu_num_draft_tokens,
+                None,
+                target_logits,
+                bonus_kwargs.get("bonus_token_ids"),
+                dummy_sampling_metadata,
+                bonus_logits=bonus_kwargs.get("bonus_logits"),
+            )
 
     def warmup_model(self) -> None:
         # NOTE(RBLN): Warm-up must not route through execute_model() while a
