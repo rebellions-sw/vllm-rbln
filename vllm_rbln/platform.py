@@ -30,6 +30,7 @@ import rebel
 from torch._dynamo import register_backend
 from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
+from vllm.version import __version_tuple__ as VLLM_VERSION
 
 import vllm_rbln.logger  # noqa: F401
 from vllm_rbln import envs
@@ -436,6 +437,20 @@ class RblnPlatform(Platform):
                 )
 
                 cls._validate_eagle3_pp_config(vllm_config)
+
+            spec_config = vllm_config.speculative_config
+            if (
+                spec_config is not None
+                and model_config.hf_text_config.model_type == "deepseek_v32"
+            ):
+                # TODO(vllm>=0.29.0): delete this block; vllm#52861 stops upstream
+                # forcing v32 MTP eager, which leaves the reset below dead.
+                assert VLLM_VERSION < (0, 29), (
+                    f"vLLM {VLLM_VERSION} ships vllm#52861; delete the deepseek_v32 "
+                    "MTP enforce_eager reset."
+                )
+                if not model_config.enforce_eager and spec_config.enforce_eager:
+                    spec_config.enforce_eager = False
 
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
