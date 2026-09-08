@@ -141,7 +141,6 @@ class RBLNEagleProposer(EagleProposer):
                 token_indices_to_sample=token_indices_to_sample,
                 target_token_ids=target_token_ids,
                 next_token_ids=next_token_ids,
-                cad=common_attn_metadata,
             )
         )
         inputs_embeds = None
@@ -326,6 +325,7 @@ class RBLNEagleProposer(EagleProposer):
         common_attn_metadata: CommonAttentionMetadata,
         spec_decode_metadata: SpecDecodeMetadata,
         valid_sampled_tokens_count: torch.Tensor,
+        back_pad: torch.Tensor,
     ) -> tuple[CommonAttentionMetadata, torch.Tensor, torch.Tensor]:
         """
         This function is used to prepare the inputs for speculative decoding
@@ -338,6 +338,7 @@ class RBLNEagleProposer(EagleProposer):
             spec_decode_metadata.cu_num_draft_tokens,
             valid_sampled_tokens_count,
             common_attn_metadata.query_start_loc,
+            back_pad,
         )
 
         query_start_loc = common_attn_metadata.query_start_loc
@@ -670,15 +671,14 @@ class RBLNEagleProposer(EagleProposer):
         token_indices_to_sample: torch.Tensor | None = None,
         target_token_ids: torch.Tensor | None = None,
         next_token_ids: torch.Tensor | None = None,
-        cad: CommonAttentionMetadata | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         if target_token_ids is not None:
             assert next_token_ids is not None
             assert num_input_tokens == target_token_ids.shape[0]
-
-            if token_indices_to_sample is None:
-                assert cad is not None
-                token_indices_to_sample = cad.query_start_loc[1:] - 1
+            # Deriving this from query_start_loc would land on the query's last
+            # slot, which back padding no longer guarantees is the last
+            # scheduled token, so the caller owns it.
+            assert token_indices_to_sample is not None
             token_indices_to_sample = token_indices_to_sample.to(self.device)
 
             self.input_ids[: num_input_tokens - 1] = target_token_ids[1:]

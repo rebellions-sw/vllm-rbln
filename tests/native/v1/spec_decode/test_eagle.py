@@ -141,32 +141,12 @@ class TestPreprocess:
             token_indices_to_sample=token_indices_to_sample,
             target_token_ids=torch.arange(11, 20, dtype=torch.int32),
             next_token_ids=torch.tensor([100, 200, 300], dtype=torch.int32),
-            cad=make_cad([0, 3, 5, 9], [3, 5, 4]),
         )
 
-    def test_first_pass_shifts_tokens_and_inserts_next(self):
-        # Three requests, query_lens [3, 2, 4]. The target ids shift left by one
-        # (drop the first) and each request's next token lands at its last slot.
-        proposer = make_eagle_proposer()
-        # None token indices default to query_start_loc[1:] - 1.
-        _, _, _, tip = self._first_pass(proposer, None)
-        assert tip.cpu().tolist() == [2, 4, 8]
-        # shifted target [12..19] with next tokens overwritten at [2, 4, 8].
-        assert proposer.input_ids[:9].cpu().tolist() == [
-            12,
-            13,
-            100,
-            15,
-            200,
-            17,
-            18,
-            19,
-            300,
-        ]
-
     def test_first_pass_uses_explicit_token_indices_verbatim(self):
-        # Given token indices are used as-is (not recomputed from
-        # query_start_loc); the next tokens land at exactly those slots.
+        # The target ids shift left by one (drop the first) and each request's
+        # next token lands at the caller's index -- never at a slot recomputed
+        # from query_start_loc, which back padding can leave un-scheduled.
         proposer = make_eagle_proposer()
         _, _, _, tip = self._first_pass(
             proposer, torch.tensor([0, 3, 8], dtype=torch.int64)
@@ -252,6 +232,7 @@ class TestPrepareInputsPadded:
             common_attn_metadata=cad,
             spec_decode_metadata=spec_md,
             valid_sampled_tokens_count=valid_count,
+            back_pad=torch.zeros(3, dtype=torch.int32),
         )
         assert num_rejected.cpu().tolist() == [1, 0, 2]
         assert token_indices.cpu().tolist() == [1, 5, 6]

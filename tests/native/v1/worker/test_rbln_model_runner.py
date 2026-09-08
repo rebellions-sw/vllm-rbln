@@ -282,6 +282,7 @@ class TestPadDepad:
                 padded.cu_num_draft_tokens,
                 torch.tensor([2, 2], dtype=torch.int32),
                 torch.tensor([0, 2, 4], dtype=torch.int32),
+                torch.zeros(2, dtype=torch.int32),
             )
 
 
@@ -976,6 +977,85 @@ class TestCalcSpecDecodeMetadata:
         assert md.logits_indices.tolist() == [0, 1]
         assert md.target_logits_indices.tolist() == []
         assert md.bonus_logits_indices.tolist() == [0, 1]
+
+
+class TestPrepareInputsFixedWindow:
+    # _prepare_inputs stages a fixed num_spec_tokens + 1 decode window and fills
+    # the slack in front of the scheduled tokens as far as the block allows, then
+    # behind them. `logits_indices` has to follow the tokens, not the window.
+    BLOCK = 16
+    NUM_SPEC = 3
+
+    def _runner(self, num_computed):
+        runner = _make_runner_stub(
+            num_spec_tokens=self.NUM_SPEC,
+            speculative_config=SimpleNamespace(use_eagle=lambda: True),
+            cache_config=SimpleNamespace(block_size=self.BLOCK),
+            arange_np=np.arange(8),
+            positions=torch.zeros(64, dtype=torch.int64),
+            input_ids=torch.zeros(64, dtype=torch.int32),
+            query_start_loc=torch.zeros(9, dtype=torch.int32),
+            decode_back_pad=torch.zeros(8, dtype=torch.int32),
+            seq_lens_np=np.zeros(8, dtype=np.int32),
+            discard_request_mask=torch.zeros(8, dtype=torch.bool),
+            device=torch.device("cpu"),
+            requests={"0": SimpleNamespace(num_tokens=num_computed + 1)},
+        )
+        runner.is_prefill = False
+        runner.query_start_loc_np = runner.query_start_loc.numpy()
+        runner.decode_back_pad_np = runner.decode_back_pad.numpy()
+        runner.input_batch = SimpleNamespace(
+            num_reqs=1,
+            num_computed_tokens_cpu=np.array([num_computed], dtype=np.int32),
+            token_ids_cpu=np.zeros((1, 64), dtype=np.int32),
+            token_ids_cpu_tensor=torch.zeros(1, 64, dtype=torch.int32),
+            req_id_to_index={"0": 0},
+            num_prompt_tokens=np.array([1], dtype=np.int32),
+            req_ids=["0"],
+        )
+        return runner
+
+    def _prepare(self, num_computed):
+        runner = self._runner(num_computed)
+        scheduler_output = SimpleNamespace(
+            total_num_scheduled_tokens=1,
+            scheduled_spec_decode_tokens={},
+        )
+        logits_indices, _, query_lengths, total = runner._prepare_inputs(
+            scheduler_output, np.array([1], dtype=np.int32)
+        )
+        return runner, logits_indices, query_lengths, total
+
+    @pytest.mark.parametrize(
+        "num_computed,window_start,sample_slot",
+        [
+            # Mid-block: all three slack slots fit in front of the token.
+            (10, 7, 3),
+            # At a block start: nothing to re-run, so all of it goes behind.
+            (16, 16, 0),
+            # One computed token in the block: one in front, two behind.
+            (17, 16, 1),
+        ],
+    )
+    def test_window_is_fixed_and_stays_in_the_block(
+        self, num_computed, window_start, sample_slot
+    ):
+        runner, logits_indices, query_lengths, total = self._prepare(num_computed)
+        window = self.NUM_SPEC + 1
+
+        assert query_lengths.tolist() == [window]
+        assert total == window
+        positions = runner.positions.numpy()[:window].tolist()
+        assert positions == list(range(window_start, window_start + window))
+        # The whole point of the split: one write range, one block.
+        assert window_start // self.BLOCK == positions[-1] // self.BLOCK
+        # The sampled slot is the scheduled token, wherever the padding put it.
+        assert logits_indices.tolist() == [sample_slot]
+        assert positions[sample_slot] == num_computed
+        # seq_lens stays the logical length; the padding must not inflate it.
+        assert runner.seq_lens_np[0] == num_computed + 1
+        # The drafter path reads this to find the same slot.
+        assert runner.decode_back_pad_np[0] == window - 1 - sample_slot
 
 
 class TestMayReorderBatch:

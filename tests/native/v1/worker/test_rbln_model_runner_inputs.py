@@ -29,17 +29,28 @@ from tests.native.v1.worker.utils import make_scheduler_output, schedule_new
 pytestmark = pytest.mark.maybe_use_device
 
 
-def _decode_ready(runner, monkeypatch, *, num_spec_tokens: int) -> None:
+def _decode_ready(
+    runner,
+    monkeypatch,
+    *,
+    num_spec_tokens: int,
+    num_computed: int = 3,
+    fixed_window: bool = True,
+) -> None:
     """One request past its prompt in the decode phase, so the spec branch is
     reachable. The phase comes from the scheduler output, so it is set through
     _is_prefill_step rather than derived from input_batch."""
     monkeypatch.setattr(mr, "get_pp_group", lambda: SimpleNamespace(is_last_rank=True))
     runner._update_states(schedule_new("a"))
-    runner.input_batch.num_computed_tokens_cpu[0] = 3
-    runner.input_batch.num_tokens_no_spec[0] = 3
+    runner.input_batch.num_computed_tokens_cpu[0] = num_computed
+    runner.input_batch.num_tokens_no_spec[0] = num_computed
     # Patched rather than configured: a real speculative_config would pull in a
-    # drafter, and none of the arithmetic under test depends on one.
+    # drafter, and the only thing the arithmetic reads off it is whether the
+    # drafter is model-based, which decides the fixed decode window.
     monkeypatch.setattr(runner, "num_spec_tokens", num_spec_tokens)
+    monkeypatch.setattr(
+        runner, "speculative_config", SimpleNamespace(use_eagle=lambda: fixed_window)
+    )
     runner._is_prefill_step = False
     assert runner.is_prefill is False
 
@@ -72,13 +83,14 @@ class TestPrepareInputsSpecDecode:
         assert spec_md.num_draft_tokens == [1]
         assert logits_indices.tolist() == spec_md.logits_indices.tolist()
 
-    def test_no_padding_when_scheduler_kept_no_drafts(
+    def test_an_ngram_style_drafter_runs_the_logical_length(
         self, make_model_runner, monkeypatch
     ):
-        # num_spec_tokens alone must not force the full-spec query: zero-draft
-        # steps and the unsafe-boundary fallback expect the plain qlen=1 decode.
+        # Without a model-based drafter the window is not fixed: an ngram-style
+        # proposer misses often, and padding every miss out to the full window
+        # would cost more than the extra compiled shape.
         runner = make_model_runner()
-        _decode_ready(runner, monkeypatch, num_spec_tokens=2)
+        _decode_ready(runner, monkeypatch, num_spec_tokens=2, fixed_window=False)
 
         logits_indices, spec_md, query_lengths, total = runner._prepare_inputs(
             make_scheduler_output(num_scheduled_tokens={"a": 1}),
@@ -91,6 +103,58 @@ class TestPrepareInputsSpecDecode:
         assert runner.positions[:1].tolist() == [3]
         assert runner.seq_lens[:1].tolist() == [4]
         assert logits_indices.tolist() == [0]
+
+
+class TestPrepareInputsFixedWindow:
+    # A decode with a model-based drafter always stages num_spec_tokens + 1
+    # slots, taking the slack in front of the scheduled token as far as the
+    # block allows and behind it for the rest. Everything downstream has to
+    # follow the token, not the window.
+    BLOCK = 1024
+    NUM_SPEC = 2
+
+    @pytest.mark.parametrize(
+        "num_computed,window_start,sample_slot",
+        [
+            # Mid-block: both slack slots fit in front of the token.
+            (3, 1, 2),
+            # At a block start: nothing to re-run, so all of it goes behind.
+            (BLOCK, BLOCK, 0),
+            # One computed token in the block: one in front, one behind.
+            (BLOCK + 1, BLOCK, 1),
+        ],
+    )
+    def test_window_is_fixed_and_stays_in_one_block(
+        self, make_model_runner, monkeypatch, num_computed, window_start, sample_slot
+    ):
+        runner = make_model_runner()
+        _decode_ready(
+            runner,
+            monkeypatch,
+            num_spec_tokens=self.NUM_SPEC,
+            num_computed=num_computed,
+        )
+        window = self.NUM_SPEC + 1
+
+        logits_indices, spec_md, query_lengths, total = runner._prepare_inputs(
+            make_scheduler_output(num_scheduled_tokens={"a": 1}),
+            np.array([1], dtype=np.int32),
+        )
+
+        assert spec_md is None
+        assert query_lengths.tolist() == [window]
+        assert total == window
+        positions = runner.positions[:window].tolist()
+        assert positions == list(range(window_start, window_start + window))
+        # The invariant the split exists for: one write range, one block.
+        assert window_start // self.BLOCK == positions[-1] // self.BLOCK
+        # The sampled slot is the scheduled token, wherever the padding put it.
+        assert logits_indices.tolist() == [sample_slot]
+        assert positions[sample_slot] == num_computed
+        # seq_lens stays the logical length; padding must not inflate it.
+        assert runner.seq_lens[:1].tolist() == [num_computed + 1]
+        # The drafter path reads this to find the same slot.
+        assert runner.decode_back_pad_np[0] == window - 1 - sample_slot
 
 
 class TestBookkeepingSyncSpecDecode:

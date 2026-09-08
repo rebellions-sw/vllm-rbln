@@ -452,9 +452,10 @@ class TestScheduleSpecDecodeCap:
 
 
 class TestBackfillCrossBlockNoSpec:
-    # A decode-ready request entering exactly at a block boundary cannot backfill
-    # num_spec past tokens without crossing into the previous block, so the whole
-    # decode batch is forced to qlen=1 -- even a running decode that is safe.
+    # A decode-ready request entering exactly at a block boundary cannot take its
+    # window's slack in front of its scheduled token without crossing into the
+    # previous block. The runner puts the slack behind it instead, so the batch --
+    # including a running decode that was never at risk -- keeps its spec.
     _BS = 16
     _NUM_SPEC = 4
 
@@ -482,7 +483,7 @@ class TestBackfillCrossBlockNoSpec:
         sched.add_request(req)
         return req
 
-    def test_unsafe_decode_ready_peer_forces_batch_no_spec(self):
+    def test_decode_ready_peer_at_a_boundary_keeps_batch_spec(self):
         sched = self._scheduler()
 
         # A running decode that, on its own, keeps full spec (block_size is far
@@ -497,16 +498,16 @@ class TestBackfillCrossBlockNoSpec:
         assert out.scheduled_spec_decode_tokens["R"] == [1, 2, 3, 4]
         sched.update_from_output(out, make_model_runner_output(out, 1))
 
-        # Introduce an unsafe decode-ready peer at a block boundary.
+        # Introduce a decode-ready peer at a block boundary.
         self._decode_ready_at_boundary(sched, "seed", "A")
         running.spec_token_ids = [1, 2, 3, 4]
         out = sched.schedule()
 
-        # The unsafe peer forces the whole decode batch to no-spec: the running
-        # decode loses its otherwise-valid drafts and drops to a single token.
-        assert out.num_scheduled_tokens["R"] == 1
-        assert "R" not in out.scheduled_spec_decode_tokens
+        # The peer joins with a single token, as it must, but no longer drags the
+        # batch with it: the running decode keeps its drafts and its full query.
         assert out.num_scheduled_tokens["A"] == 1
+        assert out.num_scheduled_tokens["R"] == 1 + self._NUM_SPEC
+        assert out.scheduled_spec_decode_tokens["R"] == [1, 2, 3, 4]
 
 
 class TestStrandedBlockDelta:
@@ -1050,10 +1051,11 @@ class TestPriorityScheduling:
         assert all(r.is_finished() for r in reqs)
 
 
-class TestSpecDecodeRetroactiveTrim:
-    # A decode-ready join whose backfill window would cross a block boundary
-    # forces the whole decode batch to no-spec. Reachable only via a prefix
-    # match, the one way a waiting request reaches decode un-prefilled.
+class TestSpecDecodeSurvivesDecodeReadyJoin:
+    # A decode-ready join used to demote the whole decode batch to no-spec when
+    # its fixed window could not be front-padded inside the current block. The
+    # runner now pads behind the scheduled tokens in that case, so the scheduler
+    # has no boundary left to demote and the batch keeps its drafts.
     @staticmethod
     def _running_decoder_with_spec():
         # req0: a running decode carrying 4 spec tokens, positioned mid-block so
@@ -1074,26 +1076,16 @@ class TestSpecDecodeRetroactiveTrim:
         req0.spec_token_ids = [1] * 4
         return sched, req0
 
-    def test_unsafe_decode_ready_join_trims_whole_batch(self):
-        # req1 matches the full 16-token prefix -> joins at the block start, so
-        # its backfill would cross the boundary -> the batch loses its spec.
+    def test_join_at_a_block_start_keeps_the_batch_spec(self):
+        # req1 matches the full 16-token prefix, so it joins at a block start
+        # where a front-padded window would reach into the previous block. The
+        # batch keeps its drafts; the runner pads behind instead.
         sched, req0 = self._running_decoder_with_spec()
         req1 = make_request("1", list(range(16)) + [999], 16, max_tokens=50)
         sched.add_request(req1)
         out = sched.schedule()
         assert out.num_scheduled_tokens[req1.request_id] == 1  # decode-ready join
-        assert out.num_scheduled_tokens[req0.request_id] == 1  # retroactively trimmed
-        assert not out.scheduled_spec_decode_tokens.get(req0.request_id)
-
-    def test_safe_decode_ready_join_keeps_spec(self):
-        # req1 matches only the first sub-block -> joins mid-block where the
-        # backfill fits, proving it is the crossing that trims, not the join.
-        sched, req0 = self._running_decoder_with_spec()
-        req1 = make_request("1", list(range(8)) + [999], 16, max_tokens=50)
-        sched.add_request(req1)
-        out = sched.schedule()
-        assert out.num_scheduled_tokens[req1.request_id] == 1
-        assert out.num_scheduled_tokens[req0.request_id] == 5  # spec preserved
+        assert out.num_scheduled_tokens[req0.request_id] == 5  # not demoted
         assert len(out.scheduled_spec_decode_tokens[req0.request_id]) == 4
 
 
