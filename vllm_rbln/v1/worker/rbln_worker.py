@@ -318,6 +318,7 @@ class RBLNWorker(WorkerBase):
                 "gpt_oss_mxfp4",
                 "fp8",
                 "compressed-tensors",
+                "modelopt_mixed",
             )
 
             if quantization == "compressed-tensors":
@@ -358,6 +359,11 @@ class RBLNWorker(WorkerBase):
             if quantization == "fp8":
                 nbits_per_param = 8
                 packed_num_elems = 1
+            elif quantization == "modelopt_mixed":
+                # The fp8 weights and both NVFP4 scales are float dtypes and are
+                # counted by element_size() below
+                nbits_per_param = 4
+                packed_num_elems = 8 // 4
             elif quantization == "int4":
                 nbits_per_param = 4
                 packed_num_elems = 1
