@@ -45,11 +45,9 @@ PLACEHOLDER_TOKEN_ID = -1
 # TODO(RBLN): Enable RBLNSampler for
 # - apply_bad_words_with_drafts
 # - apply_all_penalties
-# - apply_top_k_top_p
+
+
 class RBLNRejectionSampler(RejectionSampler):
-    # NOTE(RBLN): This class simply overrides forward by copying the upstream
-    # implementation, so that it uses the functions defined in this
-    # file. There are no behavioral changes.
     def __init__(
         self,
         sampler: Sampler,
@@ -93,19 +91,19 @@ class RBLNRejectionSampler(RejectionSampler):
         Args:
             metadata:
                 Metadata for spec decoding.
-            draft_probs (Optional[torch.Tensor]):
+            draft_probs (torch.Tensor | None):
                 Probability distribution for the draft tokens. Shape is
                 [num_tokens, vocab_size]. Can be None if probabilities are
                 not provided, which is the case for ngram spec decode.
             logits (torch.Tensor):
-                Target model's logits probability distribution.
-                Shape is [num_tokens + batch_size, vocab_size]. Here,
-                probabilities from different requests are flattened into a
-                single tensor because this is the shape of the output logits.
-                NOTE: `logits` can be updated in place to save memory.
+                Target model's logits. Shape is
+                [num_tokens + batch_size, vocab_size] -- every request's draft
+                rows plus one bonus row each, flattened into a single tensor
+                because this is the shape of the output logits.
             sampling_metadata (vllm.v1.sample.metadata.SamplingMetadata):
                 Additional metadata needed for sampling, such as temperature,
                 top-k/top-p parameters, or other relevant information.
+
         Returns:
             SamplerOutput:
                 Contains the final output token IDs and their logprobs if
@@ -116,10 +114,8 @@ class RBLNRejectionSampler(RejectionSampler):
         bonus_logits_indices = metadata.bonus_logits_indices
         target_logits_indices = metadata.target_logits_indices
 
-        # When indexing with a tensor (bonus_logits_indices), PyTorch
-        # creates a new tensor with separate storage from the original
-        # logits tensor. This means any in-place operations on bonus_logits
-        # won't affect the original logits tensor.
+        # Indexing with a tensor creates new storage, so both slices below are
+        # safe to update in place.
         assert logits is not None
         bonus_logits = logits[bonus_logits_indices]
         raw_target_logits = logits[target_logits_indices]
@@ -385,14 +381,7 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
 
         device = target_logits.device
 
-        # ------------------------------------------------------------------
-        # 1) Build NPU primitive inputs (packed-then-padded layout).
-        # NPU expects the first N = sum(num_draft_tokens) rows to be the
-        # concat of valid drafts/probs across batches and the remaining
-        # B*K - N rows to be tail padding (zeros). `draft_token_ids` and
-        # `target_logits` come in already concatenated, so we just copy into
-        # the front of the B*K buffer.
-        # ------------------------------------------------------------------
+        # Pad the packed inputs to the fixed [B*K] length the op wants.
         N = num_tokens  # = sum(num_draft_tokens)
         padded_len = batch_size * max_spec_len
         reshaped_draft_token_ids = torch.zeros(
@@ -409,10 +398,6 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         reshaped_draft_token_ids[:N] = draft_token_ids
         reshaped_target_logits[:N] = target_logits
 
-        # Per-batch padded view of drafts for the scatter in section 3a. NPU's
-        # input is packed-then-padded, but `output_token_ids` is per-batch
-        # padded, so we materialize a (B, K) view that aligns row-by-row with
-        # `recovered_token_ids` and `output_token_ids`.
         draft_per_batch = torch.full(
             (batch_size, max_spec_len),
             PLACEHOLDER_TOKEN_ID,
@@ -433,14 +418,7 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
             device,
         )
 
-        # ------------------------------------------------------------------
-        # 2) Call the NPU primitive.
-        # Returns:
-        #   recovered_token_ids : (B, K) int32 — per-batch padded recovered tokens.
-        #   num_accepted       : (B,)   int32 — per-batch number of accepted draft
-        #                                       tokens (in [0, num_draft_tokens[i]]).
-        # ------------------------------------------------------------------
-        # NOTE(RBLN): [B*K] temperature for the divide inside the graph. Padding
+        # NOTE(RBLN): Per-row temperature for the divide inside the graph. Padding
         # and greedy rows must carry 1.0 -- a 0 would divide by zero.
         reshaped_temperature = torch.ones(
             padded_len,
@@ -488,7 +466,11 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         cu_num_draft_tokens: torch.Tensor,  # [batch_size]
         sampling_metadata: SamplingMetadata,
     ) -> torch.Tensor:
-        """Return the target logits unchanged -- the graph does all of it."""
+        """Return the target logits unchanged.
+
+        Temperature is divided inside the graph, and `rbln::rejection_sample`
+        applies `top_k`/`top_p` itself.
+        """
         assert logits.ndim == 2
         assert cu_num_draft_tokens.ndim == 1
         return logits
@@ -503,11 +485,38 @@ def rbln_rejection_sample(
     temperature: torch.Tensor,
     draft_per_batch: torch.Tensor,
     bonus_token_ids: torch.Tensor,
-    counts: torch.Tensor,
+    num_draft_tokens: torch.Tensor,
 ) -> torch.Tensor:
-    # No eager op walks the `[B*K, vocab]` logits: the caller hands over raw logits.
+    """Sample, then build the output token ids.
+
+    Args:
+        draft_token_ids: Packed-then-padded. Shape is [B*K], int32.
+        target_logits: Raw -- temperature and the softmax are applied here.
+            Shape is [B*K, vocab_size].
+        cu_num_draft_tokens: Shape is [B].
+        top_k: Shape is [B], int32.
+        top_p: Shape is [B].
+        temperature: Per-row divisor. Padding and greedy rows carry 1.0, since
+            a 0 would divide by zero. Shape is [B*K].
+        draft_per_batch: Per-request, with `PLACEHOLDER_TOKEN_ID` in the
+            padding. Shape is [B, K], int32.
+        bonus_token_ids: The token to emit when a request accepts every draft
+            it proposed. Shape is [B, 1].
+        num_draft_tokens: Shape is [B], int32.
+
+    Returns:
+        The sampled token ids, `PLACEHOLDER_TOKEN_ID` in unfilled slots. Shape
+        is [B, K+1], int32.
+    """
     target_logits = target_logits / temperature.unsqueeze(-1)
     target_probs = target_logits.softmax(dim=-1)
+
+    # ------------------------------------------------------------------
+    # rbln::rejection_sample Returns:
+    #   recovered_token_ids : [B, K] int32 — per-request padded recovered tokens.
+    #   num_accepted        : [B]    int32 — per-request number of accepted draft
+    #                                       tokens (in [0, num_draft_tokens[r]]).
+    # ------------------------------------------------------------------
     recovered_token_ids, num_accepted = torch.ops.rbln.rejection_sample(
         draft_token_ids,
         target_probs,
@@ -516,15 +525,20 @@ def rbln_rejection_sample(
         top_p,
     )
 
-    # ---- Compose the [B, K+1] output ----
-    # Fixed shapes only -- no index is computed and gathered here, which is the
-    # pattern `RblnTensor pass` rejects.
+    # ---- Build the [B, K+1] output ----
+    # Column j of row r takes, whichever case applies:
+    #   j <  num_accepted[r]                   -> draft_per_batch[r, j]
+    #   j == num_accepted[r], some rejected    -> recovered_token_ids[r, j]
+    #   j == num_draft_tokens[r], all accepted -> bonus_token_ids[r]
+    #   otherwise                              -> PLACEHOLDER_TOKEN_ID
+    # Fixed shapes only: every index is an `arange` compared against a tensor,
+    # never a computed index that gets gathered -- that fails to compile at B=1.
     batch_size, max_spec_len = draft_per_batch.shape
     num_accepted = num_accepted.reshape(batch_size)
     # `all_accepted` is True for inactive rows too (0 == 0), which is what the
-    # bonus placement wants; recovery needs `counts > 0` to exclude them.
-    all_accepted = num_accepted == counts
-    partially_accepted = (counts > 0) & (num_accepted != counts)
+    # bonus placement wants; recovery needs `num_draft_tokens > 0` to exclude them.
+    all_accepted = num_accepted == num_draft_tokens
+    partially_accepted = (num_draft_tokens > 0) & (num_accepted != num_draft_tokens)
 
     positions_k1 = torch.arange(
         max_spec_len + 1,
@@ -544,8 +558,9 @@ def rbln_rejection_sample(
     )
     out = torch.cat([head, out[:, max_spec_len:]], dim=1)
 
-    # `bonus_token_ids` is already `[B, 1]`, which broadcasts along the position axis.
-    bonus_mask = all_accepted.unsqueeze(1) & (positions_k1 == counts.unsqueeze(1))
+    bonus_mask = all_accepted.unsqueeze(1) & (
+        positions_k1 == num_draft_tokens.unsqueeze(1)
+    )
     return torch.where(bonus_mask, bonus_token_ids.to(dtype=out.dtype), out)
 
 
