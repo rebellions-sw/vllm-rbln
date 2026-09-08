@@ -32,7 +32,7 @@ except ImportError:
 
 import torch.distributed as dist
 import torch.nn as nn
-from rebel._C import profiler as rbln_profiler
+from rebel import profiler as rbln_profiler
 from torch._dynamo.exc import BackendCompilerFailed
 from vllm.config import (
     VllmConfig,
