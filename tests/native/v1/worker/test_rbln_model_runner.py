@@ -981,21 +981,24 @@ class TestCalcSpecDecodeMetadata:
 
 
 class TestSortBatchByLength:
-    # __init__ enables the sort only on REBEL CR13; ATOM and other REBEL parts
-    # keep the scheduler's order.
+    # __init__ enables the sort on REBEL CR13 and wherever
+    # VLLM_RBLN_BATCH_ATTN_OPT is set; other parts keep the scheduler's order.
     @pytest.mark.parametrize(
-        ("name", "expected"),
+        ("name", "batch_attn_opt", "expected"),
         [
-            ("RBLN-CR13", True),
-            ("rbln-cr13", True),
-            ("RBLN-CR03", False),
-            ("RBLN-CA25", False),
+            ("RBLN-CR13", "0", True),
+            ("rbln-cr13", "0", True),
+            ("RBLN-CR03", "0", False),
+            ("RBLN-CA25", "0", False),
+            ("RBLN-CR03", "1", True),
+            ("RBLN-CA25", "1", True),
         ],
     )
-    def test_resolved_from_device_name(
-        self, monkeypatch, make_model_runner, name, expected
+    def test_resolved_from_device_and_flag(
+        self, monkeypatch, make_model_runner, name, batch_attn_opt, expected
     ):
         monkeypatch.setattr(current_platform, "get_device_name", lambda: name)
+        monkeypatch.setenv("VLLM_RBLN_BATCH_ATTN_OPT", batch_attn_opt)
         runner = make_model_runner(init_kv_cache=False)
         assert runner.sort_batch_by_length is expected
 

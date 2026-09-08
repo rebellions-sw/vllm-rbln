@@ -480,10 +480,14 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             parallel_config.data_parallel_size > 1
             and envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE
         )
-        # REBEL CR13's batched dynamic decode kernel processes the first
-        # valid_batch[p] rows of partition p and early-exits on the rest, which is
-        # only correct when rows are sorted by descending sequence length.
-        self.sort_batch_by_length = "cr13" in current_platform.get_device_name().lower()
+        # The batched dynamic decode kernel (REBEL CR13, or any device with
+        # VLLM_RBLN_BATCH_ATTN_OPT) processes the first valid_batch[p] rows of
+        # partition p and early-exits on the rest, which is only correct when
+        # rows are sorted by descending sequence length.
+        self.sort_batch_by_length = (
+            "cr13" in current_platform.get_device_name().lower()
+            or envs.VLLM_RBLN_BATCH_ATTN_OPT
+        )
 
         # Static, so the per-step decision only has to supply this step's counts.
         self.shape_config = ShapeConfig(
@@ -543,12 +547,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         return model_kwargs
 
     def _may_reorder_batch(self, scheduler_output: RBLNSchedulerOutput) -> None:
-        # NOTE(RBLN): Unlike upstream GPUModelRunner, we do not split mixed batches
-        # into decode / extend / prefill regions here. The RBLN execution path assumes
-        # a homogeneous batch phase and therefore does not use scheduler_output-based
-        # phase classification. Instead, we perform a stable sort by current sequence
-        # length (num_tokens_no_spec, descending) on devices whose decode kernel
-        # needs it (sort_batch_by_length, resolved in __init__).
+        # Upstream splits the batch into decode / prefill regions here. RBLN batches
+        # are single-phase, so instead this is a stable sort by descending sequence
+        # length, done only when sort_batch_by_length (resolved in __init__) is set.
         if (
             not self.sort_batch_by_length
             or len(self.kv_cache_config.kv_cache_groups) == 0
