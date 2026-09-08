@@ -124,19 +124,35 @@ class RBLNRejectionSampler(RejectionSampler):
         # logprobs; asking for them widens the rows to float32, which on the
         # device is a host round trip, so ask only when logprobs are requested.
         wants_logprobs = sampling_metadata.max_num_logprobs is not None
-        bonus_sampler_output = self.sampler(
-            logits=bonus_logits,
-            sampling_metadata=replace(sampling_metadata, max_num_logprobs=-1)
-            if wants_logprobs
-            else sampling_metadata,
-            predict_bonus_token=True,
-            logprobs_mode_override=(
-                "processed_logits" if self.is_processed_logprobs_mode else "raw_logits"
+        bonus_token_ids = None
+        if (
+            sampling_metadata.all_greedy
+            and not wants_logprobs
+            and not sampling_metadata.logprob_token_ids
+            and isinstance(self.impl, RBLNRejectionSamplerImpl)
+        ):
+            # A greedy bonus token is its row's argmax; the rejection graph
+            # takes it there instead of a separate sampler launch.
+            bonus_logits = self.sampler.apply_logits_processors(
+                bonus_logits, sampling_metadata, predict_bonus_token=True
             )
-            if wants_logprobs
-            else None,
-        )
-        bonus_token_ids = bonus_sampler_output.sampled_token_ids
+        else:
+            bonus_sampler_output = self.sampler(
+                logits=bonus_logits,
+                sampling_metadata=replace(sampling_metadata, max_num_logprobs=-1)
+                if wants_logprobs
+                else sampling_metadata,
+                predict_bonus_token=True,
+                logprobs_mode_override=(
+                    "processed_logits"
+                    if self.is_processed_logprobs_mode
+                    else "raw_logits"
+                )
+                if wants_logprobs
+                else None,
+            )
+            bonus_token_ids = bonus_sampler_output.sampled_token_ids
+            bonus_logits = None
 
         # [num_tokens, vocab_size]
         target_logits = self.apply_logits_processors(
@@ -154,6 +170,7 @@ class RBLNRejectionSampler(RejectionSampler):
             sampling_metadata,
             synthetic_mode=self.synthetic_mode,
             synthetic_conditional_rates=self.synthetic_conditional_rates,
+            bonus_logits=bonus_logits,
         )
 
         logprobs_tensors = None
@@ -186,10 +203,11 @@ class RejectionSamplerImpl:
         cu_num_draft_tokens: torch.Tensor,
         draft_probs: torch.Tensor | None,
         target_logits: torch.Tensor,
-        bonus_token_ids: torch.Tensor,
+        bonus_token_ids: torch.Tensor | None,
         sampling_metadata: SamplingMetadata,
         synthetic_mode: bool = False,
         synthetic_conditional_rates: torch.Tensor | None = None,
+        bonus_logits: torch.Tensor | None = None,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -213,11 +231,13 @@ class TorchRejectionSamplerImpl(RejectionSamplerImpl):
         cu_num_draft_tokens: torch.Tensor,
         draft_probs: torch.Tensor | None,
         target_logits: torch.Tensor,
-        bonus_token_ids: torch.Tensor,
+        bonus_token_ids: torch.Tensor | None,
         sampling_metadata: SamplingMetadata,
         synthetic_mode: bool = False,
         synthetic_conditional_rates: torch.Tensor | None = None,
+        bonus_logits: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        assert bonus_token_ids is not None
         target_logits = self.apply_sampling_constraints(
             target_logits,
             cu_num_draft_tokens,
@@ -340,10 +360,11 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         cu_num_draft_tokens: torch.Tensor,
         draft_probs: torch.Tensor | None,
         target_logits: torch.Tensor,
-        bonus_token_ids: torch.Tensor,
+        bonus_token_ids: torch.Tensor | None,
         sampling_metadata: SamplingMetadata,
         synthetic_mode: bool = False,
         synthetic_conditional_rates: torch.Tensor | None = None,
+        bonus_logits: torch.Tensor | None = None,
     ) -> torch.Tensor:
         target_logits = self.apply_sampling_constraints(
             target_logits,
@@ -379,7 +400,9 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         assert draft_token_ids.is_contiguous()
         assert draft_probs is None or draft_probs.is_contiguous()
         assert target_logits.is_contiguous()
-        assert bonus_token_ids.is_contiguous()
+        assert (bonus_token_ids is None) != (bonus_logits is None)
+        assert bonus_token_ids is None or bonus_token_ids.is_contiguous()
+        assert bonus_logits is None or bonus_logits.is_contiguous()
         assert target_logits.shape == (num_tokens, vocab_size)
 
         device = target_logits.device
@@ -471,6 +494,7 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
             draft_per_batch,
             bonus_token_ids,
             num_draft_tokens_t,
+            bonus_logits,
         )
 
     def apply_sampling_constraints(
@@ -497,8 +521,9 @@ def rbln_rejection_sample(
     top_p: torch.Tensor | None,
     temperature: torch.Tensor,
     draft_per_batch: torch.Tensor,
-    bonus_token_ids: torch.Tensor,
+    bonus_token_ids: torch.Tensor | None,
     num_draft_tokens: torch.Tensor,
+    bonus_logits: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Sample, then build the output token ids.
 
@@ -574,7 +599,13 @@ def rbln_rejection_sample(
     bonus_mask = all_accepted.unsqueeze(1) & (
         positions_k1 == num_draft_tokens.unsqueeze(1)
     )
-    return torch.where(bonus_mask, bonus_token_ids.to(dtype=out.dtype), out)
+    if bonus_logits is not None:
+        # `rbln::argmax` returns [B]; `bonus_token_ids` already comes as [B, 1].
+        bonus = torch.ops.rbln.argmax(bonus_logits).unsqueeze(1)
+    else:
+        assert bonus_token_ids is not None
+        bonus = bonus_token_ids
+    return torch.where(bonus_mask, bonus.to(dtype=out.dtype), out)
 
 
 def torch_rejection_sample(
