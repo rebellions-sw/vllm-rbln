@@ -544,9 +544,9 @@ def rbln_rejection_sample(
     )
     out = torch.cat([head, out[:, max_spec_len:]], dim=1)
 
-    bonus = bonus_token_ids.squeeze(-1).to(dtype=out.dtype)
+    # `bonus_token_ids` is already `[B, 1]`, which broadcasts along the position axis.
     bonus_mask = all_accepted.unsqueeze(1) & (positions_k1 == counts.unsqueeze(1))
-    return torch.where(bonus_mask, bonus.unsqueeze(1), out)
+    return torch.where(bonus_mask, bonus_token_ids.to(dtype=out.dtype), out)
 
 
 def torch_rejection_sample(
