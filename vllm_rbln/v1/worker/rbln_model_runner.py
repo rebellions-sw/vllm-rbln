@@ -1733,9 +1733,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             sample_hidden_states = hidden_states
             assert self.use_wrapped_compute_logits
             if not self.is_prefill and spec_decode_metadata is not None:
-                # NOTE(RBLN): with the indices on the logits' device; an index
-                # tensor on the host would route the gather through the host.
-                logits = logits.index_select(0, logits_indices.to(logits.device))
+                logits = logits[logits_indices]
 
         self.execute_model_state = ExecuteModelState(
             scheduler_output,

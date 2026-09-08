@@ -113,17 +113,16 @@ class RBLNRejectionSampler(RejectionSampler):
         """
         assert metadata.max_spec_len <= self.impl.max_spec_len
 
-        # NOTE(RBLN): gathered with the indices on the logits' device -- an
-        # index tensor on the host would route the gather through the host.
-        # Both results are new tensors, so in-place updates below leave
-        # `logits` alone.
+        bonus_logits_indices = metadata.bonus_logits_indices
+        target_logits_indices = metadata.target_logits_indices
+
+        # When indexing with a tensor (bonus_logits_indices), PyTorch
+        # creates a new tensor with separate storage from the original
+        # logits tensor. This means any in-place operations on bonus_logits
+        # won't affect the original logits tensor.
         assert logits is not None
-        bonus_logits = logits.index_select(
-            0, metadata.bonus_logits_indices.to(logits.device)
-        )
-        raw_target_logits = logits.index_select(
-            0, metadata.target_logits_indices.to(logits.device)
-        )
+        bonus_logits = logits[bonus_logits_indices]
+        raw_target_logits = logits[target_logits_indices]
 
         # The bonus logits are wanted back only to compute the accepted-token
         # logprobs; asking for them widens the rows to float32, which on the
