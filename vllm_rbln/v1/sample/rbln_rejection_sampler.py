@@ -29,6 +29,7 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.platform import HAS_TORCH_RBLN, USE_DEVICE_TENSOR
 from vllm_rbln.v1.sample.ops.top_k_top_p import (
     GREEDY_TEMPERATURE,
+    GREEDY_TOP_K,
     build_op_top_k_top_p,
 )
 
@@ -238,6 +239,9 @@ class TorchRejectionSamplerImpl(RejectionSamplerImpl):
         bonus_logits: torch.Tensor | None = None,
     ) -> torch.Tensor:
         assert bonus_token_ids is not None
+        # The runner hands the draft ids over on the host; this impl samples
+        # wherever the logits are.
+        draft_token_ids = draft_token_ids.to(target_logits.device)
         target_logits = self.apply_sampling_constraints(
             target_logits,
             cu_num_draft_tokens,
@@ -351,6 +355,10 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
             # sampler off misses this op and forces a partial compile.
             use_cache=False,
         )
+        # The graph's small inputs, one set per input shape: handing the same
+        # tensors over every step keeps the runtime's input bindings warm --
+        # a fresh address re-validates and re-binds the input.
+        self._graph_inputs: dict[tuple, dict[str, torch.Tensor]] = {}
 
     def rejection_sample(
         self,
@@ -406,40 +414,58 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         assert target_logits.shape == (num_tokens, vocab_size)
 
         device = target_logits.device
+        dtype = target_logits.dtype
+        key = (batch_size, vocab_size, dtype, device)
+        if (bufs := self._graph_inputs.get(key)) is None:
+            # Every length is the config-fixed `num_spec_tokens` the op's
+            # inputs are padded to just above, not the batch's own longest run.
+            buf_len = batch_size * self.num_spec_tokens
+            bufs = self._graph_inputs[key] = {
+                "draft_token_ids": torch.zeros(
+                    buf_len, dtype=torch.int32, device=device
+                ),
+                "draft_per_batch": torch.full(
+                    (batch_size, self.num_spec_tokens),
+                    PLACEHOLDER_TOKEN_ID,
+                    dtype=torch.int32,
+                    device=device,
+                ),
+                "temperature": torch.ones(buf_len, dtype=dtype, device=device),
+                "ones": torch.ones(buf_len, dtype=dtype, device=device),
+                "greedy_top_k": torch.full(
+                    (batch_size,), GREEDY_TOP_K, dtype=torch.int32, device=device
+                ),
+                "cu_num_draft_tokens": torch.zeros(
+                    batch_size, dtype=torch.int32, device=device
+                ),
+                "counts": torch.zeros(batch_size, dtype=torch.int32, device=device),
+            }
 
-        # Pad the packed inputs to the fixed [B*K] length the op wants.
+        # Pad the packed inputs to the fixed [B*K] length the op wants. Rows past
+        # the packed length carry an earlier step's values, which the op reads
+        # only into slots its acceptance count clips.
         N = num_tokens  # = sum(num_draft_tokens)
         padded_len = batch_size * max_spec_len
+        reshaped_draft_token_ids = bufs["draft_token_ids"]
+        draft_per_batch = bufs["draft_per_batch"]
         if padded_len == N:
             # Full K drafts everywhere: already packed and padded, and request
             # r's draft c sits at r * K + c. Two graph inputs must not alias one
             # buffer, so the per-batch view is its own copy.
-            reshaped_draft_token_ids = draft_token_ids.to(device)
+            reshaped_draft_token_ids.copy_(draft_token_ids)
             reshaped_target_logits = target_logits
-            draft_per_batch = draft_token_ids.view(batch_size, max_spec_len).to(
-                device, copy=True
-            )
+            draft_per_batch.copy_(draft_token_ids.view(batch_size, max_spec_len))
         else:
-            reshaped_draft_token_ids = torch.zeros(
-                padded_len,
-                dtype=torch.int32,
-                device=device,
-            )
-            reshaped_target_logits = torch.zeros(
-                padded_len,
-                vocab_size,
-                dtype=target_logits.dtype,
-                device=device,
-            )
+            # Only a partial-draft step needs the padded logits block, and it
+            # is the one big buffer here, so it is allocated on first use.
+            if (reshaped_target_logits := bufs.get("target_logits")) is None:
+                reshaped_target_logits = bufs["target_logits"] = torch.zeros(
+                    padded_len, vocab_size, dtype=dtype, device=device
+                )
             reshaped_draft_token_ids[:N] = draft_token_ids
             reshaped_target_logits[:N] = target_logits
 
-            draft_per_batch = torch.full(
-                (batch_size, max_spec_len),
-                PLACEHOLDER_TOKEN_ID,
-                dtype=torch.int32,
-                device=device,
-            )
+            draft_per_batch.fill_(PLACEHOLDER_TOKEN_ID)
             src_offset = 0
             for i, n in enumerate(num_draft_tokens):
                 if n == 0:
@@ -447,22 +473,22 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
                 draft_per_batch[i, :n] = draft_token_ids[src_offset : src_offset + n]
                 src_offset += n
 
-        top_k, top_p = build_op_top_k_top_p(
-            sampling_metadata,
-            batch_size,
-            vocab_size,
-            device,
-        )
+        if sampling_metadata.all_greedy:
+            top_k, top_p = bufs["greedy_top_k"], None
+        else:
+            top_k, top_p = build_op_top_k_top_p(
+                sampling_metadata,
+                batch_size,
+                vocab_size,
+                device,
+            )
 
         # NOTE(RBLN): Per-row temperature for the divide inside the graph. Padding
         # and greedy rows must carry 1.0 -- a 0 would divide by zero.
-        reshaped_temperature = torch.ones(
-            padded_len,
-            dtype=target_logits.dtype,
-            device=device,
-        )
+        reshaped_temperature = bufs["ones"]
         temperature = sampling_metadata.temperature
         if not sampling_metadata.all_greedy and temperature is not None:
+            reshaped_temperature = bufs["temperature"]
             if not sampling_metadata.all_random:
                 temperature = torch.where(
                     temperature == GREEDY_TEMPERATURE,
@@ -477,17 +503,19 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
                     temperature.unsqueeze(1)
                 )
             else:
+                reshaped_temperature.fill_(1)
                 reshaped_temperature[:N] = expand_batch_to_tokens(
                     temperature, cu_num_draft_tokens, num_tokens
                 )
 
-        num_draft_tokens_t = torch.tensor(
-            num_draft_tokens, dtype=torch.int32, device=device
-        )
+        cu_num_draft_tokens_t = bufs["cu_num_draft_tokens"]
+        cu_num_draft_tokens_t.copy_(cu_num_draft_tokens)
+        num_draft_tokens_t = bufs["counts"]
+        num_draft_tokens_t.copy_(torch.tensor(num_draft_tokens, dtype=torch.int32))
         return self._compiled_rejection_sample(
             reshaped_draft_token_ids,
             reshaped_target_logits,
-            cu_num_draft_tokens.to(device),
+            cu_num_draft_tokens_t,
             top_k,
             top_p,
             reshaped_temperature,
