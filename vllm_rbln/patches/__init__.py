@@ -32,14 +32,14 @@ from . import (
     distributed_utils,
     dynamic_kv,
     fp8_moe_method,
-    gpt_oss,
+    # gpt_oss,  # TODO(vllm>=0.26.0): vllm#46441 landed; delete this module
     gpt_oss_mxfp4_config,
     llama_eagle3,
     metrics,
     minimax_m2,
     mla,
     models_utils,
-    multi_connector,
+    # multi_connector,  # TODO(vllm>=0.26.0): vllm#46865 landed; delete this module
     oot,
     profiler,
     qwen2_moe,
