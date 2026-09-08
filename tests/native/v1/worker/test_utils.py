@@ -41,6 +41,7 @@ from vllm_rbln.v1.worker.utils import (
     REBEL_DRAM_NBYTES,
     chiplet_replication_factor,
     compute_rbln_local_omp_cpuid,
+    copy_host_device_kv_blocks,
     divide_by_chiplet_replication,
     estimate_available_memory,
     estimate_model_kernel_size,
@@ -1037,13 +1038,13 @@ class TestReplicationFactorIsGated:
 # ---------------------------------------------------------------------------
 class TestRblnSysfsReaders:
     def test_visible_indices_from_env(self):
-        with patch.dict(os.environ, {"RBLN_DEVICES": "2,0,1"}):
+        with patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "2,0,1"}):
             assert get_rbln_visible_card_indices() == [0, 1, 2]
 
     def test_owned_indices_resolve_container_local_numbering(self, tmp_path):
-        """`RBLN_DEVICES` indexes the container's devices, not sysfs card names.
+        """`RBLN_VISIBLE_DEVICES` indexes the container's devices, not sysfs card names.
 
-        Measured on a container exposing /dev/rbln4..7: `RBLN_DEVICES=4,5,6,7`
+        Measured on a container exposing /dev/rbln4..7: `RBLN_VISIBLE_DEVICES=4,5,6,7`
         enumerates zero logical devices, `0,1,2,3` works, and holding `rbln:0`
         there put the context on physical rbln4. So entry `i` is the `i`-th
         present device and must not be used as a sysfs name.
@@ -1051,7 +1052,7 @@ class TestRblnSysfsReaders:
         for index in (4, 5, 6, 7):
             (tmp_path / f"rbln{index}").touch()
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "0,1,2,3"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "0,1,2,3"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(tmp_path)),
         ):
             assert get_rbln_owned_card_indices() == [4, 5, 6, 7]
@@ -1062,7 +1063,7 @@ class TestRblnSysfsReaders:
         for index in (4, 5, 6, 7):
             (tmp_path / f"rbln{index}").touch()
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "4,5,6,7"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "4,5,6,7"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(tmp_path)),
         ):
             assert get_rbln_owned_card_indices() == [4, 5, 6, 7]
@@ -1071,7 +1072,7 @@ class TestRblnSysfsReaders:
         """No /dev/rbln* (unit env, host without the driver) keeps the previous
         behaviour exactly rather than guessing."""
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "1,2"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "1,2"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(tmp_path)),
         ):
             assert get_rbln_owned_card_indices() == [1, 2]
@@ -1096,7 +1097,7 @@ class TestRblnSysfsReaders:
             card.mkdir()
             (card / "dram_used").write_text("0\n")
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "0,1,2,3"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "0,1,2,3"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(dev)),
             patch("vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR", str(sysfs)),
         ):
@@ -1116,7 +1117,7 @@ class TestRblnSysfsReaders:
         (sysfs / "rbln4" / "dram_used").write_text("0\n")
         (sysfs / "rbln5" / "dram_used").write_text("2048\n")
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "0,1"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "0,1"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(dev)),
             patch("vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR", str(sysfs)),
         ):
@@ -1127,14 +1128,14 @@ class TestRblnSysfsReaders:
             (tmp_path / f"rbln{index}").mkdir()
         (tmp_path / "rsd0").mkdir()
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": ""}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": ""}),
             patch("vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR", str(tmp_path)),
         ):
             assert get_rbln_visible_card_indices() == [0, 1, 3]
 
     def test_dram_total_is_none_without_sysfs(self, tmp_path):
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": ""}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": ""}),
             patch(
                 "vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR",
                 str(tmp_path / "missing"),
@@ -1144,7 +1145,7 @@ class TestRblnSysfsReaders:
             assert read_rbln_card_dram_used_bytes() == 0
 
     def test_dram_total_reads_uniform_capacity(self, tmp_path):
-        # RBLN_DEV_DIR must be patched too: both readers resolve RBLN_DEVICES
+        # RBLN_DEV_DIR must be patched too: both readers resolve RBLN_VISIBLE_DEVICES
         # against the device nodes actually present, so leaving /dev alone makes
         # the result depend on the host's card numbering. On a container exposing
         # /dev/rbln4..7 "0,1" resolves to cards 4 and 5, which this fake sysfs
@@ -1160,7 +1161,7 @@ class TestRblnSysfsReaders:
             (card / "dram_used").write_text(f"{index * 1024}\n")
             (dev / f"rbln{index}").touch()
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "0,1"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "0,1"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(dev)),
             patch("vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR", str(sysfs)),
         ):
@@ -1184,7 +1185,7 @@ class TestRblnSysfsReaders:
             (card / "dram_total").write_text(f"{size}\n")
             (dev / f"rbln{index}").touch()
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "0,1"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "0,1"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(dev)),
             patch("vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR", str(sysfs)),
             pytest.raises(RuntimeError, match="different dram_total"),
@@ -1194,7 +1195,7 @@ class TestRblnSysfsReaders:
     def test_dram_total_ignores_cards_we_do_not_own(self, tmp_path):
         """Capacity must come from our own cards, like `dram_used`.
 
-        A container holding /dev/rbln4..7 with RBLN_DEVICES=0,1 owns physical
+        A container holding /dev/rbln4..7 with RBLN_VISIBLE_DEVICES=0,1 owns physical
         cards 4 and 5. Reading the raw entry instead would report card 0's
         capacity -- somebody else's card, and a different SKU here.
         """
@@ -1214,7 +1215,7 @@ class TestRblnSysfsReaders:
             (card / "dram_total").write_text("75161927680\n")
 
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "0,1"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "0,1"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(dev)),
             patch("vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR", str(sysfs)),
         ):
@@ -1249,8 +1250,55 @@ class TestRblnSysfsReaders:
         (card / "dram_total").write_text(f"{reported}\n")
         (dev / "rbln0").touch()
         with (
-            patch.dict(os.environ, {"RBLN_DEVICES": "0"}),
+            patch.dict(os.environ, {"RBLN_VISIBLE_DEVICES": "0"}),
             patch("vllm_rbln.v1.worker.utils.RBLN_DEV_DIR", str(dev)),
             patch("vllm_rbln.v1.worker.utils.RBLN_SYSFS_CLASS_DIR", str(sysfs)),
         ):
             assert read_rbln_card_dram_total_bytes() == expected
+
+
+class TestCopyHostDeviceKvBlocks:
+    # The host-bounce staging copy. Only the listed block ids move, and MLA's
+    # 3D latent cache has no K/V axis to split first.
+    def test_copies_only_the_listed_blocks_non_mla(self):
+        src = torch.arange(2 * 4 * 3, dtype=torch.float32).reshape(2, 4, 3)
+        # Compared against a snapshot, and dst filled with a sentinel: a copy
+        # running the other way would make src equal dst and read as a hit.
+        expected = src.clone()
+        dst = torch.full_like(src, -1.0)
+        copy_host_device_kv_blocks(
+            {"l0": src}, {"l0": dst}, [1, 3], [1, 3], "h2d", use_mla=False
+        )
+        for block in (1, 3):
+            assert torch.equal(dst[:, block], expected[:, block])
+        for block in (0, 2):
+            assert (dst[:, block] == -1.0).all()
+
+    def test_copies_by_block_for_mla(self):
+        # Dim 0 is the block axis here; treating it as K/V would copy the wrong
+        # slices and index a token row by a block id.
+        src = torch.arange(4 * 8 * 2, dtype=torch.float32).reshape(4, 8, 2)
+        expected = src.clone()
+        dst = torch.full_like(src, -1.0)
+        copy_host_device_kv_blocks(
+            {"l0": src}, {"l0": dst}, [2], [2], "d2h", use_mla=True
+        )
+        assert torch.equal(dst[2], expected[2])
+        assert (dst[[0, 1, 3]] == -1.0).all()
+
+    def test_empty_ids_is_a_noop(self):
+        dst = torch.zeros(2, 4, 3)
+        copy_host_device_kv_blocks(
+            {"l0": torch.ones(2, 4, 3)}, {"l0": dst}, [], [], "h2d"
+        )
+        assert (dst == 0.0).all()
+
+    def test_mismatched_block_ids_are_rejected(self):
+        with pytest.raises(AssertionError, match="must be the same"):
+            copy_host_device_kv_blocks(
+                {"l0": torch.ones(2, 4, 3)},
+                {"l0": torch.zeros(2, 4, 3)},
+                [0],
+                [1],
+                "h2d",
+            )

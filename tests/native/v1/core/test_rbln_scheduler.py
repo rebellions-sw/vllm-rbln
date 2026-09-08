@@ -63,6 +63,20 @@ class TestSchedulerInit:
         assert isinstance(sched.kv_cache_manager, RBLNKVCacheManager)
         assert sched.kv_cache_manager.sub_block_size == 128
 
+    def test_additional_config_reaches_the_scheduler(self):
+        # EngineCore receives an already-built VllmConfig, so __init__ is the
+        # only place the section can be resolved. No env var is involved.
+        from vllm_rbln.config import get_rbln_config
+
+        create_rbln_scheduler(
+            enable_prefix_caching=True,
+            block_size=1024,
+            max_num_batched_tokens=128,
+            max_model_len=2048,
+            additional_config={"sub_block_cache": False},
+        )
+        assert get_rbln_config().sub_block_cache is False
+
     def test_disabled_falls_back_to_base_manager(self):
         # prefix caching off -> plain KVCacheManager.
         sched = create_rbln_scheduler(enable_prefix_caching=False)
@@ -571,6 +585,95 @@ class TestStrandedBlockDelta:
         sched._preempt_request(req_a, 0.0)
         assert req_a.status == RequestStatus.PREEMPTED
         assert req_a.request_id not in sched._pending_runner_block_deltas
+
+
+class TestAsyncMaxTokensSkip:
+    """The placeholder-aware max_tokens check in schedule().
+
+    Async counts tokens that have not arrived yet, so the step that reaches
+    max_tokens is in flight when the next one is being scheduled. Without the
+    check the request gets a step it does not need; with it too eager, the
+    request stops one token short. num_output_placeholders is zero under sync
+    scheduling, so the whole branch was unreachable before async landed.
+
+    Sync is the control: it decides from tokens it already has, and its step
+    count is what async has to match.
+    """
+
+    @staticmethod
+    def _drain_async(sched, token=7, max_steps=50):
+        """One output in flight, the way the engine's batch queue drives async:
+        schedule() runs a step ahead of the update_from_output() for the step
+        before it. That lag is what leaves num_output_placeholders above zero,
+        so the serial _drain never reaches the branch under test."""
+        steps = 0
+        pending = None
+        while True:
+            out = sched.schedule()
+            scheduled = bool(out.num_scheduled_tokens)
+            if scheduled:
+                steps += 1
+            if pending is not None:
+                sched.update_from_output(*pending)
+            pending = (out, make_model_runner_output(out, token)) if scheduled else None
+            if pending is None:
+                return steps
+            assert steps < max_steps, "run did not converge"
+
+    @classmethod
+    def _run(cls, async_scheduling, max_tokens):
+        sched = create_rbln_scheduler(async_scheduling=async_scheduling)
+        req = create_requests(1, num_tokens=8, max_tokens=max_tokens)[0]
+        sched.add_request(req)
+        if async_scheduling:
+            return cls._drain_async(sched), req
+        return _drain(sched, token=7), req
+
+    @pytest.mark.parametrize("max_tokens", [1, 2, 3, 4, 5])
+    def test_async_takes_the_same_steps_as_sync(self, max_tokens):
+        sync_steps, _ = self._run(False, max_tokens)
+        async_steps, _ = self._run(True, max_tokens)
+        assert async_steps == sync_steps
+
+    @pytest.mark.parametrize("max_tokens", [1, 2, 3, 4, 5])
+    def test_async_still_generates_every_token(self, max_tokens):
+        _, req = self._run(True, max_tokens)
+        assert len(req.output_token_ids) == max_tokens
+
+    @classmethod
+    def _run_batch(cls, async_scheduling, plan):
+        sched = create_rbln_scheduler(async_scheduling=async_scheduling)
+        reqs = []
+        for req_id, num_tokens, max_tokens in plan:
+            req = create_requests(
+                1, num_tokens=num_tokens, max_tokens=max_tokens, req_ids=[req_id]
+            )[0]
+            sched.add_request(req)
+            reqs.append(req)
+        if async_scheduling:
+            return cls._drain_async(sched), reqs
+        return _drain(sched, token=7), reqs
+
+    def test_a_mixed_batch_stops_each_request_at_its_own_max_tokens(self):
+        # The skip advances req_index rather than dropping the request, so the
+        # ones sitting after it in self.running still have to get their steps.
+        plan = [("a", 8, 1), ("b", 9, 3), ("c", 10, 5)]
+        sync_steps, sync_reqs = self._run_batch(False, plan)
+        async_steps, async_reqs = self._run_batch(True, plan)
+        assert async_steps == sync_steps
+        assert [len(r.output_token_ids) for r in sync_reqs] == [1, 3, 5]
+        assert [len(r.output_token_ids) for r in async_reqs] == [1, 3, 5]
+
+    def test_the_branch_is_actually_reached(self):
+        # Without placeholders above zero the two assertions above would pass
+        # against a branch that never ran.
+        sched = create_rbln_scheduler(async_scheduling=True)
+        req = create_requests(1, num_tokens=8, max_tokens=4)[0]
+        sched.add_request(req)
+        out = sched.schedule()
+        sched.schedule()  # the engine schedules ahead before the output lands
+        assert req.num_output_placeholders > 0
+        sched.update_from_output(out, make_model_runner_output(out, 7))
 
 
 class TestStopping:
@@ -1279,3 +1382,62 @@ class TestDeferredBlockFree:
         assert request.request_id not in manager._req_sub_hashes
         assert request.request_id not in manager._pending_indexing
         assert partial_block.block_hash is not None
+
+
+class TestDraftingLookahead:
+    """A first chunk was allocated with no drafting lookahead at all, so a
+    request whose prefill ends in a block's last slots got no page for the draft
+    block that follows it. Upstream zeroes the lookahead only to keep the local
+    and remote block counts matching under an async P/D load; that is the
+    condition here, rather than every request on its first chunk."""
+
+    LOOKAHEAD = 4
+
+    PROMPT = 32
+
+    def _lookahead_seen(self, use_kv_connector=None, remote_prefill=False):
+        sched = create_rbln_scheduler(
+            num_speculative_tokens=3,
+            use_kv_connector=use_kv_connector,
+            enable_prefix_caching=True,
+        )
+        # ngram is what the helper builds without a draft model, so the two
+        # attributes a drafting method would set are set here instead -- they
+        # are what the branch reads.
+        sched.use_eagle = True
+        sched.num_lookahead_tokens = self.LOOKAHEAD
+
+        seen: list[int] = []
+        allocate_slots = sched.kv_cache_manager.allocate_slots
+
+        def spy(*args, **kwargs):
+            seen.append(kwargs["num_lookahead_tokens"])
+            return allocate_slots(*args, **kwargs)
+
+        sched.kv_cache_manager.allocate_slots = spy
+
+        request = create_requests(1, num_tokens=self.PROMPT)[0]
+        if remote_prefill:
+            request.kv_transfer_params = {"do_remote_prefill": True}
+        sched.add_request(request)
+        sched.schedule()
+        return seen
+
+    def test_a_first_chunk_gets_the_drafting_lookahead(self):
+        assert self._lookahead_seen() == [self.LOOKAHEAD]
+
+    def test_a_synchronous_remote_load_keeps_it(self):
+        seen = self._lookahead_seen(
+            use_kv_connector=MockKVConfig(matched_tokens=16, is_async=False),
+            remote_prefill=True,
+        )
+        assert seen == [self.LOOKAHEAD]
+
+    def test_an_async_remote_load_still_gets_none(self):
+        """The case upstream zeroes it for: an extra block here would leave the
+        local and remote block counts mismatched."""
+        seen = self._lookahead_seen(
+            use_kv_connector=MockKVConfig(matched_tokens=16, is_async=True),
+            remote_prefill=True,
+        )
+        assert seen == [0]

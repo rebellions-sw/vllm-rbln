@@ -55,6 +55,10 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
 from vllm.distributed.parallel_state import get_dp_group, get_pp_group, get_tp_group
 from vllm.model_executor.layers.attention import Attention
 from vllm.platforms import current_platform
+from vllm.platforms.interface import (
+    get_assigned_physical_gpu_ids,
+    set_assigned_physical_gpu_ids,
+)
 from vllm.profiler.wrapper import TorchProfilerWrapper
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import SupportedTask
@@ -71,6 +75,7 @@ from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 
 import vllm_rbln.envs as envs
 from vllm_rbln.compilation.backends import set_compile_stage
+from vllm_rbln.config import build_rbln_config, set_rbln_config
 from vllm_rbln.distributed.kv_transfer.kv_connector.v1.utils import (
     finalize_kv_cache_registrations,
 )
@@ -169,6 +174,9 @@ class RBLNWorker(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
 
+        # Before _init_device_env(), which reads device-count options.
+        set_rbln_config(build_rbln_config(vllm_config.additional_config))
+
         self._init_device_env()
 
         self._rbln_host_threads_before_compile_ready = False
@@ -183,9 +191,10 @@ class RBLNWorker(WorkerBase):
         if envs.VLLM_RBLN_USE_DYNAMIC_KV_CACHE:
             self._foreign_dram_used_bytes = read_rbln_card_dram_used_bytes()
             logger.debug(
-                "foreign device DRAM at worker init: %d bytes (RBLN_DEVICES=%s)",
+                "foreign device DRAM at worker init: %d bytes "
+                "(RBLN_VISIBLE_DEVICES=%s)",
                 self._foreign_dram_used_bytes,
-                os.environ.get("RBLN_DEVICES", ""),
+                os.environ.get("RBLN_VISIBLE_DEVICES", ""),
             )
 
         self.profiler: Any | None = None
@@ -205,44 +214,30 @@ class RBLNWorker(WorkerBase):
         pass
 
     def _init_device_env(self) -> None:
-        world_size = self.parallel_config.world_size // envs.VLLM_RBLN_NUM_RAY_NODES
         env_var = current_platform.device_control_env_var
-
         num_devices = envs.VLLM_RBLN_NUM_DEVICES_PER_LOCAL_RANK
-        total_device_count = world_size * num_devices
 
-        if env_var not in os.environ:
-            dev_begin = total_device_count * self.parallel_config.data_parallel_rank
-            dev_end = dev_begin + total_device_count
-            device_ids = [str(i) for i in range(dev_begin, dev_end)]
-            start_idx = self.local_rank * num_devices
-            end_idx = start_idx + num_devices
-            selected_devices = ",".join(device_ids[start_idx:end_idx])
-        else:
-            # vLLM 0.24 stopped narrowing the device-control env var per DP rank
-            # and puts the mapping on the config instead, so under DP the env var
-            # now holds the whole deployment's list (vllm/v1/engine/utils.py,
-            # set_assigned_physical_gpu_ids_for_dp_rank). getattr: older vLLM has
-            # no such field.
-            assigned = getattr(self.parallel_config, "assigned_physical_gpu_ids", None)
-            if assigned:
-                device_ids = [str(i) for i in assigned]
-            else:
-                device_ids = os.environ[env_var].split(",")
-            assert len(device_ids) == world_size, (
-                f"device_ids: {device_ids} should have device count: {world_size}"
-            )
-            try:
-                device_id = int(device_ids[self.local_rank])
-                start_idx = device_id * num_devices
-                end_idx = start_idx + num_devices
-                device_ids = [str(i) for i in range(start_idx, end_idx)]
-                selected_devices = ",".join(device_ids)
-            except ValueError as e:
-                raise ValueError(
-                    f"device_ids: {device_ids} should be a list of integers"
-                ) from e
+        # UniProcExecutor never publishes the mapping, so publish it here rather
+        # than only reading it.
+        assigned = self.parallel_config.assigned_physical_gpu_ids
+        if assigned and get_assigned_physical_gpu_ids() is None:
+            set_assigned_physical_gpu_ids(assigned)
 
+        first = self.local_rank * num_devices
+        try:
+            selected = [
+                current_platform.device_id_to_physical_device_id(first + offset)
+                for offset in range(num_devices)
+            ]
+        except IndexError as e:
+            raise ValueError(
+                f"local rank {self.local_rank} needs {num_devices} NPU(s) from "
+                f"index {first} of {env_var}="
+                f"{os.environ.get(env_var, '')!r}, or of the data parallel "
+                f"mapping when one is in effect. One entry per NPU is expected."
+            ) from e
+
+        selected_devices = ",".join(str(device) for device in selected)
         os.environ[env_var] = selected_devices
         logger.info(
             "Local rank: %d, Selected devices: %s",
@@ -284,16 +279,32 @@ class RBLNWorker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
+        """Estimate KV-cache DRAM, discounting the fixed command-stream buffers
+        that warm-up's compiled decode runtimes reserve.
+
+        One runtime per (decode bucket, query length): non-spec has a single
+        query length (1); spec adds a second (num_spec + 1) per bucket;
+        specialized-MoE decode repeats those plus one DP-asymmetric spec dummy.
+        A draft model, when present, adds its own -- one per bucket, plus the
+        specialized-MoE fallback. Counting all of them keeps the KV-block estimate
+        from over-reserving and OOMing at runtime.
+        """
         params_dict = dict(self.model_runner.model.named_parameters())
         device_name = current_platform.get_device_name().lower()
         assert "rbln" in device_name
 
-        specialized_moe_decode = int(self.model_runner.specialized_moe_decode)
+        has_specialized_moe_decode = self.model_runner.specialized_moe_decode
         decode_batch_buckets_count = (
             self.model_runner.bucketing_manager.decode_batch_buckets_count
         )
 
-        num_runtimes = 1 + decode_batch_buckets_count + specialized_moe_decode
+        spec_enabled = self.speculative_config is not None
+        num_decode_query_lens = 2 if spec_enabled else 1
+        num_runtimes = 1 + decode_batch_buckets_count * num_decode_query_lens
+        if has_specialized_moe_decode:
+            num_runtimes += num_decode_query_lens
+            if spec_enabled:
+                num_runtimes += 1
 
         ratio: float = 1.0
         if self.model_config.quantization is not None:
@@ -394,7 +405,7 @@ class RBLNWorker(WorkerBase):
             gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
         )
 
-        speculative_config = getattr(self, "speculative_config", None)
+        speculative_config = self.speculative_config
         drafter = getattr(self.model_runner, "drafter", None)
         draft_model = getattr(drafter, "model", None)
         draft_model_config = getattr(speculative_config, "draft_model_config", None)
@@ -428,7 +439,13 @@ class RBLNWorker(WorkerBase):
                 n_model_bytes=n_model_bytes,
             )
 
+            # Draft runtimes: one per bucket, plus the specialized-MoE fallback.
+            # TODO(RBLN): an undercount since the draft started compiling both decode
+            # query lengths. Reserving for what it actually compiles needs the count
+            # split by speculative method, which the medusa path would want too.
             num_draft_runtimes = 1 + decode_batch_buckets_count
+            if has_specialized_moe_decode:
+                num_draft_runtimes += 1
             draft_n_model_bytes = 0
 
             for value in draft_model.parameters():
@@ -964,16 +981,17 @@ class RBLNWorker(WorkerBase):
         kv_device_types = {kv_cache.device.type for kv_cache in mr.kv_caches}
         was_device_resident = bool(kv_device_types - {"meta", "cpu"})
 
-        # NOTE(RBLN): upstream `bind_kv_cache` asserts kv_caches starts empty,
-        # and `initialize_kv_cache_tensors` asserts kv_cache_names has equal
-        # length, so the two must be cleared together.
+        # NOTE(RBLN): the rebind (initialize_kv_cache_tensors) reassigns
+        # kv_caches and kv_cache_names from one ordered name list and rebuilds
+        # kv_cache_bases, so drop all three stale bindings together before the
+        # reallocation.
         mr.kv_caches = []
         mr.kv_cache_bases = []
         mr.kv_cache_names = []
 
-        # NOTE(RBLN): `bind_kv_cache` also parks each layer's view on the
-        # Attention module; the next bind overwrites it only *after* the new
-        # tensors exist, which is the window this closes.
+        # NOTE(RBLN): the rebind also parks each layer's view on the Attention
+        # module; the next bind overwrites it only *after* the new tensors
+        # exist, which is the window this closes.
         forward_context = mr.compilation_config.static_forward_context
         unbound = 0
         # `KVCacheTensor.shared_by` is the same list `_allocate_kv_cache_tensors`
@@ -1037,9 +1055,9 @@ class RBLNWorker(WorkerBase):
         )
         mr.kv_cache_config = new_cfg
         # Order is load-bearing: see `_release_kv_cache_tensors`. It also does
-        # the `mr.kv_caches = []` that upstream bind_kv_cache() asserts on.
+        # the `mr.kv_caches = []` that the rebind reassigns.
         self._release_kv_cache_tensors(old_cfg)
-        # Re-applies mark_dynamic and calls bind_kv_cache itself.
+        # Re-applies mark_dynamic and rebinds the KV caches itself.
         mr.initialize_kv_cache_tensors(new_cfg, mr._kernel_block_sizes)
 
         if mr.kv_cache_bases:
@@ -1149,19 +1167,23 @@ class RBLNWorker(WorkerBase):
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         return self.model_runner.sample_tokens(grammar_output)
 
+    def _send_handoff(self, tensors: dict) -> None:
+        """Hand this stage's output on; a seam the metrics patch wraps."""
+        # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
+        get_pp_group().send_tensor_dict(tensors)
+
     @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
     ) -> ModelRunnerOutput | None:
         intermediate_tensors = None
-        forward_pass = scheduler_output.total_num_scheduled_tokens > 0
 
-        if forward_pass and not get_pp_group().is_first_rank:
-            # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
-            intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict()
-            )
+        if (
+            scheduler_output.total_num_scheduled_tokens > 0
+            and not get_pp_group().is_first_rank
+        ):
+            intermediate_tensors = self.model_runner.recv_intermediate_tensors()
 
         output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)
         if isinstance(output, ModelRunnerOutput | NoneType):
@@ -1174,8 +1196,7 @@ class RBLNWorker(WorkerBase):
             and not get_pp_group().is_last_rank
         )
 
-        # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
-        get_pp_group().send_tensor_dict(output.tensors)
+        self._send_handoff(output.tensors)
 
         # Non-last PP rank: the model runner already surfaces this rank's
         # KV-connector output through the two-phase sample_tokens() path
@@ -1240,13 +1261,13 @@ class RBLNWorker(WorkerBase):
             self.profiler.stop()
 
     def execute_dummy_batch(self) -> None:
-        bucket_size = self.model_runner.bucketing_manager.find_decode_batch_bucket(1)
-        spec = self.model_runner.speculative_config
-        if spec is not None and spec.use_eagle():
-            query_len = 1 + self.model_runner.num_spec_tokens
-        else:
-            query_len = 1
-        self.model_runner._dummy_run(bucket_size, query_len, is_prefill=False)
+        # Serving-time DP-idle step: this rank has no real work. Run a non-warmup
+        # dummy (warmup=False) so it contributes a minimal (num_reqs=1, qlen=1)
+        # entry to the cross-DP collective, is EXCLUDED from the shape decision,
+        # then adopts the busy-decided shape and runs the same compiled decode
+        # graph the busy ranks run -- so an idle rank never drags the collective
+        # into a fall-back route nor lands on an uncompiled shape.
+        self.model_runner._dummy_run(1, 1, is_prefill=False, warmup=False)
 
     # def add_lora(self, lora_request: LoRARequest) -> bool:
     #     return self.model_runner.add_lora(lora_request)

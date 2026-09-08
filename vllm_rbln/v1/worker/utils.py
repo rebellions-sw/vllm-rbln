@@ -18,12 +18,11 @@ import os
 import platform
 from collections import defaultdict
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
 from vllm.config import ModelConfig, ParallelConfig
-from vllm.model_executor.models.utils import extract_layer_index
 from vllm.platforms import CpuArchEnum, current_platform
 from vllm.utils.cpu_resource_utils import (
     LogicalCPUInfo,
@@ -50,21 +49,81 @@ logger = init_logger(__name__)
 
 RBLN_SYSFS_CLASS_DIR = "/sys/class/rebellions"
 # sysfs lists every card on the host, /dev only ours; reading sysfs by the raw
-# RBLN_DEVICES entry would charge a neighbouring container's workload to us.
+# RBLN_VISIBLE_DEVICES entry would charge a neighbouring container's workload to us.
 RBLN_DEV_DIR = "/dev"
 
 # 144 GiB of quad-chiplet DRAM minus the 4 GiB system region
 REBEL_DRAM_NBYTES = 144 * 2**30 - 4 * 2**30
 
 
+def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
+    int_vals: list[int] = []
+    for subname in layer_name.split("."):
+        try:
+            int_vals.append(int(subname))
+        except ValueError:
+            continue
+    if num_attn_module <= 1 or "attn" not in layer_name:
+        assert len(int_vals) == 1, (
+            f"layer name {layer_name} should only contain one integer"
+        )
+        return int_vals[0]
+    assert int_vals, f"layer name {layer_name} has no integer layer index"
+    base = int_vals[0]
+    if len(int_vals) >= 2:
+        sub = int_vals[1]
+    elif "scale" in layer_name:
+        sub = 2
+    elif "indexer" in layer_name:
+        sub = 1
+    else:
+        sub = 0
+    return base * num_attn_module + sub
+
+
+def pipeline_adjusted_layer_index(
+    layer_name: str,
+    model_config,
+    parallel_config,
+    num_attn_module: int,
+) -> int:
+    raw_layer_index = extract_layer_index(layer_name, num_attn_module)
+    if model_config is None:
+        return raw_layer_index
+
+    start, end = model_config.get_layers_start_end_indices(parallel_config)
+    total_num_hidden_layers = model_config.get_total_num_hidden_layers()
+    if raw_layer_index >= total_num_hidden_layers * num_attn_module:
+        # MTP/nextn layers are named past the target's layer count
+        # (mtp_start_layer_idx == num_hidden_layers), so their KV cache sits
+        # right after the target layers in the compacted per-rank cache list.
+        return (end - start) * num_attn_module + (
+            raw_layer_index - total_num_hidden_layers * num_attn_module
+        )
+    return raw_layer_index - start * num_attn_module
+
+
+def num_attn_module(model_config, cache_dtype) -> int:
+    hf_config = model_config.hf_config
+    if getattr(hf_config, "model_type", None) == "longcat_flash":
+        return 2
+    text_config = getattr(model_config, "hf_text_config", hf_config)
+    # A DSA model puts the lightning-indexer key cache next to MLA: 2 modules,
+    # or 3 when the indexer cache is fp8 (a companion fp16 scale cache).
+    if hasattr(text_config, "index_topk") or hasattr(hf_config, "index_topk"):
+        is_fp8 = bool(cache_dtype) and cache_dtype.startswith("fp8")
+        return 3 if is_fp8 else 2
+    return 1
+
+
 def get_rbln_visible_card_indices() -> list[int]:
-    """Card indices this process may use, from `RBLN_DEVICES`.
+    """Card indices this process may use, from `RBLN_VISIBLE_DEVICES`.
 
     Unset or empty means every card under /sys/class/rebellions. Prefer
     `get_rbln_owned_card_indices`; this one reads each entry as a sysfs card
     name and remains only as the fallback for hosts with no device nodes.
     """
-    raw = os.environ.get("RBLN_DEVICES", "")
+    raw = os.environ.get("RBLN_VISIBLE_DEVICES", "")
     if raw.strip():
         return sorted(
             {int(token) for token in raw.replace(",", " ").split() if token.strip()}
@@ -95,7 +154,7 @@ def _rbln_present_card_indices() -> list[int]:
 
 
 def get_rbln_owned_card_indices() -> list[int]:
-    """sysfs card indices this process owns, with `RBLN_DEVICES` resolved.
+    """sysfs card indices this process owns, with `RBLN_VISIBLE_DEVICES` resolved.
 
     Entry `i` selects the `i`-th present device; a physical name is accepted too,
     but the positional reading wins when both are possible.
@@ -105,7 +164,7 @@ def get_rbln_owned_card_indices() -> list[int]:
         # No device nodes (unit tests, host without the driver): nothing better
         # is knowable, so keep the previous behaviour exactly.
         return get_rbln_visible_card_indices()
-    raw = os.environ.get("RBLN_DEVICES", "")
+    raw = os.environ.get("RBLN_VISIBLE_DEVICES", "")
     if not raw.strip():
         return present
     owned: list[int] = []
@@ -883,3 +942,46 @@ def get_kv_cache_names(
             raise NotImplementedError
         kv_cache_names.extend(layer_names)
     return kv_cache_names
+
+
+def copy_host_device_kv_blocks(
+    src_kv_caches: dict[str, torch.Tensor],
+    dst_kv_caches: dict[str, torch.Tensor],
+    src_block_ids: list[int],
+    dst_block_ids: list[int],
+    direction: Literal["h2d", "d2h"],
+    *,
+    use_mla: bool = False,
+) -> None:
+    """Copy KV blocks between the host xfer buffer and the device KV cache.
+
+    Requires VLLM_RBLN_USE_DEVICE_TENSOR=1. Splits K/V (dim 0) first so each
+    per-block view is contiguous. MLA has no K/V level to split, and only
+    `use_mla` says so -- SSM/conv and cross-layer pools are 3D as well.
+    """
+    if not src_kv_caches or not dst_kv_caches or not src_block_ids or not dst_block_ids:
+        return
+    assert src_block_ids == dst_block_ids, (
+        "src_block_ids and dst_block_ids must be the same: "
+        f"src_block_ids={src_block_ids} dst_block_ids={dst_block_ids}"
+    )
+    # P/D uses identical block ids on both sides (asserted above), so the copy
+    # indexes by src_block_ids; it is symmetric, so the direction arg (part of
+    # the fixed CopyBlocksOp signature) is unused.
+    del direction
+    dsts: list[torch.Tensor] = []
+    srcs: list[torch.Tensor] = []
+    for layer_name, dst_cache in dst_kv_caches.items():
+        src_cache = src_kv_caches[layer_name]
+        if use_mla:
+            for idx in src_block_ids:
+                dsts.append(dst_cache[idx])
+                srcs.append(src_cache[idx])
+            continue
+        for kv in range(dst_cache.shape[0]):
+            dst_kv = dst_cache[kv]
+            src_kv = src_cache[kv]
+            for idx in src_block_ids:
+                dsts.append(dst_kv[idx])
+                srcs.append(src_kv[idx])
+    torch._foreach_copy_(dsts, srcs)

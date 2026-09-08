@@ -517,6 +517,35 @@ def _drop_envs_shadows():
 
 
 @pytest.fixture(autouse=True)
+def _reset_rbln_config(monkeypatch):
+    """`vllm_rbln.config` publishes the resolved config in a module global.
+
+    A worker or scheduler built by one test leaves it behind, so a test that
+    never published one would silently read another test's.
+    """
+    from vllm_rbln import config
+
+    monkeypatch.setattr(config, "_rbln_config", None)
+
+
+@pytest.fixture
+def rbln_config():
+    """Publish an `RBLNConfig` for code that reads it without an engine.
+
+    Only a process with an engine resolves one by itself, so a unit test has
+    to say what it wants to read.
+    """
+    from vllm_rbln.config import RBLNConfig, set_rbln_config
+
+    def _publish(**overrides) -> RBLNConfig:
+        config = RBLNConfig(**overrides)
+        set_rbln_config(config)
+        return config
+
+    return _publish
+
+
+@pytest.fixture(autouse=True)
 def _isolate_rbln_ctx_standalone():
     """Clear the one env var the code under test writes to the process env.
 
@@ -527,14 +556,3 @@ def _isolate_rbln_ctx_standalone():
     a device at all. Mirrors tests/torch_compile/conftest.py."""
     os.environ.pop("RBLN_CTX_STANDALONE", None)
     yield
-
-
-@pytest.fixture(autouse=True)
-def _reset_memoized_env_reads():
-    """Clear the one env read that sticks process-wide: get_use_w8a16() caches
-    into a module global, pinning the value session-wide otherwise."""
-    from vllm_rbln import envs
-
-    envs._USE_W8A16 = None
-    yield
-    envs._USE_W8A16 = None

@@ -79,6 +79,7 @@ from vllm_rbln.model_executor.models.optimum import (
     PartialPrefixInfo,
 )
 from vllm_rbln.model_executor.models.optimum.model_base import (
+    KVCacheCopyError,
     RBLNOptimumDecoderMixin,
     RBLNOptimumMultimodalMixin,
 )
@@ -306,6 +307,12 @@ class RBLNOptimumModelRunner(
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
             self.model = get_optimum_model(vllm_config=self.vllm_config)
+        assert self.model.dtype == self.dtype, (
+            "Internal dtype mismatch: "
+            f"runner dtype is {self.dtype!r}, but the compiled model dtype is "
+            f"{self.model.dtype!r}. model_config.dtype may not have been synchronized "
+            "during model conversion."
+        )
         self.use_optimum_lora = getattr(self.model.model.rbln_config, "use_lora", None)
         if self.lora_config and not self.use_optimum_lora:
             raise RuntimeError(
@@ -347,8 +354,8 @@ class RBLNOptimumModelRunner(
             # with self.synchronize_input_prep():
             self._update_states(scheduler_output)
             if not num_scheduled_tokens:
-                # FIXME If local block table exists in the model,
-                # clear the local block table.
+                # FIXME If the model keeps an attention manager (Gemma3),
+                # clear its per-request state.
                 # Because in the case of LLM (not AsyncLLMEngine),
                 # `finished_request_ids` is provided separately
                 # from new requests.
@@ -374,6 +381,11 @@ class RBLNOptimumModelRunner(
             model_input, num_scheduled_tokens_np = self._prepare_inputs(
                 scheduler_output
             )
+
+            if not self.try_copy_prefix_cached_kv(model_input, scheduler_output):
+                model_input, _ = self._prepare_inputs(
+                    scheduler_output, use_cached_prefix=False
+                )
 
         has_new_prefill = len(scheduler_output.scheduled_new_reqs) > 0
         with self.maybe_get_ec_connector_output(
@@ -402,7 +414,6 @@ class RBLNOptimumModelRunner(
                 else:
                     with capture_ctx as model_reports:
                         model_input = self._build_forward_inputs(model_input)
-                        self.reuse_prefix_cached_kv(model_input, scheduler_output)
                         hidden_states = self.model(model_input)
                 if (
                     envs.VLLM_RBLN_METRICS
@@ -438,20 +449,29 @@ class RBLNOptimumModelRunner(
         )
         return None
 
-    def reuse_prefix_cached_kv(
+    def try_copy_prefix_cached_kv(
         self,
         model_input: ModelInputForRBLN,
         scheduler_output: "SchedulerOutput",
-    ) -> None:
+    ) -> bool:
         if not (
             model_input.is_prompt and isinstance(self.model, RBLNOptimumDecoderMixin)
         ):
-            return
-        self.model.copy_cached_kv_blocks(
-            scheduler_output.cached_block_table,
-            scheduler_output.cached_length,
-            model_input.block_tables,
-        )
+            return True
+        try:
+            self.model.copy_cached_kv_blocks(
+                scheduler_output.cached_block_table,
+                scheduler_output.cached_length,
+                model_input.block_tables,
+            )
+        except KVCacheCopyError:
+            logger.exception(
+                "Copying prefix-cached KV failed for request(s) %s. "
+                "Falling back to a full prefill without prefix-cache reuse.",
+                model_input.running_requests_ids,
+            )
+            return False
+        return True
 
     def _build_forward_inputs(
         self, model_input: ModelInputForRBLN
@@ -459,9 +479,6 @@ class RBLNOptimumModelRunner(
         model = self.model
         if not isinstance(model, RBLNOptimumMultimodalMixin):
             return model_input
-
-        for request_id in model_input.finished_requests_ids:
-            self.mrope_position_deltas.pop(request_id, None)
 
         if model_input.is_prompt:
             return model.build_prefill_forward_inputs(
@@ -507,20 +524,8 @@ class RBLNOptimumModelRunner(
     def _prepare_inputs(
         self,
         scheduler_output: "SchedulerOutput",
+        use_cached_prefix: bool = True,
     ) -> tuple[ModelInputForRBLN, np.ndarray]:
-        """
-        :return: ModelInputForRBLN[
-            input_tokens: Token IDs,
-            input_positions: Position IDs,
-            sampling_metadata, pooling_metadata: It is `None` in V1,
-            multi_modal_kwargs: Batched multi-modal data,
-            block_tables: [num_reqs, num_blocks_per_req] shaped tensor,
-            running_requests_ids: RUNNING request IDs,
-            finished_requests_ids: FINISHED request IDs in between
-                the previous and the current steps,
-            is_prompt: It is used only in V1
-        ]
-        """
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs
@@ -532,7 +537,6 @@ class RBLNOptimumModelRunner(
         num_scheduled_tokens_np = np.array(tokens, dtype=np.int32)
         num_prefill_reqs = len(scheduler_output.scheduled_new_reqs)
         num_decode_reqs = scheduler_output.scheduled_cached_reqs.num_reqs
-        finished_requests_ids = scheduler_output.finished_req_ids
         is_prefill = False
 
         if num_prefill_reqs > 1 or (num_prefill_reqs >= 1 and num_decode_reqs > 0):
@@ -555,7 +559,7 @@ class RBLNOptimumModelRunner(
                 multi_modal_kwargs,
                 running_request_ids,
                 partial_prefix,
-            ) = self._prepare_prefill(scheduler_output)
+            ) = self._prepare_prefill(scheduler_output, use_cached_prefix)
         else:
             input_ids, positions, block_tables, running_request_ids = (
                 self._prepare_decode(scheduler_output)
@@ -571,14 +575,22 @@ class RBLNOptimumModelRunner(
             + num_scheduled_tokens_np[:num_reqs]
         )
 
+        cache_slot_ids = torch.tensor(
+            [
+                scheduler_output.cache_slot_id_dict[req_id]
+                for req_id in running_request_ids
+            ],
+            dtype=torch.int16,
+        )
+
         # TODO interemediate_tensor should be set
         model_input = ModelInputForRBLN(
             input_tokens=input_ids,
             input_positions=positions,
             multi_modal_kwargs=multi_modal_kwargs if is_prefill else None,
             block_tables=block_tables,
+            cache_slot_ids=cache_slot_ids,
             running_requests_ids=running_request_ids,
-            finished_requests_ids=list(finished_requests_ids),
             # FIXME unify the variable name is_prefill and is_prompt
             is_prompt=is_prefill,
             dummy_block=scheduler_output.dummy_block,
@@ -614,6 +626,7 @@ class RBLNOptimumModelRunner(
     def _prepare_prefill(
         self,
         scheduler_output: "RBLNSchedulerOutput",
+        use_cached_prefix: bool = True,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -667,8 +680,9 @@ class RBLNOptimumModelRunner(
                 block_ids,
             )
             block_table = scheduler_output.block_table_dict[req_id]
-            cached_length = scheduler_output.cached_length
-            total_cached_length = sum(cached_length)
+            if use_cached_prefix:
+                cached_length = scheduler_output.cached_length
+                total_cached_length = sum(cached_length)
             if total_cached_length > 0:
                 prompt_tokens = prompt_tokens[total_cached_length:]
                 input_positions = input_positions[total_cached_length:]
@@ -876,8 +890,11 @@ class RBLNOptimumModelRunner(
 
             self.requests.pop(req_id, None)
             self.num_prompt_logprobs.pop(req_id, None)
-            # In case of sliding window / hybrid attention models,
-            # free the local block table id managed in the model's attention manager.
+            self.mrope_position_deltas.pop(req_id, None)
+
+            # Gemma3's attention manager still keeps per-request state the
+            # model forward produces (attention mask, pad length); free it
+            # here. Cache slot ids are owned by the scheduler.
             if getattr(self.model, "attention_manager", None):
                 self.model.attention_manager.pop(req_id)
         # Remove the finished requests from the persistent batch.
@@ -1223,7 +1240,7 @@ class RBLNOptimumModelRunner(
                     empty_logits = torch.empty(
                         batch_size,
                         input_batch.vocab_size,
-                        dtype=self.model.dtype,
+                        dtype=self.dtype,
                     )
                     _ = self.sampler(logits=empty_logits, sampling_metadata=metadata)
 
@@ -1498,7 +1515,7 @@ class RBLNOptimumModelRunner(
             for bucket_size in self.bucket_sizes:
                 self.pooled_tensors[bucket_size] = torch.zeros(
                     (bucket_size, self.model_config.get_vocab_size()),
-                    dtype=self.model.dtype,
+                    dtype=self.dtype,
                 )
         torch._dynamo.config.recompile_limit = len(self.bucket_sizes) * len(
             WARM_UP_CONFIGS
