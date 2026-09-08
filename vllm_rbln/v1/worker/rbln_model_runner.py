@@ -3445,7 +3445,11 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             # last PP rank only, so no other rank has anything to warm up here.
             if get_pp_group().is_last_rank:
                 # 4-1. sampler
-                if not self.is_pooling_model:
+                # Compile-only writes every compiled graph to the cache dir, but
+                # the sampler graphs are compiled without a cache (use_cache=False)
+                # and are rebuilt on load anyway, so there is nothing to produce
+                # here and the compile would refuse the missing cache_dir.
+                if not self.is_pooling_model and not envs.VLLM_RBLN_COMPILE_ONLY:
                     for size in self.bucketing_manager.batch_buckets:
                         self._dummy_sampler_run(size)
 
