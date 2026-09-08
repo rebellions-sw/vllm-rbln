@@ -79,6 +79,7 @@ from vllm_rbln.logger import init_logger
 from vllm_rbln.model_executor.model_loader.rbln_model_loader import get_optimum_model
 from vllm_rbln.model_executor.models.optimum import ModelInputForRBLN
 from vllm_rbln.model_executor.models.optimum.model_base import (
+    KVCacheCopyError,
     RBLNOptimumDecoderMixin,
     RBLNOptimumMultimodalMixin,
 )
@@ -376,6 +377,10 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             model_input, num_scheduled_tokens_np = self._prepare_inputs(
                 scheduler_output
             )
+            if not self.try_copy_prefix_cached_kv(model_input, scheduler_output):
+                model_input, _ = self._prepare_inputs(
+                    scheduler_output, use_cached_prefix=False
+                )
             ec_connector_output = None
             if isinstance(self.model, RBLNOptimumMultimodalMixin):
                 model_input, ec_connector_output = self._preprocess(
@@ -390,7 +395,6 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 capture_ctx = contextlib.nullcontext()
             model_start_time = time.perf_counter()
             with capture_ctx as model_reports:
-                self.reuse_prefix_cached_kv(model_input, scheduler_output)
                 hidden_states = self.model(model_input)
             if envs.VLLM_RBLN_METRICS and self.model_performance_tracker is not None:
                 collect_metrics(
@@ -423,20 +427,29 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
         )
         return None
 
-    def reuse_prefix_cached_kv(
+    def try_copy_prefix_cached_kv(
         self,
         model_input: ModelInputForRBLN,
         scheduler_output: "SchedulerOutput",
-    ) -> None:
+    ) -> bool:
         if not (
             model_input.is_prompt and isinstance(self.model, RBLNOptimumDecoderMixin)
         ):
-            return
-        self.model.copy_cached_kv_blocks(
-            scheduler_output.cached_block_table,
-            scheduler_output.cached_length,
-            model_input.block_tables,
-        )
+            return True
+        try:
+            self.model.copy_cached_kv_blocks(
+                scheduler_output.cached_block_table,
+                scheduler_output.cached_length,
+                model_input.block_tables,
+            )
+        except KVCacheCopyError:
+            logger.exception(
+                "Copying prefix-cached KV failed for request(s) %s. "
+                "Falling back to a full prefill without prefix-cache reuse.",
+                model_input.running_requests_ids,
+            )
+            return False
+        return True
 
     def _preprocess(
         self, model_input: ModelInputForRBLN, scheduler_output: "SchedulerOutput"
@@ -498,6 +511,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _prepare_inputs(
         self,
         scheduler_output: "SchedulerOutput",
+        use_cached_prefix: bool = True,
     ) -> tuple[ModelInputForRBLN, np.ndarray]:
         """Build the graph-ready ModelInputForRBLN for this step (see its
         docstring for the layout) and the per-request scheduled token counts."""
@@ -526,7 +540,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
             is_prefill = True
 
         if is_prefill:
-            model_input = self._prepare_prefill(scheduler_output)
+            model_input = self._prepare_prefill(scheduler_output, use_cached_prefix)
         else:
             model_input = self._prepare_decode(scheduler_output)
 
@@ -569,6 +583,7 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
     def _prepare_prefill(
         self,
         scheduler_output: "RBLNSchedulerOutput",
+        use_cached_prefix: bool = True,
     ) -> ModelInputForRBLN:
         num_blocks_per_req = self.input_batch.block_table.block_tables[
             0
@@ -609,8 +624,9 @@ class RBLNOptimumModelRunner(LoRAModelRunnerMixin, ECConnectorModelRunnerMixin):
                 block_ids,
             )
             block_table = scheduler_output.block_table_dict[req_id]
-            cached_length = scheduler_output.cached_length
-            total_cached_length = sum(cached_length)
+            if use_cached_prefix:
+                cached_length = scheduler_output.cached_length
+                total_cached_length = sum(cached_length)
             if total_cached_length > 0:
                 prompt_tokens = prompt_tokens[total_cached_length:]
                 assert len(prompt_tokens) > 0, (

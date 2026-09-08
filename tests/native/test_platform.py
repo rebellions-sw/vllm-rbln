@@ -33,7 +33,10 @@ from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 import vllm_rbln.platform as platform
 from tests.native.vllm_config import local_model_path
-from vllm_rbln.platform import RBLN_DEFAULT_MAX_NUM_SEQS, RblnPlatform
+from vllm_rbln.platform import (
+    RBLN_DEFAULT_MAX_NUM_SEQS,
+    RblnPlatform,
+)
 
 # Small, non-gated and already needed by the spec-decode tests; a config build
 # never touches the device.
@@ -120,7 +123,7 @@ class TestPlatformIdentity:
             # Ops dispatch on CPU even when tensors live on the device.
             ("dispatch_key", "CPU"),
             # RBLNWorker._init_device_env narrows this var per rank.
-            ("device_control_env_var", "RBLN_DEVICES"),
+            ("device_control_env_var", "RBLN_VISIBLE_DEVICES"),
             ("simple_compile_backend", "bypass"),
         ],
     )
@@ -403,7 +406,8 @@ class TestSchedulerOverrides:
 
         def mutate(config: VllmConfig) -> None:
             config.scheduler_config.async_scheduling = True
-            config.speculative_config = object()
+            # eagle is a method vLLM does allow async scheduling with.
+            config.speculative_config = SimpleNamespace(method="eagle")
 
         config = reconfigure(mutate)
         assert config.scheduler_config.async_scheduling is False
@@ -558,6 +562,46 @@ class TestPreRegisterAndUpdate:
         assert EngineArgs.get_batch_defaults.__func__ is before
 
 
+class TestDeprecatedDeviceControlEnvVar:
+    """``RBLN_DEVICES`` is folded into ``device_control_env_var`` and unset.
+
+    Unsetting is the point: the runtime takes both names but prefers the
+    deprecated one, so one left behind would override the pool a worker
+    narrows itself to.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_env(self):
+        # patch.dict, not monkeypatch.delenv: the code under test creates the
+        # current name, and a key a test never held is not restored.
+        with patch.dict(os.environ):
+            os.environ.pop("RBLN_DEVICES", None)
+            os.environ.pop(RblnPlatform.device_control_env_var, None)
+            yield
+
+    def test_legacy_value_carries_over_and_the_name_goes(self):
+        os.environ["RBLN_DEVICES"] = "4,5"
+
+        RblnPlatform.pre_register_and_update()
+
+        assert os.environ[RblnPlatform.device_control_env_var] == "4,5"
+        assert "RBLN_DEVICES" not in os.environ
+
+    def test_the_current_name_wins_when_both_are_set(self):
+        os.environ["RBLN_DEVICES"] = "4,5"
+        os.environ[RblnPlatform.device_control_env_var] = "6,7"
+
+        RblnPlatform.pre_register_and_update()
+
+        assert os.environ[RblnPlatform.device_control_env_var] == "6,7"
+        assert "RBLN_DEVICES" not in os.environ
+
+    def test_nothing_is_invented_when_neither_is_set(self):
+        RblnPlatform.pre_register_and_update()
+
+        assert RblnPlatform.device_control_env_var not in os.environ
+
+
 class TestCustomKvCacheSpecs:
     @pytest.fixture(autouse=True)
     def restore_registry(self):
@@ -703,3 +747,34 @@ class TestDynamicKvConfig:
             monkeypatch.setenv("VLLM_RBLN_USE_DYNAMIC_KV_CACHE", "1")
             reconfigure(lambda config: None)
             assert len(seen) == 1
+
+
+class TestDflashTokenBudget:
+    """DFlash reserves no drafting slots, so the auto-computed budget is the
+    whole of `max_num_batched_tokens`; anything else was set explicitly, and no
+    other prefill chunk lands on a KV block boundary."""
+
+    def _mutate(self, scheduled):
+        def mutate(config: VllmConfig) -> None:
+            config.speculative_config = SimpleNamespace(method="dflash")
+            config.scheduler_config.max_num_scheduled_tokens = scheduled
+
+        return mutate
+
+    def test_the_auto_computed_budget_is_accepted(self, reconfigure, configured):
+        budget = configured.scheduler_config.max_num_batched_tokens
+        config = reconfigure(self._mutate(budget))
+        assert config.scheduler_config.max_num_scheduled_tokens == budget
+
+    @pytest.mark.parametrize("delta", [-1, -8, 1])
+    def test_any_other_budget_is_refused(self, reconfigure, configured, delta):
+        budget = configured.scheduler_config.max_num_batched_tokens
+        with pytest.raises(ValueError, match="auto-computed"):
+            reconfigure(self._mutate(budget + delta))
+
+    def test_only_dflash_is_gated(self, reconfigure, configured):
+        def mutate(config: VllmConfig) -> None:
+            config.speculative_config = SimpleNamespace(method="eagle3")
+            config.scheduler_config.max_num_scheduled_tokens = 8
+
+        assert reconfigure(mutate).scheduler_config.max_num_scheduled_tokens == 8
