@@ -3125,6 +3125,23 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 "Set VLLM_RBLN_SUB_BLOCK_CACHE=false to disable."
             )
 
+        if self.uses_fixed_decode_window:
+            # The fixed decode window is placed inside one KV block, so the
+            # sequence's last block has to be able to hold it. A block-aligned
+            # max_model_len always can; a shorter remainder cannot, and the
+            # window would then have to run past max_model_len.
+            window = self.num_spec_tokens + 1
+            block_size = self.cache_config.block_size
+            remainder = self.max_model_len % block_size
+            if remainder and remainder < window:
+                raise ValueError(
+                    f"max_model_len={self.max_model_len} leaves {remainder} "
+                    f"token(s) in its last KV block, which cannot hold the "
+                    f"{window}-slot speculative decode window. Round "
+                    f"max_model_len to a multiple of block_size={block_size}, "
+                    f"or leave at least {window} tokens in the last block."
+                )
+
         kv_cache_config = deepcopy(kv_cache_config)
         self.kv_cache_config = kv_cache_config
         self.maybe_add_kv_sharing_layers_to_kv_cache_groups(kv_cache_config)

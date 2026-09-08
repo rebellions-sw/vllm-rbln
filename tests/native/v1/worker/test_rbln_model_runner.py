@@ -1105,6 +1105,36 @@ class TestMayReorderBatch:
         assert r.input_batch.batch_update_builder.moved != []
 
 
+class TestFixedDecodeWindowConfig:
+    # The fixed decode window is placed inside one KV block, so the sequence's
+    # last block has to be able to hold it. A max_model_len whose remainder is
+    # shorter than the window has no valid placement there, and is refused at
+    # load rather than a step into serving.
+    @staticmethod
+    def _runner(max_model_len, num_spec_tokens):
+        runner = _make_runner_stub(
+            max_model_len=max_model_len,
+            num_spec_tokens=num_spec_tokens,
+            speculative_config=SimpleNamespace(use_eagle=lambda: True),
+            cache_config=SimpleNamespace(block_size=1024),
+        )
+        return runner
+
+    def test_a_last_block_too_short_for_the_window_is_refused(self):
+        runner = self._runner(1024 * 4 + 2, 3)
+        with pytest.raises(ValueError, match="cannot hold the 4-slot"):
+            runner.initialize_kv_cache(SimpleNamespace(kv_cache_groups=[]))
+
+    @pytest.mark.parametrize("max_model_len", [1024 * 4, 1024 * 4 + 4, 1024 * 4 + 900])
+    def test_a_last_block_that_fits_is_accepted(self, max_model_len):
+        # Block-aligned, exactly the window, and a long remainder all pass the
+        # check; the raise is the only thing under test, so the call is expected
+        # to fail later on the stub's missing state.
+        runner = self._runner(max_model_len, 3)
+        with pytest.raises(AttributeError):
+            runner.initialize_kv_cache(SimpleNamespace(kv_cache_groups=[]))
+
+
 class TestAllocateKvCacheTensors:
     # Device selection: "cpu" if not compiling, else self.device if device-tensor,
     # else "meta". The mapping/validation logic is exercised on CPU.
