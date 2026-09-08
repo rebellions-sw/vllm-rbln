@@ -157,6 +157,12 @@ class RBLNTopKTopPSampler(nn.Module):
                 "per-request generators. Ignoring generators."
             )
 
+        # Feed the graph a temperature already in the logits dtype. Casting the
+        # fp32 temperature inside the graph and dividing fp16 logits by it fails
+        # at runtime input preparation on the current compiler, while the same
+        # graph with a pre-cast temperature does not; bf16 is unaffected either
+        # way. The cast is a tiny eager op on the sampling batch.
+        temperature = temperature.to(logits.dtype)
         out = self._compiled_rbln_topk_topp_sampler(logits, temperature, k, p)
         if staging_owner is not None:
             out = _stage_into(staging_owner, out)
