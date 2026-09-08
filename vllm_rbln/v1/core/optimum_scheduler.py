@@ -98,6 +98,8 @@ class RBLNOptimumScheduler(Scheduler):
         self.kv_events_config = vllm_config.kv_events_config
         self.parallel_config = vllm_config.parallel_config
         self.log_stats = log_stats
+        self.grammar_compile_error_reqs: set[str] = set()
+        self.reset_preempted_req_ids: set[str] = set()
         self.observability_config = vllm_config.observability_config
         self.kv_metrics_collector: KVCacheMetricsCollector | None = None
         if self.observability_config.kv_cache_metrics:
@@ -239,7 +241,7 @@ class RBLNOptimumScheduler(Scheduler):
             # The SWA/chunked-local admission cap, which must match the actual
             # per-step budget, not max_num_batched_tokens (the compiled chunk
             # size). See max_num_scheduled_tokens above.
-            max_num_batched_tokens=self.max_num_scheduled_tokens,
+            max_in_flight_tokens=self.max_num_scheduled_tokens,
             enable_caching=self.cache_config.enable_prefix_caching,
             use_eagle=False,
             log_stats=self.log_stats,
@@ -431,9 +433,11 @@ class RBLNOptimumScheduler(Scheduler):
                 # which would otherwise reduce the cache hit rate.
                 # This is special logic
                 # because we do not touch cache-hit blocks.
-                new_computed_blocks, num_new_local_computed_tokens = (
-                    self.kv_cache_manager.get_computed_blocks(request)
-                )
+                (
+                    new_computed_blocks,
+                    num_new_local_computed_tokens,
+                    request.shared_prefix_boundary,
+                ) = self.kv_cache_manager.get_computed_blocks(request)
 
                 # Get the cached blocks for prefix caching.
                 # using new_computed_blocks, num_new_local_computed_tokens
