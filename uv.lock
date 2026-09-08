@@ -11,6 +11,9 @@ supported-markers = [
     "platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 
+[manifest]
+overrides = [{ name = "torchcodec", specifier = ">=0.14", index = "https://download.pytorch.org/whl/cpu" }]
+
 [[package]]
 name = "accelerate"
 version = "1.14.0"
@@ -490,15 +493,6 @@ source = { registry = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/
 sdist = { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/dill/0.4.1/dill-0.4.1.tar.gz", hash = "sha256:423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa" }
 wheels = [
     { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/dill/0.4.1/dill-0.4.1-py3-none-any.whl", hash = "sha256:1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d" },
-]
-
-[[package]]
-name = "diskcache"
-version = "5.6.3"
-source = { registry = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/simple/" }
-sdist = { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/diskcache/5.6.3/diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc" }
-wheels = [
-    { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/diskcache/5.6.3/diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19" },
 ]
 
 [[package]]
@@ -1534,7 +1528,7 @@ wheels = [
 [[package]]
 name = "optimum-rbln"
 version = "0.11.3a2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/simple/" }
 dependencies = [
     { name = "accelerate" },
     { name = "diffusers" },
@@ -1542,13 +1536,13 @@ dependencies = [
     { name = "tokenizers" },
     { name = "torch" },
     { name = "torchaudio", marker = "platform_python_implementation == 'CPython'" },
-    { name = "torchcodec", marker = "platform_python_implementation == 'CPython'" },
+    { name = "torchcodec" },
     { name = "torchvision", marker = "platform_python_implementation == 'CPython'" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/64/eb5af7a5d5d3991c2eefee6c097dd86529d5f9d570aa465c3c3707030a25/optimum_rbln-0.11.3a2.tar.gz", hash = "sha256:87d7d87bdd47547a90a33a8b7ef3dcf698ff553303b5dc2087a91d7b8ef61fb1", size = 627781, upload-time = "2026-09-08T04:26:54.202Z" }
+sdist = { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/optimum-rbln/0.11.3a2/optimum_rbln-0.11.3a2.tar.gz", hash = "sha256:87d7d87bdd47547a90a33a8b7ef3dcf698ff553303b5dc2087a91d7b8ef61fb1" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/35/f25d6ba2109583e150b00178f40b977a62b095d55b1644863c8c49482898/optimum_rbln-0.11.3a2-py3-none-any.whl", hash = "sha256:51cdc7df892ef5d47075b79d22242f16da0c6779a529e4a18bac3a80f048ea86", size = 673951, upload-time = "2026-09-08T04:26:52.107Z" },
+    { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/optimum-rbln/0.11.3a2/optimum_rbln-0.11.3a2-py3-none-any.whl", hash = "sha256:51cdc7df892ef5d47075b79d22242f16da0c6779a529e4a18bac3a80f048ea86" },
 ]
 
 [[package]]
@@ -2617,13 +2611,13 @@ wheels = [
 
 [[package]]
 name = "torchcodec"
-version = "0.11.0+cpu"
+version = "0.16.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 wheels = [
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:7332f806164ee7c0ac288eef9d99f773486858068a127dc08b5e5c275194925c", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:f991b274c3ab567c07bd066cdb23aee28c46e71bc832ddb87c0ac0a0da0b4ee7", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:fa759203e1f88aeba7d31493bf5c2969eb97d551a0ab38a18d20155e60f9db16", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:e1fdfaec9987614a91e03a3bd6697a668ddb556dcacab95264fa56dfe3c0b44a", upload-time = "2026-03-24T17:02:09Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.16.0%2Bcpu-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d3b1c4e1ef963ce4f1e8b3e9a837e1d8e2f7d79b795b7dad8482eb9921e937d5", upload-time = "2026-08-13T11:55:28Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.16.0%2Bcpu-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ba08634c44e0a262baf6b9e35999603f6d42bb70e2d8b6953d07301ba9c02657", upload-time = "2026-08-13T11:55:29Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.16.0%2Bcpu-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b1014ea437a95d8565b13a56d604d5297b38edf4b6b72c279126a890b3a21efc", upload-time = "2026-08-13T11:55:29Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.16.0%2Bcpu-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5c8631a707f8bf0e68d7bc9f6b03b5cc43173091bc7fe0e0605db95be506ef15", upload-time = "2026-08-13T11:55:29Z" },
 ]
 
 [[package]]
@@ -2806,8 +2800,8 @@ wheels = [
 
 [[package]]
 name = "vllm"
-version = "0.24.0+cpu"
-source = { registry = "https://wheels.vllm.ai/0.24.0/cpu" }
+version = "0.26.0+cpu"
+source = { registry = "https://wheels.vllm.ai/0.26.0/cpu" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
@@ -2817,7 +2811,6 @@ dependencies = [
     { name = "cloudpickle" },
     { name = "compressed-tensors" },
     { name = "depyf" },
-    { name = "diskcache" },
     { name = "einops" },
     { name = "fastapi", extra = ["standard"] },
     { name = "filelock" },
@@ -2868,6 +2861,7 @@ dependencies = [
     { name = "tokenizers" },
     { name = "torch" },
     { name = "torchaudio" },
+    { name = "torchcodec" },
     { name = "torchvision" },
     { name = "tqdm" },
     { name = "transformers" },
@@ -2876,7 +2870,7 @@ dependencies = [
     { name = "xgrammar" },
 ]
 wheels = [
-    { url = "https://wheels.vllm.ai/ee0da84ab9e04ac7610e28580af62c365e898389/vllm-0.24.0%2Bcpu-cp38-abi3-manylinux_2_34_x86_64.whl" },
+    { url = "https://wheels.vllm.ai/568afb3a13806beb53bb2e6bd518269357b237c0/vllm-0.26.0%2Bcpu-cp38-abi3-manylinux_2_34_x86_64.whl" },
 ]
 
 [[package]]
@@ -2950,7 +2944,7 @@ requires-dist = [
     { name = "torchaudio", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchcodec", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/cpu" },
-    { name = "vllm", specifier = "==0.24.0+cpu", index = "https://wheels.vllm.ai/0.24.0/cpu" },
+    { name = "vllm", specifier = "==0.26.0+cpu", index = "https://wheels.vllm.ai/0.26.0/cpu" },
 ]
 provides-extras = ["test", "build", "dev", "runtime"]
 
