@@ -1533,7 +1533,7 @@ wheels = [
 
 [[package]]
 name = "optimum-rbln"
-version = "0.11.3a1"
+version = "0.11.3a4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
@@ -1546,9 +1546,9 @@ dependencies = [
     { name = "torchvision", marker = "platform_python_implementation == 'CPython'" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/47/1c/a9c9c22e78da624239175dbe8abbf4b6943c28e44f095c5c4791f89af77e/optimum_rbln-0.11.3a1.tar.gz", hash = "sha256:091823469ee835ec523f4b15f78a9620e387234f53bfcd210fabf81b0815aa77", size = 627074, upload-time = "2026-09-07T06:33:47.441Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/74/3633e2ded59faebc435c1f34e04a9d85125136579b647c47a91ca07e2f14/optimum_rbln-0.11.3a4.tar.gz", hash = "sha256:45bcf23fce6d85df26930dd55e18bd1b35ca6ecef57441a05dc082ed8764f33b", size = 649283, upload-time = "2026-09-08T11:19:24.43Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/b0/5dfb73f577bc5cf7110c1d5e5bf129f4a0c420bdbc5b9bf47f5ef1250bbe/optimum_rbln-0.11.3a1-py3-none-any.whl", hash = "sha256:2a49ac5179f213e1419fab6713c5866f3b03893fd3371120bb94535c222920c2", size = 673236, upload-time = "2026-09-07T06:33:44.077Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/13/cf03ee360b11eb1d18f3218ba9ca02f1ad4c23c2d2748456fe776c7711d5/optimum_rbln-0.11.3a4-py3-none-any.whl", hash = "sha256:22bf329f64406d3dc5c064d7d10168534c52e28ba5a835a5a6d39d4134c483d7", size = 673955, upload-time = "2026-09-08T11:19:21.456Z" },
 ]
 
 [[package]]
@@ -2617,13 +2617,14 @@ wheels = [
 
 [[package]]
 name = "torchcodec"
-version = "0.11.0+cpu"
+version = "0.14.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 wheels = [
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:7332f806164ee7c0ac288eef9d99f773486858068a127dc08b5e5c275194925c", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:f991b274c3ab567c07bd066cdb23aee28c46e71bc832ddb87c0ac0a0da0b4ee7", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:fa759203e1f88aeba7d31493bf5c2969eb97d551a0ab38a18d20155e60f9db16", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:e1fdfaec9987614a91e03a3bd6697a668ddb556dcacab95264fa56dfe3c0b44a", upload-time = "2026-03-24T17:02:09Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:0f1e5a4153a4739053b477474eaef1a94414f97e438b2702966fe6c75a93b589", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:67bb31bbac7f6484d67c92e92495b0044c5cdc25898e5f3a78daf279c7270bf4", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:0da64ee68e8103a28906e0950acc40e2501d81894c3cb2b17e461336c08ab42f", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:7deaf484f8986d5246d81336faa8b89327192114c33b0f4582737dc0acec52ab", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:d277e8425af0ee4dab20e1e09499171f83acbfe2f5be03e5879490279c0dfd2f", upload-time = "2026-06-03T12:38:55Z" },
 ]
 
 [[package]]
@@ -2930,7 +2931,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = "<0.137" },
     { name = "fire", marker = "extra == 'dev'" },
     { name = "huggingface-hub", marker = "extra == 'dev'" },
-    { name = "optimum-rbln", specifier = ">=0.11.3a1,<0.11.4" },
+    { name = "optimum-rbln", specifier = ">=0.11.3a4,<0.11.4" },
     { name = "packaging", marker = "extra == 'dev'" },
     { name = "pynvml", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'test'" },
