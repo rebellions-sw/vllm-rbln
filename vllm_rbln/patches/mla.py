@@ -47,7 +47,10 @@ mla_attention_original_get_and_maybe_dequant_weights = (
     reason=(
         "The MLA kv_b_proj weight-absorb dequantises eagerly at load time. "
         "Upstream's fast path covers only Fp8LinearMethod, so per-tensor ModelOpt "
-        "fp8 falls to its generic base case"
+        "fp8 falls to the generic base case, which reads the weight back by "
+        "running the layer's apply() against an identity matrix -- an eager "
+        "matmul the dummy compile device has no NPU to execute. Dequantise "
+        "directly instead."
     ),
 )
 def patched_get_and_maybe_dequant_weights(
@@ -57,12 +60,6 @@ def patched_get_and_maybe_dequant_weights(
     if isinstance(quant_method, RBLNModelOptFp8LinearMethod):
         weight = layer.weight.detach().to("cpu", torch.float32)
         scale = layer.weight_scale.detach().to("cpu", torch.float32)
-        # ModelOpt fp8 is per-tensor, so the scale is a 0-dim scalar (see
-        # RBLNModelOptFp8LinearMethod.process_weights_after_loading)
-        if scale.ndim != 0:
-            scale = torch.repeat_interleave(scale, torch.tensor(layer.logical_widths))[
-                :, None
-            ]
         return (weight * scale).to(out_dtype).to(layer.weight.device)
     return mla_attention_original_get_and_maybe_dequant_weights(layer, out_dtype)
 
