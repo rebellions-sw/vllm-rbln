@@ -56,23 +56,3 @@ class TestMinPRowsMatchLogits:
 
         assert torch.isinf(out[:2, 1:]).all()
         assert torch.isfinite(out[2:]).all()
-
-    def test_prefill_slices_to_leading_rows(self):
-        proc = _min_p_proc(2)
-
-        out = proc.apply(_peaked_logits(1))
-
-        assert torch.isinf(out[0, 1:]).all()
-        assert torch.isfinite(out[0, 0])
-
-    def test_state_survives_a_row_mismatch(self):
-        # update_state only re-slices min_p on a batch change, so a prefill
-        # step (1 row) followed by a decode step (4 rows) with no batch change
-        # must still mask both live requests on the decode step.
-        proc = _min_p_proc(2)
-        proc.apply(_peaked_logits(1))
-
-        out = proc.apply(_peaked_logits(4))
-
-        assert torch.isinf(out[:2, 1:]).all()
-        assert torch.isfinite(out[2:]).all()

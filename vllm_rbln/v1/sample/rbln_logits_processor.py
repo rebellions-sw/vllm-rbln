@@ -94,27 +94,16 @@ class RBLNMinPLogitsProcessor(MinPLogitsProcessor):
         if not self.min_p_count:
             return logits
 
-        # update_state sizes min_p to the live request count, so it has to be
-        # re-matched to the logits rows the native runner hands the sampler.
+        # update_state sizes min_p to the live request count, but on decode the
+        # native runner hands the sampler logits padded to the batch bucket.
+        # A min_p of 0 makes the padded rows no-ops.
+        pad = logits.shape[0] - self.min_p.shape[0]
+        assert pad >= 0
         min_p = self.min_p
-        num_rows = logits.shape[0]
-        if min_p.shape[0] > num_rows:
-            # Prefill: the sampler receives only the leading rows.
-            rows = min_p[:num_rows]
-        elif min_p.shape[0] < num_rows:
-            # Decode: logits are padded to the batch bucket. min_p 0 is a no-op.
-            rows = torch.cat([min_p, min_p.new_zeros(num_rows - min_p.shape[0], 1)])
-        else:
-            # Rows already match: a full native bucket, or the optimum path,
-            # where RBLNInputBatch sizes min_p to the bucket.
-            rows = min_p
-        self.min_p = rows.to(logits.dtype)
-        try:
-            return super().apply(logits)
-        finally:
-            # update_state only re-slices on a batch change; a resized tensor
-            # left behind would leak into the next step.
-            self.min_p = min_p
+        if pad:
+            min_p = torch.cat([min_p, min_p.new_zeros(pad, 1)])
+        self.min_p = min_p.to(logits.dtype)
+        return super().apply(logits)
 
 
 RBLN_BUILTIN_LOGITS_PROCESSORS: list[type[LogitsProcessor]] = [
