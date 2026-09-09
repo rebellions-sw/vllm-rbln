@@ -1526,12 +1526,17 @@ class RBLNOptimumModelRunner(
                     dtype=self.dtype,
                 )
 
-        num_graphs = len(WARM_UP_CONFIGS) * len(self.bucket_sizes)
+        num_buckets = len(self.bucket_sizes)
+        greedy_configs = sum(1 for c in WARM_UP_CONFIGS if c["all_greedy"])
+        topk_topp_configs = len(WARM_UP_CONFIGS) - greedy_configs
+        busiest_fn_configs = max(greedy_configs, topk_topp_configs)
+
         torch._dynamo.config.recompile_limit = max(
-            torch._dynamo.config.recompile_limit, num_graphs
+            torch._dynamo.config.recompile_limit, busiest_fn_configs * num_buckets
         )
         torch._dynamo.config.accumulated_recompile_limit = max(
-            torch._dynamo.config.accumulated_recompile_limit, num_graphs
+            torch._dynamo.config.accumulated_recompile_limit,
+            len(WARM_UP_CONFIGS) * num_buckets,
         )
 
     @torch.inference_mode
