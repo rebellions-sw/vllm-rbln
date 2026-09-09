@@ -1525,15 +1525,13 @@ class RBLNOptimumModelRunner(
                     (bucket_size, self.model_config.get_vocab_size()),
                     dtype=self.dtype,
                 )
-        # Per bucket shape, rbln_top_k_top_p_sample compiles one entry per
-        # (top_k, top_p) None/tensor combination (4) and rbln_greedy_sample
-        # one. Raise the per-code-object and global limits to fit; never lower.
+
+        num_graphs = len(WARM_UP_CONFIGS) * len(self.bucket_sizes)
         torch._dynamo.config.recompile_limit = max(
-            torch._dynamo.config.recompile_limit, 4 * len(self.bucket_sizes)
+            torch._dynamo.config.recompile_limit, num_graphs
         )
         torch._dynamo.config.accumulated_recompile_limit = max(
-            torch._dynamo.config.accumulated_recompile_limit,
-            5 * len(self.bucket_sizes),
+            torch._dynamo.config.accumulated_recompile_limit, num_graphs
         )
 
     @torch.inference_mode
