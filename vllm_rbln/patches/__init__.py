@@ -31,12 +31,15 @@ from . import (
     deepseek_v2,
     distributed_utils,
     dynamic_kv,
+    engine_core,
     fp8_moe_method,
     gpt_oss,
     gpt_oss_mxfp4_config,
+    llama_eagle3,
     metrics,
     minimax_m2,
     mla,
+    modelopt_mixed_config,
     models_utils,
     multi_connector,
     oot,
@@ -44,6 +47,7 @@ from . import (
     qwen2_moe,
     qwen3_moe,
     rotary_embedding,
+    speculative_config,
 )
 
 __all__ = (

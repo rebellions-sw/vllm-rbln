@@ -27,10 +27,12 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingParams
 from vllm.v1.kv_cache_interface import FullAttentionSpec
-from vllm.v1.outputs import SamplerOutput
+from vllm.v1.outputs import LogprobsTensors, SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
+from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.kv_connector_model_runner_mixin import (
     KVConnectorModelRunnerMixin,
@@ -40,6 +42,7 @@ import vllm_rbln.v1.worker.dp_utils as dp_utils
 import vllm_rbln.v1.worker.rbln_model_runner as mr
 from vllm_rbln.v1.core.rbln_kv_cache_manager import KVCacheCopyOp
 from vllm_rbln.v1.spec_decode.eagle import RBLNEagleProposer
+from vllm_rbln.v1.spec_decode.utils import eagle_prepare_inputs_padded
 from vllm_rbln.v1.worker.bucketing.exponential_bucketing_manager import (
     ExponentialBucketingManager,
 )
@@ -55,6 +58,7 @@ from vllm_rbln.v1.worker.rbln_model_runner import (
     _depad_sampler_output,
     _pad_rows,
     _pad_sampling_metadata,
+    _pad_spec_decode_metadata,
 )
 
 
@@ -85,7 +89,9 @@ def _make_runner_stub(**attrs):
     return runner
 
 
-def _sampling_metadata(n, *, no_penalties=True, spec_token_ids=None):
+def _sampling_metadata(
+    n, *, no_penalties=True, spec_token_ids=None, allowed_token_ids_mask=None
+):
     return SamplingMetadata(
         temperature=torch.ones(n),
         all_greedy=False,
@@ -100,12 +106,28 @@ def _sampling_metadata(n, *, no_penalties=True, spec_token_ids=None):
         presence_penalties=torch.zeros(n),
         repetition_penalties=torch.ones(n),
         output_token_ids=[[] for _ in range(n)],
-        allowed_token_ids_mask=None,
+        allowed_token_ids_mask=allowed_token_ids_mask,
         bad_words_token_ids={},
         logitsprocs=None,
         logprob_token_ids=None,
         spec_token_ids=spec_token_ids,
         thinking_budget_state_holder=None,
+    )
+
+
+def _spec_decode_metadata(num_draft_tokens: list[int]) -> SpecDecodeMetadata:
+    num_sampled_tokens = [n + 1 for n in num_draft_tokens]
+    cu_sampled = torch.tensor(num_sampled_tokens, dtype=torch.int32).cumsum(0)
+    cu_draft = torch.tensor(num_draft_tokens, dtype=torch.int32).cumsum(0)
+    total_draft = int(cu_draft[-1])
+    return SpecDecodeMetadata(
+        draft_token_ids=torch.zeros(total_draft, dtype=torch.int32),
+        num_draft_tokens=list(num_draft_tokens),
+        cu_num_draft_tokens=cu_draft,
+        cu_num_sampled_tokens=cu_sampled,
+        target_logits_indices=torch.arange(total_draft, dtype=torch.int32),
+        bonus_logits_indices=cu_sampled - 1,
+        logits_indices=torch.arange(int(cu_sampled[-1]), dtype=torch.int32),
     )
 
 
@@ -203,11 +225,138 @@ class TestPadDepad:
         assert len(p.output_token_ids) == 4
         assert p.output_token_ids[2] == []
 
+    def test_pad_sampling_metadata_pads_allowed_token_ids_mask(self):
+        mask = torch.zeros(2, 10, dtype=torch.bool)
+        mask[0, 3] = True
+        p = _pad_sampling_metadata(
+            _sampling_metadata(2, allowed_token_ids_mask=mask), 4
+        )
+        assert p.allowed_token_ids_mask.shape == (4, 10)
+        assert torch.equal(p.allowed_token_ids_mask[:2], mask)
+
     def test_depad_sampler_output_trims_to_num_reqs(self):
         out = SamplerOutput(
             sampled_token_ids=torch.arange(4).reshape(4, 1), logprobs_tensors=None
         )
         assert _depad_sampler_output(out, 2).sampled_token_ids.shape == (2, 1)
+
+    def test_depad_sampler_output_keeps_every_speculative_logprob_position(self):
+        batch_size = 4
+        output_width = 3
+        out = SamplerOutput(
+            sampled_token_ids=torch.zeros(
+                (batch_size, output_width), dtype=torch.int32
+            ),
+            logprobs_tensors=LogprobsTensors(
+                torch.zeros((batch_size * output_width, 2), dtype=torch.int32),
+                torch.zeros((batch_size * output_width, 2)),
+                torch.zeros(batch_size * output_width, dtype=torch.int32),
+            ),
+        )
+
+        depadded = _depad_sampler_output(out, 2)
+
+        assert depadded.sampled_token_ids.shape == (2, output_width)
+        assert depadded.logprobs_tensors is not None
+        assert depadded.logprobs_tensors.logprobs.shape[0] == 2 * output_width
+
+    def test_pad_spec_decode_metadata_preserves_packed_token_axes(self):
+        original = _spec_decode_metadata([1, 1])
+
+        padded = _pad_spec_decode_metadata(original, 4)
+
+        assert padded.num_draft_tokens == [1, 1, 0, 0]
+        assert padded.cu_num_draft_tokens.shape[0] == 4
+        assert padded.cu_num_sampled_tokens.shape[0] == 4
+        assert padded.bonus_logits_indices.shape[0] == 4
+        assert padded.max_spec_len == original.max_spec_len
+        assert torch.equal(padded.target_logits_indices, original.target_logits_indices)
+        assert torch.equal(padded.logits_indices, original.logits_indices)
+
+    def test_padded_metadata_breaks_the_eagle_reader_it_would_reach(self):
+        # Why the pad lives in _sample, not in the producer: this reader
+        # differences cu_num_draft_tokens against num_reqs-sized tensors.
+        padded = _pad_spec_decode_metadata(_spec_decode_metadata([1, 1]), 4)
+
+        with pytest.raises(RuntimeError):
+            eagle_prepare_inputs_padded(
+                padded.cu_num_draft_tokens,
+                torch.tensor([2, 2], dtype=torch.int32),
+                torch.tensor([0, 2, 4], dtype=torch.int32),
+            )
+
+
+class TestSamplePadding:
+    @staticmethod
+    def _runner(rejection_output: SamplerOutput):
+        rejection_sampler = MagicMock(return_value=rejection_output)
+        runner = _make_runner_stub(
+            _is_prefill_step=False,
+            use_async_scheduling=False,
+            input_batch=SimpleNamespace(
+                num_reqs=2,
+                sampling_metadata=_sampling_metadata(2, spec_token_ids=[[], []]),
+            ),
+            bucketing_manager=SimpleNamespace(
+                decode_batch_buckets=[2, 4], max_batch_size=4
+            ),
+            max_num_reqs=8,
+            rejection_sampler=rejection_sampler,
+        )
+        return runner, rejection_sampler
+
+    def test_compiled_rejection_sampler_uses_per_stage_batch_bound(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+        output = SamplerOutput(
+            sampled_token_ids=torch.zeros((4, 3), dtype=torch.int32),
+            logprobs_tensors=None,
+        )
+        runner, rejection_sampler = self._runner(output)
+
+        runner._sample(torch.zeros((4, 10)), _spec_decode_metadata([1, 1]))
+
+        padded_metadata = rejection_sampler.call_args.args[0]
+        assert len(padded_metadata.num_draft_tokens) == 4
+
+    def test_torch_rejection_sampler_keeps_live_batch_metadata(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", False)
+        output = SamplerOutput(
+            sampled_token_ids=torch.zeros((2, 3), dtype=torch.int32),
+            logprobs_tensors=None,
+        )
+        runner, rejection_sampler = self._runner(output)
+        spec_decode_metadata = _spec_decode_metadata([1, 1])
+        sampling_metadata = runner.input_batch.sampling_metadata
+
+        runner._sample(torch.zeros((4, 10)), spec_decode_metadata)
+
+        assert rejection_sampler.call_args.args[0] is spec_decode_metadata
+        assert rejection_sampler.call_args.args[3] is sampling_metadata
+
+
+def test_rejection_sampler_warmup_uses_per_stage_batch_bound(monkeypatch):
+    monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+    rejection_sample = MagicMock()
+    runner = _make_runner_stub(
+        speculative_config=object(),
+        num_spec_tokens=2,
+        is_pooling_model=False,
+        model_config=SimpleNamespace(get_vocab_size=lambda: 10),
+        device=torch.device("cpu"),
+        dtype=torch.bfloat16,
+        bucketing_manager=SimpleNamespace(
+            decode_batch_buckets=[2, 4], max_batch_size=4
+        ),
+        max_num_reqs=8,
+        rejection_sampler=SimpleNamespace(
+            impl=SimpleNamespace(rejection_sample=rejection_sample)
+        ),
+    )
+
+    runner._warmup_sampler_decode_batches()
+
+    assert rejection_sample.call_count == 1
+    assert len(rejection_sample.call_args.args[1]) == 4
 
 
 class TestPredicates:
@@ -717,6 +866,10 @@ def _sched(*, new=(), finished=(), scheduled=None, cached=None, spec=None):
 class TestUpdateStates:
     # Request-state bookkeeping on a real InputBatch; scheduler_output is
     # duck-typed since every access is an attribute or index read.
+    @pytest.fixture(autouse=True)
+    def _config(self, rbln_config):
+        rbln_config()
+
     @staticmethod
     def _runner(monkeypatch, *, input_batch, requests=None):
         monkeypatch.setattr(
@@ -727,6 +880,7 @@ class TestUpdateStates:
             requests=requests if requests is not None else {},
             num_prompt_logprobs={},
             is_pooling_model=False,
+            sort_batch_by_length=False,
             kv_cache_config=SimpleNamespace(kv_cache_groups=[]),
         )
 
@@ -831,14 +985,35 @@ class TestCalcSpecDecodeMetadata:
         assert md.bonus_logits_indices.tolist() == [0, 1]
 
 
+class TestSortBatchByLength:
+    # __init__ enables the sort on REBEL CR13 and wherever
+    # VLLM_RBLN_BATCH_ATTN_OPT is set; other parts keep the scheduler's order.
+    @pytest.mark.parametrize(
+        ("is_cr13", "batch_attn_opt", "expected"),
+        [
+            (True, "0", True),
+            (False, "0", False),
+            (False, "1", True),
+        ],
+    )
+    def test_resolved_from_device_and_flag(
+        self, monkeypatch, make_model_runner, is_cr13, batch_attn_opt, expected
+    ):
+        monkeypatch.setattr(current_platform, "is_cr13", lambda: is_cr13)
+        monkeypatch.setenv("VLLM_RBLN_BATCH_ATTN_OPT", batch_attn_opt)
+        runner = make_model_runner(init_kv_cache=False)
+        assert runner.sort_batch_by_length is expected
+
+
 class TestMayReorderBatch:
     # Stable descending sort by num_tokens_no_spec, applied in place. Uses a real
     # InputBatch; scheduler_output is unused by the sort path, so None is passed.
+    # sort_batch_by_length is what __init__ resolves from the device.
     @staticmethod
-    def _runner(monkeypatch, ib, *, sort=True, groups=1):
-        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SORT_BATCH", sort)
+    def _runner(ib, *, sort=True, groups=1):
         return _make_runner_stub(
             input_batch=ib,
+            sort_batch_by_length=sort,
             kv_cache_config=SimpleNamespace(kv_cache_groups=[object()] * groups),
         )
 
@@ -848,30 +1023,30 @@ class TestMayReorderBatch:
         ib.num_tokens_no_spec[: len(tokens)] = tokens
         return ib
 
-    def test_noop_when_sort_disabled(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]), sort=False)
+    def test_noop_when_sort_disabled(self):
+        r = self._runner(self._batch([1, 3, 2, 4]), sort=False)
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r0", "r1", "r2", "r3"]
 
-    def test_noop_when_no_kv_cache_groups(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]), groups=0)
+    def test_noop_when_no_kv_cache_groups(self):
+        r = self._runner(self._batch([1, 3, 2, 4]), groups=0)
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r0", "r1", "r2", "r3"]
 
-    def test_already_sorted_skips(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([4, 3, 2, 1]))
+    def test_already_sorted_skips(self):
+        r = self._runner(self._batch([4, 3, 2, 1]))
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r0", "r1", "r2", "r3"]
         assert r.input_batch.batch_update_builder.moved == []
 
-    def test_sorts_descending_by_num_tokens(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]))
+    def test_sorts_descending_by_num_tokens(self):
+        r = self._runner(self._batch([1, 3, 2, 4]))
         r._may_reorder_batch(None)
         assert r.input_batch.req_ids == ["r3", "r1", "r2", "r0"]
         assert r.input_batch.num_tokens_no_spec[:4].tolist() == [4, 3, 2, 1]
 
-    def test_emits_swap_records_for_non_pooling(self, monkeypatch):
-        r = self._runner(monkeypatch, self._batch([1, 3, 2, 4]))
+    def test_emits_swap_records_for_non_pooling(self):
+        r = self._runner(self._batch([1, 3, 2, 4]))
         assert not r.input_batch.is_pooling_model
         r._may_reorder_batch(None)
         # Non-pooling models replay pairwise swaps into the logits-proc builder.
@@ -1255,6 +1430,7 @@ class TestDummyRunPPIntermediateTensors:
             vllm_config=SimpleNamespace(),
             input_stager=SimpleNamespace(stage=stage),
             model_executable=lambda **k: None,
+            intermediate_tensors_dict={},
         )
         monkeypatch.setattr(RBLNModelRunner, "use_wrapped_compute_logits", False)
         monkeypatch.setattr(

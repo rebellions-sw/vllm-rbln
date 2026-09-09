@@ -71,6 +71,7 @@ from vllm.v1.worker.worker_base import CompilationTimes, WorkerBase
 
 import vllm_rbln.envs as envs
 from vllm_rbln.compilation.backends import set_compile_stage
+from vllm_rbln.config import build_rbln_config, set_rbln_config
 from vllm_rbln.distributed.kv_transfer.kv_connector.v1.utils import (
     finalize_kv_cache_registrations,
 )
@@ -169,6 +170,9 @@ class RBLNWorker(WorkerBase):
             is_driver_worker=is_driver_worker,
         )
 
+        # Before _init_device_env(), which reads device-count options.
+        set_rbln_config(build_rbln_config(vllm_config.additional_config))
+
         self._init_device_env()
 
         self._rbln_host_threads_before_compile_ready = False
@@ -183,9 +187,10 @@ class RBLNWorker(WorkerBase):
         if envs.VLLM_RBLN_USE_DYNAMIC_KV_CACHE:
             self._foreign_dram_used_bytes = read_rbln_card_dram_used_bytes()
             logger.debug(
-                "foreign device DRAM at worker init: %d bytes (RBLN_DEVICES=%s)",
+                "foreign device DRAM at worker init: %d bytes "
+                "(RBLN_VISIBLE_DEVICES=%s)",
                 self._foreign_dram_used_bytes,
-                os.environ.get("RBLN_DEVICES", ""),
+                os.environ.get("RBLN_VISIBLE_DEVICES", ""),
             )
 
         self.profiler: Any | None = None
@@ -205,44 +210,29 @@ class RBLNWorker(WorkerBase):
         pass
 
     def _init_device_env(self) -> None:
-        world_size = self.parallel_config.world_size // envs.VLLM_RBLN_NUM_RAY_NODES
         env_var = current_platform.device_control_env_var
-
         num_devices = envs.VLLM_RBLN_NUM_DEVICES_PER_LOCAL_RANK
-        total_device_count = world_size * num_devices
 
-        if env_var not in os.environ:
-            dev_begin = total_device_count * self.parallel_config.data_parallel_rank
-            dev_end = dev_begin + total_device_count
-            device_ids = [str(i) for i in range(dev_begin, dev_end)]
-            start_idx = self.local_rank * num_devices
-            end_idx = start_idx + num_devices
-            selected_devices = ",".join(device_ids[start_idx:end_idx])
-        else:
-            # vLLM 0.24 stopped narrowing the device-control env var per DP rank
-            # and puts the mapping on the config instead, so under DP the env var
-            # now holds the whole deployment's list (vllm/v1/engine/utils.py,
-            # set_assigned_physical_gpu_ids_for_dp_rank). getattr: older vLLM has
-            # no such field.
-            assigned = getattr(self.parallel_config, "assigned_physical_gpu_ids", None)
-            if assigned:
-                device_ids = [str(i) for i in assigned]
-            else:
-                device_ids = os.environ[env_var].split(",")
-            assert len(device_ids) == world_size, (
-                f"device_ids: {device_ids} should have device count: {world_size}"
-            )
-            try:
-                device_id = int(device_ids[self.local_rank])
-                start_idx = device_id * num_devices
-                end_idx = start_idx + num_devices
-                device_ids = [str(i) for i in range(start_idx, end_idx)]
-                selected_devices = ",".join(device_ids)
-            except ValueError as e:
-                raise ValueError(
-                    f"device_ids: {device_ids} should be a list of integers"
-                ) from e
+        dp_rank = self.parallel_config.data_parallel_rank_local or 0
+        slot = dp_rank * self.parallel_config.world_size + self.local_rank
+        first = slot * num_devices
+        # The visible variant, because every worker process is handed a data
+        # parallel mapping of one device per rank that the logical variant
+        # prefers (MultiprocExecutor.worker_main), and a rank owning
+        # num_devices NPUs cannot be described by one entry.
+        try:
+            selected = [
+                current_platform.visible_device_id_to_physical_device_id(first + offset)
+                for offset in range(num_devices)
+            ]
+        except IndexError as e:
+            raise ValueError(
+                f"rank slot {slot} needs {num_devices} NPU(s) from index "
+                f"{first} of {env_var}={os.environ.get(env_var, '')!r}. "
+                "One entry per NPU is expected."
+            ) from e
 
+        selected_devices = ",".join(str(device) for device in selected)
         os.environ[env_var] = selected_devices
         logger.info(
             "Local rank: %d, Selected devices: %s",
@@ -323,6 +313,7 @@ class RBLNWorker(WorkerBase):
                 "gpt_oss_mxfp4",
                 "fp8",
                 "compressed-tensors",
+                "modelopt_mixed",
             )
 
             if quantization == "compressed-tensors":
@@ -363,6 +354,11 @@ class RBLNWorker(WorkerBase):
             if quantization == "fp8":
                 nbits_per_param = 8
                 packed_num_elems = 1
+            elif quantization == "modelopt_mixed":
+                # The fp8 weights and both NVFP4 scales are float dtypes and are
+                # counted by element_size() below
+                nbits_per_param = 4
+                packed_num_elems = 8 // 4
             elif quantization == "int4":
                 nbits_per_param = 4
                 packed_num_elems = 1
@@ -1172,19 +1168,23 @@ class RBLNWorker(WorkerBase):
     ) -> ModelRunnerOutput | AsyncModelRunnerOutput:
         return self.model_runner.sample_tokens(grammar_output)
 
+    def _send_handoff(self, tensors: dict) -> None:
+        """Hand this stage's output on; a seam the metrics patch wraps."""
+        # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
+        get_pp_group().send_tensor_dict(tensors)
+
     @torch.inference_mode()
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
     ) -> ModelRunnerOutput | None:
         intermediate_tensors = None
-        forward_pass = scheduler_output.total_num_scheduled_tokens > 0
 
-        if forward_pass and not get_pp_group().is_first_rank:
-            # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
-            intermediate_tensors = IntermediateTensors(
-                get_pp_group().recv_tensor_dict()
-            )
+        if (
+            scheduler_output.total_num_scheduled_tokens > 0
+            and not get_pp_group().is_first_rank
+        ):
+            intermediate_tensors = self.model_runner.recv_intermediate_tensors()
 
         output = self.model_runner.execute_model(scheduler_output, intermediate_tensors)
         if isinstance(output, ModelRunnerOutput | NoneType):
@@ -1197,8 +1197,7 @@ class RBLNWorker(WorkerBase):
             and not get_pp_group().is_last_rank
         )
 
-        # NOTE(RBLN): DO NOT all_gather_group for RBLN pp
-        get_pp_group().send_tensor_dict(output.tensors)
+        self._send_handoff(output.tensors)
 
         # Non-last PP rank: the model runner already surfaces this rank's
         # KV-connector output through the two-phase sample_tokens() path

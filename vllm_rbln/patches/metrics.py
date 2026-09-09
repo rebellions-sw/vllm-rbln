@@ -24,12 +24,22 @@ absorbs the wait. Async defers that read out of the pass, so there it is dispatc
 A pass is recorded only once its phase and its graph time are both known, which is
 what keeps those counts equal.
 
+Spec decode moves that first blocking read again -- into the spec-only logits gather
+in execute_model's postprocess block, which syncs on the target forward. The gather
+is an inline block with no method to wrap, so timed_region folds the runner's
+"postprocess" profiler region into the graph sum; it is empty without spec decode.
+The drafter, which runs between _sample and _bookkeeping_sync, is deliberately not
+folded: MODEL + SAMPLE stays the main-graph number, and the drafter's time -- under
+EAGLE/MTP a draft-model forward, plus any sampler wait its first read absorbs --
+shows up in the E2E residual.
+
 The whole feature lives in this module so the runner carries no metrics code at all. A
 range that is not a whole method -- the model call sits mid-way through execute_model --
 is reached by wrapping the callable the runner holds, and the phase, which is a local of
 execute_model, is read where the runner computes it.
 """
 
+import contextlib
 import functools
 import json
 import os
@@ -39,6 +49,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+from vllm.sequence import IntermediateTensors
+from vllm.v1.utils import record_function_or_nullcontext
 
 from vllm_rbln import envs
 from vllm_rbln.logger import init_logger
@@ -266,12 +278,14 @@ _shutdown = RBLNWorker.shutdown
 
 @functools.wraps(_execute_model)
 def execute_model(self, *args, **kwargs):
+    global _ACTIVE_CTX
     ctx = _ctx(self)
+    _ACTIVE_CTX = ctx
     ctx.start_pass()
     output = _execute_model(self, *args, **kwargs)
-    # The engine calls sample_tokens() only if execute_model() returned None, so a
-    # non-None return means nobody else will end this pass.
-    if output is not None:
+    # A None pass is closed by sample_tokens, an IntermediateTensors pass by
+    # send_handoff below; anything else nobody would end.
+    if output is not None and not isinstance(output, IntermediateTensors):
         ctx.end_pass()
     return output
 
@@ -346,6 +360,21 @@ def determine_batch_execution_and_padding(self, *args, **kwargs):
     return result
 
 
+_send_handoff = RBLNWorker._send_handoff
+
+
+@functools.wraps(_send_handoff)
+def send_handoff(self, *args, **kwargs):
+    # The send waits on this stage's compute, so its wall carries the stage's time.
+    # No try/finally: a raising hand-off leaves the pass open, like any raising pass.
+    ctx = _ctx(self.model_runner)
+    start = time.perf_counter()
+    output = _send_handoff(self, *args, **kwargs)
+    ctx.add_graph_time(time.perf_counter() - start)
+    ctx.end_pass()
+    return output
+
+
 @functools.wraps(_shutdown)
 def shutdown(self):
     # The runner is built in init_device(), not __init__, so a worker that failed
@@ -355,6 +384,28 @@ def shutdown(self):
     if ctx is not None:
         ctx.print_stats()
     _shutdown(self)
+
+
+_ACTIVE_CTX: _PerformanceContext | None = None
+
+# The region that holds the spec-only logits gather (see the module docstring); it
+# belongs to the graph sum, and is empty without spec decode.
+_GRAPH_REGION = "rbln_model_runner: postprocess"
+
+
+@contextlib.contextmanager
+def timed_region(name: str):
+    ctx = _ACTIVE_CTX
+    if name != _GRAPH_REGION or ctx is None or not ctx.in_pass:
+        with record_function_or_nullcontext(name):
+            yield
+        return
+    start = time.perf_counter()
+    try:
+        with record_function_or_nullcontext(name):
+            yield
+    finally:
+        ctx.add_graph_time(time.perf_counter() - start)
 
 
 _RUNNER = "vllm_rbln.v1.worker.rbln_model_runner.RBLNModelRunner"
@@ -400,10 +451,22 @@ def _register_patches() -> None:
             "local of execute_model and is not observable from any wrapped callable.",
         ),
         (
+            f"{_WORKER}._send_handoff",
+            send_handoff,
+            "Times the hand-off and closes its pass; left outside the pass, "
+            "the send hides a non-last rank's stage time.",
+        ),
+        (
             f"{_WORKER}.shutdown",
             shutdown,
             "Reports the collected metrics before teardown; the worker holds the only "
             "shutdown hook that still has the runner.",
+        ),
+        (
+            "vllm_rbln.v1.worker.rbln_model_runner.record_function_or_nullcontext",
+            timed_region,
+            "Spec decode syncs on the forward in the spec-only logits gather, "
+            "an inline block of execute_model with no method to wrap.",
         ),
     ):
         register_patch(

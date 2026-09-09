@@ -18,7 +18,7 @@ import os
 import platform
 from collections import defaultdict
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -49,7 +49,7 @@ logger = init_logger(__name__)
 
 RBLN_SYSFS_CLASS_DIR = "/sys/class/rebellions"
 # sysfs lists every card on the host, /dev only ours; reading sysfs by the raw
-# RBLN_DEVICES entry would charge a neighbouring container's workload to us.
+# RBLN_VISIBLE_DEVICES entry would charge a neighbouring container's workload to us.
 RBLN_DEV_DIR = "/dev"
 
 # 144 GiB of quad-chiplet DRAM minus the 4 GiB system region
@@ -117,13 +117,13 @@ def num_attn_module(model_config, cache_dtype) -> int:
 
 
 def get_rbln_visible_card_indices() -> list[int]:
-    """Card indices this process may use, from `RBLN_DEVICES`.
+    """Card indices this process may use, from `RBLN_VISIBLE_DEVICES`.
 
     Unset or empty means every card under /sys/class/rebellions. Prefer
     `get_rbln_owned_card_indices`; this one reads each entry as a sysfs card
     name and remains only as the fallback for hosts with no device nodes.
     """
-    raw = os.environ.get("RBLN_DEVICES", "")
+    raw = os.environ.get("RBLN_VISIBLE_DEVICES", "")
     if raw.strip():
         return sorted(
             {int(token) for token in raw.replace(",", " ").split() if token.strip()}
@@ -154,7 +154,7 @@ def _rbln_present_card_indices() -> list[int]:
 
 
 def get_rbln_owned_card_indices() -> list[int]:
-    """sysfs card indices this process owns, with `RBLN_DEVICES` resolved.
+    """sysfs card indices this process owns, with `RBLN_VISIBLE_DEVICES` resolved.
 
     Entry `i` selects the `i`-th present device; a physical name is accepted too,
     but the positional reading wins when both are possible.
@@ -164,7 +164,7 @@ def get_rbln_owned_card_indices() -> list[int]:
         # No device nodes (unit tests, host without the driver): nothing better
         # is knowable, so keep the previous behaviour exactly.
         return get_rbln_visible_card_indices()
-    raw = os.environ.get("RBLN_DEVICES", "")
+    raw = os.environ.get("RBLN_VISIBLE_DEVICES", "")
     if not raw.strip():
         return present
     owned: list[int] = []
@@ -942,3 +942,46 @@ def get_kv_cache_names(
             raise NotImplementedError
         kv_cache_names.extend(layer_names)
     return kv_cache_names
+
+
+def copy_host_device_kv_blocks(
+    src_kv_caches: dict[str, torch.Tensor],
+    dst_kv_caches: dict[str, torch.Tensor],
+    src_block_ids: list[int],
+    dst_block_ids: list[int],
+    direction: Literal["h2d", "d2h"],
+    *,
+    use_mla: bool = False,
+) -> None:
+    """Copy KV blocks between the host xfer buffer and the device KV cache.
+
+    Requires VLLM_RBLN_USE_DEVICE_TENSOR=1. Splits K/V (dim 0) first so each
+    per-block view is contiguous. MLA has no K/V level to split, and only
+    `use_mla` says so -- SSM/conv and cross-layer pools are 3D as well.
+    """
+    if not src_kv_caches or not dst_kv_caches or not src_block_ids or not dst_block_ids:
+        return
+    assert src_block_ids == dst_block_ids, (
+        "src_block_ids and dst_block_ids must be the same: "
+        f"src_block_ids={src_block_ids} dst_block_ids={dst_block_ids}"
+    )
+    # P/D uses identical block ids on both sides (asserted above), so the copy
+    # indexes by src_block_ids; it is symmetric, so the direction arg (part of
+    # the fixed CopyBlocksOp signature) is unused.
+    del direction
+    dsts: list[torch.Tensor] = []
+    srcs: list[torch.Tensor] = []
+    for layer_name, dst_cache in dst_kv_caches.items():
+        src_cache = src_kv_caches[layer_name]
+        if use_mla:
+            for idx in src_block_ids:
+                dsts.append(dst_cache[idx])
+                srcs.append(src_cache[idx])
+            continue
+        for kv in range(dst_cache.shape[0]):
+            dst_kv = dst_cache[kv]
+            src_kv = src_cache[kv]
+            for idx in src_block_ids:
+                dsts.append(dst_kv[idx])
+                srcs.append(src_kv[idx])
+    torch._foreach_copy_(dsts, srcs)
