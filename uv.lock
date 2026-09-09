@@ -1533,7 +1533,7 @@ wheels = [
 
 [[package]]
 name = "optimum-rbln"
-version = "0.11.3a4"
+version = "0.11.3a5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
@@ -1546,9 +1546,9 @@ dependencies = [
     { name = "torchvision", marker = "platform_python_implementation == 'CPython'" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/74/3633e2ded59faebc435c1f34e04a9d85125136579b647c47a91ca07e2f14/optimum_rbln-0.11.3a4.tar.gz", hash = "sha256:45bcf23fce6d85df26930dd55e18bd1b35ca6ecef57441a05dc082ed8764f33b", size = 649283, upload-time = "2026-09-08T11:19:24.43Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/80/80/4a07a044e388286ae78ccaaa07c8bef9b8d5bad0f3138f401cf78ab01789/optimum_rbln-0.11.3a5.tar.gz", hash = "sha256:f04d72ef46025d3983c9fa64f5fb08c5b00753342e55e0abfe643027ba2bf7ae", size = 656002, upload-time = "2026-09-09T07:29:39.965Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/13/cf03ee360b11eb1d18f3218ba9ca02f1ad4c23c2d2748456fe776c7711d5/optimum_rbln-0.11.3a4-py3-none-any.whl", hash = "sha256:22bf329f64406d3dc5c064d7d10168534c52e28ba5a835a5a6d39d4134c483d7", size = 673955, upload-time = "2026-09-08T11:19:21.456Z" },
+    { url = "https://files.pythonhosted.org/packages/29/87/c358ae2c183730354f07aeef81905167258db0379a14ba3b6e5f0cca489d/optimum_rbln-0.11.3a5-py3-none-any.whl", hash = "sha256:039b26ce3377a3095db540c59ed4309aa8e6b84af12fdd93e53b08e68f0d3000", size = 678195, upload-time = "2026-09-09T07:29:37.477Z" },
 ]
 
 [[package]]
@@ -2931,7 +2931,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = "<0.137" },
     { name = "fire", marker = "extra == 'dev'" },
     { name = "huggingface-hub", marker = "extra == 'dev'" },
-    { name = "optimum-rbln", specifier = ">=0.11.3a4,<0.11.4" },
+    { name = "optimum-rbln", specifier = ">=0.11.3a5,<0.11.4" },
     { name = "packaging", marker = "extra == 'dev'" },
     { name = "pynvml", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'test'" },
