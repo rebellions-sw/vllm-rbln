@@ -1535,14 +1535,13 @@ class RBLNOptimumModelRunner(
                     (bucket_size, self.model_config.get_vocab_size()),
                     dtype=self.dtype,
                 )
-        # Past either limit dynamo silently falls back to eager for the frame.
-        # recompile_limit is per code object, accumulated_recompile_limit is
-        # process-wide; only raise them, other compiles share the same globals.
+
         num_graphs = len(WARM_UP_CONFIGS) * len(self.bucket_sizes)
-        dynamo_config = torch._dynamo.config
-        dynamo_config.recompile_limit = max(dynamo_config.recompile_limit, num_graphs)
-        dynamo_config.accumulated_recompile_limit = max(
-            dynamo_config.accumulated_recompile_limit, num_graphs
+        torch._dynamo.config.recompile_limit = max(
+            torch._dynamo.config.recompile_limit, num_graphs
+        )
+        torch._dynamo.config.accumulated_recompile_limit = max(
+            torch._dynamo.config.accumulated_recompile_limit, num_graphs
         )
 
     @torch.inference_mode
