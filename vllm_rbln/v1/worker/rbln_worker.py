@@ -32,6 +32,7 @@ except ImportError:
 
 import torch.distributed as dist
 import torch.nn as nn
+from rebel import flags as rbln_flags
 from rebel import profiler as rbln_profiler
 from torch._dynamo.exc import BackendCompilerFailed
 from vllm.config import (
@@ -1218,7 +1219,7 @@ class RBLNWorker(WorkerBase):
     def profile(self, is_start: bool = True, profile_prefix: str | None = None):
         # Check if profiling is enabled
         if self.profiler_config is None or (
-            self.profiler_config.profiler is None and not rbln_profiler.is_activated()
+            self.profiler_config.profiler is None and not rbln_flags.RBLN_PROFILER
         ):
             raise RuntimeError(
                 "Profiling is not enabled. Please set --profiler-config to enable "
@@ -1257,7 +1258,7 @@ class RBLNWorker(WorkerBase):
                     logger.debug(
                         "Starting torch profiler with tarce name: %s", trace_name
                     )
-                elif profiler_type is None:
+                elif profiler_type is None and rbln_flags.RBLN_PROFILER:
                     self.profiler = RblnProfilerWrapper(self.profiler_config)
                     logger.debug("Starting RBLN profiler on %s", rank_suffix)
                 else:
