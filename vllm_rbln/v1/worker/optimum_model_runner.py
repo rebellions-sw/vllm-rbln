@@ -1255,7 +1255,7 @@ class RBLNOptimumModelRunner(
 
                 clear_reqs(input_batch)
 
-        sig = mega_cache.sampler_config_signature(
+        sig = mega_cache.sampler_bundle_signature(
             self.input_batch.vocab_size, self.dtype, self.bucket_sizes
         )
         mega_cache.load("sampler", sig)

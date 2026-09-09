@@ -131,7 +131,7 @@ def _stable_compute_hash(vllm_config) -> str:
                 object.__setattr__(pc, name, value)
 
 
-def config_signature(vllm_config) -> str:
+def model_bundle_signature(vllm_config) -> str:
     """vLLM config hash + warm-up graph set + rbln compile env + NPU name +
     rebel major.minor; launch- and host-stable, shared by all TP/DP ranks (the
     rank subdir isolates shards)."""
@@ -145,7 +145,7 @@ def config_signature(vllm_config) -> str:
     )
     sig = digest.hexdigest()[:16]
     logger.info(
-        "mega-cache config_signature=%s (cfg=%s graphs=%s env=%s npu=%s rebel=%s)",
+        "mega-cache model_bundle_signature=%s (cfg=%s graphs=%s env=%s npu=%s rebel=%s)",
         sig,
         cfg[:8],
         graphs[:8],
@@ -156,7 +156,7 @@ def config_signature(vllm_config) -> str:
     return sig
 
 
-def sampler_config_signature(vocab_size, dtype, bucket_sizes) -> str:
+def sampler_bundle_signature(vocab_size, dtype, bucket_sizes) -> str:
     from vllm.config.utils import hash_factors, normalize_value
 
     graphs = hash_factors(
@@ -174,7 +174,7 @@ def sampler_config_signature(vocab_size, dtype, bucket_sizes) -> str:
     )
     sig = digest.hexdigest()[:16]
     logger.info(
-        "mega-cache sampler config_signature=%s (graphs=%s env=%s npu=%s rebel=%s)",
+        "mega-cache sampler_bundle_signature=%s (graphs=%s env=%s npu=%s rebel=%s)",
         sig,
         graphs[:8],
         env[:8],
