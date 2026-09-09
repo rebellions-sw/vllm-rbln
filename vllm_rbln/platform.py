@@ -30,6 +30,7 @@ import rebel
 from torch._dynamo import register_backend
 from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
+from vllm.version import __version_tuple__ as VLLM_VERSION
 
 import vllm_rbln.logger  # noqa: F401
 from vllm_rbln import envs
@@ -126,6 +127,10 @@ class RblnPlatform(Platform):
                 "target NPU (e.g., RBLN-CA25) so compilation can target it."
             )
         return device_name
+
+    @classmethod
+    def is_cr13(cls) -> bool:
+        return cls.get_device_name().strip().upper() == "RBLN-CR13"
 
     @staticmethod
     def inference_mode():
@@ -250,7 +255,10 @@ class RblnPlatform(Platform):
         # max_num_seqs, which is still None here.
         cls._adopt_deprecated_device_control_env_var()
         cls._override_default_max_num_seqs()
-        cls._capture_user_max_num_batched_tokens()
+        if not envs.VLLM_RBLN_USE_VLLM_MODEL:
+            # Only sync_from_vllm reads the key it writes, and on the native
+            # path it would be an unknown field of RBLNConfig.
+            cls._capture_user_max_num_batched_tokens()
 
         if parser is None:
             return
@@ -263,8 +271,14 @@ class RblnPlatform(Platform):
             if action.dest == "block_size":
                 action.choices = None  # Override choices
 
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            from vllm_rbln.config import add_rbln_cli_args
+
+            add_rbln_cli_args(parser)
+
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
+        from vllm_rbln.config import build_rbln_config, set_rbln_config
         from vllm_rbln.utils.optimum.converter import sync_vllm_and_optimum
         from vllm_rbln.utils.optimum.predicates import forces_fp32_dtype
         from vllm_rbln.utils.optimum.registry import is_pooling_arch
@@ -285,6 +299,11 @@ class RblnPlatform(Platform):
             cls._validate_dynamic_kv_config(vllm_config)
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            vllm_config.additional_config = build_rbln_config(
+                vllm_config.additional_config
+            )
+            set_rbln_config(vllm_config.additional_config)
+
             if vllm_config.lora_config is not None:
                 raise ValueError("LoRA is not supported on RBLN.")
 
@@ -422,6 +441,20 @@ class RblnPlatform(Platform):
                 )
 
                 cls._validate_eagle3_pp_config(vllm_config)
+
+            spec_config = vllm_config.speculative_config
+            if (
+                spec_config is not None
+                and model_config.hf_text_config.model_type == "deepseek_v32"
+            ):
+                # TODO(vllm>=0.29.0): delete this block; vllm#52861 stops upstream
+                # forcing v32 MTP eager, which leaves the reset below dead.
+                assert VLLM_VERSION < (0, 29), (
+                    f"vLLM {VLLM_VERSION} ships vllm#52861; delete the deepseek_v32 "
+                    "MTP enforce_eager reset."
+                )
+                if not model_config.enforce_eager and spec_config.enforce_eager:
+                    spec_config.enforce_eager = False
 
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:

@@ -1533,7 +1533,7 @@ wheels = [
 
 [[package]]
 name = "optimum-rbln"
-version = "0.11.3a0"
+version = "0.11.3a4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
@@ -1546,9 +1546,9 @@ dependencies = [
     { name = "torchvision", marker = "platform_python_implementation == 'CPython'" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/68/d8c65d16bd3451dfb055ea36dd64ef79a7301af835c9b56736767ec55eb4/optimum_rbln-0.11.3a0.tar.gz", hash = "sha256:afa7747a9d2277649e3140c8f8b99f6f518fb58b18845bc9fb23507ba6ced1a9", size = 613330, upload-time = "2026-09-04T06:03:38.564Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/74/3633e2ded59faebc435c1f34e04a9d85125136579b647c47a91ca07e2f14/optimum_rbln-0.11.3a4.tar.gz", hash = "sha256:45bcf23fce6d85df26930dd55e18bd1b35ca6ecef57441a05dc082ed8764f33b", size = 649283, upload-time = "2026-09-08T11:19:24.43Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/2e/c130f3cd9e98d51926d5d3906dda81702d8fa379a1ebae0debe84319a709/optimum_rbln-0.11.3a0-py3-none-any.whl", hash = "sha256:d6432b547f0014c20f9ea46de7e752af9748bff1a39b118e3159739b084d21f4", size = 664381, upload-time = "2026-09-04T06:03:36.307Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/13/cf03ee360b11eb1d18f3218ba9ca02f1ad4c23c2d2748456fe776c7711d5/optimum_rbln-0.11.3a4-py3-none-any.whl", hash = "sha256:22bf329f64406d3dc5c064d7d10168534c52e28ba5a835a5a6d39d4134c483d7", size = 673955, upload-time = "2026-09-08T11:19:21.456Z" },
 ]
 
 [[package]]
@@ -2617,13 +2617,14 @@ wheels = [
 
 [[package]]
 name = "torchcodec"
-version = "0.11.0+cpu"
+version = "0.14.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 wheels = [
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:7332f806164ee7c0ac288eef9d99f773486858068a127dc08b5e5c275194925c", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:f991b274c3ab567c07bd066cdb23aee28c46e71bc832ddb87c0ac0a0da0b4ee7", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:fa759203e1f88aeba7d31493bf5c2969eb97d551a0ab38a18d20155e60f9db16", upload-time = "2026-03-24T17:02:09Z" },
-    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.11.0%2Bcpu-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:e1fdfaec9987614a91e03a3bd6697a668ddb556dcacab95264fa56dfe3c0b44a", upload-time = "2026-03-24T17:02:09Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:0f1e5a4153a4739053b477474eaef1a94414f97e438b2702966fe6c75a93b589", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:67bb31bbac7f6484d67c92e92495b0044c5cdc25898e5f3a78daf279c7270bf4", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:0da64ee68e8103a28906e0950acc40e2501d81894c3cb2b17e461336c08ab42f", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:7deaf484f8986d5246d81336faa8b89327192114c33b0f4582737dc0acec52ab", upload-time = "2026-06-03T12:38:55Z" },
+    { url = "https://download.pytorch.org/whl/cpu/torchcodec-0.14.0%2Bcpu-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:d277e8425af0ee4dab20e1e09499171f83acbfe2f5be03e5879490279c0dfd2f", upload-time = "2026-06-03T12:38:55Z" },
 ]
 
 [[package]]
@@ -2666,7 +2667,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.8.1"
+version = "5.15.1"
 source = { registry = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/simple/" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -2681,9 +2682,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/transformers/5.8.1/transformers-5.8.1.tar.gz", hash = "sha256:4dd5b6de4105725104d84fd6abd74b305f4debfc251b38c648ee5dd087cf543b" }
+sdist = { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/transformers/5.15.1/transformers-5.15.1.tar.gz", hash = "sha256:27c996bd9075ddc82d40f8590dfdc81ea45f611bfca477e0db5d7fd257a482f7" }
 wheels = [
-    { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/transformers/5.8.1/transformers-5.8.1-py3-none-any.whl", hash = "sha256:5340fb95962162cdfdae5cc91d7f8fedd92ed75216c1154c5e1f590fcf56dd0e" },
+    { url = "https://nexus.mgmt.rbln.in/repository/pypi-group-nightly/packages/transformers/5.15.1/transformers-5.15.1-py3-none-any.whl", hash = "sha256:b7cdf238ff583e3a58dbc7fa34da1aaf091ce063141f65a30538160bd5afe93f" },
 ]
 
 [[package]]
@@ -2930,7 +2931,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = "<0.137" },
     { name = "fire", marker = "extra == 'dev'" },
     { name = "huggingface-hub", marker = "extra == 'dev'" },
-    { name = "optimum-rbln", specifier = ">=0.11.3a0,<0.11.4" },
+    { name = "optimum-rbln", specifier = ">=0.11.3a4,<0.11.4" },
     { name = "packaging", marker = "extra == 'dev'" },
     { name = "pynvml", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'test'" },
