@@ -87,10 +87,7 @@ from vllm_rbln.utils.optimum.bucket import select_bucket_size
 from vllm_rbln.utils.optimum.predicates import is_qwen3_embedding, is_qwen3_reranker
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
-from vllm_rbln.v1.sample import (
-    WARM_UP_CONFIGS,
-    RBLNSampler,
-)
+from vllm_rbln.v1.sample import WARM_UP_CONFIGS, RBLNSampler
 from vllm_rbln.v1.sample.rbln_logits_processor import build_rbln_logitsprocs
 from vllm_rbln.v1.worker import mega_cache
 from vllm_rbln.v1.worker.ec_disagg_helpers import ECDisaggHelpersMixin
@@ -1534,13 +1531,15 @@ class RBLNOptimumModelRunner(
                     (bucket_size, self.model_config.get_vocab_size()),
                     dtype=self.dtype,
                 )
-
-        num_graphs = len(WARM_UP_CONFIGS) * len(self.bucket_sizes)
+        # Per bucket shape, rbln_top_k_top_p_sample compiles one entry per
+        # (top_k, top_p) None/tensor combination (4) and rbln_greedy_sample
+        # one. Raise the per-code-object and global limits to fit; never lower.
         torch._dynamo.config.recompile_limit = max(
-            torch._dynamo.config.recompile_limit, num_graphs
+            torch._dynamo.config.recompile_limit, 4 * len(self.bucket_sizes)
         )
         torch._dynamo.config.accumulated_recompile_limit = max(
-            torch._dynamo.config.accumulated_recompile_limit, num_graphs
+            torch._dynamo.config.accumulated_recompile_limit,
+            5 * len(self.bucket_sizes),
         )
 
     @torch.inference_mode
