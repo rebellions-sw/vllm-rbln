@@ -14,14 +14,12 @@
 
 from vllm_rbln.v1.sample.rbln_rejection_sampler import RBLNRejectionSampler
 from vllm_rbln.v1.sample.rbln_sampler import (
-    SAMPLER_GRAPHS_PER_BATCH_SIZE,
     WARM_UP_CONFIGS,
     RBLNSampler,
 )
 
 __all__ = [
     "RBLNRejectionSampler",
-    "SAMPLER_GRAPHS_PER_BATCH_SIZE",
     "WARM_UP_CONFIGS",
     "RBLNSampler",
 ]

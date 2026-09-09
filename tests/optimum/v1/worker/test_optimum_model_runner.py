@@ -380,18 +380,18 @@ def _prepare_sampler_with_buckets(model_runner, monkeypatch, bucket_sizes):
 def test_prepare_rbln_sampler_fits_every_graph_under_both_recompile_limits(
     model_runner, monkeypatch
 ):
-    from vllm_rbln.v1.sample import SAMPLER_GRAPHS_PER_BATCH_SIZE
+    from vllm_rbln.v1.sample import WARM_UP_CONFIGS
 
     dynamo_config = torch._dynamo.config
     monkeypatch.setattr(dynamo_config, "recompile_limit", 8)
     monkeypatch.setattr(dynamo_config, "accumulated_recompile_limit", 256)
     # Enough batch sizes that the sampler graphs alone exceed the default
     # process-wide limit.
-    bucket_sizes = range(1, 256 // SAMPLER_GRAPHS_PER_BATCH_SIZE + 2)
+    bucket_sizes = range(1, 256 // len(WARM_UP_CONFIGS) + 2)
 
     _prepare_sampler_with_buckets(model_runner, monkeypatch, bucket_sizes)
 
-    num_graphs = SAMPLER_GRAPHS_PER_BATCH_SIZE * len(bucket_sizes)
+    num_graphs = len(WARM_UP_CONFIGS) * len(bucket_sizes)
     assert num_graphs > 256
     assert dynamo_config.recompile_limit >= num_graphs
     assert dynamo_config.accumulated_recompile_limit >= num_graphs

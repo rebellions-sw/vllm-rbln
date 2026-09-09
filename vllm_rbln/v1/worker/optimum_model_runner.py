@@ -88,7 +88,6 @@ from vllm_rbln.utils.optimum.predicates import is_qwen3_embedding, is_qwen3_rera
 from vllm_rbln.utils.optimum.registry import get_rbln_model_info
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.sample import (
-    SAMPLER_GRAPHS_PER_BATCH_SIZE,
     WARM_UP_CONFIGS,
     RBLNSampler,
 )
@@ -1539,7 +1538,7 @@ class RBLNOptimumModelRunner(
         # Past either limit dynamo silently falls back to eager for the frame.
         # recompile_limit is per code object, accumulated_recompile_limit is
         # process-wide; only raise them, other compiles share the same globals.
-        num_graphs = SAMPLER_GRAPHS_PER_BATCH_SIZE * len(self.bucket_sizes)
+        num_graphs = len(WARM_UP_CONFIGS) * len(self.bucket_sizes)
         dynamo_config = torch._dynamo.config
         dynamo_config.recompile_limit = max(dynamo_config.recompile_limit, num_graphs)
         dynamo_config.accumulated_recompile_limit = max(
