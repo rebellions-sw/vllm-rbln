@@ -278,6 +278,25 @@ class TestSignatureVllmConfig:
         assert re.fullmatch(r"[0-9a-f]{16}", sig)
 
 
+class TestSamplerSignature:
+    def _sig(self, vocab_size=32000, dtype="bfloat16", bucket_sizes=(1, 4)):
+        return mega_cache.sampler_config_signature(vocab_size, dtype, bucket_sizes)
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"vocab_size": 50257},
+            {"dtype": "float16"},
+            {"bucket_sizes": (1, 4, 8)},
+        ],
+        ids=["vocab_size", "dtype", "bucket_sizes"],
+    )
+    def test_graph_input_invalidates(self, overrides):
+        # Each is a logits-shape or specialization axis; a partly-hitting bundle
+        # trips the stale-bundle guard on load.
+        assert self._sig(**overrides) != self._sig()
+
+
 class TestBundlePath:
     @pytest.fixture(autouse=True)
     def _cache_root(self, monkeypatch, tmp_path):

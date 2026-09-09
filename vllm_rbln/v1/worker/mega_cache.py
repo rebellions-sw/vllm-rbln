@@ -156,6 +156,43 @@ def config_signature(vllm_config) -> str:
     return sig
 
 
+def sampler_config_signature(vocab_size, dtype, bucket_sizes) -> str:
+    """Signature for the optimum path's standalone sampler bundle.
+
+    That bundle holds only the sampler graphs, which carry no model weights and
+    specialize on the logits shape (each bucket size x vocab_size), the logits
+    dtype, and the k/p set fixed in WARM_UP_CONFIGS. Keying on the model instead
+    (as config_signature does for the native path, whose bundle also holds the
+    model graphs) would split the bundle needlessly and break reuse across a
+    compile run and a load run, since the optimum path rewrites
+    model_config.model to a cache path once the model is compiled."""
+    from vllm.config.utils import hash_factors, normalize_value
+
+    graphs = hash_factors(
+        {
+            "vocab_size": normalize_value(vocab_size),
+            "dtype": normalize_value(str(dtype)),
+            "bucket_sizes": normalize_value(list(bucket_sizes)),
+        }
+    )
+    env = _compile_env_factors()
+    npu = _npu_name()
+    rebel_ver = _rebel_major_minor()
+    digest = hashlib.sha1(
+        "|".join([graphs, env, f"npu={npu}", f"rebel={rebel_ver}"]).encode("utf-8")
+    )
+    sig = digest.hexdigest()[:16]
+    logger.info(
+        "mega-cache sampler config_signature=%s (graphs=%s env=%s npu=%s rebel=%s)",
+        sig,
+        graphs[:8],
+        env[:8],
+        npu,
+        rebel_ver,
+    )
+    return sig
+
+
 def bundle_path(model: str, sig: str) -> str:
     """Per-(model, sig, local_rank) bundle path under VLLM_CACHE_ROOT
     (assumed node-local; override per node on a shared filesystem)."""

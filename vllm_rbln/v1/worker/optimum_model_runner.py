@@ -1258,11 +1258,10 @@ class RBLNOptimumModelRunner(
 
                 clear_reqs(input_batch)
 
-        # On this path the model is an optimum-rbln artifact, so the bundle holds
-        # the sampler graphs alone. Save only after every config compiled, so a
-        # failed warm-up leaves no partial bundle.
-        sig = mega_cache.config_signature(self.vllm_config)
-        mega_cache.load(self.model_config.model, sig)
+        sig = mega_cache.sampler_config_signature(
+            self.input_batch.vocab_size, self.dtype, self.bucket_sizes
+        )
+        mega_cache.load("sampler", sig)
         for config in WARM_UP_CONFIGS:
             logger.info("Running dummy sampler config: %s", config["name"])
 
@@ -1277,7 +1276,7 @@ class RBLNOptimumModelRunner(
             )
 
             dummy_run_batches(config)
-        mega_cache.save(self.model_config.model, sig)
+        mega_cache.save("sampler", sig)
 
     def set_active_loras(self, input_batch: RBLNInputBatch, is_prefill: bool) -> None:
         num_reqs = self.input_batch.num_reqs
