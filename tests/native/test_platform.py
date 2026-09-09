@@ -451,6 +451,18 @@ class TestEnforceEager:
             with pytest.raises(ValueError, match="VLLM_RBLN_USE_DEVICE_TENSOR"):
                 reconfigure(mutate)
 
+    def test_v32_mtp_eager_force_is_undone(self, reconfigure):
+        # Upstream forces the drafter eager for deepseek_v32 MTP; RBLN compiles it
+        # instead, so the reset has to win back over that force.
+        def mutate(config):
+            config.model_config.hf_text_config.model_type = "deepseek_v32"
+            config.model_config.enforce_eager = False
+            config.speculative_config = SimpleNamespace(
+                method="mtp", enforce_eager=True
+            )
+
+        assert reconfigure(mutate).speculative_config.enforce_eager is False
+
 
 def _selector(*, use_mla: bool = False, use_sparse: bool = False) -> SimpleNamespace:
     return SimpleNamespace(use_mla=use_mla, use_sparse=use_sparse)
@@ -525,6 +537,19 @@ class TestDeviceName:
         monkeypatch.setattr(platform.rebel, "get_npu_name", lambda *a: None)
         with pytest.raises(RuntimeError, match="RBLN_FORCE_NPU_NAME"):
             RblnPlatform.get_device_name()
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("RBLN-CR13", True),
+            (" rbln-cr13 ", True),
+            ("RBLN-CR03", False),
+            ("RBLN-CA25", False),
+        ],
+    )
+    def test_is_cr13_matches_the_exact_soc_name(self, monkeypatch, name, expected):
+        monkeypatch.setattr(platform.rebel, "get_npu_name", lambda *a: name)
+        assert RblnPlatform.is_cr13() is expected
 
 
 class TestAdditionalForwardContext:
