@@ -232,10 +232,8 @@ class TestConfigResolution:
         # only place the section can be resolved. No env var is involved.
         from vllm_rbln.config import get_rbln_config
 
-        make_worker(
-            vllm_config=_make_vllm_config(additional_config={"sort_batch": True})
-        )
-        assert get_rbln_config().sort_batch is True
+        make_worker(vllm_config=_make_vllm_config(additional_config={"sampler": False}))
+        assert get_rbln_config().sampler is False
 
 
 class TestInitDeviceEnv:

@@ -43,6 +43,7 @@ from vllm.model_executor.models.interfaces_base import (
     is_pooling_model,
     is_text_generation_model,
 )
+from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
@@ -110,7 +111,6 @@ from vllm_rbln.compilation import (
     create_compile_context,
     set_compile_stage,
 )
-from vllm_rbln.config import get_rbln_config
 from vllm_rbln.forward_context import set_forward_context
 from vllm_rbln.logger import init_logger
 from vllm_rbln.platform import HAS_TORCH_RBLN, USE_DEVICE_TENSOR
@@ -480,6 +480,13 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             parallel_config.data_parallel_size > 1
             and envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE
         )
+        # The batched dynamic decode kernel (REBEL CR13, or any device with
+        # VLLM_RBLN_BATCH_ATTN_OPT) processes the first valid_batch[p] rows of
+        # partition p and early-exits on the rest, which is only correct when
+        # rows are sorted by descending sequence length.
+        self.sort_batch_by_length = (
+            current_platform.is_cr13() or envs.VLLM_RBLN_BATCH_ATTN_OPT
+        )
 
         # Static, so the per-step decision only has to supply this step's counts.
         self.shape_config = ShapeConfig(
@@ -539,13 +546,11 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         return model_kwargs
 
     def _may_reorder_batch(self, scheduler_output: RBLNSchedulerOutput) -> None:
-        # NOTE(RBLN): Unlike upstream GPUModelRunner, we do not split mixed batches
-        # into decode / extend / prefill regions here. The RBLN execution path assumes
-        # a homogeneous batch phase and therefore does not use scheduler_output-based
-        # phase classification. Instead, we perform a stable sort by current sequence
-        # length (num_tokens_no_spec, descending).
+        # Upstream splits the batch into decode / prefill regions here. RBLN batches
+        # are single-phase, so instead this is a stable sort by descending sequence
+        # length, done only when sort_batch_by_length (resolved in __init__) is set.
         if (
-            not get_rbln_config().sort_batch
+            not self.sort_batch_by_length
             or len(self.kv_cache_config.kv_cache_groups) == 0
         ):
             return
