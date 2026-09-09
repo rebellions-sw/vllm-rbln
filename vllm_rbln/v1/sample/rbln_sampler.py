@@ -113,6 +113,9 @@ def compile_sampler(
         mode="strict" if envs.VLLM_RBLN_COMPILE_STRICT_MODE else "",
         use_global_ctx=True if HAS_TORCH_RBLN and not USE_DEVICE_TENSOR else None,
         global_device_id=0 if HAS_TORCH_RBLN and not USE_DEVICE_TENSOR else None,
+        # TODO(temporary): cache sampler graphs on the optimum path only; the
+        # native path shares a model bundle not keyed on VLLM_RBLN_SAMPLER.
+        use_cache=not envs.VLLM_RBLN_USE_VLLM_MODEL,
     )
 
 
