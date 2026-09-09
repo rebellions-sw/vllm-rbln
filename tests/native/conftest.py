@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import contextlib
-import functools
 import json
 import os
 import warnings
@@ -26,6 +25,7 @@ from tests.native.utils import (
     LAYERS_PINNABLE_ENV,
     NATIVE_ENV,
     ModuleSpawn,
+    host_chip,
     read_log_tail,
     scrub_env,
 )
@@ -145,22 +145,6 @@ def pytest_addoption(parser):
     )
 
 
-@functools.cache
-def _host_chip() -> str | None:
-    """The chip this host reports, or None when it cannot be resolved (an
-    NPU-less host) -- filter nothing then, rather than skip everything.
-
-    Safe to call in the parent, unlike opening a device: a name query leaves no
-    /dev/rbln* fd behind, and a child still resolves it afterwards. Resolving it
-    here is what keeps a wrong-chip spec from ever spawning."""
-    from vllm_rbln.platform import RblnPlatform
-
-    try:
-        return RblnPlatform.get_device_name().strip().upper()
-    except Exception:
-        return None
-
-
 def _item_spec(item):
     """The CompileModelSpec this item is parametrized with, under whatever name
     (test_dp_e2e parametrizes a fixture, not the test), or None."""
@@ -178,7 +162,7 @@ def _item_spec(item):
 def _skip_other_chips(items) -> None:
     """Skip specs this host's chip is not in. Only whole-model items: a spec also
     feeds unit tests (test_dp_specs) that assert on it without touching an NPU."""
-    chip = _host_chip()
+    chip = host_chip()
     if chip is None:
         return
     for item in items:
@@ -459,7 +443,7 @@ def pytest_report_header(config):
     )
     # Which chip a job landed on decides which specs run, and a step may request
     # several -- so the run has to say which one it got.
-    header.append(f"native: chip={_host_chip() or 'unknown'}")
+    header.append(f"native: chip={host_chip() or 'unknown'}")
     if _scrubbed:
         header.append(f"native: scrubbed {', '.join(sorted(_scrubbed))}")
     return header
@@ -514,6 +498,35 @@ def _drop_envs_shadows():
     yield
     for name in set(vars(envs)) - before:
         delattr(envs, name)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rbln_config(monkeypatch):
+    """`vllm_rbln.config` publishes the resolved config in a module global.
+
+    A worker or scheduler built by one test leaves it behind, so a test that
+    never published one would silently read another test's.
+    """
+    from vllm_rbln import config
+
+    monkeypatch.setattr(config, "_rbln_config", None)
+
+
+@pytest.fixture
+def rbln_config():
+    """Publish an `RBLNConfig` for code that reads it without an engine.
+
+    Only a process with an engine resolves one by itself, so a unit test has
+    to say what it wants to read.
+    """
+    from vllm_rbln.config import RBLNConfig, set_rbln_config
+
+    def _publish(**overrides) -> RBLNConfig:
+        config = RBLNConfig(**overrides)
+        set_rbln_config(config)
+        return config
+
+    return _publish
 
 
 @pytest.fixture(autouse=True)

@@ -47,6 +47,7 @@ def _make_vllm_config(
     quantization=None,
     enforce_eager=False,
     profiler=None,
+    additional_config=None,
 ):
     return SimpleNamespace(
         profiler_config=SimpleNamespace(profiler=profiler),
@@ -66,6 +67,7 @@ def _make_vllm_config(
         cache_config=SimpleNamespace(gpu_memory_utilization=0.9, num_gpu_blocks=None),
         scheduler_config=SimpleNamespace(),
         device_config=SimpleNamespace(device=torch.device("cpu"), device_type="cpu"),
+        additional_config=additional_config if additional_config is not None else {},
     )
 
 
@@ -222,6 +224,16 @@ class TestConformance:
         override = list(inspect.signature(RBLNWorker.load_model).parameters)
         assert "load_dummy_weights" in base
         assert override == ["self"]
+
+
+class TestConfigResolution:
+    def test_additional_config_reaches_the_worker(self, make_worker):
+        # The worker receives an already-built VllmConfig, so __init__ is the
+        # only place the section can be resolved. No env var is involved.
+        from vllm_rbln.config import get_rbln_config
+
+        make_worker(vllm_config=_make_vllm_config(additional_config={"sampler": False}))
+        assert get_rbln_config().sampler is False
 
 
 class TestInitDeviceEnv:

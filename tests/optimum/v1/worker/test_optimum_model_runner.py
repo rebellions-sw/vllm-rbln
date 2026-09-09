@@ -124,6 +124,63 @@ def _is_req_state_block_table_match(model_runner, req_id: str) -> bool:
     ).all()
 
 
+@pytest.mark.parametrize(
+    (
+        "top_level_requires_sort",
+        "language_model_requires_sort",
+        "expected",
+    ),
+    [
+        (False, False, False),
+        (True, False, True),
+        (False, True, True),
+        (True, True, True),
+    ],
+)
+def test_should_sort_batch_by_length_checks_language_submodule(
+    top_level_requires_sort, language_model_requires_sort, expected
+):
+    rbln_config = SimpleNamespace(requires_batch_sort=top_level_requires_sort)
+    model = SimpleNamespace(
+        model=SimpleNamespace(rbln_config=rbln_config),
+        get_language_model=lambda: SimpleNamespace(
+            rbln_config=SimpleNamespace(
+                requires_batch_sort=language_model_requires_sort
+            )
+        ),
+    )
+
+    assert RBLNOptimumModelRunner._should_sort_batch_by_length(model) is expected
+
+
+@pytest.mark.parametrize(
+    ("sort_batch_by_length", "expected_req_ids", "expected_lengths"),
+    [
+        (False, ["short", "long"], [1, 2]),
+        (True, ["long", "short"], [2, 1]),
+    ],
+)
+def test_may_reorder_batch_follows_model_metadata(
+    model_runner,
+    sort_batch_by_length,
+    expected_req_ids,
+    expected_lengths,
+):
+    model_runner.sort_batch_by_length = sort_batch_by_length
+    scheduler_output = _schedule_new_request(
+        "short",
+        "long",
+        block_ids=([0],),
+        outer_block_ids=[0],
+        token_ids_by_req={"short": [1], "long": [1, 2]},
+    )
+
+    model_runner._update_states(scheduler_output)
+
+    assert model_runner.input_batch.req_ids == expected_req_ids
+    assert model_runner.input_batch.num_tokens_no_spec[:2].tolist() == expected_lengths
+
+
 def test_update_states_new_request(model_runner):
     req_id = "req_0"
 

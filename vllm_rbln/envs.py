@@ -65,7 +65,6 @@ if TYPE_CHECKING:
     VLLM_RBLN_BATCH_ATTN_OPT: bool = False
     VLLM_RBLN_USE_CUSTOM_KERNEL: bool = False
     # --- MODEL INPUT / SCHEDULING ---
-    VLLM_RBLN_SORT_BATCH: bool = False
     VLLM_RBLN_SUB_BLOCK_CACHE: bool = True
     # --- MOE ---
     VLLM_RBLN_SPECIALIZE_MOE_DECODE: bool = True
@@ -306,9 +305,6 @@ environment_variables = {
         )
     ),
     # --- MODEL INPUT / SCHEDULING ---
-    "VLLM_RBLN_SORT_BATCH": (
-        lambda: os.environ.get("VLLM_RBLN_SORT_BATCH", "False").lower() in ("true", "1")
-    ),
     # Enable sub-block prefix caching.
     # Sub-block size equals max_num_batched_tokens (prefill chunk size).
     "VLLM_RBLN_SUB_BLOCK_CACHE": lambda: (
@@ -420,7 +416,6 @@ RBLN_NON_COMPILE_ENV = frozenset(
         "VLLM_RBLN_COMPILE_ONLY",
         "VLLM_RBLN_DISABLE_OFFLOAD",
         "VLLM_RBLN_AUTO_PORT",
-        "VLLM_RBLN_SORT_BATCH",
         "VLLM_RBLN_SUB_BLOCK_CACHE",
         "VLLM_RBLN_NIXL_SWA_VIEW_OPT",
     }
