@@ -24,7 +24,7 @@ from vllm.sequence import IntermediateTensors
 
 from vllm_rbln.patches import register_patch
 from vllm_rbln.v1.spec_decode.eagle3_pp import (
-    AUX_SLOT,
+    AUX_COMBINED,
     aux_slots_captured,
     aux_slots_received,
 )
@@ -147,9 +147,8 @@ def forward(
         assert intermediate_tensors is not None
         hidden_states = intermediate_tensors["hidden_states"]
         residual = intermediate_tensors["residual"]
-        received = [
-            intermediate_tensors[f"{AUX_SLOT}{i}"] for i in aux_slots_received(self)
-        ]
+        if aux_slots_received(self):
+            received = [intermediate_tensors[AUX_COMBINED]]
 
     # Index i means "input to layer i". The pre-loop capture is first-rank only:
     # for a later stage that index is the previous stage's final capture, and
@@ -171,9 +170,13 @@ def forward(
 
     if not get_pp_group().is_last_rank:
         tensors = {"hidden_states": hidden_states, "residual": residual}
-        slots = aux_slots_received(self) + aux_slots_captured(self)
-        for index, value in zip(slots, received + captured):
-            tensors[f"{AUX_SLOT}{index}"] = value
+        # Received blocks are all at or before start_layer and captured ones past
+        # it, so this order is already ascending -- see `aux_slots_captured`. A lone
+        # block is passed through: a stage owning no aux layer would otherwise copy
+        # the whole handoff to produce the same bytes.
+        aux = received + captured
+        if aux:
+            tensors[AUX_COMBINED] = aux[0] if len(aux) == 1 else torch.cat(aux, dim=-1)
         return IntermediateTensors(tensors)
 
     hidden_states, _ = self.norm(hidden_states, residual)
@@ -182,10 +185,11 @@ def forward(
         return hidden_states
 
     aux = received + captured
-    assert len(aux) == len(self.aux_hidden_state_layers), (
+    carried = sum(t.shape[-1] for t in aux) // self.config.hidden_size
+    assert carried == len(self.aux_hidden_state_layers), (
         f"EAGLE3 expected {len(self.aux_hidden_state_layers)} aux hidden states for "
-        f"layers {sorted(self.aux_hidden_state_layers)}, but "
-        f"{len(aux_slots_received(self))} arrived and "
+        f"layers {sorted(self.aux_hidden_state_layers)}, but the handoff carried "
+        f"{carried}: {len(aux_slots_received(self))} arrived and "
         f"{len(aux_slots_captured(self))} were captured"
     )
     return hidden_states, aux
