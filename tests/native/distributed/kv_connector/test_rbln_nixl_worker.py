@@ -747,3 +747,53 @@ class TestComputeDescIds:
         worker._group_specs = [MagicMock()]
         out = worker._compute_desc_ids([[]], 4, None, 1)
         assert out.size == 0
+
+
+class TestApplyPrefixCaching:
+    # The consumer's group can be LONGER than the producer's on an SWA group,
+    # which the base implementation asserts cannot happen. See the override's
+    # docstring for where the two lengths come from.
+
+    @staticmethod
+    def _worker():
+        w = object.__new__(RblnNixlConnectorWorker)
+        # Non-Mamba scope: the base end-trims the remote side and asserts
+        # local <= remote. The Mamba branch is a different code path.
+        w._has_mamba = False
+        w._physical_blocks_per_logical_kv_block = 1
+        return w
+
+    def test_a_local_group_longer_than_the_remote_is_tail_aligned(self):
+        # The shape observed on gpt-oss-120b 1P1D: the consumer clipped a full
+        # allocation to `blocks_per_sw`, the producer's list had already been
+        # pruned to the blocks still inside the window. Without the override
+        # this raises AssertionError and takes the decode EngineCore with it.
+        w = self._worker()
+        local, remote = w._apply_prefix_caching(([7, 8],), ([1],), 1)
+        # Dropped from the FRONT: the producer advertises the tail of the
+        # window, so keeping our head would name blocks it never sent.
+        assert list(local[0]) == [8]
+        assert list(remote[0]) == [1]
+
+    def test_a_partial_prefix_hit_still_end_trims_the_remote(self):
+        # local <= remote is the case the base implementation is for, and it
+        # has to keep working: the override must not touch it.
+        w = self._worker()
+        local, remote = w._apply_prefix_caching(([5],), ([1, 2],), 1)
+        assert list(local[0]) == [5]
+        assert list(remote[0]) == [2]
+
+    def test_equal_lengths_are_left_alone(self):
+        w = self._worker()
+        local, remote = w._apply_prefix_caching(([5, 6],), ([1, 2],), 1)
+        assert list(local[0]) == [5, 6]
+        assert list(remote[0]) == [1, 2]
+
+    def test_groups_are_aligned_independently(self):
+        # One KV-cache group per attention flavour: gpt-oss-120b registers a
+        # full-attention group that needs no alignment beside an SWA group that
+        # does, so the trim cannot be decided once for the whole request.
+        w = self._worker()
+        local, remote = w._apply_prefix_caching(([1, 2, 3], [7, 8]), ([1, 2, 3], [4]), 1)
+        assert list(local[0]) == [1, 2, 3]
+        assert list(local[1]) == [8]

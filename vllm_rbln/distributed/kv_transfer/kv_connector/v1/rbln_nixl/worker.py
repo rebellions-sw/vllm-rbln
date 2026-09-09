@@ -658,6 +658,39 @@ class RblnNixlConnectorWorker(NixlPullConnectorWorker):
 
         return remote_agent_name
 
+    def _apply_prefix_caching(
+        self,
+        local_block_ids: BlockIds,
+        remote_block_ids: BlockIds,
+        remote_physical_per_logical: int,
+    ) -> tuple[BlockIds, list]:
+        """Tail-align local groups before the base prefix-caching trim.
+
+        The producer already removes the leading null blocks of an HMA/SWA
+        group before advertising `remote_block_ids` (see
+        `RblnNixlConnectorScheduler.request_finished` ->
+        `get_sw_clipped_blocks`, "empty blocks are always at the start of the
+        list"), while the consumer allocates for the whole sequence length and
+        therefore still carries that leading padding. A group can thus have
+        *fewer* remote blocks than local ones.
+
+        vLLM 0.24's base implementation assumes the opposite
+        (`assert num_local_blocks <= len(remote_group)`, end-trimming the
+        remote side on a partial prefix-cache hit) and raises AssertionError on
+        every P/D read. Drop the local leading padding so both sides describe
+        the same tail blocks, then defer to the base implementation for the
+        genuine prefix-caching case (local <= remote).
+        """
+        local_block_ids = list(local_block_ids)
+        remote_block_ids = list(remote_block_ids)
+        for i, remote_group in enumerate(remote_block_ids):
+            num_remote = len(remote_group)
+            if len(local_block_ids[i]) > num_remote:
+                local_block_ids[i] = local_block_ids[i][-num_remote:]
+        return super()._apply_prefix_caching(
+            local_block_ids, remote_block_ids, remote_physical_per_logical
+        )
+
     def _compute_desc_ids(
         self,
         block_ids: BlockIds,
