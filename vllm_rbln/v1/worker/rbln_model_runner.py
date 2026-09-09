@@ -485,8 +485,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         # partition p and early-exits on the rest, which is only correct when
         # rows are sorted by descending sequence length.
         self.sort_batch_by_length = (
-            "cr13" in current_platform.get_device_name().lower()
-            or envs.VLLM_RBLN_BATCH_ATTN_OPT
+            current_platform.is_cr13() or envs.VLLM_RBLN_BATCH_ATTN_OPT
         )
 
         # Static, so the per-step decision only has to supply this step's counts.
