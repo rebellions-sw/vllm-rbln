@@ -1187,7 +1187,6 @@ class TestProfile:
             wm,
             "rbln_profiler",
             SimpleNamespace(
-                is_activated=lambda: True,
                 start=lambda: calls.append("start"),
                 done=lambda: calls.append("done"),
             ),
@@ -1204,3 +1203,25 @@ class TestProfile:
         worker.profile(is_start=False)
 
         assert calls == []
+
+    def test_rbln_profiler_starts_and_flushes_at_stop(self, make_worker, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setenv("RBLN_PROFILER", "1")
+        monkeypatch.setattr(
+            wm,
+            "rbln_profiler",
+            SimpleNamespace(
+                is_activated=lambda: False,
+                start=lambda: calls.append("start"),
+                done=lambda: calls.append("done"),
+            ),
+        )
+        vllm_config = _make_vllm_config()
+        vllm_config.profiler_config = ProfilerConfig()
+        worker = make_worker(vllm_config=vllm_config)
+
+        worker.profile(is_start=True)
+        worker.profile(is_start=False)
+
+        assert calls == ["start", "done"]
+        assert isinstance(worker.profiler, wm.RblnProfilerWrapper)
