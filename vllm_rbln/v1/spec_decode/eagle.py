@@ -60,8 +60,11 @@ class RBLNEagleProposer(EagleProposer):
         device: torch.device,
         runner: "RBLNModelRunner",
     ):
-        # Bookkeeping on the host: torch-rbln runs int/bool eager ops through a
-        # CPU fallback. The stager still stages the graph inputs onto `device`.
+        # The parent's ctor gets "cpu", so its bookkeeping -- input_ids,
+        # positions, hidden_states, backup ids -- lives on the host: torch-rbln
+        # runs int/bool eager ops through a CPU fallback. Whatever reads
+        # `self.device` afterwards (attention metadata builders, input stager)
+        # still gets the NPU, where the draft model itself keeps running.
         super().__init__(vllm_config, torch.device("cpu"), runner)
         self.device = device
 
