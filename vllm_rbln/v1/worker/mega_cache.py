@@ -157,15 +157,6 @@ def config_signature(vllm_config) -> str:
 
 
 def sampler_config_signature(vocab_size, dtype, bucket_sizes) -> str:
-    """Signature for the optimum path's standalone sampler bundle.
-
-    That bundle holds only the sampler graphs, which carry no model weights and
-    specialize on the logits shape (each bucket size x vocab_size), the logits
-    dtype, and the k/p set fixed in WARM_UP_CONFIGS. Keying on the model instead
-    (as config_signature does for the native path, whose bundle also holds the
-    model graphs) would split the bundle needlessly and break reuse across a
-    compile run and a load run, since the optimum path rewrites
-    model_config.model to a cache path once the model is compiled."""
     from vllm.config.utils import hash_factors, normalize_value
 
     graphs = hash_factors(
