@@ -320,7 +320,10 @@ class RBLNOptimumModelRunner(
     def load_model(self) -> None:
         with set_current_vllm_config(self.vllm_config, check_compile=False):
             self.model = get_optimum_model(vllm_config=self.vllm_config)
-        if isinstance(self.model, RBLNOptimumDecoderMixin):
+        if (
+            isinstance(self.model, RBLNOptimumDecoderMixin)
+            and not self.is_ec_producer_only
+        ):
             assert self.model.kv_block_adapter is not None
             self.available_blocks = torch.arange(
                 self.model.kv_block_adapter._estimated_num_blocks(), dtype=torch.int16

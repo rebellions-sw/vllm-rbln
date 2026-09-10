@@ -19,6 +19,7 @@ import pytest
 import torch
 from vllm.config import (
     CacheConfig,
+    ECTransferConfig,
     ModelConfig,
     SchedulerConfig,
     VllmConfig,
@@ -32,10 +33,11 @@ from vllm.platforms import current_platform
 from vllm.v1.core.sched.output import CachedRequestData
 from vllm.v1.sample.metadata import SamplingMetadata
 
+import vllm_rbln.v1.worker.optimum_model_runner as runner_module
 from vllm_rbln.v1.core.optimum_scheduler import RBLNSchedulerOutput
 from vllm_rbln.v1.worker.optimum_model_runner import RBLNOptimumModelRunner
 
-from .utils import _schedule_new_request, fake_load_model
+from .utils import MockModelWrapper, _schedule_new_request, fake_load_model
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 8
@@ -179,6 +181,25 @@ def test_may_reorder_batch_follows_model_metadata(
 
     assert model_runner.input_batch.req_ids == expected_req_ids
     assert model_runner.input_batch.num_tokens_no_spec[:2].tolist() == expected_lengths
+
+
+def test_load_model_skips_the_pad_block_pool_on_the_ec_producer(
+    model_runner, monkeypatch
+):
+    # The producer runs only the vision encoder, so the model comes with
+    # kv_block_adapter None; load_model must not go looking for KV blocks.
+    model = MockModelWrapper(max_num_seqs=model_runner.scheduler_config.max_num_seqs)
+    model.kv_block_adapter = None
+    monkeypatch.setattr(runner_module, "get_optimum_model", lambda vllm_config: model)
+    model_runner.vllm_config.ec_transfer_config = ECTransferConfig(
+        ec_connector="RblnECNixlConnector", ec_role="ec_producer"
+    )
+    del model_runner.available_blocks
+
+    model_runner.load_model()
+
+    assert model_runner.model is model
+    assert not hasattr(model_runner, "available_blocks")
 
 
 def test_update_states_new_request(model_runner):
