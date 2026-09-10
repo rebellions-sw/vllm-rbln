@@ -290,7 +290,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         self.use_async_scheduling = self.scheduler_config.async_scheduling
 
         # Sampler
-        if envs.VLLM_RBLN_SAMPLER:
+        if self.rbln_config.sampler:
             self.sampler = RBLNSampler(
                 logprobs_mode=self.model_config.logprobs_mode,
                 compile_context=self.compile_context,
@@ -363,6 +363,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 self.compile_context,
                 self.speculative_config,
                 self.device,
+                use_rbln_sampler=self.rbln_config.sampler,
             )
 
         self.num_spec_tokens = 0
@@ -389,7 +390,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         self._init_block_sizes = [placeholder_block_size]
         self._init_kernel_block_sizes = [placeholder_block_size]
         logitsprocs_builder = (
-            build_rbln_logitsprocs if envs.VLLM_RBLN_SAMPLER else build_logitsprocs
+            build_rbln_logitsprocs if self.rbln_config.sampler else build_logitsprocs
         )
 
         logitsprocs = logitsprocs_builder(
@@ -1315,7 +1316,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 **staging,
             )
         else:
-            if envs.VLLM_RBLN_SAMPLER:
+            if self.rbln_config.sampler:
                 bucket = self.bucketing_manager.max_batch_size
                 spec_decode_metadata = _pad_spec_decode_metadata(
                     spec_decode_metadata, bucket
@@ -3345,7 +3346,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             self.speculative_config is None
             or self.num_spec_tokens <= 0
             or self.is_pooling_model
-            or not envs.VLLM_RBLN_SAMPLER
+            or not self.rbln_config.sampler
         ):
             return
 
