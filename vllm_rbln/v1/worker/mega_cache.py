@@ -145,7 +145,8 @@ def model_bundle_signature(vllm_config) -> str:
     )
     sig = digest.hexdigest()[:16]
     logger.info(
-        "mega-cache model_bundle_signature=%s (cfg=%s graphs=%s env=%s npu=%s rebel=%s)",
+        "mega-cache model_bundle_signature=%s "
+        "(cfg=%s graphs=%s env=%s npu=%s rebel=%s)",
         sig,
         cfg[:8],
         graphs[:8],
