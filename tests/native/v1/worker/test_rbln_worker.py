@@ -1276,7 +1276,6 @@ class TestProfile:
             wm,
             "rbln_profiler",
             SimpleNamespace(
-                is_activated=lambda: False,
                 start=lambda: calls.append("start"),
                 done=lambda: calls.append("done"),
             ),
