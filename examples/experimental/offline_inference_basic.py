@@ -54,7 +54,7 @@ def main():
 
     # Generate texts from the prompts. The output is a list of RequestOutput
     # objects that contain the prompt, generated text, and other information.
-    outputs = llm.generate(prompts, SamplingParams(temperature=0.8, min_p=0.1))
+    outputs = llm.generate(prompts, SamplingParams(temperature=0.0))
     # Print the outputs.
     for output in outputs:
         prompt = output.prompt
