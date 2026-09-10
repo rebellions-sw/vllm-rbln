@@ -34,16 +34,7 @@ steps:
     image: "${DEVTOOLS_DOCKER_IMAGE}"
     secrets: *uv_secrets
     command:
-      - "uv run --no-project --python 3.12 --with pytest --with packaging python -m pytest tests/test_packaging_bounds.py -q"
-
-  - label: ":snake: python support"
-    notify:
-    - github_commit_status:
-        context: "[OB] python support"
-    image: "${DEVTOOLS_DOCKER_IMAGE}"
-    secrets: *uv_secrets
-    command:
-      - "uv run --no-project --python 3.12 --with pytest --with packaging python -m pytest tests/test_python_support.py -q"
+      - "uv run --no-project --python 3.12 --with pytest --with packaging python -m pytest tests/test_packaging_bounds.py tests/test_python_support.py -q"
 
   # All gates must pass before the heavy test pipelines are even uploaded.
   - wait: ~

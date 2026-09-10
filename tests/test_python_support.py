@@ -12,26 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-"""`requires-python` must be a claim `uv.lock` can honour.
-
-Every lane syncs on 3.12, so widening the range is otherwise unverified: the first
-user on the new interpreter is the one who finds out a locked package ships no
-distribution for it.
-"""
-
-import tomllib
 from pathlib import Path
 from urllib.parse import unquote
 
 import pytest
+import tomllib
 from packaging.specifiers import SpecifierSet
 from packaging.tags import compatible_tags, cpython_tags
 from packaging.utils import parse_wheel_filename
 
 
 def _load(name: str) -> dict:
-    return tomllib.loads((Path(__file__).resolve().parents[1] / name).read_text(encoding="utf-8"))
+    path = Path(__file__).resolve().parents[1] / name
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def _minors() -> list[int]:
@@ -44,7 +37,10 @@ def _installable(package: dict, minor: int) -> bool:
         return True
     supported = {
         (tag.interpreter, tag.abi)
-        for tags in (cpython_tags((3, minor), platforms=["any"]), compatible_tags((3, minor), platforms=["any"]))
+        for tags in (
+            cpython_tags((3, minor), platforms=["any"]),
+            compatible_tags((3, minor), platforms=["any"]),
+        )
         for tag in tags
     }
     return any(
