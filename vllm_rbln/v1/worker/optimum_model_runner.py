@@ -1524,15 +1524,18 @@ class RBLNOptimumModelRunner(
                     (bucket_size, self.model_config.get_vocab_size()),
                     dtype=self.dtype,
                 )
-        # Per bucket shape, rbln_top_k_top_p_sample compiles one entry per
-        # (top_k, top_p) None/tensor combination (4) and rbln_greedy_sample
-        # one. Raise the per-code-object and global limits to fit; never lower.
+
+        num_buckets = len(self.bucket_sizes)
+        greedy_configs = sum(1 for c in WARM_UP_CONFIGS if c["all_greedy"])
+        topk_topp_configs = len(WARM_UP_CONFIGS) - greedy_configs
+        busiest_fn_configs = max(greedy_configs, topk_topp_configs)
+
         torch._dynamo.config.recompile_limit = max(
-            torch._dynamo.config.recompile_limit, 4 * len(self.bucket_sizes)
+            torch._dynamo.config.recompile_limit, busiest_fn_configs * num_buckets
         )
         torch._dynamo.config.accumulated_recompile_limit = max(
             torch._dynamo.config.accumulated_recompile_limit,
-            5 * len(self.bucket_sizes),
+            len(WARM_UP_CONFIGS) * num_buckets,
         )
 
     @torch.inference_mode
