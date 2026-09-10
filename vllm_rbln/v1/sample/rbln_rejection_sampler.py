@@ -121,19 +121,14 @@ class RBLNRejectionSampler(RejectionSampler):
         bonus_logits = logits[bonus_logits_indices]
         raw_target_logits = logits[target_logits_indices]
 
-        # The bonus logits are wanted back only to compute the accepted-token
-        # logprobs; asking for them widens the rows to float32, which on the
-        # device is a host round trip, so ask only when logprobs are requested.
-        wants_logprobs = sampling_metadata.max_num_logprobs is not None
+        output_logprobs_requested = sampling_metadata.max_num_logprobs is not None
         bonus_token_ids = None
         if (
             sampling_metadata.all_greedy
-            and not wants_logprobs
+            and not output_logprobs_requested
             and not sampling_metadata.logprob_token_ids
             and isinstance(self.impl, RBLNRejectionSamplerImpl)
         ):
-            # A greedy bonus token is its row's argmax; the rejection graph
-            # takes it there instead of a separate sampler launch.
             bonus_logits = self.sampler.apply_logits_processors(
                 bonus_logits, sampling_metadata, predict_bonus_token=True
             )
@@ -141,7 +136,7 @@ class RBLNRejectionSampler(RejectionSampler):
             bonus_sampler_output = self.sampler(
                 logits=bonus_logits,
                 sampling_metadata=replace(sampling_metadata, max_num_logprobs=-1)
-                if wants_logprobs
+                if output_logprobs_requested
                 else sampling_metadata,
                 predict_bonus_token=True,
                 logprobs_mode_override=(
@@ -149,7 +144,7 @@ class RBLNRejectionSampler(RejectionSampler):
                     if self.is_processed_logprobs_mode
                     else "raw_logits"
                 )
-                if wants_logprobs
+                if output_logprobs_requested
                 else None,
             )
             bonus_token_ids = bonus_sampler_output.sampled_token_ids
@@ -239,8 +234,6 @@ class TorchRejectionSamplerImpl(RejectionSamplerImpl):
         bonus_logits: torch.Tensor | None = None,
     ) -> torch.Tensor:
         assert bonus_token_ids is not None
-        # The runner hands the draft ids over on the host; this impl samples
-        # wherever the logits are.
         draft_token_ids = draft_token_ids.to(target_logits.device)
         target_logits = self.apply_sampling_constraints(
             target_logits,
@@ -355,10 +348,9 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
             # sampler off misses this op and forces a partial compile.
             use_cache=False,
         )
-        # The graph's small inputs, one set per input shape: handing the same
-        # tensors over every step keeps the runtime's input bindings warm --
-        # a fresh address re-validates and re-binds the input.
-        self._graph_inputs: dict[tuple, dict[str, torch.Tensor]] = {}
+        # The graph's small inputs, one set per shape. The same tensors every
+        # step keep the runtime's bindings; a fresh address is re-bound.
+        self._graph_input_buffers: dict[tuple, dict[str, torch.Tensor]] = {}
 
     def rejection_sample(
         self,
@@ -416,11 +408,9 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         device = target_logits.device
         dtype = target_logits.dtype
         key = (batch_size, vocab_size, dtype, device)
-        if (bufs := self._graph_inputs.get(key)) is None:
-            # Every length is the config-fixed `num_spec_tokens` the op's
-            # inputs are padded to just above, not the batch's own longest run.
+        if (bufs := self._graph_input_buffers.get(key)) is None:
             buf_len = batch_size * self.num_spec_tokens
-            bufs = self._graph_inputs[key] = {
+            bufs = self._graph_input_buffers[key] = {
                 "draft_token_ids": torch.zeros(
                     buf_len, dtype=torch.int32, device=device
                 ),
@@ -442,22 +432,18 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
             }
 
         # Pad the packed inputs to the fixed [B*K] length the op wants. Rows past
-        # the packed length carry an earlier step's values, which the op reads
-        # only into slots its acceptance count clips.
+        # N keep an earlier step's values: the op reads them only into slots
+        # its acceptance count clips.
         N = num_tokens  # = sum(num_draft_tokens)
         padded_len = batch_size * max_spec_len
         reshaped_draft_token_ids = bufs["draft_token_ids"]
         draft_per_batch = bufs["draft_per_batch"]
         if padded_len == N:
-            # Full K drafts everywhere: already packed and padded, and request
-            # r's draft c sits at r * K + c. Two graph inputs must not alias one
-            # buffer, so the per-batch view is its own copy.
+            # A copy, not a view: two graph inputs must not alias one buffer.
             reshaped_draft_token_ids.copy_(draft_token_ids)
             reshaped_target_logits = target_logits
             draft_per_batch.copy_(draft_token_ids.view(batch_size, max_spec_len))
         else:
-            # Only a partial-draft step needs the padded logits block, and it
-            # is the one big buffer here, so it is allocated on first use.
             if (reshaped_target_logits := bufs.get("target_logits")) is None:
                 reshaped_target_logits = bufs["target_logits"] = torch.zeros(
                     padded_len, vocab_size, dtype=dtype, device=device

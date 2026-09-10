@@ -3378,18 +3378,14 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             logitsprocs=LogitsProcessors(),
             spec_token_ids=[[] for _ in range(batch_size)],
         )
-        # int32, as the bonus sampler's ops return, so the warmed graph is the
-        # one a random step then hits.
+        # int32, as the bonus sampler's ops return it.
         bonus_token_ids = torch.zeros(
             batch_size, 1, dtype=torch.int32, device=self.device
         )
         logger.info("Warm-up: rejection sampler (decode_batch=%d)", batch_size)
-        # Two graphs: one takes the bonus rows' logits and argmaxes them (an
-        # all-greedy step without logprobs), the other takes the ids the bonus
-        # sampler already produced. Either can come first at run time.
-        for bonus_kwargs in (
-            {"bonus_logits": bonus_logits},
-            {"bonus_token_ids": bonus_token_ids},
+        for bonus_token_ids_in, bonus_logits_in in (
+            (None, bonus_logits),
+            (bonus_token_ids, None),
         ):
             self.rejection_sampler.impl.rejection_sample(
                 draft_token_ids,
@@ -3398,9 +3394,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 cu_num_draft_tokens,
                 None,
                 target_logits,
-                bonus_kwargs.get("bonus_token_ids"),
+                bonus_token_ids_in,
                 dummy_sampling_metadata,
-                bonus_logits=bonus_kwargs.get("bonus_logits"),
+                bonus_logits=bonus_logits_in,
             )
 
     def warmup_model(self) -> None:
