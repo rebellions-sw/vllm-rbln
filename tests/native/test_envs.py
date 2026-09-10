@@ -334,6 +334,13 @@ def test_compile_env_partition_is_disjoint():
     assert not overlap, f"classified twice: {sorted(overlap)}"
 
 
+def test_sampler_compile_env_is_a_compile_subset():
+    # The sampler bundle keys on RBLN_SAMPLER_COMPILE_ENV; a member outside
+    # RBLN_COMPILE_ENV would be a graph-relevant var that keys nothing.
+    extra = envs.RBLN_SAMPLER_COMPILE_ENV - envs.RBLN_COMPILE_ENV
+    assert not extra, f"not in RBLN_COMPILE_ENV: {sorted(extra)}"
+
+
 def test_unknown_variable_raises():
     with pytest.raises(AttributeError, match="VLLM_RBLN_NOT_A_REAL_VARIABLE"):
         getattr(envs, "VLLM_RBLN_NOT_A_REAL_VARIABLE")  # noqa: B009

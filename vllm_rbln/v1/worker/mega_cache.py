@@ -48,10 +48,10 @@ def _rebel_major_minor(version: str | None = None) -> str:
     return f"{match.group(1)}.{match.group(2)}" if match else "unknown"
 
 
-def _compile_env_factors() -> str:
-    """Hash of rbln_envs.RBLN_COMPILE_ENV, rank- and host-invariant.
+def _compile_env_factors(env_names) -> str:
+    """Hash of the given rbln compile-env names, rank- and host-invariant.
 
-    Keys on the rbln partition, not compile_factors(): that walks ~240 vLLM
+    Keys on an rbln partition, not compile_factors(): that walks ~240 vLLM
     env vars, so host paths and ports alone discarded the bundle.
     """
     from vllm.config.utils import hash_factors, normalize_value
@@ -59,8 +59,7 @@ def _compile_env_factors() -> str:
     import vllm_rbln.envs as rbln_envs
 
     factors: dict[str, object] = {
-        name: normalize_value(getattr(rbln_envs, name, None))
-        for name in rbln_envs.RBLN_COMPILE_ENV
+        name: normalize_value(getattr(rbln_envs, name, None)) for name in env_names
     }
     return hash_factors(factors)
 
@@ -135,9 +134,11 @@ def model_bundle_signature(vllm_config) -> str:
     """vLLM config hash + warm-up graph set + rbln compile env + NPU name +
     rebel major.minor; launch- and host-stable, shared by all TP/DP ranks (the
     rank subdir isolates shards)."""
+    import vllm_rbln.envs as rbln_envs
+
     cfg = _stable_compute_hash(vllm_config)
     graphs = _warmup_graph_set_factors(vllm_config)
-    env = _compile_env_factors()
+    env = _compile_env_factors(rbln_envs.RBLN_COMPILE_ENV)
     npu = _npu_name()
     rebel_ver = _rebel_major_minor()
     digest = hashlib.sha1(
@@ -160,6 +161,8 @@ def model_bundle_signature(vllm_config) -> str:
 def sampler_bundle_signature(vocab_size, dtype, bucket_sizes) -> str:
     from vllm.config.utils import hash_factors, normalize_value
 
+    import vllm_rbln.envs as rbln_envs
+
     graphs = hash_factors(
         {
             "vocab_size": normalize_value(vocab_size),
@@ -167,7 +170,7 @@ def sampler_bundle_signature(vocab_size, dtype, bucket_sizes) -> str:
             "bucket_sizes": normalize_value(list(bucket_sizes)),
         }
     )
-    env = _compile_env_factors()
+    env = _compile_env_factors(rbln_envs.RBLN_SAMPLER_COMPILE_ENV)
     npu = _npu_name()
     rebel_ver = _rebel_major_minor()
     digest = hashlib.sha1(
