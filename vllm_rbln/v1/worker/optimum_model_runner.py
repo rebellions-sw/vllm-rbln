@@ -313,7 +313,14 @@ class RBLNOptimumModelRunner(
         get_language_model = getattr(model, "get_language_model", None)
         if get_language_model is None:
             return False
-        language_model = get_language_model()
+        try:
+            language_model = get_language_model()
+        except NotImplementedError:
+            # A SupportsMultiModal model without a marked language model
+            # (e.g. whisper) inherits get_language_model but cannot resolve
+            # one. This is a probe: no language model means no extra
+            # requires_batch_sort to consult, not a load failure.
+            return False
         return bool(getattr(language_model.rbln_config, "requires_batch_sort", False))
 
     @instrument(span_name="Loading (RBLN)")

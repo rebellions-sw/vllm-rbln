@@ -153,6 +153,24 @@ def test_should_sort_batch_by_length_checks_language_submodule(
     assert RBLNOptimumModelRunner._should_sort_batch_by_length(model) is expected
 
 
+def test_should_sort_batch_by_length_tolerates_an_unresolvable_language_model():
+    """A SupportsMultiModal model without a marked language model (whisper)
+    inherits get_language_model, and upstream raises NotImplementedError from
+    it. The probe answers False instead of failing the whole model load."""
+
+    def _raise():
+        raise NotImplementedError(
+            "No language model found in RBLNOptimumWhisperForConditionalGeneration!"
+        )
+
+    model = SimpleNamespace(
+        model=SimpleNamespace(rbln_config=SimpleNamespace(requires_batch_sort=False)),
+        get_language_model=_raise,
+    )
+
+    assert RBLNOptimumModelRunner._should_sort_batch_by_length(model) is False
+
+
 @pytest.mark.parametrize(
     ("sort_batch_by_length", "expected_req_ids", "expected_lengths"),
     [
