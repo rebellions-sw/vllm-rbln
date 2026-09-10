@@ -70,9 +70,7 @@ class TestSignatureComposition:
     @pytest.fixture(autouse=True)
     def _pin(self, monkeypatch):
         monkeypatch.setattr(mega_cache, "_rebel_major_minor", lambda: "0.11")
-        monkeypatch.setattr(
-            mega_cache, "_compile_env_factors", lambda env_names: "envhash"
-        )
+        monkeypatch.setattr(mega_cache, "_compile_env_factors", lambda: "envhash")
 
     def test_vllm_config_hash_invalidates(self):
         assert mega_cache.model_bundle_signature(
@@ -81,9 +79,7 @@ class TestSignatureComposition:
 
     def test_env_factors_invalidate(self, monkeypatch):
         before = mega_cache.model_bundle_signature(_stub_config())
-        monkeypatch.setattr(
-            mega_cache, "_compile_env_factors", lambda env_names: "other"
-        )
+        monkeypatch.setattr(mega_cache, "_compile_env_factors", lambda: "other")
         assert mega_cache.model_bundle_signature(_stub_config()) != before
 
     def test_rebel_minor_bump_invalidates(self, monkeypatch):
@@ -302,12 +298,20 @@ class TestSamplerSignature:
         # trips the stale-bundle guard on load.
         assert self._sig(**overrides) != self._sig()
 
-    def test_model_only_compile_env_is_ignored(self, monkeypatch):
-        # A model-shaping compile var keys the model bundle but not the sampler's;
-        # flipping it must not invalidate the sampler bundle.
-        monkeypatch.setenv("VLLM_RBLN_USE_W8A8", "0")
+    @pytest.mark.parametrize(
+        "name",
+        [
+            # Keys the model bundle, not the sampler's.
+            "VLLM_RBLN_USE_W8A8",
+            # Sampler compile options read platform.USE_DEVICE_TENSOR, which is
+            # False on the optimum path whatever this variable says.
+            "VLLM_RBLN_USE_DEVICE_TENSOR",
+        ],
+    )
+    def test_compile_env_is_ignored(self, monkeypatch, name):
+        monkeypatch.setenv(name, "0")
         before = self._sig()
-        monkeypatch.setenv("VLLM_RBLN_USE_W8A8", "1")
+        monkeypatch.setenv(name, "1")
         assert self._sig() == before
 
 

@@ -420,14 +420,6 @@ RBLN_NON_COMPILE_ENV = frozenset(
     }
 )
 
-# Bucket env vars are excluded: hash_factors already keys the resolved bucket_sizes.
-RBLN_SAMPLER_COMPILE_ENV = frozenset(
-    {
-        "VLLM_RBLN_USE_VLLM_MODEL",
-        "VLLM_RBLN_USE_DEVICE_TENSOR",
-    }
-)
-
 
 def __getattr__(name: str):
     # lazy evaluation of environment variables

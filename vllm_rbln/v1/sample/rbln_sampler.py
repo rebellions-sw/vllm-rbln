@@ -115,6 +115,8 @@ def compile_sampler(
         global_device_id=0 if HAS_TORCH_RBLN and not USE_DEVICE_TENSOR else None,
         # TODO(temporary): cache sampler graphs on the optimum path only; the
         # native path shares a model bundle not keyed on VLLM_RBLN_SAMPLER.
+        # Caching there too means keying sampler_bundle_signature on
+        # USE_DEVICE_TENSOR, which the compile options below read.
         use_cache=not envs.VLLM_RBLN_USE_VLLM_MODEL,
     )
 
