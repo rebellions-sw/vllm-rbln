@@ -18,7 +18,8 @@ from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import nullcontext
 from copy import copy, deepcopy
-from typing import Any, Literal, NamedTuple, TypeAlias, cast
+from functools import partial
+from typing import Any, NamedTuple, TypeAlias, cast
 
 import numpy as np
 import torch
@@ -28,7 +29,7 @@ from vllm.distributed.kv_transfer import (
     get_kv_transfer_group,
     has_kv_transfer_group,
 )
-from vllm.distributed.parallel_state import get_pp_group
+from vllm.distributed.parallel_state import TensorMetadata, get_pp_group
 from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.model_loader import get_model_loader
@@ -42,6 +43,7 @@ from vllm.model_executor.models.interfaces_base import (
     is_pooling_model,
     is_text_generation_model,
 )
+from vllm.platforms import current_platform
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
 from vllm.tasks import GenerationTask, PoolingTask, SupportedTask
@@ -133,6 +135,8 @@ from vllm_rbln.v1.core.utils import (
 from vllm_rbln.v1.sample.rbln_logits_processor import build_rbln_logitsprocs
 from vllm_rbln.v1.sample.rbln_rejection_sampler import RBLNRejectionSampler
 from vllm_rbln.v1.sample.rbln_sampler import RBLNSampler
+from vllm_rbln.v1.spec_decode import DRAFT_MODEL_PROPOSERS
+from vllm_rbln.v1.spec_decode.dflash import RBLNDFlashProposer
 from vllm_rbln.v1.spec_decode.eagle import RBLNEagleProposer
 from vllm_rbln.v1.spec_decode.eagle3_pp import (
     eagle3_aux_hidden_states_enabled,
@@ -155,6 +159,7 @@ from vllm_rbln.v1.worker.dp_utils import (
 )
 from vllm_rbln.v1.worker.input_stager import InputLayout, InputStager, StagedModelInputs
 from vllm_rbln.v1.worker.utils import (
+    copy_host_device_kv_blocks,
     get_kv_cache_names,
     prepare_kernel_block_sizes,
     reorder_input_batch,
@@ -324,6 +329,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             | RBLNMedusaProposer
             | NgramProposer
             | SuffixDecodingProposer
+            | RBLNDFlashProposer
             | None
         ) = None
         self.use_aux_hidden_state_outputs = eagle3_aux_hidden_states_enabled(
@@ -337,6 +343,12 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 self.drafter = SuffixDecodingProposer(self.vllm_config)
             elif self.speculative_config.method == "medusa":
                 self.drafter = RBLNMedusaProposer(self.vllm_config, self.device)
+            elif self.speculative_config.method == "dflash":
+                self.drafter = RBLNDFlashProposer(self.vllm_config, self.device, self)
+                # Upstream turns this on unconditionally for DFlash: the
+                # drafter reduces the target's aux states through its own
+                # projection, as eagle3 does.
+                self.use_aux_hidden_state_outputs = True
             elif self.speculative_config.use_eagle():
                 self.drafter = RBLNEagleProposer(self.vllm_config, self.device, self)
             else:
@@ -408,10 +420,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         self.seq_lens = torch.zeros(self.max_num_tokens, dtype=torch.int32)
         self.seq_lens_np = self.seq_lens.numpy()
         self.discard_request_mask = torch.zeros(self.max_num_reqs, dtype=torch.bool)
+        self.intermediate_tensors_dict: dict[tuple[int, int], IntermediateTensors] = {}
         self.input_stager = InputStager(self.device)
-
-        # None in the first PP rank. The rest are after load_model
-        self.intermediate_tensors: IntermediateTensors | None = None
 
         # OPTIMIZATION: Cache the tensors rather than creating them every step.
         # Keep in int64 to avoid overflow with long context
@@ -469,6 +479,13 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         self.specialized_moe_decode = (
             parallel_config.data_parallel_size > 1
             and envs.VLLM_RBLN_SPECIALIZE_MOE_DECODE
+        )
+        # The batched dynamic decode kernel (REBEL CR13, or any device with
+        # VLLM_RBLN_BATCH_ATTN_OPT) processes the first valid_batch[p] rows of
+        # partition p and early-exits on the rest, which is only correct when
+        # rows are sorted by descending sequence length.
+        self.sort_batch_by_length = (
+            current_platform.is_cr13() or envs.VLLM_RBLN_BATCH_ATTN_OPT
         )
 
         # Static, so the per-step decision only has to supply this step's counts.
@@ -529,13 +546,11 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         return model_kwargs
 
     def _may_reorder_batch(self, scheduler_output: RBLNSchedulerOutput) -> None:
-        # NOTE(RBLN): Unlike upstream GPUModelRunner, we do not split mixed batches
-        # into decode / extend / prefill regions here. The RBLN execution path assumes
-        # a homogeneous batch phase and therefore does not use scheduler_output-based
-        # phase classification. Instead, we perform a stable sort by current sequence
-        # length (num_tokens_no_spec, descending).
+        # Upstream splits the batch into decode / prefill regions here. RBLN batches
+        # are single-phase, so instead this is a stable sort by descending sequence
+        # length, done only when sort_batch_by_length (resolved in __init__) is set.
         if (
-            not envs.VLLM_RBLN_SORT_BATCH
+            not self.sort_batch_by_length
             or len(self.kv_cache_config.kv_cache_groups) == 0
         ):
             return
@@ -1001,7 +1016,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             # rank has): only the last PP rank drafts, and no other rank consumes
             # this.
             if self.drafter is not None and spec_decode_common_attn_metadata is None:
-                if isinstance(self.drafter, RBLNEagleProposer):
+                if isinstance(self.drafter, DRAFT_MODEL_PROPOSERS):
                     if self.drafter.kv_cache_gid == kv_cache_gid:
                         spec_decode_common_attn_metadata = cm
                 else:
@@ -1574,6 +1589,77 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             invalid_req_indices,
         )
 
+    def _create_or_get_intermediate_tensors(
+        self, num_reqs_padded: int, query_len: int
+    ) -> IntermediateTensors:
+        """
+        Create a new IntermediateTensors, or reuse an existing one if a matching
+        shape is already created.
+        """
+
+        key = (num_reqs_padded, query_len)
+        if (tensors := self.intermediate_tensors_dict.get(key)) is None:
+            empty = self.model.make_empty_intermediate_tensors(
+                batch_size=num_reqs_padded * query_len,
+                dtype=self.model_config.dtype,
+                device=self.device,
+            )
+            tensors = IntermediateTensors(
+                {
+                    name: t.view(num_reqs_padded, query_len, -1)
+                    for name, t in empty.items()
+                }
+            )
+            self.intermediate_tensors_dict[key] = tensors
+        return tensors
+
+    def recv_intermediate_tensors(self) -> IntermediateTensors:
+        """Receive the previous PP stage's output into this stage's tensors.
+
+        NOTE(RBLN): this is essentially the same as GroupCoordinator.recv_tensor_dict,
+        except that the upstream version allocates a new empty tensor on every call.
+        Here we instead reuse buffers via _create_or_get_intermediate_tensors, keeping
+        the graph input pinned to a fixed tensor.
+        """
+        pp_group = get_pp_group()
+        src = (pp_group.rank_in_group - 1) % pp_group.world_size
+
+        recv_metadata_list: list[tuple[str, Any]] = pp_group.recv_object(src=src)
+        for name, meta in recv_metadata_list:
+            assert isinstance(meta, TensorMetadata), (
+                f"intermediate {name!r} is not a tensor: {meta!r}"
+            )
+
+        num_reqs_padded, query_len = (int(d) for d in recv_metadata_list[0][1].size[:2])
+        intermediate_tensors = self._create_or_get_intermediate_tensors(
+            num_reqs_padded, query_len
+        )
+        received = [
+            (name, tuple(meta.size), meta.dtype) for name, meta in recv_metadata_list
+        ]
+        expected = [
+            (name, tuple(t.shape), t.dtype) for name, t in intermediate_tensors.items()
+        ]
+        assert received == expected, (
+            f"previous stage sent {received}, this stage expects {expected}"
+        )
+
+        group = (
+            pp_group.cpu_group
+            if self.device == torch.device("cpu")
+            else pp_group.device_group
+        )
+        handles = [
+            torch.distributed.irecv(
+                intermediate_tensors[name], src=pp_group.ranks[src], group=group
+            )
+            for name, _ in recv_metadata_list
+        ]
+        for handle in handles:
+            handle.wait()
+
+        return intermediate_tensors
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -1954,7 +2040,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     target_hidden_states, sampling_metadata
                 )
         elif spec_config.use_eagle():
-            assert isinstance(self.drafter, RBLNEagleProposer)
+            assert isinstance(self.drafter, DRAFT_MODEL_PROPOSERS)
             assert isinstance(sampled_token_ids, torch.Tensor)
 
             next_token_ids, valid_sampled_tokens_count = (
@@ -2104,17 +2190,17 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 logits = self.model.compute_logits(sample_hidden_states)
                 logits = logits.view(-1, logits.size(-1))
 
-            # NOTE(RBLN): When eagle3 and aux hidden states are used,
-            # fuse combine_hidden_states projection into the target graph.
+            # NOTE(RBLN): fuse the drafter's combine_hidden_states projection
+            # into the target graph, so neither proposer projects again.
             combined_hidden_states = None
             if aux_hidden_states is not None:
-                assert isinstance(self.drafter, RBLNEagleProposer)
-                target_hidden_states = torch.cat(
+                combined_hidden_states = torch.cat(
                     [h.view(-1, h.shape[-1]) for h in aux_hidden_states], dim=-1
                 )
-                combined_hidden_states = self.drafter.model.combine_hidden_states(
-                    target_hidden_states
-                )
+                if isinstance(self.drafter, DRAFT_MODEL_PROPOSERS):
+                    combined_hidden_states = self.drafter.model.combine_hidden_states(
+                        combined_hidden_states
+                    )
 
             return hidden_states, logits, combined_hidden_states
 
@@ -2403,16 +2489,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
         else:
-            intermediate_tensors = self.model.make_empty_intermediate_tensors(
-                batch_size=batch_desc.num_reqs_padded * query_len,
-                dtype=self.model_config.dtype,
-                device=self.device,
-            )
-            intermediate_tensors = IntermediateTensors(
-                {
-                    k: v.view(batch_desc.num_reqs_padded, query_len, -1)
-                    for k, v in intermediate_tensors.items()
-                }
+            intermediate_tensors = self._create_or_get_intermediate_tensors(
+                batch_desc.num_reqs_padded, query_len
             )
 
         # NOTE(RBLN): Clone tensors to make tensors non-view tensors.
@@ -2440,7 +2518,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         ):
             _ = self.model_executable(**staged_model_input.as_kwargs())
 
-        if isinstance(self.drafter, RBLNEagleProposer):
+        if isinstance(self.drafter, DRAFT_MODEL_PROPOSERS):
             if warmup:
                 self.drafter.dummy_run(
                     num_reqs,
@@ -2631,7 +2709,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 )
 
         # Initialize drafter attention backend.
-        if isinstance(self.drafter, RBLNEagleProposer):
+        if isinstance(self.drafter, DRAFT_MODEL_PROPOSERS):
             self.drafter.initialize_attn_backend(kv_cache_config, kernel_block_sizes)
 
     def may_reinitialize_input_batch(
@@ -3045,41 +3123,12 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 }
                 kv_transfer_group.register_kv_caches(filtered_kv_caches)
 
-            def rbln_copy_kv_blocks(
-                src_kv_caches: dict[str, torch.Tensor],
-                dst_kv_caches: dict[str, torch.Tensor],
-                src_block_ids: list[int],
-                dst_block_ids: list[int],
-                direction: Literal["h2d", "d2h"],
-            ) -> None:
-                """Copy KV blocks between the host xfer buffer and the device KV
-                cache. Splits K/V (dim 0) first so each per-block view is
-                contiguous, hitting `_copy_from_rbln`'s direct-DMA fast path.
-                Requires VLLM_RBLN_USE_DEVICE_TENSOR=1."""
-                if (
-                    not src_kv_caches
-                    or not dst_kv_caches
-                    or not src_block_ids
-                    or not dst_block_ids
-                ):
-                    return
-                assert src_block_ids == dst_block_ids, (
-                    "src_block_ids and dst_block_ids must be the same: "
-                    f"src_block_ids={src_block_ids} dst_block_ids={dst_block_ids}"
+            kv_transfer_group.set_host_xfer_buffer_ops(
+                partial(
+                    copy_host_device_kv_blocks,
+                    use_mla=self.model_config.use_mla,
                 )
-                # P/D uses identical block ids on both sides (asserted above), so
-                # the copy indexes by src_block_ids; it is symmetric, so the
-                # direction arg (part of the fixed CopyBlocksOp signature) is
-                # unused.
-                for layer_name, dst_cache in dst_kv_caches.items():
-                    src_cache = src_kv_caches[layer_name]
-                    for kv in range(dst_cache.shape[0]):
-                        dst_kv = dst_cache[kv]
-                        src_kv = src_cache[kv]
-                        for idx in src_block_ids:
-                            dst_kv[idx].copy_(src_kv[idx])
-
-            kv_transfer_group.set_host_xfer_buffer_ops(rbln_copy_kv_blocks)
+            )
 
         self.cache_config.num_gpu_blocks = kv_cache_config.num_blocks
         self.cache_config.num_cpu_blocks = 0
@@ -3270,7 +3319,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                         yield value
 
         models = [self.model]
-        if isinstance(self.drafter, RBLNEagleProposer):
+        if isinstance(self.drafter, DRAFT_MODEL_PROPOSERS):
             models.append(self.drafter.model)
 
         for model in models:
@@ -3296,8 +3345,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         num_tokens = batch_size * num_spec
         num_draft_tokens = [num_spec] * batch_size
         draft_token_ids = torch.zeros(num_tokens, dtype=torch.int32, device=self.device)
-        target_probs = torch.zeros(
-            num_tokens, vocab_size, dtype=torch.float32, device=self.device
+        target_logits = torch.zeros(
+            num_tokens, vocab_size, dtype=self.dtype, device=self.device
         )
         cu_num_draft_tokens = torch.arange(
             num_spec,
@@ -3335,7 +3384,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             num_spec,
             cu_num_draft_tokens,
             None,
-            target_probs,
+            target_logits,
             bonus_token_ids,
             dummy_sampling_metadata,
         )
@@ -3497,6 +3546,7 @@ def _pad_sampling_metadata(md: SamplingMetadata, bucket: int) -> SamplingMetadat
         temperature=_pad_rows(md.temperature, bucket),
         top_p=_pad_rows(md.top_p, bucket),
         top_k=_pad_rows(md.top_k, bucket),
+        allowed_token_ids_mask=_pad_rows(md.allowed_token_ids_mask, bucket),
     )
     if not md.no_penalties:
         kwargs.update(

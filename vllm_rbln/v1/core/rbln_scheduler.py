@@ -36,7 +36,7 @@ from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.utils import record_function_or_nullcontext
 
-import vllm_rbln.envs as envs
+from vllm_rbln.config import build_rbln_config, get_rbln_config, set_rbln_config
 from vllm_rbln.logger import init_logger
 from vllm_rbln.v1.core.rbln_kv_cache_manager import (
     KVCacheCopyOp,
@@ -70,11 +70,13 @@ class RBLNScheduler(Scheduler):
     ) -> None:
         super().__init__(*args, **kwargs)
 
+        set_rbln_config(build_rbln_config(self.vllm_config.additional_config))
+
         # Replace the upstream KVCacheManager with RBLNKVCacheManager
         # when sub-block prefix caching is enabled.
         # Sub-block size equals the prefill chunk size (max_num_batched_tokens)
         # so that each prefill does not span multiple blocks.
-        if sub_block_size is None and envs.VLLM_RBLN_SUB_BLOCK_CACHE:
+        if sub_block_size is None and get_rbln_config().sub_block_cache:
             sub_block_size = self.scheduler_config.max_num_batched_tokens
         if (
             self.cache_config.enable_prefix_caching
@@ -572,11 +574,22 @@ class RBLNScheduler(Scheduler):
                         connector_prefix_cache_hits = num_external_computed_tokens
 
                     # NOTE(RBLN): Arbitrate between sub-block match and KV connector.
-                    sub_block_match, num_sub_block_tokens = self._try_sub_block_match(
-                        request,
-                        num_new_local_computed_tokens,
-                        num_external_computed_tokens,
+                    # Skipped on a preemption resume: the query above fixed the
+                    # resume point at the block-aligned local count (LMCache
+                    # asserts on it) and the connector contract allows no second
+                    # query to move it.
+                    resuming_with_connector = (
+                        self.connector is not None
+                        and request.status == RequestStatus.PREEMPTED
                     )
+                    if not resuming_with_connector:
+                        sub_block_match, num_sub_block_tokens = (
+                            self._try_sub_block_match(
+                                request,
+                                num_new_local_computed_tokens,
+                                num_external_computed_tokens,
+                            )
+                        )
                     if num_sub_block_tokens > 0 and num_external_computed_tokens > 0:
                         # Cancel the KV connector match in favor of the sub-block match
                         request.num_external_computed_tokens = 0
@@ -700,8 +713,9 @@ class RBLNScheduler(Scheduler):
                 # extra block gets allocated which
                 # creates a mismatch between the number
                 # of local and remote blocks.
+                limit_lookahead_tokens = load_kv_async and self.use_eagle
                 effective_lookahead_tokens = (
-                    0 if request.num_computed_tokens == 0 else self.num_lookahead_tokens
+                    0 if limit_lookahead_tokens else self.num_lookahead_tokens
                 )
 
                 # Determine if we need to allocate cross-attention blocks.

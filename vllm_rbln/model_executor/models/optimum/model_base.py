@@ -45,6 +45,15 @@ from .compilation import RBLNCompileSpec
 logger = init_logger(__name__)
 
 
+class KVCacheCopyError(RuntimeError):
+    """Raised when copying prefix-cached KV blocks fails (e.g. device OOM).
+
+    The copy is a pure optimization: the caller can always recover by
+    running a full prefill without the cached-prefix trim, so this error
+    must be caught at the copy call site instead of killing the engine.
+    """
+
+
 class KVCacheBlockAdapter:
     """
      KV cache block allocation behavior (v1 vs v0).
@@ -242,7 +251,10 @@ class RBLNOptimumModelBase(nn.Module):
                 json.dumps(spec.rbln_config, indent=2, default=str),
             )
             model = spec.model_cls.from_pretrained(
-                self.model_config.model, rbln_config=spec.rbln_config, config=hf_config
+                self.model_config.model,
+                rbln_config=spec.rbln_config,
+                config=hf_config,
+                dtype=self.model_config.dtype,
             )
             model.save_pretrained(cached_model_path)  # type: ignore[attr-defined]
             self.vllm_config.model_config.model = cached_model_path
@@ -409,6 +421,23 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
         }
         return kwargs
 
+    @staticmethod
+    def pad_cache_slot_ids(
+        cache_slot_ids: torch.Tensor,
+        padded_batch_size: int,
+    ) -> torch.Tensor:
+        """Pad the decode cache slot ids to [padded_batch_size, 1].
+
+        Padding rows must not alias a scheduled request's row in the
+        per-sequence cache, so the pad value is the lowest id no scheduled
+        request owns (0 when the batch is full and no padding row exists).
+        """
+        used_ids = set(cache_slot_ids.tolist())
+        pad_value = next((i for i in range(padded_batch_size) if i not in used_ids), 0)
+        padded = torch.full((padded_batch_size, 1), pad_value, dtype=torch.int16)
+        padded[: cache_slot_ids.shape[0], 0] = cache_slot_ids
+        return padded
+
     def get_prefill_decoder(self) -> runtime_utils.RBLNRuntimeModel:
         return self.model.prefill_decoder
 
@@ -428,6 +457,11 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
             cached_block_tables: Source block IDs to copy from.
             cached_lengths: Cached length for each source block.
             block_tables: Tensor whose first row holds the destination block IDs.
+
+        Raises:
+            KVCacheCopyError: A block copy failed (e.g. device OOM). The
+                destination blocks may be partially written; the caller must
+                fall back to a full prefill, which overwrites them all.
         """
         if not cached_block_tables:
             return
@@ -456,12 +490,10 @@ class RBLNOptimumDecoderMixin(VllmModelForTextGeneration):
                     dst_block,
                 )
             except Exception as e:
-                error_msg = (
+                raise KVCacheCopyError(
                     f"Failed to copy KV cache from block {src_block} to block "
                     f"{dst_block} at index {block_idx}: {e}"
-                )
-                logger.error(error_msg)
-                raise RuntimeError(error_msg) from e
+                ) from e
 
     # It is required for decoder models in openai api server
     def compute_logits(
@@ -602,9 +634,7 @@ class RBLNOptimumMultimodalMixin(SupportsMultiModal):
             return inputs_embeds
 
         # Flatten per-item embeddings into (num_mm_tokens, hidden_size).
-        mm_embeds = torch.cat(list(multimodal_embeddings)).to(
-            inputs_embeds.device, inputs_embeds.dtype
-        )
+        mm_embeds = torch.cat(list(multimodal_embeddings))
         self._assert_mm_tokens_match(int(is_multimodal.sum()), mm_embeds.shape[0])
         scatter_mask = is_multimodal.unsqueeze(-1).expand_as(inputs_embeds)
         return inputs_embeds.masked_scatter(scatter_mask, mm_embeds)

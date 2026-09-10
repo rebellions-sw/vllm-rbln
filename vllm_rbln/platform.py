@@ -30,6 +30,7 @@ import rebel
 from torch._dynamo import register_backend
 from vllm.logger import init_logger
 from vllm.platforms import Platform, PlatformEnum
+from vllm.version import __version_tuple__ as VLLM_VERSION
 
 import vllm_rbln.logger  # noqa: F401
 from vllm_rbln import envs
@@ -51,6 +52,8 @@ USE_DEVICE_TENSOR: bool = (
 )
 # RBLN default for an unset max_num_seqs (upstream vLLM defaults to 256).
 RBLN_DEFAULT_MAX_NUM_SEQS = 1
+# Superseded by RblnPlatform.device_control_env_var.
+DEPRECATED_DEVICE_CONTROL_ENV_VAR = "RBLN_DEVICES"
 
 
 def bypass_backend(graph_module: torch.fx.GraphModule, example_inputs):
@@ -73,7 +76,7 @@ class RblnPlatform(Platform):
     dist_backend: str = "rbln-ccl" if USE_DEVICE_TENSOR else ""
     dispatch_key: str = "CPU"
     ray_device_key: str = "RBLN"
-    device_control_env_var: str = "RBLN_DEVICES"
+    device_control_env_var: str = "RBLN_VISIBLE_DEVICES"
     simple_compile_backend = "bypass"
 
     @classmethod
@@ -124,6 +127,10 @@ class RblnPlatform(Platform):
                 "target NPU (e.g., RBLN-CA25) so compilation can target it."
             )
         return device_name
+
+    @classmethod
+    def is_cr13(cls) -> bool:
+        return cls.get_device_name().strip().upper() == "RBLN-CR13"
 
     @staticmethod
     def inference_mode():
@@ -220,12 +227,38 @@ class RblnPlatform(Platform):
         EngineArgs._rbln_user_mnbt_patched = True
 
     @classmethod
+    def _adopt_deprecated_device_control_env_var(cls) -> None:
+        """Fold ``RBLN_DEVICES`` into ``device_control_env_var`` and unset it.
+
+        The runtime takes both names but prefers ``RBLN_DEVICES``, so one left
+        in the environment would override the pool a worker narrows itself to
+        and put every rank on the same NPUs.
+        """
+        legacy = os.environ.pop(DEPRECATED_DEVICE_CONTROL_ENV_VAR, None)
+        if legacy is None:
+            return
+        in_effect = os.environ.setdefault(cls.device_control_env_var, legacy)
+        logger.warning_once(
+            "%s is deprecated and will be removed in a future release. Please "
+            "use %s instead; this run uses %s=%s.",
+            DEPRECATED_DEVICE_CONTROL_ENV_VAR,
+            cls.device_control_env_var,
+            cls.device_control_env_var,
+            in_effect,
+        )
+
+    @classmethod
     def pre_register_and_update(
         cls, parser: "FlexibleArgumentParser | None" = None
     ) -> None:
-        # Runs before max_num_seqs is resolved from None to its default.
+        # Early enough that vLLM has read neither the device-control env var nor
+        # max_num_seqs, which is still None here.
+        cls._adopt_deprecated_device_control_env_var()
         cls._override_default_max_num_seqs()
-        cls._capture_user_max_num_batched_tokens()
+        if not envs.VLLM_RBLN_USE_VLLM_MODEL:
+            # Only sync_from_vllm reads the key it writes, and on the native
+            # path it would be an unknown field of RBLNConfig.
+            cls._capture_user_max_num_batched_tokens()
 
         if parser is None:
             return
@@ -238,9 +271,16 @@ class RblnPlatform(Platform):
             if action.dest == "block_size":
                 action.choices = None  # Override choices
 
+        if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            from vllm_rbln.config import add_rbln_cli_args
+
+            add_rbln_cli_args(parser)
+
     @classmethod
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
+        from vllm_rbln.config import build_rbln_config, set_rbln_config
         from vllm_rbln.utils.optimum.converter import sync_vllm_and_optimum
+        from vllm_rbln.utils.optimum.predicates import forces_fp32_dtype
         from vllm_rbln.utils.optimum.registry import is_pooling_arch
 
         if envs.VLLM_USE_V2_MODEL_RUNNER:
@@ -259,6 +299,11 @@ class RblnPlatform(Platform):
             cls._validate_dynamic_kv_config(vllm_config)
 
         if envs.VLLM_RBLN_USE_VLLM_MODEL:
+            vllm_config.additional_config = build_rbln_config(
+                vllm_config.additional_config
+            )
+            set_rbln_config(vllm_config.additional_config)
+
             if vllm_config.lora_config is not None:
                 raise ValueError("LoRA is not supported on RBLN.")
 
@@ -350,6 +395,24 @@ class RblnPlatform(Platform):
                     "vllm_rbln.v1.core.rbln_scheduler.RBLNScheduler"
                 )
 
+            if (
+                vllm_config.speculative_config is not None
+                and vllm_config.speculative_config.method == "dflash"
+                and scheduler_config.max_num_scheduled_tokens
+                != scheduler_config.max_num_batched_tokens
+            ):
+                # DFlash reserves no slots (see patches/speculative_config.py),
+                # so the auto-computed budget is the whole of
+                # max_num_batched_tokens and any other value was set explicitly.
+                raise ValueError(
+                    "DFlash needs max_num_scheduled_tokens left auto-computed "
+                    f"(expected {scheduler_config.max_num_batched_tokens}, got "
+                    f"{scheduler_config.max_num_scheduled_tokens}): the prefill "
+                    "chunk has to stay at max_num_batched_tokens, which is also "
+                    "the compiled prefill length and the sub-block cache's "
+                    "granularity."
+                )
+
             # Under PP the compiled per-stage decode batch is max_num_seqs // pp_size
             # (see decode_batch_size). Fail fast on an impossible config.
             pp_size = parallel_config.pipeline_parallel_size
@@ -378,6 +441,20 @@ class RblnPlatform(Platform):
                 )
 
                 cls._validate_eagle3_pp_config(vllm_config)
+
+            spec_config = vllm_config.speculative_config
+            if (
+                spec_config is not None
+                and model_config.hf_text_config.model_type == "deepseek_v32"
+            ):
+                # TODO(vllm>=0.29.0): delete this block; vllm#52861 stops upstream
+                # forcing v32 MTP eager, which leaves the reset below dead.
+                assert VLLM_VERSION < (0, 29), (
+                    f"vLLM {VLLM_VERSION} ships vllm#52861; delete the deepseek_v32 "
+                    "MTP enforce_eager reset."
+                )
+                if not model_config.enforce_eager and spec_config.enforce_eager:
+                    spec_config.enforce_eager = False
 
             # FIXME(jiwoo.park) This is a temporary workaround.
             if model_config.enforce_eager:
@@ -426,12 +503,8 @@ class RblnPlatform(Platform):
                 model_config.disable_cascade_attn = True
 
         else:
-            # NOTE(eunji.lee):
-            # It is for multimodal models
-            # to generate inputs as fp32, not bfloat16
-            # even though the model is compiled with bfloat16
-            model_config.dtype = torch.float
-            assert model_config.dtype == torch.float
+            if forces_fp32_dtype(vllm_config.model_config):
+                model_config.dtype = torch.float32
 
             if parallel_config.worker_cls == "auto":
                 parallel_config.worker_cls = (
