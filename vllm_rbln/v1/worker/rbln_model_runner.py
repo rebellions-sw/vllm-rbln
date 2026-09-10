@@ -1658,6 +1658,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         for handle in handles:
             handle.wait()
 
+        if self.device == torch.device("rbln"):
+            torch.rbln.synchronize()
+
         return intermediate_tensors
 
     @torch.inference_mode()
@@ -1793,6 +1796,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 assert isinstance(hidden_states, IntermediateTensors)
                 hidden_states.kv_connector_output = kv_connector_output
                 self.kv_connector_output = kv_connector_output
+                if self.device == torch.device("rbln"):
+                    torch.rbln.synchronize()
                 return hidden_states
 
             if self.is_pooling_model:
