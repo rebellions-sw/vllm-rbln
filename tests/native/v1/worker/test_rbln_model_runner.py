@@ -195,6 +195,88 @@ class TestGetCumsumAndArange:
         assert cu.dtype == np.int32
 
 
+class TestSpecTokenIndices:
+    # Two requests on a K=3 decode grid (query_len 4): request 0 keeps 3
+    # drafts, request 1 keeps 1. Packed rows -> grid positions:
+    #   logits_indices = [0, 1, 2, 3, 6, 7]   (req1's live rows sit at the tail)
+    #   target rows (packed) = [0, 1, 2, 4], bonus rows (packed) = [3, 5]
+    @staticmethod
+    def _metadata():
+        return SpecDecodeMetadata(
+            draft_token_ids=torch.zeros(4, dtype=torch.int32),
+            num_draft_tokens=[3, 1],
+            cu_num_draft_tokens=torch.tensor([3, 4], dtype=torch.int32),
+            cu_num_sampled_tokens=torch.tensor([4, 6], dtype=torch.int32),
+            target_logits_indices=torch.tensor([0, 1, 2, 4], dtype=torch.int32),
+            bonus_logits_indices=torch.tensor([3, 5], dtype=torch.int32),
+            logits_indices=torch.tensor([0, 1, 2, 3, 6, 7], dtype=torch.int32),
+        )
+
+    @staticmethod
+    def _runner():
+        return _make_runner_stub(
+            bucketing_manager=SimpleNamespace(max_batch_size=4),
+        )
+
+    def test_rbln_sampler_layout_pads_bonus_rows_to_the_bucket(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+        runner = self._runner()
+        (target_idx, bonus_idx), layout = runner._build_spec_token_indices(
+            self._metadata(), num_reqs=2, num_reqs_padded=2, query_len=4
+        )
+        # 2 * 3 draft slots (last repeated) and 4 bonus slots (the sampler bucket).
+        assert target_idx.dtype == bonus_idx.dtype == torch.int32
+        assert target_idx.tolist() == [0, 1, 2, 6, 6, 6]
+        assert bonus_idx.tolist() == [3, 7, 7, 7]
+        assert (layout.num_target, layout.num_reqs, layout.num_bonus_rows) == (4, 2, 4)
+        assert layout.to_packed.tolist() == [0, 1, 2, 4, 3, 5]
+
+    def test_packed_restores_the_upstream_order(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+        runner = self._runner()
+        md = self._metadata()
+        (target_idx, bonus_idx), layout = runner._build_spec_token_indices(
+            md, num_reqs=2, num_reqs_padded=2, query_len=4
+        )
+        grid = torch.arange(8, dtype=torch.float32).unsqueeze(1) * 10  # [B*T, 1]
+        target = grid[target_idx.long()]
+        layout.bonus_logits = grid[bonus_idx.long()]
+        assert torch.equal(layout.packed(target), grid[md.logits_indices.long()])
+        # And the two sampler groups are the tensors themselves.
+        assert torch.equal(
+            target[: layout.num_target],
+            grid[md.logits_indices[md.target_logits_indices].long()],
+        )
+        assert torch.equal(
+            layout.bonus_logits[: layout.num_reqs],
+            grid[md.logits_indices[md.bonus_logits_indices].long()],
+        )
+
+    def test_torch_sampler_layout_keeps_one_bonus_row_per_request(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", False)
+        runner = self._runner()
+        (target_idx, bonus_idx), layout = runner._build_spec_token_indices(
+            self._metadata(), num_reqs=2, num_reqs_padded=2, query_len=4
+        )
+        assert target_idx.tolist() == [0, 1, 2, 6, 6, 6]
+        assert bonus_idx.tolist() == [3, 7]
+        assert layout.num_bonus_rows == 2
+
+    def test_lengths_match_the_dummy_run(self, monkeypatch):
+        # The warm-up graph must be compiled for the same index lengths.
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+        runner = self._runner()
+        (target_idx, bonus_idx), _ = runner._build_spec_token_indices(
+            self._metadata(), num_reqs=2, num_reqs_padded=2, query_len=4
+        )
+        assert (
+            target_idx.shape[0],
+            bonus_idx.shape[0],
+        ) == runner._spec_token_indices_lens(2, 4)
+        # A single padded request still gets the bucket's bonus slots.
+        assert runner._spec_token_indices_lens(1, 4) == (3, 4)
+
+
 class TestPadDepad:
     def test_pad_rows_repeats_last_row(self):
         t = torch.arange(6).reshape(2, 3)
@@ -301,6 +383,7 @@ class TestSamplePadding:
                 decode_batch_buckets=[2, 4], max_batch_size=4
             ),
             max_num_reqs=8,
+            num_spec_tokens=2,
             rejection_sampler=rejection_sampler,
         )
         return runner, rejection_sampler
@@ -317,6 +400,56 @@ class TestSamplePadding:
 
         padded_metadata = rejection_sampler.call_args.args[0]
         assert len(padded_metadata.num_draft_tokens) == 4
+
+    def test_layout_slices_replace_the_sampler_gathers(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+        output = SamplerOutput(
+            sampled_token_ids=torch.zeros((4, 3), dtype=torch.int32),
+            logprobs_tensors=None,
+        )
+        runner, rejection_sampler = self._runner(output)
+        logits = torch.arange(6 * 10, dtype=torch.float32).view(6, 10)
+        bonus = torch.arange(4 * 10, dtype=torch.float32).view(4, 10) + 100
+        layout = mr.SpecLogitsLayout(
+            num_target=2,
+            num_reqs=2,
+            num_bonus_rows=4,
+            to_packed=torch.arange(4),
+            bonus_logits=bonus,
+        )
+
+        runner._sample(logits, _spec_decode_metadata([1, 1]), layout)
+
+        kwargs = rejection_sampler.call_args.kwargs
+        # 6 rows is not the op's bucket*K = 8 block: the live rows are sliced.
+        assert torch.equal(kwargs["target_logits"], logits[:2])
+        assert kwargs["target_logits"].storage_offset() == 0
+        assert kwargs["bonus_logits"] is bonus or torch.equal(
+            kwargs["bonus_logits"], bonus
+        )
+        assert rejection_sampler.call_args.args[2] is logits
+
+    def test_prepacked_target_block_is_handed_over_whole(self, monkeypatch):
+        monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", True)
+        output = SamplerOutput(
+            sampled_token_ids=torch.zeros((4, 3), dtype=torch.int32),
+            logprobs_tensors=None,
+        )
+        runner, rejection_sampler = self._runner(output)
+        # bucket 4 x K 2 = 8 rows: the graph output is the op's own layout.
+        logits = torch.arange(8 * 10, dtype=torch.float32).view(8, 10)
+        bonus = torch.zeros(4, 10)
+        layout = mr.SpecLogitsLayout(
+            num_target=2,
+            num_reqs=2,
+            num_bonus_rows=4,
+            to_packed=torch.arange(4),
+            bonus_logits=bonus,
+        )
+
+        runner._sample(logits, _spec_decode_metadata([1, 1]), layout)
+
+        assert rejection_sampler.call_args.kwargs["target_logits"] is logits
 
     def test_torch_rejection_sampler_keeps_live_batch_metadata(self, monkeypatch):
         monkeypatch.setattr(mr.envs, "VLLM_RBLN_SAMPLER", False)
@@ -403,12 +536,13 @@ class TestExecuteModelState:
             "hidden_states",
             "sample_hidden_states",
             "combined_hidden_states",
+            "spec_logits_layout",
         )
 
     def test_is_named_tuple(self):
         s = ExecuteModelState(1, 2, 3, 4, 5, 6, 7)
         assert isinstance(s, tuple)
-        assert tuple(s) == (1, 2, 3, 4, 5, 6, 7)
+        assert tuple(s) == (1, 2, 3, 4, 5, 6, 7, None)
 
 
 class TestGetNansInLogits:

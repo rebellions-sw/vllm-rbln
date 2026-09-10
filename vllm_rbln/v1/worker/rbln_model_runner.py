@@ -217,6 +217,28 @@ def _copy_pooler_output(
     return pooler_output
 
 
+@dataclasses.dataclass
+class SpecLogitsLayout:
+    """Row layout of the spec-decode logits the target graph emits (see
+    `_build_spec_token_indices`): the draft rows in packed order in
+    `logits[:num_target]`, one bonus row per request in
+    `bonus_logits[:num_reqs]` (padded to the sampler's bucket), and
+    `to_packed` to restore the upstream packed order when a consumer needs it."""
+
+    num_target: int
+    num_reqs: int
+    num_bonus_rows: int
+    to_packed: torch.Tensor
+    bonus_logits: torch.Tensor | None = None
+
+    def packed(self, target_logits: torch.Tensor) -> torch.Tensor:
+        assert self.bonus_logits is not None
+        rows = torch.cat(
+            [target_logits[: self.num_target], self.bonus_logits[: self.num_reqs]]
+        )
+        return rows[self.to_packed]
+
+
 class ExecuteModelState(NamedTuple):
     """Ephemeral cached state transferred between execute_model() and
     sample_tokens(), after execute_model() returns None."""
@@ -228,6 +250,8 @@ class ExecuteModelState(NamedTuple):
     hidden_states: torch.Tensor
     sample_hidden_states: torch.Tensor
     combined_hidden_states: torch.Tensor | None
+    # None: `logits` is in the packed order the upstream sampler expects.
+    spec_logits_layout: SpecLogitsLayout | None = None
 
 
 class RBLNModelRunner(KVConnectorModelRunnerMixin):
@@ -1230,6 +1254,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         num_input_tokens: int,
         logits_indices: torch.Tensor,
         intermediate_tensors: IntermediateTensors | None = None,
+        *,
+        spec_token_indices: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[
         StagedModelInputs,
         dict[str, Any],
@@ -1251,21 +1277,35 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             assert intermediate_tensors is not None
 
         is_prefill = self.is_prefill
-        layout = InputLayout(
-            num_reqs=num_reqs,
-            num_reqs_padded=num_reqs_padded,
-            query_len=input_ids.shape[1],
-            query_len_padded=self.max_num_tokens if is_prefill else input_ids.shape[1],
-        )
+        query_len = input_ids.shape[1]
+        query_len_padded = self.max_num_tokens if is_prefill else query_len
+        token_indices: torch.Tensor | None = None
+        bonus_token_indices: torch.Tensor | None = None
+        num_token_indices: int | None = None
+        num_bonus_token_indices: int | None = None
+        if self.use_wrapped_compute_logits:
+            if is_prefill:
+                token_indices = logits_indices
+            elif spec_token_indices is not None:
+                token_indices, bonus_token_indices = spec_token_indices
+                num_token_indices = int(token_indices.shape[0])
+                num_bonus_token_indices = int(bonus_token_indices.shape[0])
+
         staged_model_inputs = self.input_stager.stage(
             input_ids=input_ids,
             positions=positions,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
-            token_indices=logits_indices
-            if is_prefill and self.use_wrapped_compute_logits
-            else None,
-            layout=layout,
+            token_indices=token_indices,
+            bonus_token_indices=bonus_token_indices,
+            layout=InputLayout(
+                num_reqs=num_reqs,
+                num_reqs_padded=num_reqs_padded,
+                query_len=query_len,
+                query_len_padded=query_len_padded,
+                num_token_indices=num_token_indices,
+                num_bonus_token_indices=num_bonus_token_indices,
+            ),
         )
 
         model_kwargs = {
@@ -1277,10 +1317,76 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             model_kwargs,
         )
 
+    def _spec_bonus_rows(self, num_reqs: int) -> int:
+        """Bonus rows the sampler consumes: the RBLN sampler pins its graphs to
+        the decode batch bucket (see `_pad_spec_decode_metadata`)."""
+        if envs.VLLM_RBLN_SAMPLER:
+            return self.bucketing_manager.max_batch_size
+        return num_reqs
+
+    def _spec_token_indices_lens(
+        self, num_reqs_padded: int, query_len: int
+    ) -> tuple[int, int]:
+        """Fixed lengths of the two gather indices: (draft slots, bonus slots)."""
+        bonus_slots = max(self._spec_bonus_rows(num_reqs_padded), num_reqs_padded)
+        return num_reqs_padded * (query_len - 1), bonus_slots
+
+    def _build_spec_token_indices(
+        self,
+        spec_decode_metadata: SpecDecodeMetadata,
+        num_reqs: int,
+        num_reqs_padded: int,
+        query_len: int,
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], SpecLogitsLayout]:
+        """Token-grid positions the target graph gathers for lm_head, as two
+        fixed-length indices: the draft rows in packed order and one bonus row
+        per request, each padded by repeating its last entry."""
+        dtype = spec_decode_metadata.logits_indices.dtype
+        packed_to_grid = spec_decode_metadata.logits_indices.long()
+        target_rows = spec_decode_metadata.target_logits_indices.long()
+        bonus_rows = spec_decode_metadata.bonus_logits_indices.long()
+        num_target = int(target_rows.shape[0])
+        assert int(bonus_rows.shape[0]) == num_reqs, (
+            bonus_rows.shape,
+            num_reqs,
+        )
+        target_slots, bonus_slots = self._spec_token_indices_lens(
+            num_reqs_padded, query_len
+        )
+        num_bonus_rows = self._spec_bonus_rows(num_reqs)
+        assert num_target <= target_slots and num_bonus_rows <= bonus_slots, (
+            num_target,
+            target_slots,
+            num_bonus_rows,
+            bonus_slots,
+        )
+
+        def padded(rows: torch.Tensor, slots: int) -> torch.Tensor:
+            n = rows.shape[0]
+            assert n > 0
+            out = torch.empty(slots, dtype=dtype)
+            out[:n] = rows
+            out[n:] = rows[-1]
+            return out
+
+        token_indices = padded(packed_to_grid[target_rows], target_slots)
+        bonus_token_indices = padded(packed_to_grid[bonus_rows], bonus_slots)
+
+        to_packed = torch.empty(num_target + num_reqs, dtype=torch.int64)
+        to_packed[target_rows] = torch.arange(num_target, dtype=torch.int64)
+        to_packed[bonus_rows] = num_target + torch.arange(num_reqs, dtype=torch.int64)
+        return (token_indices, bonus_token_indices), SpecLogitsLayout(
+            num_target=num_target,
+            num_reqs=num_reqs,
+            num_bonus_rows=num_bonus_rows,
+            to_packed=to_packed,
+        )
+
     def _sample(
         self,
         logits: torch.Tensor,
         spec_decode_metadata: SpecDecodeMetadata | None,
+        spec_logits_layout: SpecLogitsLayout | None = None,
     ) -> SamplerOutput:
         if self.is_intermediate_chunked_prefill:
             # NOTE(RBLN): During intermediate chunked prefill, skip sampling and return
@@ -1314,8 +1420,28 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 **staging,
             )
         else:
+            bonus_logits = target_logits = None
+            bucket = self.bucketing_manager.max_batch_size
+            if spec_logits_layout is not None:
+                # Graph outputs sliced from the front only: a graph input must
+                # sit at its allocation base.
+                assert spec_logits_layout.bonus_logits is not None
+                bonus_logits = spec_logits_layout.bonus_logits[
+                    : spec_logits_layout.num_bonus_rows
+                ]
+                if (
+                    envs.VLLM_RBLN_SAMPLER
+                    and logits.shape[0] == bucket * self.num_spec_tokens
+                ):
+                    # Already the op's packed-then-padded [bucket*K, vocab]
+                    # block; rows past the live ones are never read.
+                    target_logits = logits
+                else:
+                    target_logits = logits[: spec_logits_layout.num_target]
             if envs.VLLM_RBLN_SAMPLER:
-                bucket = self.bucketing_manager.max_batch_size
+                assert spec_logits_layout is None or (
+                    spec_logits_layout.num_bonus_rows == bucket
+                )
                 spec_decode_metadata = _pad_spec_decode_metadata(
                     spec_decode_metadata, bucket
                 )
@@ -1325,6 +1451,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 None,  # draft_probs
                 logits,
                 sampling_metadata,
+                bonus_logits=bonus_logits,
+                target_logits=target_logits,
             )
 
         return _depad_sampler_output(out, num_reqs)
@@ -1742,6 +1870,21 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 )
             )
 
+            spec_token_indices: tuple[torch.Tensor, torch.Tensor] | None = None
+            spec_logits_layout: SpecLogitsLayout | None = None
+            if (
+                not self.is_prefill
+                and spec_decode_metadata is not None
+                and self.use_wrapped_compute_logits
+            ):
+                assert num_query_tokens % num_reqs == 0
+                spec_token_indices, spec_logits_layout = self._build_spec_token_indices(
+                    spec_decode_metadata,
+                    num_reqs,
+                    batch_desc.num_reqs_padded,
+                    num_query_tokens // num_reqs,
+                )
+
             (
                 staged_model_inputs,
                 model_kwargs,
@@ -1751,6 +1894,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 num_query_tokens,
                 logits_indices,
                 intermediate_tensors,
+                spec_token_indices=spec_token_indices,
             )
 
             if self.use_async_scheduling:
@@ -1786,7 +1930,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             )
 
         with record_function_or_nullcontext("rbln_model_runner: postprocess"):
-            hidden_states, logits, combined_hidden_states = model_output
+            hidden_states, logits, combined_hidden_states, bonus_logits = model_output
 
             if not get_pp_group().is_last_rank:
                 # Return the intermediate tensors; carry the connector output
@@ -1807,8 +1951,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
 
             sample_hidden_states = hidden_states
             assert self.use_wrapped_compute_logits
-            if not self.is_prefill and spec_decode_metadata is not None:
-                logits = logits[logits_indices]
+            if spec_logits_layout is not None:
+                assert bonus_logits is not None
+                spec_logits_layout.bonus_logits = bonus_logits
 
         self.execute_model_state = ExecuteModelState(
             scheduler_output,
@@ -1818,6 +1963,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             hidden_states,
             sample_hidden_states,
             combined_hidden_states,
+            spec_logits_layout,
         )
         self.kv_connector_output = kv_connector_output
         return None
@@ -1846,8 +1992,17 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             hidden_states,
             sample_hidden_states,
             combined_hidden_states,
+            spec_logits_layout,
         ) = self.execute_model_state
         self.execute_model_state = None  # Clear ephemeral state
+
+        if spec_logits_layout is not None and (
+            grammar_output is not None
+            or self.input_batch.sampling_metadata.max_num_logprobs is not None
+        ):
+            # These consumers read `logits` in the upstream packed order.
+            logits = spec_logits_layout.packed(logits)
+            spec_logits_layout = None
 
         # Nothing waits for the forward here. Its device work and the sampler's
         # are queued in order on the same device, so the sampler cannot start on
@@ -1869,7 +2024,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             logits = logits.to(origin_dtype).to(origin_device)
 
         with record_function_or_nullcontext("rbln_model_runner: sample"):
-            sampler_output = self._sample(logits, spec_decode_metadata)
+            sampler_output = self._sample(
+                logits, spec_decode_metadata, spec_logits_layout
+            )
 
         self._draft_token_ids = None
 
@@ -2152,6 +2309,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             intermediate_tensors: IntermediateTensors | None = None,
             inputs_embeds: torch.Tensor | None = None,
             token_indices: torch.Tensor | None = None,
+            bonus_token_indices: torch.Tensor | None = None,
             **kwargs,
         ):
             model_output = self.model(
@@ -2163,6 +2321,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
             )
 
             logits = None
+            bonus_logits = None
             # Only the last stage gets the aux tensors as a second return value;
             # earlier stages carry them inside the IntermediateTensors handoff, which
             # is model_output itself.
@@ -2178,7 +2337,21 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 and self.logits_processor is not None
             ):
                 if token_indices is not None:
-                    sample_hidden_states = hidden_states[:, token_indices]
+                    # The indices address the flat B*T token axis.
+                    flat_hidden_states = hidden_states.reshape(
+                        1, -1, hidden_states.shape[-1]
+                    )
+                    sample_hidden_states = flat_hidden_states[:, token_indices]
+                    if bonus_token_indices is not None:
+                        # One lm_head over both groups: weight-reuse mode
+                        # rejects a second use of the weight in one graph.
+                        sample_hidden_states = torch.cat(
+                            [
+                                sample_hidden_states,
+                                flat_hidden_states[:, bonus_token_indices],
+                            ],
+                            dim=1,
+                        )
                     # NOTE(RBLN): token_indices points to the last-token positions used
                     # for sampling. EAGLE needs the full hidden_states during prefill,
                     # so do not slice them here.
@@ -2190,6 +2363,12 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                     sample_hidden_states = hidden_states
                 logits = self.model.compute_logits(sample_hidden_states)
                 logits = logits.view(-1, logits.size(-1))
+                if bonus_token_indices is not None:
+                    num_target_slots = token_indices.shape[0]
+                    logits, bonus_logits = (
+                        logits[:num_target_slots],
+                        logits[num_target_slots:],
+                    )
 
             # NOTE(RBLN): fuse the drafter's combine_hidden_states projection
             # into the target graph, so neither proposer projects again.
@@ -2203,7 +2382,7 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                         combined_hidden_states
                     )
 
-            return hidden_states, logits, combined_hidden_states
+            return hidden_states, logits, combined_hidden_states, bonus_logits
 
         if self.model_config.enforce_eager or not envs.VLLM_RBLN_COMPILE_MODEL:
             self.model_executable = model_wrapper
@@ -2474,6 +2653,9 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
         inputs_embeds = None
         positions = self.positions[:num_tokens]
         token_indices: torch.Tensor | None = None
+        bonus_token_indices: torch.Tensor | None = None
+        num_token_indices: int | None = None
+        num_bonus_token_indices: int | None = None
         if self.use_wrapped_compute_logits and is_prefill:
             token_indices = torch.arange(
                 query_len - 1,
@@ -2482,6 +2664,24 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 device=input_ids.device,
                 dtype=torch.int32,
             )
+        elif (
+            self.use_wrapped_compute_logits
+            and not is_prefill
+            and self.speculative_config is not None
+            and query_len > 1
+        ):
+            # Same fixed index lengths as the spec-decode step; any in-range
+            # values compile the same graph.
+            num_token_indices, num_bonus_token_indices = self._spec_token_indices_lens(
+                batch_desc.num_reqs_padded, query_len
+            )
+            last = batch_desc.num_reqs_padded * query_len - 1
+            token_indices = torch.arange(num_token_indices, dtype=torch.int32).clamp_(
+                max=last
+            )
+            bonus_token_indices = torch.arange(
+                num_bonus_token_indices, dtype=torch.int32
+            ).clamp_(max=last)
 
         # The stager pads input_ids / positions but passes intermediate tensors
         # through unpadded, so build PP intermediate tensors at the padded batch
@@ -2506,6 +2706,8 @@ class RBLNModelRunner(KVConnectorModelRunnerMixin):
                 num_reqs_padded=batch_desc.num_reqs_padded,
                 query_len=query_len,
                 query_len_padded=query_len,
+                num_token_indices=num_token_indices,
+                num_bonus_token_indices=num_bonus_token_indices,
             ),
         )
 

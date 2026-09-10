@@ -581,9 +581,8 @@ class TestModelExecutable:
 
 
 class TestTimedRegion:
-    """Spec decode's device wait sits in the postprocess gather, an inline region:
-    timed_region must fold exactly that one into the graph sum, and only while a
-    pass is open."""
+    """timed_region folds the execute_model postprocess profiler name into the
+    graph sum while a pass is open (legacy hook for the old logits gather)."""
 
     def _in_pass(self, ctx, clock, monkeypatch):
         monkeypatch.setattr(pm, "_ACTIVE_CTX", ctx)
@@ -613,9 +612,8 @@ class TestTimedRegion:
             clock.advance(3 * MS)
 
     def test_the_region_literal_matches_the_runner_source(self):
-        # timed_region matches execute_model's region by its literal name, so a
-        # rename in the runner would silently drop the spec-decode device wait
-        # from the graph sum. Pin the string to the source it must match.
+        # timed_region matches execute_model's region by its literal name.
+        # Pin the string to the source it must match.
         source = inspect.getsource(pm._execute_model)
         assert f'"{pm._GRAPH_REGION}"' in source
 

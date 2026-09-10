@@ -87,6 +87,10 @@ class RBLNRejectionSampler(RejectionSampler):
         # [num_tokens + batch_size, vocab_size]
         logits: torch.Tensor,
         sampling_metadata: SamplingMetadata,
+        *,
+        # Rows the target graph gathered already; None gathers from `logits`.
+        bonus_logits: torch.Tensor | None = None,
+        target_logits: torch.Tensor | None = None,
     ) -> SamplerOutput:
         """
         Args:
@@ -112,14 +116,18 @@ class RBLNRejectionSampler(RejectionSampler):
         """
         assert metadata.max_spec_len <= self.impl.max_spec_len
 
-        bonus_logits_indices = metadata.bonus_logits_indices
-        target_logits_indices = metadata.target_logits_indices
-
-        # Indexing with a tensor creates new storage, so both slices below are
-        # safe to update in place.
+        # A gather yields new storage; pre-gathered rows alias the graph
+        # output, which only the logprobs path reads afterwards.
         assert logits is not None
-        bonus_logits = logits[bonus_logits_indices]
-        raw_target_logits = logits[target_logits_indices]
+        if bonus_logits is None:
+            bonus_logits = logits[metadata.bonus_logits_indices]
+        else:
+            assert sampling_metadata.max_num_logprobs is None
+        if target_logits is None:
+            raw_target_logits = logits[metadata.target_logits_indices]
+        else:
+            assert sampling_metadata.max_num_logprobs is None
+            raw_target_logits = target_logits
 
         # The bonus logits are wanted back only to compute the accepted-token
         # logprobs; asking for them widens the rows to float32, which on the
@@ -155,10 +163,25 @@ class RBLNRejectionSampler(RejectionSampler):
             bonus_token_ids = bonus_sampler_output.sampled_token_ids
             bonus_logits = None
 
-        # [num_tokens, vocab_size]
-        target_logits = self.apply_logits_processors(
-            raw_target_logits, sampling_metadata, metadata
-        )
+        num_target = int(metadata.target_logits_indices.shape[0])
+        if raw_target_logits.shape[0] > num_target:
+            # The op's [B*K, vocab] block already: run the processors on the
+            # live rows in place and hand the block over as it is. A processor
+            # that returns new storage falls back to the packed rows.
+            live_rows = raw_target_logits[:num_target]
+            processed = self.apply_logits_processors(
+                live_rows, sampling_metadata, metadata
+            )
+            target_logits = (
+                raw_target_logits
+                if processed.data_ptr() == live_rows.data_ptr()
+                and processed.shape == live_rows.shape
+                else processed
+            )
+        else:
+            target_logits = self.apply_logits_processors(
+                raw_target_logits, sampling_metadata, metadata
+            )
 
         output_token_ids = self.impl.rejection_sample(
             metadata.draft_token_ids,
@@ -411,7 +434,14 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         assert (bonus_token_ids is None) != (bonus_logits is None)
         assert bonus_token_ids is None or bonus_token_ids.is_contiguous()
         assert bonus_logits is None or bonus_logits.is_contiguous()
-        assert target_logits.shape == (num_tokens, vocab_size)
+        # Packed [N, vocab] rows, or the op's [B*K, vocab] block ready to use.
+        padded_len = batch_size * max_spec_len
+        prepacked = target_logits.shape[0] == padded_len
+        assert prepacked or target_logits.shape == (num_tokens, vocab_size), (
+            target_logits.shape,
+            num_tokens,
+            padded_len,
+        )
 
         device = target_logits.device
         dtype = target_logits.dtype
@@ -445,7 +475,6 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
         # the packed length carry an earlier step's values, which the op reads
         # only into slots its acceptance count clips.
         N = num_tokens  # = sum(num_draft_tokens)
-        padded_len = batch_size * max_spec_len
         reshaped_draft_token_ids = bufs["draft_token_ids"]
         draft_per_batch = bufs["draft_per_batch"]
         if padded_len == N:
@@ -456,14 +485,17 @@ class RBLNRejectionSamplerImpl(RejectionSamplerImpl):
             reshaped_target_logits = target_logits
             draft_per_batch.copy_(draft_token_ids.view(batch_size, max_spec_len))
         else:
-            # Only a partial-draft step needs the padded logits block, and it
-            # is the one big buffer here, so it is allocated on first use.
-            if (reshaped_target_logits := bufs.get("target_logits")) is None:
-                reshaped_target_logits = bufs["target_logits"] = torch.zeros(
-                    padded_len, vocab_size, dtype=dtype, device=device
-                )
+            if prepacked:
+                reshaped_target_logits = target_logits
+            else:
+                # Only a partial-draft step needs the padded logits block, and
+                # it is the one big buffer here, so it is allocated on first use.
+                if (reshaped_target_logits := bufs.get("target_logits")) is None:
+                    reshaped_target_logits = bufs["target_logits"] = torch.zeros(
+                        padded_len, vocab_size, dtype=dtype, device=device
+                    )
+                reshaped_target_logits[:N] = target_logits
             reshaped_draft_token_ids[:N] = draft_token_ids
-            reshaped_target_logits[:N] = target_logits
 
             draft_per_batch.fill_(PLACEHOLDER_TOKEN_ID)
             src_offset = 0

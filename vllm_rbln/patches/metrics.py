@@ -24,10 +24,9 @@ absorbs the wait. Async defers that read out of the pass, so there it is dispatc
 A pass is recorded only once its phase and its graph time are both known, which is
 what keeps those counts equal.
 
-Spec decode moves that first blocking read again -- into the spec-only logits gather
-in execute_model's postprocess block, which syncs on the target forward. The gather
-is an inline block with no method to wrap, so timed_region folds the runner's
-"postprocess" profiler region into the graph sum; it is empty without spec decode.
+Spec decode gathers the sampled rows inside the compiled graph, so postprocess no
+longer waits on the device; timed_region still folds the runner's "postprocess"
+region into the graph sum so older traces stay comparable.
 The drafter, which runs between _sample and _bookkeeping_sync, is deliberately not
 folded: MODEL + SAMPLE stays the main-graph number, and the drafter's time -- under
 EAGLE/MTP a draft-model forward, plus any sampler wait its first read absorbs --
@@ -388,8 +387,8 @@ def shutdown(self):
 
 _ACTIVE_CTX: _PerformanceContext | None = None
 
-# The region that holds the spec-only logits gather (see the module docstring); it
-# belongs to the graph sum, and is empty without spec decode.
+# Folded into the graph sum so traces stay comparable with older runs, where the
+# spec-decode logits gather waited here.
 _GRAPH_REGION = "rbln_model_runner: postprocess"
 
 
@@ -465,8 +464,9 @@ def _register_patches() -> None:
         (
             "vllm_rbln.v1.worker.rbln_model_runner.record_function_or_nullcontext",
             timed_region,
-            "Spec decode syncs on the forward in the spec-only logits gather, "
-            "an inline block of execute_model with no method to wrap.",
+            "Folds the execute_model postprocess region into the graph sum. Spec "
+            "decode used to sync there on a logits gather; the fold remains so "
+            "older traces stay comparable.",
         ),
     ):
         register_patch(

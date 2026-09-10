@@ -29,10 +29,19 @@ class InputLayout:
     position_pad_value: int = 0
     hidden_state_pad_value: float = 0.0
     token_index_pad_value: int = 0
+    # Rows of the gather indices; token_indices defaults to one per request.
+    num_token_indices: int | None = None
+    num_bonus_token_indices: int | None = None
 
     @property
     def shape(self) -> tuple[int, int]:
         return (self.num_reqs_padded, self.query_len_padded)
+
+    @property
+    def token_indices_size(self) -> int:
+        if self.num_token_indices is None:
+            return self.num_reqs_padded
+        return self.num_token_indices
 
 
 @dataclass
@@ -50,6 +59,7 @@ class StagedModelInputs:
     token_indices: torch.Tensor | None
     # For Eagle3 drafter
     hidden_states: torch.Tensor | None = None
+    bonus_token_indices: torch.Tensor | None = None
 
     def as_kwargs(self) -> dict[str, Any]:
         return {
@@ -58,6 +68,7 @@ class StagedModelInputs:
             "intermediate_tensors": self.intermediate_tensors,
             "inputs_embeds": self.inputs_embeds,
             "token_indices": self.token_indices,
+            "bonus_token_indices": self.bonus_token_indices,
         }
 
 
@@ -67,6 +78,9 @@ class InputStager:
         self._buffers: dict[tuple, InputBuffer] = {}
         self._hidden_state_buffers: dict[tuple, torch.Tensor] = {}
         self._token_indices_buffers: dict[tuple[torch.dtype, int], torch.Tensor] = {}
+        self._bonus_token_indices_buffers: dict[
+            tuple[torch.dtype, int], torch.Tensor
+        ] = {}
 
     def stage(
         self,
@@ -76,6 +90,7 @@ class InputStager:
         intermediate_tensors: IntermediateTensors | None = None,
         inputs_embeds: torch.Tensor | None = None,
         token_indices: torch.Tensor | None = None,
+        bonus_token_indices: torch.Tensor | None = None,
         hidden_states: torch.Tensor | None = None,
         layout: InputLayout,
     ) -> StagedModelInputs:
@@ -101,6 +116,12 @@ class InputStager:
             inputs_embeds=inputs_embeds,
             token_indices=self._stage_token_indices(token_indices, layout),
             hidden_states=self._stage_hidden_states(hidden_states, layout),
+            bonus_token_indices=self._stage_index(
+                bonus_token_indices,
+                layout.num_bonus_token_indices,
+                layout.token_index_pad_value,
+                self._bonus_token_indices_buffers,
+            ),
         )
 
     def _get_or_create_buffer(
@@ -164,19 +185,33 @@ class InputStager:
     ) -> torch.Tensor | None:
         if token_indices is None:
             return None
+        return self._stage_index(
+            token_indices,
+            layout.token_indices_size,
+            layout.token_index_pad_value,
+            self._token_indices_buffers,
+        )
 
-        num_indices = token_indices.shape[0]
-        assert num_indices <= layout.num_reqs_padded
+    def _stage_index(
+        self,
+        indices: torch.Tensor | None,
+        size: int | None,
+        pad_value: int,
+        buffers: dict[tuple[torch.dtype, int], torch.Tensor],
+    ) -> torch.Tensor | None:
+        """Copy a 1-D index into a fixed-size device buffer (keyed by dtype and
+        size so the graph input address stays put), padding the tail."""
+        if indices is None:
+            return None
+        assert size is not None
+        num_indices = indices.shape[0]
+        assert num_indices <= size
 
-        key = (token_indices.dtype, layout.num_reqs_padded)
-        if (buf := self._token_indices_buffers.get(key)) is None:
-            buf = torch.empty(
-                layout.num_reqs_padded,
-                dtype=token_indices.dtype,
-                device=self.device,
-            )
-            self._token_indices_buffers[key] = buf
+        key = (indices.dtype, size)
+        if (buf := buffers.get(key)) is None:
+            buf = torch.empty(size, dtype=indices.dtype, device=self.device)
+            buffers[key] = buf
 
-        buf.fill_(layout.token_index_pad_value)
-        buf[:num_indices].copy_(token_indices, non_blocking=True)
+        buf.fill_(pad_value)
+        buf[:num_indices].copy_(indices, non_blocking=True)
         return buf

@@ -60,13 +60,14 @@ class TestInputLayout:
 
 class TestStagedModelInputs:
     def test_as_kwargs_maps_all_fields(self):
-        a, b, c, d, e = (object() for _ in range(5))
+        a, b, c, d, e, f = (object() for _ in range(6))
         staged = StagedModelInputs(
             input_ids=a,
             positions=b,
             intermediate_tensors=c,
             inputs_embeds=d,
             token_indices=e,
+            bonus_token_indices=f,
         )
         assert staged.as_kwargs() == {
             "input_ids": a,
@@ -74,6 +75,7 @@ class TestStagedModelInputs:
             "intermediate_tensors": c,
             "inputs_embeds": d,
             "token_indices": e,
+            "bonus_token_indices": f,
         }
 
 
@@ -265,6 +267,23 @@ class TestTokenIndices:
         )
         assert s1.token_indices is not s2.token_indices
         assert s2.token_indices.shape == (8,)
+
+    def test_num_token_indices_overrides_buffer_length(self):
+        stager = _stager()
+        # Spec decode stages one index per padded token, not per request.
+        layout = _layout(num_reqs_padded=2, query_len=4, num_token_indices=8)
+        staged = stager.stage(
+            input_ids=torch.ones(2, 4, dtype=torch.int64),
+            positions=torch.ones(2, 4, dtype=torch.int64),
+            layout=layout,
+            token_indices=torch.tensor([0, 1, 2], dtype=torch.int64),
+        )
+        assert staged.token_indices is not None
+        assert staged.token_indices.shape == (8,)
+        assert torch.equal(
+            staged.token_indices.cpu(),
+            torch.tensor([0, 1, 2, 0, 0, 0, 0, 0], dtype=torch.int64),
+        )
 
     def test_new_buffer_for_different_dtype(self):
         stager = _stager()

@@ -378,15 +378,23 @@ def run_rejection_sample(
     metadata: SamplingMetadata,
     num_draft_tokens: list[int] | None = None,
     bonus_from_logits: bool = False,
+    prepacked: bool = False,
 ) -> torch.Tensor:
     """Run the impl on a batch of drafts packed in `draft_token_ids` order.
 
     `num_draft_tokens` defaults to every request holding NUM_SPEC_TOKENS drafts.
     `bonus_from_logits` hands the graph bonus logits peaked at `bonus_token_ids`
-    instead of the ids, the way a greedy step does.
+    instead of the ids, the way a greedy step does. `prepacked` hands the target
+    logits as the op's own [B*K, vocab] block -- live rows first, the tail
+    filled with unrelated rows -- the way the runner's in-graph gather does.
     """
     if num_draft_tokens is None:
         num_draft_tokens = [NUM_SPEC_TOKENS] * (len(draft_token_ids) // NUM_SPEC_TOKENS)
+    target_logits = make_target_probs(target_argmax_token_ids)
+    if prepacked:
+        padded_len = len(num_draft_tokens) * NUM_SPEC_TOKENS
+        tail = make_target_probs([0] * (padded_len - len(target_argmax_token_ids)))
+        target_logits = torch.cat([target_logits, tail])
     return impl.rejection_sample(
         draft_token_ids=torch.tensor(draft_token_ids, dtype=torch.int32),
         num_draft_tokens=num_draft_tokens,
@@ -395,7 +403,7 @@ def run_rejection_sample(
             torch.tensor(num_draft_tokens, dtype=torch.int32), dim=0
         ),
         draft_probs=None,
-        target_logits=make_target_probs(target_argmax_token_ids),
+        target_logits=target_logits,
         bonus_token_ids=None
         if bonus_from_logits
         else torch.tensor(bonus_token_ids, dtype=torch.int64).unsqueeze(-1),
@@ -500,3 +508,49 @@ def test_requests_with_fewer_drafts_than_the_padded_length(impl):
         dtype=torch.int32,
     )
     assert torch.equal(output, expected)
+
+
+def test_prepacked_target_block_skips_the_packing_copy(impl, monkeypatch):
+    """The target logits may arrive as the op's [B*K, vocab] block already
+    (the runner's target graph lays them out that way). The impl must hand the
+    block over as it is -- no zeroed buffer, no copy -- and sample the same
+    tokens as from the packed [N, vocab] rows."""
+    metadata = make_sampling_metadata(
+        temperature=None,
+        all_greedy=True,
+        all_random=False,
+    )
+    calls = []
+    real = impl._compiled_rejection_sample
+
+    def spy(*args):
+        calls.append(args)
+        return real(*args)
+
+    monkeypatch.setattr(impl, "_compiled_rejection_sample", spy)
+
+    packed = run_rejection_sample(
+        impl,
+        draft_token_ids=[3, 2, 4],
+        target_argmax_token_ids=[3, 2, 7],
+        bonus_token_ids=[10, 11],
+        metadata=metadata,
+        num_draft_tokens=[1, 2],
+    )
+    prepacked = run_rejection_sample(
+        impl,
+        draft_token_ids=[3, 2, 4],
+        target_argmax_token_ids=[3, 2, 7],
+        bonus_token_ids=[10, 11],
+        metadata=metadata,
+        num_draft_tokens=[1, 2],
+        prepacked=True,
+    )
+
+    assert torch.equal(packed, prepacked)
+    graph_target_logits = calls[-1][1]
+    assert graph_target_logits.shape[0] == 2 * NUM_SPEC_TOKENS
+    # The block itself, not the impl's zeroed staging buffer.
+    assert graph_target_logits is not impl._graph_inputs[
+        next(iter(impl._graph_inputs))
+    ].get("target_logits")
